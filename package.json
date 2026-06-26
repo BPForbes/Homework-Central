@@ -1,0 +1,20 @@
+{
+  "name": "homework-central",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BPForbes/Homework-Central.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/BPForbes/Homework-Central/issues"
+  },
+  "homepage": "https://github.com/BPForbes/Homework-Central#readme"
+}
