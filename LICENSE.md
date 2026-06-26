@@ -1,8 +1,6 @@
 Authorized Source Control License
 
-Version 1.2
-
-Copyright (c) [YEAR] [OWNER NAME]
+Copyright (c) 2026 Bailey Forbes
 
 All rights reserved.
 
