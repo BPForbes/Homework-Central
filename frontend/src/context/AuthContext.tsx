@@ -19,16 +19,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const token = sessionStorage.getItem('accessToken')
-    if (!token) {
-      setIsLoading(false)
-      return
+    const bootstrap = async () => {
+      try {
+        const token = sessionStorage.getItem('accessToken')
+        if (token) {
+          // Fast path: token already in memory, just verify it
+          const { data } = await authApi.me()
+          setUser(data)
+          return
+        }
+        // Slow path: attempt silent session restore via refresh cookie
+        const { data } = await authApi.refresh()
+        sessionStorage.setItem('accessToken', data.accessToken)
+        setUser(data.user)
+      } catch {
+        sessionStorage.removeItem('accessToken')
+        setUser(null)
+      } finally {
+        setIsLoading(false)
+      }
     }
-    authApi
-      .me()
-      .then(({ data }) => setUser(data))
-      .catch(() => sessionStorage.removeItem('accessToken'))
-      .finally(() => setIsLoading(false))
+    void bootstrap()
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {

@@ -7,11 +7,18 @@ services:
     environment:
       POSTGRES_DB: homework_central
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+    # Omit host-port publish in production; uncomment only for local inspection.
+    # ports:
+    #   - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d homework_central"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   backend:
     build:
@@ -21,12 +28,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: >
-        Host=postgres;Database=homework_central;Username=postgres;Password=postgres
-      Jwt__Secret: "${JWT_SECRET}"
+        Host=postgres;Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD}
+      Jwt__Secret: "${JWT_SECRET:?JWT_SECRET must be set}"
     ports:
       - "5000:8080"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   frontend:
     build:
@@ -34,7 +42,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "5173:8080"
     depends_on:
       - backend
 

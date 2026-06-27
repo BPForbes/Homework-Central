@@ -15,17 +15,40 @@ export function Register() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    if (password !== confirm) {
-      setError('Passwords do not match.')
+
+    if (!email.trim()) {
+      setError('Email is required.')
+      return
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailPattern.test(email)) {
+      setError('Please enter a valid email address.')
+      return
+    }
+    if (!username.trim()) {
+      setError('Username is required.')
+      return
+    }
+    if (username.trim().length < 3 || username.trim().length > 64) {
+      setError('Username must be between 3 and 64 characters.')
       return
     }
     if (password.length < 8) {
       setError('Password must be at least 8 characters.')
       return
     }
+    if (password.length > 128) {
+      setError('Password must be 128 characters or fewer.')
+      return
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match.')
+      return
+    }
+
     setIsSubmitting(true)
     try {
-      await register(email, username, password)
+      await register(email.trim().toLowerCase(), username.trim(), password)
       navigate('/dashboard')
     } catch (err: unknown) {
       const msg =
@@ -42,7 +65,7 @@ export function Register() {
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Create account</h2>
-        <form onSubmit={handleSubmit} noValidate>
+        <form onSubmit={handleSubmit}>
           <div className="field">
             <label htmlFor="email">Email</label>
             <input

@@ -3,10 +3,20 @@ using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Trust forwarded headers from the nginx reverse proxy so rate limiting
+// buckets by the real client IP rather than the proxy address.
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    opts.KnownNetworks.Clear();
+    opts.KnownProxies.Clear();
+});
 
 // Database
 builder.Services.AddDbContext<AppDbContext>(opts =>
@@ -19,7 +29,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 
 // JWT authentication
 var jwtSecret = builder.Configuration["Jwt:Secret"]
-    ?? throw new InvalidOperationException("Jwt:Secret must be set.");
+    ?? throw new InvalidOperationException("Jwt:Secret must be set via environment variable or user-secrets.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opts =>
     {
@@ -48,7 +58,7 @@ builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>()
 builder.Services.AddSingleton<IProcessingStrategy, AsyncKeyLockProcessingStrategy>();
 builder.Services.AddInMemoryRateLimiting();
 
-// CORS – allow the Vite dev server; tighten for production
+// CORS — allow the configured frontend origin; tighten for production
 builder.Services.AddCors(opts =>
     opts.AddPolicy("Frontend", p =>
         p.WithOrigins(
@@ -59,7 +69,10 @@ builder.Services.AddCors(opts =>
 
 var app = builder.Build();
 
-// Security headers
+// ForwardedHeaders must run before any middleware that inspects the IP
+app.UseForwardedHeaders();
+
+// Security headers on every response
 app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -75,9 +88,14 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Auto-migrate on startup (dev convenience; use explicit migration commands in production)
-using (var scope = app.Services.CreateScope())
+// Health probe for Docker / load balancers
+app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
+
+// Auto-migrate only in Development to avoid blocking production deploys
+// and concurrent startup races. In production, run migrations explicitly.
+if (app.Environment.IsDevelopment())
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 }

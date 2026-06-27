@@ -5,8 +5,9 @@ RUN npm ci
 COPY . ./
 RUN npm run build
 
-FROM nginx:alpine AS runtime
+# nginxinc/nginx-unprivileged runs as a non-root user on port 8080 by default
+FROM nginxinc/nginx-unprivileged:alpine AS runtime
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

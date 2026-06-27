@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(u => u.UserId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(u => u.Email).HasMaxLength(320).IsRequired();
             e.HasIndex(u => u.Email).IsUnique();
+            e.HasCheckConstraint("CK_Users_Email_Lower", "\"Email\" = lower(\"Email\")");
             e.Property(u => u.Username).HasMaxLength(64).IsRequired();
             e.HasIndex(u => u.Username).IsUnique();
             e.Property(u => u.PasswordHash).IsRequired();
@@ -63,10 +64,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         mb.Entity<Permission>(e =>
         {
             e.HasKey(p => p.PermissionId);
+            e.Property(p => p.PermissionId).ValueGeneratedNever();
             e.Property(p => p.Name).HasMaxLength(64).IsRequired();
             e.HasIndex(p => p.Name).IsUnique();
             e.Property(p => p.DisplayName).HasMaxLength(128).IsRequired();
             e.Property(p => p.IsReserved).HasDefaultValue(false);
+            e.HasCheckConstraint("CK_Permissions_PermissionId_Range", "\"PermissionId\" BETWEEN 0 AND 255");
         });
 
         mb.Entity<RolePermission>(e =>
@@ -86,8 +89,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(rt => rt.Id);
             e.Property(rt => rt.Id).HasDefaultValueSql("gen_random_uuid()");
-            e.Property(rt => rt.Token).IsRequired();
-            e.HasIndex(rt => rt.Token).IsUnique();
+            e.Property(rt => rt.TokenHash).HasColumnName("TokenHash").IsRequired();
+            e.HasIndex(rt => rt.TokenHash).IsUnique();
             e.Property(rt => rt.ExpiresAt).IsRequired();
             e.Property(rt => rt.CreatedAt).IsRequired();
             e.HasOne(rt => rt.User)

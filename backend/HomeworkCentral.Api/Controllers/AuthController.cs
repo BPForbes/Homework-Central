@@ -8,7 +8,7 @@ namespace HomeworkCentral.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(IAuthService auth) : ControllerBase
+public class AuthController(IAuthService auth, IConfiguration config) : ControllerBase
 {
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
@@ -41,6 +41,9 @@ public class AuthController(IAuthService auth) : ControllerBase
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh()
     {
+        if (!IsValidOrigin())
+            return Forbid();
+
         var token = Request.Cookies["refresh_token"];
         if (string.IsNullOrEmpty(token))
             return Unauthorized(new { message = "No refresh token." });
@@ -59,6 +62,9 @@ public class AuthController(IAuthService auth) : ControllerBase
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
+        if (!IsValidOrigin())
+            return Forbid();
+
         var token = Request.Cookies["refresh_token"];
         if (!string.IsNullOrEmpty(token))
             await auth.RevokeRefreshTokenAsync(token);
@@ -88,5 +94,16 @@ public class AuthController(IAuthService auth) : ControllerBase
         if (user is null) return NotFound();
 
         return Ok(user);
+    }
+
+    // Validates Origin header against the configured frontend origin for CSRF defense-in-depth.
+    // SameSite=Strict is the primary protection; this is a secondary layer.
+    private bool IsValidOrigin()
+    {
+        var origin = Request.Headers.Origin.ToString();
+        if (string.IsNullOrEmpty(origin))
+            return true; // Same-origin or non-browser requests don't send Origin
+        var allowedOrigin = config["Cors:AllowedOrigin"] ?? "http://localhost:5173";
+        return origin == allowedOrigin;
     }
 }

@@ -1,8 +1,11 @@
 using System.Collections;
+using System.Security.Cryptography;
+using System.Text;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HomeworkCentral.Api.Services;
 
@@ -12,17 +15,13 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
-        if (await db.Users.AnyAsync(u => u.Email == req.Email))
-            throw new InvalidOperationException("An account with that email already exists.");
-
-        if (await db.Users.AnyAsync(u => u.Username == req.Username))
-            throw new InvalidOperationException("That username is already taken.");
+        var normalizedEmail = req.Email.ToLowerInvariant();
 
         var now = DateTime.UtcNow;
         var user = new User
         {
             UserId = Guid.NewGuid(),
-            Email = req.Email,
+            Email = normalizedEmail,
             Username = req.Username,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
             CreatedAt = now,
@@ -30,16 +29,34 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
         };
 
         db.Users.Add(user);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)
+        {
+            // Unique constraint violation (23505)
+            if (pg.SqlState == "23505")
+            {
+                var detail = pg.Detail ?? string.Empty;
+                if (detail.Contains("Email"))
+                    throw new InvalidOperationException("An account with that email already exists.");
+                if (detail.Contains("Username"))
+                    throw new InvalidOperationException("That username is already taken.");
+            }
+            throw;
+        }
 
         return await BuildAuthResponseAsync(user);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req)
     {
+        var normalizedEmail = req.Email.ToLowerInvariant();
+
         var user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Email == req.Email);
+            .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
 
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid email or password.");
@@ -47,29 +64,33 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
         return await BuildAuthResponseAsync(user);
     }
 
-    public async Task<AuthResponse> RefreshAsync(string refreshToken)
+    public async Task<AuthResponse> RefreshAsync(string rawToken)
     {
+        var tokenHash = HashToken(rawToken);
+
+        // Atomically revoke: only one concurrent caller wins the update
+        var revoked = await db.RefreshTokens
+            .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
+            .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
+
+        if (revoked == 0)
+            throw new UnauthorizedAccessException("Invalid or expired refresh token.");
+
         var stored = await db.RefreshTokens
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(rt => rt.Token == refreshToken);
-
-        if (stored is null || stored.IsRevoked || stored.ExpiresAt < DateTime.UtcNow)
-            throw new UnauthorizedAccessException("Invalid or expired refresh token.");
-
-        stored.IsRevoked = true;
-        await db.SaveChangesAsync();
+            .FirstAsync(rt => rt.TokenHash == tokenHash);
 
         return await BuildAuthResponseAsync(stored.User);
     }
 
-    public async Task RevokeRefreshTokenAsync(string refreshToken)
+    public async Task RevokeRefreshTokenAsync(string rawToken)
     {
-        var stored = await db.RefreshTokens.FirstOrDefaultAsync(rt => rt.Token == refreshToken);
-        if (stored is null) return;
-        stored.IsRevoked = true;
-        await db.SaveChangesAsync();
+        var tokenHash = HashToken(rawToken);
+        await db.RefreshTokens
+            .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked)
+            .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
     }
 
     public async Task<UserDto?> GetCurrentUserAsync(Guid userId)
@@ -89,18 +110,18 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
                 .Query().Include(ur => ur.Role).LoadAsync();
         }
 
-        var (refreshToken, refreshExpires) = jwt.GenerateRefreshToken();
+        var (rawToken, refreshExpires) = jwt.GenerateRefreshToken();
         db.RefreshTokens.Add(new RefreshToken
         {
             Id = Guid.NewGuid(),
             UserId = user.UserId,
-            Token = refreshToken,
+            TokenHash = HashToken(rawToken),
             ExpiresAt = refreshExpires,
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
 
-        SetRefreshCookie(refreshToken, refreshExpires);
+        SetRefreshCookie(rawToken, refreshExpires);
 
         var dto = BuildUserDto(user);
         var accessToken = jwt.GenerateAccessToken(user, dto.Roles, dto.PermissionMask);
@@ -137,12 +158,12 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
         };
     }
 
-    private void SetRefreshCookie(string token, DateTime expires)
+    private void SetRefreshCookie(string rawToken, DateTime expires)
     {
         var response = http.HttpContext?.Response;
         if (response is null) return;
 
-        response.Cookies.Append("refresh_token", token, new CookieOptions
+        response.Cookies.Append("refresh_token", rawToken, new CookieOptions
         {
             HttpOnly = true,
             Secure = true,
@@ -150,5 +171,11 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
             Expires = expires,
             Path = "/api/auth",
         });
+    }
+
+    private static string HashToken(string token)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }

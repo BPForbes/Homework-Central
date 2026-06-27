@@ -1,6 +1,8 @@
 import axios from 'axios'
 import type { AuthResponse, LoginRequest, RegisterRequest } from '../types/auth'
 
+const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh']
+
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
@@ -18,7 +20,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config
-    if (error.response?.status === 401 && !original._retry) {
+    const url: string = original?.url ?? ''
+    const isAuthEndpoint = AUTH_PATHS.some((p) => url.endsWith(p))
+
+    if (error.response?.status === 401 && original && !original._retry && !isAuthEndpoint) {
       original._retry = true
       try {
         const { data } = await axios.post<AuthResponse>('/api/auth/refresh', null, {

@@ -13,9 +13,24 @@ export function Login() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+
+    if (!email.trim()) {
+      setError('Email is required.')
+      return
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailPattern.test(email)) {
+      setError('Please enter a valid email address.')
+      return
+    }
+    if (!password) {
+      setError('Password is required.')
+      return
+    }
+
     setIsSubmitting(true)
     try {
-      await login(email, password)
+      await login(email.trim().toLowerCase(), password)
       navigate('/dashboard')
     } catch (err: unknown) {
       const msg =
@@ -32,7 +47,7 @@ export function Login() {
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Sign in</h2>
-        <form onSubmit={handleSubmit} noValidate>
+        <form onSubmit={handleSubmit}>
           <div className="field">
             <label htmlFor="email">Email</label>
             <input

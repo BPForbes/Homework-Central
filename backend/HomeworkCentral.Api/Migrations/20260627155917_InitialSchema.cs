@@ -13,6 +13,10 @@ namespace HomeworkCentral.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // gen_random_uuid() is built-in from PostgreSQL 13; this ensures
+            // compatibility with older versions without failing on newer ones.
+            migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;");
+
             migrationBuilder.CreateTable(
                 name: "Permissions",
                 columns: table => new
