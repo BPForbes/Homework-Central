@@ -1,0 +1,31 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.swp
+
+# EF Core migrations snapshot (keep migrations, not snapshots generated elsewhere)
+# Uncomment to ignore if desired:
+# Migrations/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local env overrides (never commit secrets)
+appsettings.Local.json
+.env
+.env.local
+.env.*.local
+
+# AI tooling (local only, per SETUP.md)
+.codegraph/
+.code-review-graph/
+claude-mem/
+
+# OS
+.DS_Store
+Thumbs.db
