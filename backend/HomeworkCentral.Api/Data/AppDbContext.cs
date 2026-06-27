@@ -3,13 +3,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<Subject> Subjects => Set<Subject>();
+    public DbSet<UserSubject> UserSubjects => Set<UserSubject>();
+    public DbSet<UserEffectiveMask> UserEffectiveMasks => Set<UserEffectiveMask>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder mb)
@@ -34,12 +37,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(r => r.RoleId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(r => r.Name).HasMaxLength(64).IsRequired();
             e.HasIndex(r => r.Name).IsUnique();
-            e.Property(r => r.PermissionMask)
-                .HasColumnType("bit(256)")
-                .IsRequired()
-                .HasConversion(
-                    v => v,
-                    v => v ?? new System.Collections.BitArray(256));
+            e.Property(r => r.RoleMask).HasBitColumn("bit(64)", 64);
+            e.Property(r => r.PermissionMask).HasBitColumn("bit(256)", 256);
+            e.Property(r => r.FeatureMask).HasBitColumn("bit(256)", 256);
             e.Property(r => r.Description);
         });
 
@@ -69,6 +69,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(p => p.Name).IsUnique();
             e.Property(p => p.DisplayName).HasMaxLength(128).IsRequired();
             e.Property(p => p.IsReserved).HasDefaultValue(false);
+            e.Property(p => p.Category).HasMaxLength(64);
             e.HasCheckConstraint("CK_Permissions_PermissionId_Range", "\"PermissionId\" BETWEEN 0 AND 255");
         });
 
@@ -82,6 +83,55 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(rp => rp.Permission)
                 .WithMany(p => p.RolePermissions)
                 .HasForeignKey(rp => rp.PermissionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<Subject>(e =>
+        {
+            e.HasKey(s => s.SubjectId);
+            e.Property(s => s.SubjectId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(s => s.SubjectMask).HasMaxLength(64).IsRequired();
+            e.Property(s => s.Name).HasMaxLength(128).IsRequired();
+            e.HasIndex(s => new { s.SubjectMask, s.BitIndex }).IsUnique();
+            e.HasOne(s => s.ParentSubject)
+                .WithMany(s => s.ChildSubjects)
+                .HasForeignKey(s => s.ParentSubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        mb.Entity<UserSubject>(e =>
+        {
+            e.HasKey(us => new { us.UserId, us.SubjectId });
+            e.Property(us => us.AssignedAt).IsRequired();
+            e.HasOne(us => us.User)
+                .WithMany(u => u.UserSubjects)
+                .HasForeignKey(us => us.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(us => us.Subject)
+                .WithMany(s => s.UserSubjects)
+                .HasForeignKey(us => us.SubjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(us => us.AssignedByUser)
+                .WithMany()
+                .HasForeignKey(us => us.AssignedBy)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<UserEffectiveMask>(e =>
+        {
+            e.HasKey(m => m.UserId);
+            e.Property(m => m.EffectiveRoleMask).HasBitColumn("bit(64)", 64);
+            e.Property(m => m.EffectiveModerationMask).HasBitColumn("bit(256)", 256);
+            e.Property(m => m.EffectiveFeatureMask).HasBitColumn("bit(256)", 256);
+            e.Property(m => m.GeneralSubjectMask).HasBitColumn("bit(128)", 128);
+            e.Property(m => m.ComputerScienceMask).HasBitColumn("bit(128)", 128);
+            e.Property(m => m.MathematicsMask).HasBitColumn("bit(128)", 128);
+            e.Property(m => m.LanguageMask).HasBitColumn("bit(128)", 128);
+            e.Property(m => m.StatusMask).HasBitColumn("bit(64)", 64);
+            e.Property(m => m.UpdatedAt).IsRequired();
+            e.HasOne(m => m.User)
+                .WithOne(u => u.EffectiveMask)
+                .HasForeignKey<UserEffectiveMask>(m => m.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

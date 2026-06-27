@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,14 +17,16 @@ public class JwtService(IConfiguration config) : IJwtService
     private readonly int _accessTokenMinutes = int.Parse(config["Jwt:AccessTokenMinutes"] ?? "15");
     private readonly int _refreshTokenDays = int.Parse(config["Jwt:RefreshTokenDays"] ?? "7");
 
-    public string GenerateAccessToken(User user, IEnumerable<string> roles, string permissionMask)
+    public string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks)
     {
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new("username", user.Username),
-            new("perm", permissionMask),
+            new("perm", masks.ModerationMask),
+            new("role_mask", masks.RoleMask),
+            new("feature_mask", masks.FeatureMask),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));

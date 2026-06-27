@@ -1,8 +1,11 @@
 using System.Text;
 using AspNetCoreRateLimit;
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -26,6 +29,9 @@ builder.Services.AddDbContext<AppDbContext>(opts =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
+builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
+builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
 
 // JWT authentication
 var jwtSecret = builder.Configuration["Jwt:Secret"]
@@ -46,7 +52,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(opts =>
+{
+    RegisterBitmaskPolicies(opts, MaskType.Moderation, ModerationPermissions.BanUser);
+    RegisterBitmaskPolicies(opts, MaskType.Feature, PlatformFeatures.PublicMessages);
+    RegisterBitmaskPolicies(opts, MaskType.Role, PlatformRoles.Tutor);
+});
+
+static void RegisterBitmaskPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions opts, MaskType maskType, short exampleBit)
+{
+    opts.AddPolicy(
+        AuthorizationPolicyNames.For(maskType, exampleBit),
+        policy => policy.AddRequirements(new BitmaskRequirement(maskType, exampleBit)));
+}
 builder.Services.AddControllers();
 
 // Rate limiting
@@ -97,7 +115,9 @@ if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var roleMaskService = scope.ServiceProvider.GetRequiredService<IRoleMaskService>();
     db.Database.Migrate();
+    await AuthorizationSeedData.SeedAsync(db, roleMaskService);
 }
 
 app.Run();

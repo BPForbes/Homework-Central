@@ -1,15 +1,19 @@
-using System.Collections;
-using System.Security.Cryptography;
-using System.Text;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace HomeworkCentral.Api.Services;
 
-public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor http) : IAuthService
+public class AuthService(
+    AppDbContext db,
+    IJwtService jwt,
+    IHttpContextAccessor http,
+    IEffectiveMaskService effectiveMaskService) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
 
@@ -32,10 +36,10 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
         try
         {
             await db.SaveChangesAsync();
+            await db.AssignDefaultRolesAsync(user, effectiveMaskService);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)
         {
-            // Unique constraint violation (23505)
             if (pg.SqlState == "23505")
             {
                 var detail = pg.Detail ?? string.Empty;
@@ -56,6 +60,7 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
         var user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .Include(u => u.EffectiveMask)
             .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
 
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
@@ -68,7 +73,6 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
     {
         var tokenHash = HashToken(rawToken);
 
-        // Atomically revoke: only one concurrent caller wins the update
         var revoked = await db.RefreshTokens
             .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
             .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
@@ -80,6 +84,7 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
+            .Include(rt => rt.User.EffectiveMask)
             .FirstAsync(rt => rt.TokenHash == tokenHash);
 
         return await BuildAuthResponseAsync(stored.User);
@@ -97,9 +102,16 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
     {
         var user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .Include(u => u.EffectiveMask)
             .FirstOrDefaultAsync(u => u.UserId == userId);
 
-        return user is null ? null : BuildUserDto(user);
+        if (user is null)
+            return null;
+
+        var effectiveMask = user.EffectiveMask
+            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
+
+        return BuildUserDto(user, effectiveMask);
     }
 
     private async Task<AuthResponse> BuildAuthResponseAsync(User user)
@@ -109,6 +121,12 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
             await db.Entry(user).Collection(u => u.UserRoles)
                 .Query().Include(ur => ur.Role).LoadAsync();
         }
+
+        if (!db.Entry(user).Reference(u => u.EffectiveMask).IsLoaded)
+            await db.Entry(user).Reference(u => u.EffectiveMask).LoadAsync();
+
+        var effectiveMask = user.EffectiveMask
+            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId);
 
         var (rawToken, refreshExpires) = jwt.GenerateRefreshToken();
         db.RefreshTokens.Add(new RefreshToken
@@ -123,8 +141,8 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
         SetRefreshCookie(rawToken, refreshExpires);
 
-        var dto = BuildUserDto(user);
-        var accessToken = jwt.GenerateAccessToken(user, dto.Roles, dto.PermissionMask);
+        var dto = BuildUserDto(user, effectiveMask);
+        var accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask));
 
         return new AuthResponse
         {
@@ -134,19 +152,10 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
         };
     }
 
-    private static UserDto BuildUserDto(User user)
+    private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask)
     {
         var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-
-        var combined = new BitArray(256);
-        foreach (var ur in user.UserRoles)
-        {
-            combined = combined.Or(ur.Role.PermissionMask);
-        }
-
-        var bytes = new byte[32];
-        combined.CopyTo(bytes, 0);
-        var permMask = Convert.ToBase64String(bytes);
+        var masks = ToEffectiveMaskDto(effectiveMask);
 
         return new UserDto
         {
@@ -154,9 +163,29 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
             Email = user.Email,
             Username = user.Username,
             Roles = roles,
-            PermissionMask = permMask,
+            PermissionMask = masks.ModerationMask,
+            RoleMask = masks.RoleMask,
+            FeatureMask = masks.FeatureMask,
+            GeneralSubjectMask = masks.GeneralSubjectMask,
+            ComputerScienceMask = masks.ComputerScienceMask,
+            MathematicsMask = masks.MathematicsMask,
+            LanguageMask = masks.LanguageMask,
+            StatusMask = masks.StatusMask,
         };
     }
+
+    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask) =>
+        new()
+        {
+            RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
+            ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
+            FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
+            GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
+            ComputerScienceMask = BitMask.ToBase64(effectiveMask.ComputerScienceMask),
+            MathematicsMask = BitMask.ToBase64(effectiveMask.MathematicsMask),
+            LanguageMask = BitMask.ToBase64(effectiveMask.LanguageMask),
+            StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
+        };
 
     private void SetRefreshCookie(string rawToken, DateTime expires)
     {
