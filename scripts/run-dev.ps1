@@ -17,6 +17,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# dotnet/msbuild may write warnings to stderr; do not treat that as a terminating error.
+$PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
@@ -150,12 +152,16 @@ function Wait-ForPostgres {
 }
 
 function Start-Postgres([hashtable]$EnvValues) {
+    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop and ensure docker is on PATH.'
+    }
+
     docker info *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'Docker is not running. Start Docker Desktop and retry.'
     }
-
-    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
     docker compose -f $ComposeFile up -d postgres
     if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
 
@@ -216,6 +222,27 @@ dotnet run --project '$apiProjectLiteral' --no-build --urls http://localhost:500
     Write-Host 'Close each terminal window to stop its server'
 }
 
+function Get-EnvValues {
+    $raw = @(Ensure-EnvFile)
+    $values = $raw | Where-Object { $_ -is [hashtable] } | Select-Object -First 1
+    if ($null -eq $values) {
+        throw 'Ensure-EnvFile did not return environment values (internal script error)'
+    }
+    return $values
+}
+
+function Start-RunPhase([hashtable]$EnvValues) {
+    Write-Step 'Preparing dev stack (Postgres, API, frontend)'
+
+    if (-not $SkipDocker) {
+        Start-Postgres -EnvValues $EnvValues
+    } else {
+        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
+    }
+
+    Start-DevStack -EnvValues $EnvValues
+}
+
 if ($Help) {
     Show-Usage
     exit 0
@@ -227,21 +254,20 @@ if ($env:HC_SKIP_DOCKER -eq '1') {
 
 Push-Location $RepoRoot
 try {
-    $envValues = Ensure-EnvFile
+    $envValues = Get-EnvValues
     Build-Projects
 
-    if ($BuildOnly) {
+    # Only stop for an explicit -BuildOnly on the command line (ignore profile defaults).
+    if ($PSBoundParameters.ContainsKey('BuildOnly') -and $BuildOnly.IsPresent) {
         Write-Step 'Build complete (-BuildOnly)'
         exit 0
     }
 
-    if (-not $SkipDocker) {
-        Start-Postgres -EnvValues $envValues
-    } else {
-        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
-    }
-
-    Start-DevStack -EnvValues $envValues
+    Start-RunPhase -EnvValues $envValues
+}
+catch {
+    Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
 finally {
     Pop-Location
