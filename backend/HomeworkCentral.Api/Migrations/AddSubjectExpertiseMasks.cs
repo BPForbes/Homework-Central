@@ -36,6 +36,17 @@ namespace HomeworkCentral.Api.Migrations
                     ADD COLUMN "ExpertiseMask" bit(128) NOT NULL DEFAULT B'0'::bit(128);
                 """);
 
+            migrationBuilder.AddCheckConstraint(
+                name: "CK_UserSubjectExpertiseMasks_Category_Allowed",
+                table: "UserSubjectExpertiseMasks",
+                sql: """
+                    "Category" IN (
+                        'Mathematics', 'Science', 'ComputerScience', 'Languages', 'History',
+                        'Business', 'Art', 'Music', 'Engineering', 'Medicine', 'Finance',
+                        'Economics', 'Education'
+                    )
+                    """);
+
             migrationBuilder.Sql("""
                 DO $$
                 BEGIN
