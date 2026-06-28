@@ -1,12 +1,16 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using HomeworkCentral.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
 namespace HomeworkCentral.Api.Migrations
 {
-    /// <inheritdoc />
-    public partial class AddTokenHashAndConstraints : Migration
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260627163120_AddTokenHashAndConstraints")]
+    public class AddTokenHashAndConstraints : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
