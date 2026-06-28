@@ -6,9 +6,9 @@ obj/
 .vs/
 *.swp
 
-# EF Core migrations snapshot (keep migrations, not snapshots generated elsewhere)
-# Uncomment to ignore if desired:
-# Migrations/
+# EF Core scaffolding artifacts (migrations are hand-authored; see scripts/ef-migrations-add.sh)
+**/Migrations/*.Designer.cs
+**/Migrations/*ModelSnapshot.cs
 
 # Node
 node_modules/

@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Collections;
+using HomeworkCentral.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -7,8 +10,9 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace HomeworkCentral.Api.Migrations
 {
-    /// <inheritdoc />
-    public partial class InitialSchema : Migration
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260627155917_InitialSchema")]
+    public class InitialSchema : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

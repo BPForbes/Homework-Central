@@ -21,4 +21,16 @@ export interface UserInfo {
   username: string
   roles: string[]
   permissionMask: string
+  roleMask: string
+  featureMask: string
+  generalSubjectMask: string
+  subjectExpertiseMasks: Record<string, string>
+  statusMask: string
 }
+
+export type CoreMaskField =
+  | 'permissionMask'
+  | 'roleMask'
+  | 'featureMask'
+  | 'generalSubjectMask'
+  | 'statusMask'

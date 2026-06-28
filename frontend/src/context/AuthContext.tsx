@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { authApi } from '../api/auth'
-import type { UserInfo } from '../types/auth'
+import { authApi } from '../api/authApi'
+import type { CoreMaskField, UserInfo } from '../types/auth'
+import { hasMaskBit } from '../utils/bitmask'
 
 interface AuthContextValue {
   user: UserInfo | null
@@ -10,6 +11,11 @@ interface AuthContextValue {
   register: (email: string, username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   hasPermission: (bit: number) => boolean
+  hasFeature: (bit: number) => boolean
+  hasRole: (bit: number) => boolean
+  hasGeneralSubject: (bit: number) => boolean
+  hasSubjectExpertise: (category: string, bit: number) => boolean
+  hasMaskBit: (mask: CoreMaskField, bit: number) => boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -23,12 +29,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const token = sessionStorage.getItem('accessToken')
         if (token) {
-          // Fast path: token already in memory, just verify it
-          const { data } = await authApi.me()
-          setUser(data)
-          return
+          try {
+            const { data } = await authApi.me()
+            setUser(data)
+            return
+          } catch {
+            sessionStorage.removeItem('accessToken')
+          }
         }
-        // Slow path: attempt silent session restore via refresh cookie
         const { data } = await authApi.refresh()
         sessionStorage.setItem('accessToken', data.accessToken)
         setUser(data.user)
@@ -60,19 +68,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
-  const hasPermission = useCallback(
-    (bit: number): boolean => {
-      if (!user?.permissionMask) return false
-      const bytes = Uint8Array.from(atob(user.permissionMask), (c) => c.charCodeAt(0))
-      const byteIndex = Math.floor(bit / 8)
-      const bitIndex = bit % 8
-      return (bytes[byteIndex] & (1 << bitIndex)) !== 0
-    },
+  const checkMaskBit = useCallback(
+    (mask: CoreMaskField, bit: number): boolean => hasMaskBit(user?.[mask], bit),
     [user]
   )
 
+  const hasSubjectExpertise = useCallback(
+    (category: string, bit: number): boolean =>
+      hasMaskBit(user?.subjectExpertiseMasks?.[category], bit),
+    [user]
+  )
+
+  const hasPermission = useCallback((bit: number) => checkMaskBit('permissionMask', bit), [checkMaskBit])
+  const hasFeature = useCallback((bit: number) => checkMaskBit('featureMask', bit), [checkMaskBit])
+  const hasRole = useCallback((bit: number) => checkMaskBit('roleMask', bit), [checkMaskBit])
+  const hasGeneralSubject = useCallback((bit: number) => checkMaskBit('generalSubjectMask', bit), [checkMaskBit])
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout, hasPermission }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        login,
+        register,
+        logout,
+        hasPermission,
+        hasFeature,
+        hasRole,
+        hasGeneralSubject,
+        hasSubjectExpertise,
+        hasMaskBit: checkMaskBit,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

@@ -1,0 +1,6 @@
+# C# style rules for Homework Central backend
+
+When editing C# files under `backend/`:
+
+- Do not use `var`. Always write explicit types for locals, foreach variables, and deconstruction targets.
+- Match existing naming, primary constructors, and file-scoped namespaces in the project.
