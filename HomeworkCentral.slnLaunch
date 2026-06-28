@@ -1,0 +1,12 @@
+[
+  {
+    "Name": "Dev Stack",
+    "Projects": [
+      {
+        "Path": "tools\\DevHost\\DevHost.csproj",
+        "Action": "Start",
+        "DebugTarget": "Dev Stack"
+      }
+    ]
+  }
+]
