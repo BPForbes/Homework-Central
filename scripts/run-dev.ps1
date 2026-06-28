@@ -56,7 +56,84 @@ function Write-Step([string]$Message) {
 function New-RandomSecret {
     $bytes = New-Object byte[] 48
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    return [Convert]::ToBase64String($bytes)
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Get-PasswordFingerprint([string]$Password) {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
+    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return [Convert]::ToBase64String($hash)
+}
+
+function Format-PostgresConnectionString([hashtable]$EnvValues) {
+    $pgPort = $EnvValues['POSTGRES_HOST_PORT']
+    $quotedPassword = $EnvValues['POSTGRES_PASSWORD'].Replace("'", "''")
+    return "Host=localhost;Port=$pgPort;Database=homework_central;Username=postgres;Password='$quotedPassword'"
+}
+
+function Set-ComposeEnv([hashtable]$EnvValues) {
+    $env:POSTGRES_PASSWORD = $EnvValues['POSTGRES_PASSWORD']
+    $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
+}
+
+function Test-PostgresAuth([hashtable]$EnvValues) {
+    $encoded = [uri]::EscapeDataString($EnvValues['POSTGRES_PASSWORD'])
+    $uri = "postgresql://postgres:${encoded}@127.0.0.1:5432/homework_central"
+    docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        psql $uri -tAc 'SELECT 1' *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+function Reset-PostgresVolume {
+    Write-Step 'Recreating Postgres Docker volume to match POSTGRES_PASSWORD in .env'
+    docker compose -f $ComposeFile --env-file $EnvFile down -v --remove-orphans *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to remove Postgres Docker volume'
+    }
+}
+
+function Save-VolumePasswordFingerprint([hashtable]$EnvValues) {
+    $fingerprintFile = Join-Path $RepoRoot '.postgres-volume-password'
+    $fingerprint = Get-PasswordFingerprint $EnvValues['POSTGRES_PASSWORD']
+    Set-Content -Path $fingerprintFile -Value $fingerprint -NoNewline
+}
+
+function Ensure-PostgresReady([hashtable]$EnvValues) {
+    Set-ComposeEnv $EnvValues
+
+    $fingerprintFile = Join-Path $RepoRoot '.postgres-volume-password'
+    $currentFingerprint = Get-PasswordFingerprint $EnvValues['POSTGRES_PASSWORD']
+    if ((Test-Path $fingerprintFile) -and (Get-Content $fingerprintFile -Raw).Trim() -ne $currentFingerprint) {
+        Write-Step 'POSTGRES_PASSWORD changed since the database volume was created'
+        Reset-PostgresVolume
+    }
+
+    docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+
+    Write-Step 'Waiting for Postgres to accept connections'
+    Wait-ForPostgres
+
+    if (Test-PostgresAuth $EnvValues) {
+        Save-VolumePasswordFingerprint $EnvValues
+        return
+    }
+
+    Write-Step 'Postgres is running but rejected the password from .env (stale Docker volume)'
+    Reset-PostgresVolume
+
+    docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed after volume reset' }
+
+    Write-Step 'Waiting for Postgres to accept connections'
+    Wait-ForPostgres
+
+    if (-not (Test-PostgresAuth $EnvValues)) {
+        throw 'Postgres password verification failed after recreating the Docker volume. Check POSTGRES_PASSWORD in .env'
+    }
+
+    Save-VolumePasswordFingerprint $EnvValues
 }
 
 function Read-EnvFile {
@@ -162,11 +239,8 @@ function Start-Postgres([hashtable]$EnvValues) {
     if ($LASTEXITCODE -ne 0) {
         throw 'Docker is not running. Start Docker Desktop and retry.'
     }
-    docker compose -f $ComposeFile up -d postgres
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
 
-    Write-Step 'Waiting for Postgres to accept connections'
-    Wait-ForPostgres
+    Ensure-PostgresReady $EnvValues
 }
 
 function Build-Projects {
@@ -189,25 +263,22 @@ function Build-Projects {
 }
 
 function Start-DevStack([hashtable]$EnvValues) {
-    $jwtSecret = $EnvValues['JWT_SECRET'].Replace("'", "''")
-    $pgPort = $EnvValues['POSTGRES_HOST_PORT']
-    $pgPassword = $EnvValues['POSTGRES_PASSWORD'].Replace("'", "''")
-    $connectionString = "Host=localhost;Port=$pgPort;Database=homework_central;Username=postgres;Password=$pgPassword".Replace("'", "''")
     $apiProjectLiteral = $ApiProject.Replace("'", "''")
+    $connectionString = Format-PostgresConnectionString $EnvValues
 
-    $backendCommand = @"
-`$env:ASPNETCORE_ENVIRONMENT = 'Development'
-`$env:ASPNETCORE_URLS = 'http://localhost:5000'
-`$env:Jwt__Secret = '$jwtSecret'
-`$env:ConnectionStrings__DefaultConnection = '$connectionString'
-Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
-dotnet run --project '$apiProjectLiteral' --no-build --urls http://localhost:5000
-"@
+    $backendEnv = [System.Collections.Generic.Dictionary[string, string]]::new()
+    $backendEnv['ASPNETCORE_ENVIRONMENT'] = 'Development'
+    $backendEnv['ASPNETCORE_URLS'] = 'http://localhost:5000'
+    $backendEnv['Jwt__Secret'] = $EnvValues['JWT_SECRET']
+    $backendEnv['ConnectionStrings__DefaultConnection'] = $connectionString
+
+    $backendCommand = "Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan; dotnet run --project '$apiProjectLiteral' --no-build --urls http://localhost:5000"
 
     Write-Step 'Starting API in a new terminal (http://localhost:5000)'
     Start-Process -FilePath 'pwsh' `
         -ArgumentList @('-NoExit', '-NoLogo', '-Command', $backendCommand) `
-        -WorkingDirectory $RepoRoot
+        -WorkingDirectory $RepoRoot `
+        -Environment $backendEnv
 
     $frontendCommand = "Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan; npm run dev"
 

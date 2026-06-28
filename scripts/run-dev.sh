@@ -83,10 +83,90 @@ parse_args() {
 
 generate_secret() {
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 48 | tr -d '\n'
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n'
   else
     fail "openssl is required to generate secrets for a new .env file"
   fi
+}
+
+password_fingerprint() {
+  printf '%s' "$1" | openssl dgst -sha256 -binary | openssl base64 | tr -d '\n'
+}
+
+postgres_connection_string() {
+  local quoted_password
+  quoted_password="${POSTGRES_PASSWORD//\'/\'\'}"
+  printf "Host=localhost;Port=%s;Database=homework_central;Username=postgres;Password='%s'" \
+    "$POSTGRES_HOST_PORT" "$quoted_password"
+}
+
+urlencode() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
+  elif command -v node >/dev/null 2>&1; then
+    node -e "console.log(encodeURIComponent(process.argv[1]))" "$1"
+  else
+    fail "python3 or node is required to verify the Postgres password"
+  fi
+}
+
+set_compose_env() {
+  export POSTGRES_PASSWORD
+  export POSTGRES_HOST_PORT
+}
+
+test_postgres_auth() {
+  local encoded uri
+  encoded="$(urlencode "$POSTGRES_PASSWORD")"
+  uri="postgresql://postgres:${encoded}@127.0.0.1:5432/homework_central"
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    psql "$uri" -tAc 'SELECT 1' >/dev/null 2>&1
+}
+
+reset_postgres_volume() {
+  log "Recreating Postgres Docker volume to match POSTGRES_PASSWORD in .env"
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
+}
+
+save_volume_password_fingerprint() {
+  password_fingerprint "$POSTGRES_PASSWORD" >"$REPO_ROOT/.postgres-volume-password"
+}
+
+ensure_postgres_ready() {
+  local fingerprint_file="$REPO_ROOT/.postgres-volume-password"
+  local current_fingerprint stored_fingerprint
+
+  set_compose_env
+  current_fingerprint="$(password_fingerprint "$POSTGRES_PASSWORD")"
+  if [[ -f "$fingerprint_file" ]]; then
+    stored_fingerprint="$(tr -d '\r\n' <"$fingerprint_file")"
+    if [[ "$stored_fingerprint" != "$current_fingerprint" ]]; then
+      log "POSTGRES_PASSWORD changed since the database volume was created"
+      reset_postgres_volume
+    fi
+  fi
+
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  log "Waiting for Postgres to accept connections"
+  wait_for_postgres
+
+  if test_postgres_auth; then
+    save_volume_password_fingerprint
+    return 0
+  fi
+
+  log "Postgres is running but rejected the password from .env (stale Docker volume)"
+  reset_postgres_volume
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  log "Waiting for Postgres to accept connections"
+  wait_for_postgres
+
+  if ! test_postgres_auth; then
+    fail "Postgres password verification failed after recreating the Docker volume. Check POSTGRES_PASSWORD in .env"
+  fi
+
+  save_volume_password_fingerprint
 }
 
 trim_whitespace() {
@@ -195,9 +275,7 @@ start_postgres() {
   fi
 
   log "Starting Postgres (Docker) on localhost:${POSTGRES_HOST_PORT}"
-  docker compose -f "$REPO_ROOT/docker-compose.yml" up -d postgres
-  log "Waiting for Postgres to accept connections"
-  wait_for_postgres
+  ensure_postgres_ready
 }
 
 build_projects() {
@@ -226,7 +304,8 @@ export_backend_env() {
   export ASPNETCORE_ENVIRONMENT=Development
   export ASPNETCORE_URLS=http://localhost:5000
   export Jwt__Secret="$JWT_SECRET"
-  export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD}"
+  export ConnectionStrings__DefaultConnection
+  ConnectionStrings__DefaultConnection="$(postgres_connection_string)"
 }
 
 supervise_children() {
