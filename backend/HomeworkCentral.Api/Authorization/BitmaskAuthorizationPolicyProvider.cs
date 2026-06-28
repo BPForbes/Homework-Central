@@ -51,10 +51,19 @@ public sealed class BitmaskAuthorizationPolicyProvider(IOptions<AuthorizationOpt
         if (!Enum.TryParse(parts[1], ignoreCase: false, out maskType))
             return false;
 
-        if (parts.Length == 3)
-            return short.TryParse(parts[2], out bit);
+        if (maskType == MaskType.SubjectExpertise)
+        {
+            if (parts.Length != 4 || string.IsNullOrWhiteSpace(parts[2]))
+                return false;
 
-        subjectCategory = parts[2];
-        return short.TryParse(parts[3], out bit);
+            subjectCategory = parts[2];
+            return short.TryParse(parts[3], out bit);
+        }
+
+        if (parts.Length != 3)
+            return false;
+
+        subjectCategory = null;
+        return short.TryParse(parts[2], out bit);
     }
 }

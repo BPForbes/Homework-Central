@@ -31,6 +31,23 @@ public static class PlatformRoleCatalog
     public static bool TryGetRoleBit(string roleName, out short bit) =>
         RoleBits.TryGetValue(roleName, out bit);
 
+    public static bool TryGetCanonicalRoleName(string roleName, out string canonicalName, out short bit)
+    {
+        foreach (KeyValuePair<string, short> entry in RoleBits)
+        {
+            if (!string.Equals(entry.Key, roleName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            canonicalName = entry.Key;
+            bit = entry.Value;
+            return true;
+        }
+
+        canonicalName = string.Empty;
+        bit = 0;
+        return false;
+    }
+
     public static short GetHighestRoleBit(IEnumerable<string> roleNames)
     {
         short highest = PlatformRoles.Guest;

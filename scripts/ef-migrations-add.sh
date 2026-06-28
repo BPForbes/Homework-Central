@@ -32,11 +32,21 @@ extra_args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --project requires a path" >&2
+        echo "usage: $0 <MigrationName> [--project path] [--startup-project path]" >&2
+        exit 1
+      fi
       project="$2"
       extra_args+=("$1" "$2")
       shift 2
       ;;
     --startup-project)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --startup-project requires a path" >&2
+        echo "usage: $0 <MigrationName> [--project path] [--startup-project path]" >&2
+        exit 1
+      fi
       startup_project="$2"
       extra_args+=("$1" "$2")
       shift 2

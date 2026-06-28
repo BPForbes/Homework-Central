@@ -47,10 +47,9 @@ public class AuthService(
             await transaction.RollbackAsync();
             if (pg.SqlState == "23505")
             {
-                string detail = pg.Detail ?? string.Empty;
-                if (detail.Contains("Email"))
+                if (string.Equals(pg.ConstraintName, "IX_Users_Email", StringComparison.Ordinal))
                     throw new InvalidOperationException("An account with that email already exists.");
-                if (detail.Contains("Username"))
+                if (string.Equals(pg.ConstraintName, "IX_Users_Username", StringComparison.Ordinal))
                     throw new InvalidOperationException("That username is already taken.");
             }
             throw;

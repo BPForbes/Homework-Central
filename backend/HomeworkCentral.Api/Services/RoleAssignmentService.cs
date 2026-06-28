@@ -19,7 +19,7 @@ public class RoleAssignmentService(
 {
     public async Task AssignRoleAsync(Guid granterUserId, Guid targetUserId, string roleName, CancellationToken ct = default)
     {
-        if (!PlatformRoleCatalog.TryGetRoleBit(roleName, out short targetRoleBit))
+        if (!PlatformRoleCatalog.TryGetCanonicalRoleName(roleName, out string canonicalRoleName, out short targetRoleBit))
             throw new InvalidOperationException($"Unknown role '{roleName}'.");
 
         (System.Collections.BitArray roles, System.Collections.BitArray moderation) granterMask =
@@ -31,8 +31,8 @@ public class RoleAssignmentService(
         if (!PlatformRoleCatalog.CanGrantRole(granterLevel, targetRoleBit))
             throw new UnauthorizedAccessException("You can only grant roles below your own level.");
 
-        Role role = await db.Roles.FirstOrDefaultAsync(r => r.Name == roleName, ct)
-            ?? throw new InvalidOperationException($"Role '{roleName}' is not configured.");
+        Role role = await db.Roles.FirstOrDefaultAsync(r => r.Name == canonicalRoleName, ct)
+            ?? throw new InvalidOperationException($"Role '{canonicalRoleName}' is not configured.");
 
         User targetUser = await db.Users
             .Include(u => u.UserRoles)
@@ -40,7 +40,7 @@ public class RoleAssignmentService(
             ?? throw new InvalidOperationException("Target user was not found.");
 
         bool guestRemoved = false;
-        if (string.Equals(roleName, "VerifiedUser", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(canonicalRoleName, "VerifiedUser", StringComparison.Ordinal))
             guestRemoved = await RemoveRoleAsync(targetUser, "Guest", ct);
 
         if (targetUser.UserRoles.Any(ur => ur.RoleId == role.RoleId))
@@ -72,7 +72,7 @@ public class RoleAssignmentService(
 
     public async Task RevokeRoleAsync(Guid granterUserId, Guid targetUserId, string roleName, CancellationToken ct = default)
     {
-        if (!PlatformRoleCatalog.TryGetRoleBit(roleName, out short targetRoleBit))
+        if (!PlatformRoleCatalog.TryGetCanonicalRoleName(roleName, out string canonicalRoleName, out short targetRoleBit))
             throw new InvalidOperationException($"Unknown role '{roleName}'.");
 
         (System.Collections.BitArray roles, System.Collections.BitArray moderation) granterMask =
@@ -90,7 +90,7 @@ public class RoleAssignmentService(
             ?? throw new InvalidOperationException("Target user was not found.");
 
         UserRole? assignment = targetUser.UserRoles.FirstOrDefault(ur =>
-            string.Equals(ur.Role.Name, roleName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(ur.Role.Name, canonicalRoleName, StringComparison.Ordinal));
 
         if (assignment is null)
             return;
@@ -128,15 +128,40 @@ public class RoleAssignmentService(
             .FirstOrDefaultAsync(u => u.UserId == userId, ct)
             ?? throw new InvalidOperationException("Granter user was not found.");
 
+        Dictionary<short, Role> rolesByBit = await BuildRolesByBitAsync(ct);
+
         System.Collections.BitArray roleMask = BitMask.Create(64);
         System.Collections.BitArray moderationMask = BitMask.Create(256);
 
         foreach (UserRole userRole in user.UserRoles)
         {
-            roleMask = BitMask.Or(roleMask, userRole.Role.RoleMask);
-            moderationMask = BitMask.Or(moderationMask, userRole.Role.PermissionMask);
+            if (!PlatformRoleCatalog.TryGetRoleBit(userRole.Role.Name, out short directBit))
+                continue;
+
+            foreach (short bit in RoleHierarchy.ExpandRoleBits(directBit))
+            {
+                if (!rolesByBit.TryGetValue(bit, out Role? inheritedRole))
+                    continue;
+
+                BitMask.SetBit(roleMask, bit);
+                moderationMask = BitMask.Or(moderationMask, inheritedRole.PermissionMask);
+            }
         }
 
-        return (roleMaskService.ExpandRoleIdentityMask(roleMask), moderationMask);
+        roleMask = roleMaskService.ExpandRoleIdentityMask(roleMask);
+        return (roleMask, moderationMask);
+    }
+
+    private async Task<Dictionary<short, Role>> BuildRolesByBitAsync(CancellationToken ct)
+    {
+        Dictionary<short, Role> rolesByBit = new();
+        List<Role> roles = await db.Roles.AsNoTracking().ToListAsync(ct);
+        foreach (Role role in roles)
+        {
+            if (PlatformRoleCatalog.TryGetRoleBit(role.Name, out short bit))
+                rolesByBit[bit] = role;
+        }
+
+        return rolesByBit;
     }
 }

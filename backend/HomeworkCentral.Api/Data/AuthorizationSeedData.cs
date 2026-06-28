@@ -216,8 +216,19 @@ public static class AuthorizationSeedData
             }
         }
 
-        await db.SaveChangesAsync(ct);
-        await roleMaskService.RebuildAllRoleMasksAsync(ct);
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
+            await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await roleMaskService.RebuildAllRoleMasksAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
+        }
     }
 
     private static async Task UpsertSubjectsAsync(AppDbContext db, CancellationToken ct)
