@@ -12,6 +12,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/dev-stack-lib.sh
+source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
 POSTGRES_HOST_CHECK_PROJECT="$REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
 POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll"
@@ -44,6 +46,10 @@ After startup:
   Frontend  http://localhost:5173
   API       http://localhost:5000
   Health    http://localhost:5000/healthz
+
+Stop:
+  scripts/stop-dev.sh
+  Ctrl+C in this terminal also stops Docker Postgres and frees its port.
 
 Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+
 EOF
@@ -474,6 +480,10 @@ supervise_children() {
 }
 
 run_stack() {
+  if [[ "$SKIP_DOCKER" == false ]]; then
+    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
+  fi
+
   log "Starting API on http://localhost:5000"
   "$REPO_ROOT/scripts/start-api-dev.sh" &
   BACKEND_PID=$!
@@ -486,13 +496,20 @@ run_stack() {
     log "Stopping dev servers"
     kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    if [[ "$SKIP_DOCKER" == false ]]; then
+      release_dev_stack_postgres
+    fi
   }
   trap cleanup EXIT INT TERM
 
   log "Dev stack is running"
   log "  Frontend: http://localhost:5173"
   log "  API:      http://localhost:5000"
-  log "Press Ctrl+C to stop"
+  if [[ "$SKIP_DOCKER" == false ]]; then
+    log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
+  fi
+  log "Press Ctrl+C to stop servers and free the Postgres port"
+  log "Or run: scripts/stop-dev.sh"
 
   supervise_children "$BACKEND_PID" "$FRONTEND_PID"
   local status=$?

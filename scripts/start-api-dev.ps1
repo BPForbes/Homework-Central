@@ -17,6 +17,8 @@ $EnvFile = Join-Path $RepoRoot '.env'
 $DevPostgresUser = 'postgres'
 $DevPostgresPassword = 'postgres'
 
+. (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
+
 function Read-JwtSecret {
     if (-not (Test-Path $EnvFile)) {
         throw ".env not found at $EnvFile. Run scripts/run-dev.ps1 first."
@@ -67,4 +69,5 @@ try {
 }
 finally {
     Pop-Location
+    Unregister-DevStackServer
 }

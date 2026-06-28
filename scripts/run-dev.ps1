@@ -33,6 +33,8 @@ $DevPostgresHostPort = '5434'
 $DevPostgresHostPortMin = 5434
 $DevPostgresHostPortMax = 5450
 
+. (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
+
 function Show-Usage {
     @'
 Homework Central - local dev stack
@@ -49,6 +51,10 @@ After startup (each server opens in its own terminal window):
   Frontend  http://localhost:5173
   API       http://localhost:5000
   Health    http://localhost:5000/healthz
+
+Stop:
+  scripts/stop-dev.ps1
+  Closing both API and frontend terminals also stops Docker Postgres and frees its port.
 
 Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+, PowerShell 7+ (pwsh)
 '@ | Write-Output
@@ -489,23 +495,32 @@ function Build-Projects {
 
 function Start-DevStack([hashtable]$EnvValues) {
     $apiStarter = Join-Path $RepoRoot 'scripts/start-api-dev.ps1'
+    $frontendStarter = Join-Path $RepoRoot 'scripts/start-frontend-dev.ps1'
+
+    if (-not $SkipDocker) {
+        Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
+    }
 
     Write-Step 'Starting API in a new terminal (http://localhost:5000)'
     Start-Process -FilePath 'pwsh' `
         -ArgumentList @('-NoExit', '-NoLogo', '-File', $apiStarter) `
         -WorkingDirectory $RepoRoot
 
-    $frontendCommand = "Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan; npm run dev"
-
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
     Start-Process -FilePath 'pwsh' `
-        -ArgumentList @('-NoExit', '-NoLogo', '-Command', $frontendCommand) `
-        -WorkingDirectory $FrontendDir
+        -ArgumentList @('-NoExit', '-NoLogo', '-File', $frontendStarter) `
+        -WorkingDirectory $RepoRoot
 
     Write-Step 'Dev stack is running in separate terminals'
     Write-Host '  Frontend: http://localhost:5173'
     Write-Host '  API:      http://localhost:5000'
-    Write-Host 'Close each terminal window to stop its server'
+    if (-not $SkipDocker) {
+        Write-Host '  Postgres: localhost:' -NoNewline
+        Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline
+        Write-Host ' (Docker; stops when both terminals are closed)'
+    }
+    Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
+    Write-Host 'Or run: scripts/stop-dev.ps1'
 }
 
 function Get-EnvValues {

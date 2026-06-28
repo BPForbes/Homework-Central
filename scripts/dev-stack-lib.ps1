@@ -1,0 +1,116 @@
+# Shared helpers for starting/stopping the local Homework Central dev stack.
+# Dot-source from other scripts in this directory; do not run directly.
+
+Set-StrictMode -Version Latest
+
+if (-not (Get-Variable -Name RepoRoot -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+}
+
+$script:DevStackStateFile = Join-Path $script:RepoRoot '.hc-dev-stack.state'
+$script:DevStackMutexName = 'Global\HomeworkCentralDevStack'
+$script:DevStackComposeFile = Join-Path $script:RepoRoot 'docker-compose.yml'
+$script:DevStackEnvFile = Join-Path $script:RepoRoot '.env'
+$script:DevPostgresPassword = 'postgres'
+
+function Read-DevStackState {
+    if (-not (Test-Path $script:DevStackStateFile)) {
+        return $null
+    }
+
+    $state = @{}
+    foreach ($line in Get-Content $script:DevStackStateFile) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+        $name, $value = $line -split '=', 2
+        $state[$name.Trim()] = $value.Trim()
+    }
+
+    return $state
+}
+
+function Write-DevStackState([hashtable]$State) {
+    $lines = foreach ($key in ($State.Keys | Sort-Object)) {
+        "$key=$($State[$key])"
+    }
+    Set-Content -Path $script:DevStackStateFile -Value $lines
+}
+
+function Stop-DevStackPostgres([string]$Port) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    $env:POSTGRES_PASSWORD = $script:DevPostgresPassword
+    $env:POSTGRES_HOST_PORT = $Port
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop postgres *> $null
+}
+
+function Initialize-DevStackState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresPort,
+        [Parameter(Mandatory = $true)]
+        [int]$ServerCount
+    )
+
+    $existing = Read-DevStackState
+    if ($null -ne $existing -and $existing['managed_postgres'] -eq '1') {
+        Write-Host '==> Stopping previous dev stack Postgres session' -ForegroundColor DarkGray
+        Stop-DevStackPostgres -Port $existing['postgres_port']
+    }
+
+    Write-DevStackState @{
+        managed_postgres = '1'
+        postgres_port = $PostgresPort
+        refcount = "$ServerCount"
+    }
+}
+
+function Invoke-DevStackStateUpdate([scriptblock]$Action) {
+    $mutex = New-Object System.Threading.Mutex($false, $script:DevStackMutexName)
+    $acquired = $false
+    try {
+        $acquired = $mutex.WaitOne(15000)
+        if (-not $acquired) {
+            throw 'Timed out waiting for dev stack state lock'
+        }
+
+        & $Action
+    }
+    finally {
+        if ($acquired) {
+            $mutex.ReleaseMutex()
+        }
+        $mutex.Dispose()
+    }
+}
+
+function Unregister-DevStackServer {
+    Invoke-DevStackStateUpdate {
+        $state = Read-DevStackState
+        if ($null -eq $state -or $state['managed_postgres'] -ne '1') {
+            return
+        }
+
+        $refcount = [int]$state['refcount'] - 1
+        if ($refcount -gt 0) {
+            $state['refcount'] = "$refcount"
+            Write-DevStackState $state
+            return
+        }
+
+        $port = $state['postgres_port']
+        Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
+        Stop-DevStackPostgres -Port $port
+        Write-Host '==> Stopped Docker Postgres and freed localhost port' -ForegroundColor DarkGray
+    }
+}
+
+function Stop-DevStack {
+    $state = Read-DevStackState
+    if ($null -ne $state -and $state['managed_postgres'] -eq '1') {
+        Stop-DevStackPostgres -Port $state['postgres_port']
+    }
+
+    Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
+}
