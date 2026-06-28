@@ -39,11 +39,22 @@ public class RoleAssignmentService(
             .FirstOrDefaultAsync(u => u.UserId == targetUserId, ct)
             ?? throw new InvalidOperationException("Target user was not found.");
 
+        bool guestRemoved = false;
         if (string.Equals(roleName, "VerifiedUser", StringComparison.OrdinalIgnoreCase))
-            await RemoveRoleAsync(targetUser, "Guest", ct);
+            guestRemoved = await RemoveRoleAsync(targetUser, "Guest", ct);
 
         if (targetUser.UserRoles.Any(ur => ur.RoleId == role.RoleId))
+        {
+            if (!guestRemoved)
+                return;
+
+            await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction cleanupTransaction =
+                await db.Database.BeginTransactionAsync(ct);
+            await db.SaveChangesAsync(ct);
+            await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+            await cleanupTransaction.CommitAsync(ct);
             return;
+        }
 
         db.UserRoles.Add(new UserRole
         {
@@ -91,14 +102,17 @@ public class RoleAssignmentService(
         await transaction.CommitAsync(ct);
     }
 
-    private async Task RemoveRoleAsync(User user, string roleName, CancellationToken ct)
+    private async Task<bool> RemoveRoleAsync(User user, string roleName, CancellationToken ct)
     {
         UserRole? assignment = await db.UserRoles
             .Include(ur => ur.Role)
             .FirstOrDefaultAsync(ur => ur.UserId == user.UserId && ur.Role.Name == roleName, ct);
 
-        if (assignment is not null)
-            db.UserRoles.Remove(assignment);
+        if (assignment is null)
+            return false;
+
+        db.UserRoles.Remove(assignment);
+        return true;
     }
 
     private async Task<(System.Collections.BitArray roles, System.Collections.BitArray moderation)> GetExpandedRoleMaskAsync(

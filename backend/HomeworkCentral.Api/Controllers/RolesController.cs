@@ -18,9 +18,11 @@ public class RolesController(IRoleAssignmentService roleAssignments) : Controlle
         if (validation is not null)
             return validation;
 
+        if (!TryGetGranterId(out Guid granterId))
+            return Unauthorized();
+
         try
         {
-            Guid granterId = GetUserId();
             await roleAssignments.AssignRoleAsync(granterId, request.UserId, request.RoleName, ct);
             return NoContent();
         }
@@ -41,9 +43,11 @@ public class RolesController(IRoleAssignmentService roleAssignments) : Controlle
         if (validation is not null)
             return validation;
 
+        if (!TryGetGranterId(out Guid granterId))
+            return Unauthorized();
+
         try
         {
-            Guid granterId = GetUserId();
             await roleAssignments.RevokeRoleAsync(granterId, request.UserId, request.RoleName, ct);
             return NoContent();
         }
@@ -63,9 +67,11 @@ public class RolesController(IRoleAssignmentService roleAssignments) : Controlle
         if (request.UserId == Guid.Empty)
             return BadRequest(new { error = "UserId is required." });
 
+        if (!TryGetGranterId(out Guid granterId))
+            return Unauthorized();
+
         try
         {
-            Guid granterId = GetUserId();
             await roleAssignments.AssignRoleAsync(granterId, request.UserId, "VerifiedUser", ct);
             return NoContent();
         }
@@ -98,12 +104,17 @@ public class RolesController(IRoleAssignmentService roleAssignments) : Controlle
         return new BadRequestObjectResult(new { error = ex.Message });
     }
 
-    private Guid GetUserId()
+    private bool TryGetGranterId(out Guid granterId)
     {
         string? sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? User.FindFirstValue("sub")
-            ?? throw new UnauthorizedAccessException();
+            ?? User.FindFirstValue("sub");
 
-        return Guid.Parse(sub);
+        if (sub is null || !Guid.TryParse(sub, out granterId))
+        {
+            granterId = default;
+            return false;
+        }
+
+        return true;
     }
 }
