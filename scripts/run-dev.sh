@@ -13,6 +13,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
+POSTGRES_HOST_CHECK_PROJECT="$REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
+POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
@@ -118,24 +120,33 @@ get_postgres_published_port() {
 
 test_postgres_host_connection() {
   local published
-  local gateway_args=()
+  local attempt
+  local output
+  local status
 
   published="$(get_postgres_published_port || true)"
-  if [[ "$published" != "$POSTGRES_HOST_PORT" ]]; then
-    log "Docker Postgres is not published on localhost:${POSTGRES_HOST_PORT} (container maps to ${published:-unknown})"
+  if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
+    log "Docker Postgres is not published on localhost:${POSTGRES_HOST_PORT} (container maps to ${published})"
     return 1
   fi
 
-  if [[ "$(uname -s)" == "Linux" ]]; then
-    gateway_args=(--add-host=host.docker.internal:host-gateway)
+  if [[ ! -f "$POSTGRES_HOST_CHECK_DLL" ]]; then
+    build_postgres_host_check
   fi
 
-  if docker run --rm "${gateway_args[@]}" postgres:16-alpine \
-    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h host.docker.internal -p $POSTGRES_HOST_PORT -U $DEV_POSTGRES_USER -d homework_central -tAc 'SELECT 1'" >/dev/null 2>&1; then
-    return 0
-  fi
+  for ((attempt = 1; attempt <= 10; attempt++)); do
+    output="$(dotnet "$POSTGRES_HOST_CHECK_DLL" "$POSTGRES_HOST_PORT" 2>&1)"
+    status=$?
+    if [[ $status -eq 0 ]]; then
+      return 0
+    fi
+    sleep 1
+  done
 
-  log "Docker Postgres is not reachable at localhost:${POSTGRES_HOST_PORT} from the host (another PostgreSQL may own that port)"
+  log "Cannot connect to homework_central on localhost:${POSTGRES_HOST_PORT} from the host"
+  if [[ -n "$output" ]]; then
+    printf '       %s\n' "$output"
+  fi
   return 1
 }
 
@@ -182,7 +193,15 @@ prepare_homework_central_database() {
 }
 
 start_postgres_container() {
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  local published
+  published="$(get_postgres_published_port || true)"
+
+  if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
+    log "Recreating Postgres container for localhost:${POSTGRES_HOST_PORT}"
+    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d --force-recreate postgres
+  else
+    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  fi
 }
 
 reset_postgres_volume() {
@@ -221,7 +240,7 @@ ensure_postgres_ready() {
   fi
 
   if ! test_postgres_host_connection; then
-    fail "Failed to reach Docker Postgres at localhost:${POSTGRES_HOST_PORT}. Another PostgreSQL install may own that port. Try: docker compose down -v, set POSTGRES_HOST_PORT to a free port in .env, then rerun scripts/run-dev.sh"
+    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: docker compose down -v && scripts/run-dev.sh"
   fi
 }
 
@@ -341,6 +360,10 @@ start_postgres() {
   ensure_postgres_ready
 }
 
+build_postgres_host_check() {
+  dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
+}
+
 build_projects() {
   local skip_dotnet=false
   if [[ "${HC_SKIP_DOTNET_BUILD:-}" == "1" || "${HC_SKIP_BUILD:-}" == "1" ]]; then
@@ -353,6 +376,8 @@ build_projects() {
     log "Building API"
     dotnet build "$API_PROJECT" -c Debug
   fi
+
+  build_postgres_host_check
 
   require_cmd npm
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then

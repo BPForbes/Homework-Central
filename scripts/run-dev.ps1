@@ -22,6 +22,8 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
+$PostgresHostCheckProject = Join-Path $RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
+$PostgresHostCheckDll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll'
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
@@ -98,25 +100,31 @@ function Get-PostgresPublishedPort {
 function Test-PostgresHostConnection([hashtable]$EnvValues) {
     $port = $EnvValues['POSTGRES_HOST_PORT']
     $published = Get-PostgresPublishedPort
-    if ($published -ne $port) {
+    if ($published -and $published -ne $port) {
         Write-Step "Docker Postgres is not published on localhost:$port (container maps to ${published})"
         return $false
     }
 
-    $gatewayArgs = @()
-    if ($IsLinux) {
-        $gatewayArgs = @('--add-host=host.docker.internal:host-gateway')
+    if (-not (Test-Path $PostgresHostCheckDll)) {
+        Build-PostgresHostCheck
     }
 
-    # Ephemeral client container mirrors how the host reaches the published port.
-    docker run --rm @gatewayArgs postgres:16-alpine `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h host.docker.internal -p $port -U $DevPostgresUser -d homework_central -tAc 'SELECT 1'" *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Step "Docker Postgres is not reachable at localhost:$port from the host (another PostgreSQL may own that port)"
-        return $false
+    # Same localhost path the API uses (docker run + host.docker.internal is unreliable on Windows).
+    $stderr = ''
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        $stderr = dotnet $PostgresHostCheckDll $port 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
     }
 
-    return $true
+    Write-Step "Cannot connect to homework_central on localhost:$port from the host"
+    $detail = $stderr.Trim()
+    if ($detail) {
+        Write-Host "       $detail" -ForegroundColor DarkGray
+    }
+    return $false
 }
 
 function Test-PostgresAuth {
@@ -171,8 +179,17 @@ function Prepare-HomeworkCentralDatabase {
     return $true
 }
 
-function Start-PostgresContainer {
-    docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+function Start-PostgresContainer([hashtable]$EnvValues) {
+    $expectedPort = $EnvValues['POSTGRES_HOST_PORT']
+    $published = Get-PostgresPublishedPort
+
+    if ($published -and $published -ne $expectedPort) {
+        Write-Step "Recreating Postgres container for localhost:$expectedPort"
+        docker compose -f $ComposeFile --env-file $EnvFile up -d --force-recreate postgres
+    } else {
+        docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    }
+
     if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
 }
 
@@ -187,7 +204,7 @@ function Reset-PostgresVolume {
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
-    Start-PostgresContainer
+    Start-PostgresContainer -EnvValues $EnvValues
 
     Write-Step 'Waiting for Postgres to accept connections'
     Wait-ForPostgres
@@ -195,7 +212,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     if (-not (Test-PostgresAuth -Database 'postgres')) {
         Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
         Reset-PostgresVolume
-        Start-PostgresContainer
+        Start-PostgresContainer -EnvValues $EnvValues
         Write-Step 'Waiting for Postgres to accept connections'
         Wait-ForPostgres
         if (-not (Test-PostgresAuth -Database 'postgres')) {
@@ -206,7 +223,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     if (-not (Prepare-HomeworkCentralDatabase)) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
         Reset-PostgresVolume
-        Start-PostgresContainer
+        Start-PostgresContainer -EnvValues $EnvValues
         Write-Step 'Waiting for Postgres to accept connections'
         Wait-ForPostgres
 
@@ -216,7 +233,13 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     }
 
     if (-not (Test-PostgresHostConnection $EnvValues)) {
-        throw "Failed to reach Docker Postgres at localhost:$($EnvValues['POSTGRES_HOST_PORT']). Another PostgreSQL install may own that port. Try: docker compose down -v, set POSTGRES_HOST_PORT to a free port in .env, then rerun scripts/run-dev.ps1"
+        $port = $EnvValues['POSTGRES_HOST_PORT']
+        throw @"
+Failed to reach homework_central on localhost:$port.
+If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
+  docker compose down -v
+  pwsh .\scripts\run-dev.ps1
+"@
     }
 }
 
@@ -333,14 +356,21 @@ function Start-Postgres([hashtable]$EnvValues) {
     Ensure-PostgresReady $EnvValues
 }
 
+function Build-PostgresHostCheck {
+    dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
+}
+
 function Build-Projects {
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
+        Build-PostgresHostCheck
     } else {
         Write-Step 'Building API'
         dotnet build $ApiProject -c Debug
         if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
+        Build-PostgresHostCheck
     }
 
     if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
