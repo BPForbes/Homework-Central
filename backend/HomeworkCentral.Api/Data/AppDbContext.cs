@@ -124,6 +124,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             e.Property(m => m.EffectiveModerationMask).HasBitColumn("bit(256)", 256);
             e.Property(m => m.EffectiveFeatureMask).HasBitColumn("bit(256)", 256);
             e.Property(m => m.GeneralSubjectMask).HasBitColumn("bit(128)", 128);
+            e.Property(m => m.ScienceMask).HasBitColumn("bit(128)", 128);
             e.Property(m => m.ComputerScienceMask).HasBitColumn("bit(128)", 128);
             e.Property(m => m.MathematicsMask).HasBitColumn("bit(128)", 128);
             e.Property(m => m.LanguageMask).HasBitColumn("bit(128)", 128);

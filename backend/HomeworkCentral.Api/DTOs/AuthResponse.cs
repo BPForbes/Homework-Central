@@ -20,6 +20,7 @@ public class UserDto
     public string ComputerScienceMask { get; set; } = null!;
     public string MathematicsMask { get; set; } = null!;
     public string LanguageMask { get; set; } = null!;
+    public string ScienceMask { get; set; } = null!;
     public string StatusMask { get; set; } = null!;
 }
 
@@ -32,5 +33,6 @@ public class EffectiveMaskDto
     public string ComputerScienceMask { get; set; } = null!;
     public string MathematicsMask { get; set; } = null!;
     public string LanguageMask { get; set; } = null!;
+    public string ScienceMask { get; set; } = null!;
     public string StatusMask { get; set; } = null!;
 }

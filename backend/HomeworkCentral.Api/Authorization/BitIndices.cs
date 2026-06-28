@@ -1,57 +1,53 @@
 namespace HomeworkCentral.Api.Authorization;
 
-/// <summary>Mask A — moderation permissions (bit indices 0–255).</summary>
+/// <summary>Mask A — moderation permissions (bit indices 0–255). Paired actions are bundled.</summary>
 public static class ModerationPermissions
 {
     public const short ViewReports = 0;
     public const short ResolveReports = 1;
     public const short WarnUser = 2;
     public const short TimeoutUser = 3;
-    public const short MuteUser = 4;
-    public const short UnmuteUser = 5;
-    public const short KickUser = 6;
-    public const short BanUser = 7;
-    public const short UnbanUser = 8;
-    public const short DeleteMessages = 9;
-    public const short EditMessages = 10;
-    public const short PinMessages = 11;
-    public const short LockChannel = 12;
-    public const short UnlockChannel = 13;
-    public const short ManageChannels = 14;
-    public const short ManageRoles = 15;
-    public const short ManagePermissions = 16;
-    public const short ViewAuditLogs = 17;
-    public const short ManageEvents = 18;
-    public const short ManageSeminars = 19;
-    public const short ModerateResources = 20;
-    public const short SuspendAccount = 21;
-    public const short RestoreAccount = 22;
-    public const short HandleAppeals = 23;
+    public const short MuteMembers = 4;
+    public const short KickUser = 5;
+    public const short BanMembers = 6;
+    public const short DeleteMessages = 7;
+    public const short EditMessages = 8;
+    public const short PinMessages = 9;
+    public const short LockChannels = 10;
+    public const short ManageChannels = 11;
+    public const short ManageRoles = 12;
+    public const short ManagePermissions = 13;
+    public const short ViewAuditLogs = 14;
+    public const short ManageEvents = 15;
+    public const short ManageSeminars = 16;
+    public const short ModerateResources = 17;
+    public const short SuspendAccounts = 18;
+    public const short HandleAppeals = 19;
 }
 
-/// <summary>Mask B — platform roles (bit indices 0–63).</summary>
+/// <summary>Mask B — platform roles. Higher bit index = higher authority for role grants.</summary>
 public static class PlatformRoles
 {
     public const short Guest = 0;
     public const short VerifiedUser = 1;
     public const short Student = 2;
-    public const short Tutor = 3;
-    public const short SeniorTutor = 4;
-    public const short HeadTutor = 5;
-    public const short Moderator = 6;
-    public const short SeniorModerator = 7;
-    public const short CommunityManager = 8;
-    public const short EventOrganizer = 9;
-    public const short SeminarHost = 10;
-    public const short VerifiedEducator = 11;
-    public const short Developer = 12;
-    public const short Administrator = 13;
-    public const short SystemAdministrator = 14;
-    public const short Owner = 15;
-    public const short Founder = 16;
+    public const short Staff = 3;
+    public const short Tutor = 4;
+    public const short SeniorTutor = 5;
+    public const short HeadTutor = 6;
+    public const short Moderator = 7;
+    public const short SeniorModerator = 8;
+    public const short CommunityManager = 9;
+    public const short EventOrganizer = 10;
+    public const short SeminarHost = 11;
+    public const short VerifiedEducator = 12;
+    public const short Developer = 13;
+    public const short BetaTester = 14;
+    public const short Administrator = 15;
+    public const short SystemAdministrator = 16;
     public const short BoardMember = 17;
-    public const short BetaTester = 18;
-    public const short Staff = 19;
+    public const short Owner = 18;
+    public const short Founder = 19;
 }
 
 /// <summary>Mask C — general subjects (bit indices 0–127).</summary>
@@ -68,10 +64,8 @@ public static class GeneralSubjects
     public const short Engineering = 8;
     public const short Medicine = 9;
     public const short Finance = 10;
-    public const short Philosophy = 11;
-    public const short Economics = 12;
-    public const short Psychology = 13;
-    public const short Education = 14;
+    public const short Economics = 11;
+    public const short Education = 12;
 }
 
 /// <summary>Mask D — computer science expertise (bit indices 0–127).</summary>
@@ -142,6 +136,16 @@ public static class LanguageExpertise
     public const short AmericanSignLanguage = 10;
 }
 
+/// <summary>Science expertise under general subject Science (bit indices 0–127).</summary>
+public static class ScienceExpertise
+{
+    public const short Biology = 0;
+    public const short Chemistry = 1;
+    public const short Physics = 2;
+    public const short Philosophy = 3;
+    public const short Psychology = 4;
+}
+
 /// <summary>Mask G — platform features (bit indices 0–255).</summary>
 public static class PlatformFeatures
 {
@@ -196,4 +200,14 @@ public static class SubjectMaskNames
     public const string ComputerScience = "ComputerScience";
     public const string Mathematics = "Mathematics";
     public const string Languages = "Languages";
+    public const string Science = "Science";
+    public const string History = "History";
+    public const string Business = "Business";
+    public const string Art = "Art";
+    public const string Music = "Music";
+    public const string Engineering = "Engineering";
+    public const string Medicine = "Medicine";
+    public const string Finance = "Finance";
+    public const string Economics = "Economics";
+    public const string Education = "Education";
 }

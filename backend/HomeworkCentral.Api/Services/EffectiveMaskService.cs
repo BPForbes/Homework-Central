@@ -44,6 +44,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         roleMask = roleMaskService.ExpandRoleIdentityMask(roleMask);
 
         var generalSubjectMask = BitMask.Create(128);
+        var scienceMask = BitMask.Create(128);
         var computerScienceMask = BitMask.Create(128);
         var mathematicsMask = BitMask.Create(128);
         var languageMask = BitMask.Create(128);
@@ -53,7 +54,16 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
             .ToDictionaryAsync(s => s.SubjectId, ct);
 
         foreach (var userSubject in user.UserSubjects)
-            ApplySubjectHierarchy(userSubject.Subject, subjectsById, generalSubjectMask, computerScienceMask, mathematicsMask, languageMask);
+        {
+            ApplySubjectHierarchy(
+                userSubject.Subject,
+                subjectsById,
+                generalSubjectMask,
+                scienceMask,
+                computerScienceMask,
+                mathematicsMask,
+                languageMask);
+        }
 
         var statusMask = BuildDefaultStatusMask();
 
@@ -68,6 +78,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         existing.EffectiveModerationMask = moderationMask;
         existing.EffectiveFeatureMask = featureMask;
         existing.GeneralSubjectMask = generalSubjectMask;
+        existing.ScienceMask = scienceMask;
         existing.ComputerScienceMask = computerScienceMask;
         existing.MathematicsMask = mathematicsMask;
         existing.LanguageMask = languageMask;
@@ -89,6 +100,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         Subject subject,
         IReadOnlyDictionary<Guid, Subject> subjectsById,
         BitArray generalSubjectMask,
+        BitArray scienceMask,
         BitArray computerScienceMask,
         BitArray mathematicsMask,
         BitArray languageMask)
@@ -101,7 +113,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
             if (!visited.Add(current.SubjectId))
                 break;
 
-            ApplySubjectBit(current, generalSubjectMask, computerScienceMask, mathematicsMask, languageMask);
+            ApplySubjectBit(current, generalSubjectMask, scienceMask, computerScienceMask, mathematicsMask, languageMask);
 
             if (current.ParentSubjectId is null ||
                 !subjectsById.TryGetValue(current.ParentSubjectId.Value, out var parent))
@@ -114,6 +126,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
     private static void ApplySubjectBit(
         Subject subject,
         BitArray generalSubjectMask,
+        BitArray scienceMask,
         BitArray computerScienceMask,
         BitArray mathematicsMask,
         BitArray languageMask)
@@ -121,6 +134,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         var target = subject.SubjectMask switch
         {
             SubjectMaskNames.General => generalSubjectMask,
+            SubjectMaskNames.Science => scienceMask,
             SubjectMaskNames.ComputerScience => computerScienceMask,
             SubjectMaskNames.Mathematics => mathematicsMask,
             SubjectMaskNames.Languages => languageMask,

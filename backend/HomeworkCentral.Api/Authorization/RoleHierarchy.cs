@@ -8,11 +8,15 @@ public static class RoleHierarchy
 {
     private static readonly IReadOnlyDictionary<short, short[]> ParentRoleBits = new Dictionary<short, short[]>
     {
-        [PlatformRoles.SeniorTutor] = [PlatformRoles.Tutor],
-        [PlatformRoles.HeadTutor] = [PlatformRoles.SeniorTutor, PlatformRoles.Tutor],
+        [PlatformRoles.Staff] = [PlatformRoles.Student],
+        [PlatformRoles.Tutor] = [PlatformRoles.Staff],
+        [PlatformRoles.SeniorTutor] = [PlatformRoles.Tutor, PlatformRoles.EventOrganizer, PlatformRoles.SeminarHost],
+        [PlatformRoles.HeadTutor] = [PlatformRoles.SeniorTutor],
         [PlatformRoles.SeniorModerator] = [PlatformRoles.Moderator],
         [PlatformRoles.SystemAdministrator] = [PlatformRoles.Administrator],
-        [PlatformRoles.Owner] = [PlatformRoles.SystemAdministrator, PlatformRoles.Administrator],
+        [PlatformRoles.BoardMember] = [PlatformRoles.SystemAdministrator, PlatformRoles.Administrator],
+        [PlatformRoles.Owner] = [PlatformRoles.BoardMember],
+        [PlatformRoles.Founder] = [PlatformRoles.Owner],
     };
 
     public static IEnumerable<short> ExpandRoleBits(short roleBit)

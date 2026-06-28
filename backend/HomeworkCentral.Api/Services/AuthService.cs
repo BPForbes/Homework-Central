@@ -170,6 +170,7 @@ public class AuthService(
             ComputerScienceMask = masks.ComputerScienceMask,
             MathematicsMask = masks.MathematicsMask,
             LanguageMask = masks.LanguageMask,
+            ScienceMask = masks.ScienceMask,
             StatusMask = masks.StatusMask,
         };
     }
@@ -184,6 +185,7 @@ public class AuthService(
             ComputerScienceMask = BitMask.ToBase64(effectiveMask.ComputerScienceMask),
             MathematicsMask = BitMask.ToBase64(effectiveMask.MathematicsMask),
             LanguageMask = BitMask.ToBase64(effectiveMask.LanguageMask),
+            ScienceMask = BitMask.ToBase64(effectiveMask.ScienceMask),
             StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
         };
 

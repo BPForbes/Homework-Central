@@ -31,6 +31,7 @@ builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
+builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
 
 // JWT authentication
@@ -54,7 +55,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization(opts =>
 {
-    RegisterBitmaskPolicies(opts, MaskType.Moderation, ModerationPermissions.BanUser);
+    RegisterBitmaskPolicies(opts, MaskType.Moderation, ModerationPermissions.BanMembers);
     RegisterBitmaskPolicies(opts, MaskType.Feature, PlatformFeatures.PublicMessages);
     RegisterBitmaskPolicies(opts, MaskType.Role, PlatformRoles.Tutor);
 });

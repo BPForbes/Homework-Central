@@ -26,7 +26,7 @@ export interface UserInfo {
   generalSubjectMask: string
   computerScienceMask: string
   mathematicsMask: string
-  languageMask: string
+  scienceMask: string
   statusMask: string
 }
 
@@ -38,4 +38,5 @@ export type MaskField =
   | 'computerScienceMask'
   | 'mathematicsMask'
   | 'languageMask'
+  | 'scienceMask'
   | 'statusMask'

@@ -66,7 +66,7 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
     }
 
     private static BitArray BuildRoleIdentityMask(string roleName) =>
-        TryGetRoleBit(roleName, out var bit)
+        PlatformRoleCatalog.TryGetRoleBit(roleName, out var bit)
             ? SetSingleBit(64, bit)
             : BitMask.Create(64);
 
@@ -101,24 +101,27 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
                     PlatformFeatures.ImageUploads,
                     PlatformFeatures.EventCalendar);
                 break;
-            case "Tutor":
-            case "SeniorTutor":
-            case "HeadTutor":
+            case "Staff":
                 SetFeatures(mask,
                     PlatformFeatures.PublicMessages,
                     PlatformFeatures.PrivateMessages,
                     PlatformFeatures.GroupMessages,
-                    PlatformFeatures.VoiceRooms,
-                    PlatformFeatures.VideoRooms,
-                    PlatformFeatures.ScreenSharing,
+                    PlatformFeatures.PublicProfile,
+                    PlatformFeatures.ResourceSharing,
+                    PlatformFeatures.EventCalendar);
+                break;
+            case "Tutor":
+                SetFeatures(mask, TutorFeatures());
+                break;
+            case "SeniorTutor":
+            case "HeadTutor":
+                SetFeatures(mask, TutorFeatures());
+                SetFeatures(mask,
                     PlatformFeatures.SeminarHosting,
                     PlatformFeatures.SeminarUpload,
-                    PlatformFeatures.ResourceSharing,
-                    PlatformFeatures.PublicProfile,
-                    PlatformFeatures.ProfileCustomization,
-                    PlatformFeatures.FileUploads,
-                    PlatformFeatures.ImageUploads,
-                    PlatformFeatures.EventCalendar);
+                    PlatformFeatures.EventPosting,
+                    PlatformFeatures.EventCalendar,
+                    PlatformFeatures.CommunityPolls);
                 break;
             case "SeminarHost":
                 SetFeatures(mask,
@@ -162,7 +165,9 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
                 break;
             case "Administrator":
             case "SystemAdministrator":
+            case "BoardMember":
             case "Owner":
+            case "Founder":
                 EnableAllFeatures(mask);
                 break;
             default:
@@ -175,6 +180,22 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
         return mask;
     }
 
+    private static short[] TutorFeatures() =>
+    [
+        PlatformFeatures.PublicMessages,
+        PlatformFeatures.PrivateMessages,
+        PlatformFeatures.GroupMessages,
+        PlatformFeatures.VoiceRooms,
+        PlatformFeatures.VideoRooms,
+        PlatformFeatures.ScreenSharing,
+        PlatformFeatures.ResourceSharing,
+        PlatformFeatures.PublicProfile,
+        PlatformFeatures.ProfileCustomization,
+        PlatformFeatures.FileUploads,
+        PlatformFeatures.ImageUploads,
+        PlatformFeatures.EventCalendar,
+    ];
+
     private static void EnableAllFeatures(BitArray mask)
     {
         for (var i = 0; i <= PlatformFeatures.BetaFeatures; i++)
@@ -185,36 +206,6 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
     {
         foreach (var feature in features)
             BitMask.SetBit(mask, feature);
-    }
-
-    private static bool TryGetRoleBit(string roleName, out short bit)
-    {
-        bit = roleName switch
-        {
-            "Guest" => PlatformRoles.Guest,
-            "VerifiedUser" => PlatformRoles.VerifiedUser,
-            "Student" => PlatformRoles.Student,
-            "Tutor" => PlatformRoles.Tutor,
-            "SeniorTutor" => PlatformRoles.SeniorTutor,
-            "HeadTutor" => PlatformRoles.HeadTutor,
-            "Moderator" => PlatformRoles.Moderator,
-            "SeniorModerator" => PlatformRoles.SeniorModerator,
-            "CommunityManager" => PlatformRoles.CommunityManager,
-            "EventOrganizer" => PlatformRoles.EventOrganizer,
-            "SeminarHost" => PlatformRoles.SeminarHost,
-            "VerifiedEducator" => PlatformRoles.VerifiedEducator,
-            "Developer" => PlatformRoles.Developer,
-            "Administrator" => PlatformRoles.Administrator,
-            "SystemAdministrator" => PlatformRoles.SystemAdministrator,
-            "Owner" => PlatformRoles.Owner,
-            "Founder" => PlatformRoles.Founder,
-            "BoardMember" => PlatformRoles.BoardMember,
-            "BetaTester" => PlatformRoles.BetaTester,
-            "Staff" => PlatformRoles.Staff,
-            _ => -1,
-        };
-
-        return bit >= 0;
     }
 
     private static BitArray SetSingleBit(int length, short bit)
