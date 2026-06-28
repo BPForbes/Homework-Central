@@ -1,13 +1,15 @@
 using System.Text;
 using AspNetCoreRateLimit;
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Trust forwarded headers from the nginx reverse proxy so rate limiting
 // buckets by the real client IP rather than the proxy address.
@@ -26,9 +28,14 @@ builder.Services.AddDbContext<AppDbContext>(opts =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
+builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
+builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
+builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
 
 // JWT authentication
-var jwtSecret = builder.Configuration["Jwt:Secret"]
+string jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret must be set via environment variable or user-secrets.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opts =>
@@ -67,7 +74,7 @@ builder.Services.AddCors(opts =>
             .AllowAnyHeader()
             .AllowAnyMethod()));
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
@@ -95,9 +102,16 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
 {
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    using IServiceScope scope = app.Services.CreateScope();
+    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
+}
+
+using (IServiceScope seedScope = app.Services.CreateScope())
+{
+    AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
 }
 
 app.Run();

@@ -6,6 +6,25 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!--
+    EF migrations in this project are hand-authored. dotnet ef migrations add still
+    emits *.Designer.cs and *ModelSnapshot.cs; those artifacts are deleted on build
+    and ignored by git. Use scripts/ef-migrations-add.sh when scaffolding is needed.
+  -->
+  <ItemGroup>
+    <Compile Remove="Migrations\**\*.Designer.cs" />
+    <Compile Remove="Migrations\**\*ModelSnapshot.cs" />
+  </ItemGroup>
+
+  <Target Name="RemoveEfGeneratedMigrationArtifacts" BeforeTargets="BeforeBuild">
+    <ItemGroup>
+      <_EfGeneratedMigrationArtifacts Include="Migrations\**\*.Designer.cs" />
+      <_EfGeneratedMigrationArtifacts Include="Migrations\**\*ModelSnapshot.cs" />
+    </ItemGroup>
+    <Delete Files="@(_EfGeneratedMigrationArtifacts)" TreatErrorsAsWarnings="true" />
+    <Message Importance="high" Text="Removed EF scaffolding artifacts: @(_EfGeneratedMigrationArtifacts)" Condition="'@(_EfGeneratedMigrationArtifacts)' != ''" />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="AspNetCoreRateLimit" Version="5.0.0" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />

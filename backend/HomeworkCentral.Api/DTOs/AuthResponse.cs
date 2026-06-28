@@ -14,4 +14,19 @@ public class UserDto
     public string Username { get; set; } = null!;
     public List<string> Roles { get; set; } = new();
     public string PermissionMask { get; set; } = null!;
+    public string RoleMask { get; set; } = null!;
+    public string FeatureMask { get; set; } = null!;
+    public string GeneralSubjectMask { get; set; } = null!;
+    public Dictionary<string, string> SubjectExpertiseMasks { get; set; } = new();
+    public string StatusMask { get; set; } = null!;
+}
+
+public class EffectiveMaskDto
+{
+    public string RoleMask { get; set; } = null!;
+    public string ModerationMask { get; set; } = null!;
+    public string FeatureMask { get; set; } = null!;
+    public string GeneralSubjectMask { get; set; } = null!;
+    public Dictionary<string, string> SubjectExpertiseMasks { get; set; } = new();
+    public string StatusMask { get; set; } = null!;
 }

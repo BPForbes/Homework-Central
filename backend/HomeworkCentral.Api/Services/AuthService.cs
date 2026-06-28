@@ -1,24 +1,30 @@
-using System.Collections;
-using System.Security.Cryptography;
-using System.Text;
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Utilities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace HomeworkCentral.Api.Services;
 
-public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor http) : IAuthService
+public class AuthService(
+    AppDbContext db,
+    IJwtService jwt,
+    IHttpContextAccessor http,
+    IEffectiveMaskService effectiveMaskService) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
-        var normalizedEmail = req.Email.ToLowerInvariant();
+        string normalizedEmail = req.Email.ToLowerInvariant();
 
-        var now = DateTime.UtcNow;
-        var user = new User
+        DateTime now = DateTime.UtcNow;
+        User user = new User
         {
             UserId = Guid.NewGuid(),
             Email = normalizedEmail,
@@ -28,22 +34,29 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
             UpdatedAt = now,
         };
 
-        db.Users.Add(user);
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await db.Database.BeginTransactionAsync();
         try
         {
+            db.Users.Add(user);
             await db.SaveChangesAsync();
+            await db.AssignDefaultRolesAsync(user, effectiveMaskService);
+            await transaction.CommitAsync();
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)
         {
-            // Unique constraint violation (23505)
+            await transaction.RollbackAsync();
             if (pg.SqlState == "23505")
             {
-                var detail = pg.Detail ?? string.Empty;
-                if (detail.Contains("Email"))
+                if (string.Equals(pg.ConstraintName, "IX_Users_Email", StringComparison.Ordinal))
                     throw new InvalidOperationException("An account with that email already exists.");
-                if (detail.Contains("Username"))
+                if (string.Equals(pg.ConstraintName, "IX_Users_Username", StringComparison.Ordinal))
                     throw new InvalidOperationException("That username is already taken.");
             }
+            throw;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
             throw;
         }
 
@@ -52,10 +65,12 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req)
     {
-        var normalizedEmail = req.Email.ToLowerInvariant();
+        string normalizedEmail = req.Email.ToLowerInvariant();
 
-        var user = await db.Users
+        User? user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .Include(u => u.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
 
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
@@ -66,20 +81,21 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
     {
-        var tokenHash = HashToken(rawToken);
+        string tokenHash = HashToken(rawToken);
 
-        // Atomically revoke: only one concurrent caller wins the update
-        var revoked = await db.RefreshTokens
+        int revoked = await db.RefreshTokens
             .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
             .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
 
         if (revoked == 0)
             throw new UnauthorizedAccessException("Invalid or expired refresh token.");
 
-        var stored = await db.RefreshTokens
+        RefreshToken stored = await db.RefreshTokens
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
+            .Include(rt => rt.User.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
             .FirstAsync(rt => rt.TokenHash == tokenHash);
 
         return await BuildAuthResponseAsync(stored.User);
@@ -87,7 +103,7 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
     public async Task RevokeRefreshTokenAsync(string rawToken)
     {
-        var tokenHash = HashToken(rawToken);
+        string tokenHash = HashToken(rawToken);
         await db.RefreshTokens
             .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked)
             .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
@@ -95,11 +111,19 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
     public async Task<UserDto?> GetCurrentUserAsync(Guid userId)
     {
-        var user = await db.Users
+        User? user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .Include(u => u.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(u => u.UserId == userId);
 
-        return user is null ? null : BuildUserDto(user);
+        if (user is null)
+            return null;
+
+        UserEffectiveMask effectiveMask = user.EffectiveMask
+            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
+
+        return BuildUserDto(user, effectiveMask);
     }
 
     private async Task<AuthResponse> BuildAuthResponseAsync(User user)
@@ -110,7 +134,18 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
                 .Query().Include(ur => ur.Role).LoadAsync();
         }
 
-        var (rawToken, refreshExpires) = jwt.GenerateRefreshToken();
+        if (!db.Entry(user).Reference(u => u.EffectiveMask).IsLoaded)
+        {
+            await db.Entry(user).Reference(u => u.EffectiveMask)
+                .Query()
+                .Include(m => m.SubjectExpertiseMasks)
+                .LoadAsync();
+        }
+
+        UserEffectiveMask effectiveMask = user.EffectiveMask
+            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId);
+
+        (string rawToken, DateTime refreshExpires) = jwt.GenerateRefreshToken();
         db.RefreshTokens.Add(new RefreshToken
         {
             Id = Guid.NewGuid(),
@@ -123,8 +158,8 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
         SetRefreshCookie(rawToken, refreshExpires);
 
-        var dto = BuildUserDto(user);
-        var accessToken = jwt.GenerateAccessToken(user, dto.Roles, dto.PermissionMask);
+        UserDto dto = BuildUserDto(user, effectiveMask);
+        string accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask));
 
         return new AuthResponse
         {
@@ -134,19 +169,10 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
         };
     }
 
-    private static UserDto BuildUserDto(User user)
+    private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask)
     {
-        var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-
-        var combined = new BitArray(256);
-        foreach (var ur in user.UserRoles)
-        {
-            combined = combined.Or(ur.Role.PermissionMask);
-        }
-
-        var bytes = new byte[32];
-        combined.CopyTo(bytes, 0);
-        var permMask = Convert.ToBase64String(bytes);
+        List<string> roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+        EffectiveMaskDto masks = ToEffectiveMaskDto(effectiveMask);
 
         return new UserDto
         {
@@ -154,13 +180,42 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
             Email = user.Email,
             Username = user.Username,
             Roles = roles,
-            PermissionMask = permMask,
+            PermissionMask = masks.ModerationMask,
+            RoleMask = masks.RoleMask,
+            FeatureMask = masks.FeatureMask,
+            GeneralSubjectMask = masks.GeneralSubjectMask,
+            SubjectExpertiseMasks = masks.SubjectExpertiseMasks,
+            StatusMask = masks.StatusMask,
+        };
+    }
+
+    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
+    {
+        Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
+            .ToDictionary(
+                category => category,
+                category =>
+                {
+                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
+                        .FirstOrDefault(m => m.Category == category);
+                    return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
+                },
+                StringComparer.Ordinal);
+
+        return new EffectiveMaskDto
+        {
+            RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
+            ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
+            FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
+            GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
+            SubjectExpertiseMasks = subjectExpertiseMasks,
+            StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
         };
     }
 
     private void SetRefreshCookie(string rawToken, DateTime expires)
     {
-        var response = http.HttpContext?.Response;
+        HttpResponse? response = http.HttpContext?.Response;
         if (response is null) return;
 
         response.Cookies.Append("refresh_token", rawToken, new CookieOptions
@@ -175,7 +230,7 @@ public class AuthService(AppDbContext db, IJwtService jwt, IHttpContextAccessor 
 
     private static string HashToken(string token)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }

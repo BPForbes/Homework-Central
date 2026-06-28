@@ -1,12 +1,16 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using HomeworkCentral.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
 namespace HomeworkCentral.Api.Migrations
 {
-    /// <inheritdoc />
-    public partial class AddTokenHashAndConstraints : Migration
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260627163120_AddTokenHashAndConstraints")]
+    public class AddTokenHashAndConstraints : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -29,6 +33,26 @@ namespace HomeworkCentral.Api.Migrations
                 oldClrType: typeof(short),
                 oldType: "smallint")
                 .OldAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn);
+
+            migrationBuilder.Sql("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT lower("Email")
+                        FROM "Users"
+                        GROUP BY lower("Email")
+                        HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Cannot normalize emails: case-insensitive duplicate addresses exist';
+                    END IF;
+                END $$;
+                """);
+
+            migrationBuilder.Sql("""
+                UPDATE "Users"
+                SET "Email" = lower("Email")
+                WHERE "Email" <> lower("Email");
+                """);
 
             migrationBuilder.AddCheckConstraint(
                 name: "CK_Users_Email_Lower",

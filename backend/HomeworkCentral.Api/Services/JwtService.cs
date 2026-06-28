@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,22 +17,24 @@ public class JwtService(IConfiguration config) : IJwtService
     private readonly int _accessTokenMinutes = int.Parse(config["Jwt:AccessTokenMinutes"] ?? "15");
     private readonly int _refreshTokenDays = int.Parse(config["Jwt:RefreshTokenDays"] ?? "7");
 
-    public string GenerateAccessToken(User user, IEnumerable<string> roles, string permissionMask)
+    public string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks)
     {
-        var claims = new List<Claim>
+        List<Claim> claims = new()
         {
             new(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new("username", user.Username),
-            new("perm", permissionMask),
+            new("perm", masks.ModerationMask),
+            new("role_mask", masks.RoleMask),
+            new("feature_mask", masks.FeatureMask),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_secret));
+        SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
 
-        var token = new JwtSecurityToken(
+        JwtSecurityToken token = new(
             issuer: _issuer,
             audience: _audience,
             claims: claims,
@@ -43,16 +46,16 @@ public class JwtService(IConfiguration config) : IJwtService
 
     public (string token, DateTime expires) GenerateRefreshToken()
     {
-        var bytes = RandomNumberGenerator.GetBytes(64);
-        var token = Convert.ToBase64String(bytes);
-        var expires = DateTime.UtcNow.AddDays(_refreshTokenDays);
+        byte[] bytes = RandomNumberGenerator.GetBytes(64);
+        string token = Convert.ToBase64String(bytes);
+        DateTime expires = DateTime.UtcNow.AddDays(_refreshTokenDays);
         return (token, expires);
     }
 
     public Guid? ValidateAccessToken(string token)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
-        var handler = new JwtSecurityTokenHandler();
+        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_secret));
+        JwtSecurityTokenHandler handler = new();
         try
         {
             handler.ValidateToken(token, new TokenValidationParameters
@@ -65,10 +68,10 @@ public class JwtService(IConfiguration config) : IJwtService
                 ValidAudience = _audience,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero,
-            }, out var validatedToken);
+            }, out SecurityToken validatedToken);
 
-            var jwt = (JwtSecurityToken)validatedToken;
-            var sub = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Sub).Value;
+            JwtSecurityToken jwt = (JwtSecurityToken)validatedToken;
+            string sub = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Sub).Value;
             return Guid.Parse(sub);
         }
         catch
