@@ -26,7 +26,7 @@ $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
 
 function Show-Usage {
     @'
-Homework Central — local dev stack
+Homework Central - local dev stack
 
 Usage:
   scripts/run-dev.ps1 [options]

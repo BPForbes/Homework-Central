@@ -23,7 +23,7 @@ POSTGRES_HOST_PORT="5432"
 
 usage() {
   cat <<'EOF'
-Homework Central — local dev stack
+Homework Central - local dev stack
 
 Usage:
   scripts/run-dev.sh [options]
