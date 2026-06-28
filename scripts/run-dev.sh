@@ -117,11 +117,8 @@ set_compose_env() {
 }
 
 test_postgres_auth() {
-  local encoded uri
-  encoded="$(urlencode "$POSTGRES_PASSWORD")"
-  uri="postgresql://postgres:${encoded}@127.0.0.1:5432/homework_central"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    psql "$uri" -tAc 'SELECT 1' >/dev/null 2>&1
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p 5432 -U postgres -d homework_central -tAc "SELECT 1"' >/dev/null 2>&1
 }
 
 reset_postgres_volume() {
@@ -300,14 +297,6 @@ build_projects() {
   fi
 }
 
-export_backend_env() {
-  export ASPNETCORE_ENVIRONMENT=Development
-  export ASPNETCORE_URLS=http://localhost:5000
-  export Jwt__Secret="$JWT_SECRET"
-  export ConnectionStrings__DefaultConnection
-  ConnectionStrings__DefaultConnection="$(postgres_connection_string)"
-}
-
 supervise_children() {
   local backend_pid=$1
   local frontend_pid=$2
@@ -339,10 +328,8 @@ supervise_children() {
 }
 
 run_stack() {
-  export_backend_env
-
   log "Starting API on http://localhost:5000"
-  dotnet run --project "$API_PROJECT" --no-build --urls http://localhost:5000 &
+  "$REPO_ROOT/scripts/start-api-dev.sh" &
   BACKEND_PID=$!
 
   log "Starting frontend on http://localhost:5173"

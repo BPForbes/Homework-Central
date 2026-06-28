@@ -66,22 +66,15 @@ function Get-PasswordFingerprint([string]$Password) {
     return [Convert]::ToBase64String($hash)
 }
 
-function Format-PostgresConnectionString([hashtable]$EnvValues) {
-    $pgPort = $EnvValues['POSTGRES_HOST_PORT']
-    $quotedPassword = $EnvValues['POSTGRES_PASSWORD'].Replace("'", "''")
-    return "Host=localhost;Port=$pgPort;Database=homework_central;Username=postgres;Password='$quotedPassword'"
-}
-
 function Set-ComposeEnv([hashtable]$EnvValues) {
     $env:POSTGRES_PASSWORD = $EnvValues['POSTGRES_PASSWORD']
     $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
 }
 
 function Test-PostgresAuth([hashtable]$EnvValues) {
-    $encoded = [uri]::EscapeDataString($EnvValues['POSTGRES_PASSWORD'])
-    $uri = "postgresql://postgres:${encoded}@127.0.0.1:5432/homework_central"
+    # Use the password baked into the running container env (from docker compose + .env).
     docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        psql $uri -tAc 'SELECT 1' *> $null
+        sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p 5432 -U postgres -d homework_central -tAc "SELECT 1"' *> $null
     return $LASTEXITCODE -eq 0
 }
 
@@ -263,22 +256,12 @@ function Build-Projects {
 }
 
 function Start-DevStack([hashtable]$EnvValues) {
-    $apiProjectLiteral = $ApiProject.Replace("'", "''")
-    $connectionString = Format-PostgresConnectionString $EnvValues
-
-    $backendEnv = [System.Collections.Generic.Dictionary[string, string]]::new()
-    $backendEnv['ASPNETCORE_ENVIRONMENT'] = 'Development'
-    $backendEnv['ASPNETCORE_URLS'] = 'http://localhost:5000'
-    $backendEnv['Jwt__Secret'] = $EnvValues['JWT_SECRET']
-    $backendEnv['ConnectionStrings__DefaultConnection'] = $connectionString
-
-    $backendCommand = "Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan; dotnet run --project '$apiProjectLiteral' --no-build --urls http://localhost:5000"
+    $apiStarter = Join-Path $RepoRoot 'scripts/start-api-dev.ps1'
 
     Write-Step 'Starting API in a new terminal (http://localhost:5000)'
     Start-Process -FilePath 'pwsh' `
-        -ArgumentList @('-NoExit', '-NoLogo', '-Command', $backendCommand) `
-        -WorkingDirectory $RepoRoot `
-        -Environment $backendEnv
+        -ArgumentList @('-NoExit', '-NoLogo', '-File', $apiStarter) `
+        -WorkingDirectory $RepoRoot
 
     $frontendCommand = "Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan; npm run dev"
 
