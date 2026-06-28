@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { authApi } from '../api/auth'
-import type { MaskField, UserInfo } from '../types/auth'
+import type { CoreMaskField, UserInfo } from '../types/auth'
 import { hasMaskBit } from '../utils/bitmask'
 
 interface AuthContextValue {
@@ -13,7 +13,9 @@ interface AuthContextValue {
   hasPermission: (bit: number) => boolean
   hasFeature: (bit: number) => boolean
   hasRole: (bit: number) => boolean
-  hasMaskBit: (mask: MaskField, bit: number) => boolean
+  hasGeneralSubject: (bit: number) => boolean
+  hasSubjectExpertise: (category: string, bit: number) => boolean
+  hasMaskBit: (mask: CoreMaskField, bit: number) => boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -63,13 +65,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const checkMaskBit = useCallback(
-    (mask: MaskField, bit: number): boolean => hasMaskBit(user?.[mask], bit),
+    (mask: CoreMaskField, bit: number): boolean => hasMaskBit(user?.[mask], bit),
+    [user]
+  )
+
+  const hasSubjectExpertise = useCallback(
+    (category: string, bit: number): boolean =>
+      hasMaskBit(user?.subjectExpertiseMasks?.[category], bit),
     [user]
   )
 
   const hasPermission = useCallback((bit: number) => checkMaskBit('permissionMask', bit), [checkMaskBit])
   const hasFeature = useCallback((bit: number) => checkMaskBit('featureMask', bit), [checkMaskBit])
   const hasRole = useCallback((bit: number) => checkMaskBit('roleMask', bit), [checkMaskBit])
+  const hasGeneralSubject = useCallback((bit: number) => checkMaskBit('generalSubjectMask', bit), [checkMaskBit])
 
   return (
     <AuthContext.Provider
@@ -82,6 +91,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasPermission,
         hasFeature,
         hasRole,
+        hasGeneralSubject,
+        hasSubjectExpertise,
         hasMaskBit: checkMaskBit,
       }}
     >

@@ -24,19 +24,13 @@ export interface UserInfo {
   roleMask: string
   featureMask: string
   generalSubjectMask: string
-  computerScienceMask: string
-  mathematicsMask: string
-  scienceMask: string
+  subjectExpertiseMasks: Record<string, string>
   statusMask: string
 }
 
-export type MaskField =
+export type CoreMaskField =
   | 'permissionMask'
   | 'roleMask'
   | 'featureMask'
   | 'generalSubjectMask'
-  | 'computerScienceMask'
-  | 'mathematicsMask'
-  | 'languageMask'
-  | 'scienceMask'
   | 'statusMask'

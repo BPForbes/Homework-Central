@@ -9,12 +9,9 @@ public class UserEffectiveMask
     public BitArray EffectiveModerationMask { get; set; } = new(256);
     public BitArray EffectiveFeatureMask { get; set; } = new(256);
     public BitArray GeneralSubjectMask { get; set; } = new(128);
-    public BitArray ScienceMask { get; set; } = new(128);
-    public BitArray ComputerScienceMask { get; set; } = new(128);
-    public BitArray MathematicsMask { get; set; } = new(128);
-    public BitArray LanguageMask { get; set; } = new(128);
     public BitArray StatusMask { get; set; } = new(64);
     public DateTime UpdatedAt { get; set; }
 
     public User User { get; set; } = null!;
+    public ICollection<UserSubjectExpertiseMask> SubjectExpertiseMasks { get; set; } = new List<UserSubjectExpertiseMask>();
 }

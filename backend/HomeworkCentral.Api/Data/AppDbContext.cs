@@ -13,6 +13,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     public DbSet<Subject> Subjects => Set<Subject>();
     public DbSet<UserSubject> UserSubjects => Set<UserSubject>();
     public DbSet<UserEffectiveMask> UserEffectiveMasks => Set<UserEffectiveMask>();
+    public DbSet<UserSubjectExpertiseMask> UserSubjectExpertiseMasks => Set<UserSubjectExpertiseMask>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder mb)
@@ -124,15 +125,22 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             e.Property(m => m.EffectiveModerationMask).HasBitColumn("bit(256)", 256);
             e.Property(m => m.EffectiveFeatureMask).HasBitColumn("bit(256)", 256);
             e.Property(m => m.GeneralSubjectMask).HasBitColumn("bit(128)", 128);
-            e.Property(m => m.ScienceMask).HasBitColumn("bit(128)", 128);
-            e.Property(m => m.ComputerScienceMask).HasBitColumn("bit(128)", 128);
-            e.Property(m => m.MathematicsMask).HasBitColumn("bit(128)", 128);
-            e.Property(m => m.LanguageMask).HasBitColumn("bit(128)", 128);
             e.Property(m => m.StatusMask).HasBitColumn("bit(64)", 64);
             e.Property(m => m.UpdatedAt).IsRequired();
             e.HasOne(m => m.User)
                 .WithOne(u => u.EffectiveMask)
                 .HasForeignKey<UserEffectiveMask>(m => m.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<UserSubjectExpertiseMask>(e =>
+        {
+            e.HasKey(m => new { m.UserId, m.Category });
+            e.Property(m => m.Category).HasMaxLength(64).IsRequired();
+            e.Property(m => m.ExpertiseMask).HasBitColumn("bit(128)", 128);
+            e.HasOne(m => m.EffectiveMask)
+                .WithMany(m => m.SubjectExpertiseMasks)
+                .HasForeignKey(m => m.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

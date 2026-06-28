@@ -217,6 +217,15 @@ public static class AuthorizationSeedData
         var computerScience = AddSubject("Computer Science", SubjectMaskNames.General, GeneralSubjects.ComputerScience);
         var mathematics = AddSubject("Mathematics", SubjectMaskNames.General, GeneralSubjects.Mathematics);
         var languages = AddSubject("Languages", SubjectMaskNames.General, GeneralSubjects.Languages);
+        var history = AddSubject("History", SubjectMaskNames.General, GeneralSubjects.History);
+        var business = AddSubject("Business", SubjectMaskNames.General, GeneralSubjects.Business);
+        var art = AddSubject("Art", SubjectMaskNames.General, GeneralSubjects.Art);
+        var music = AddSubject("Music", SubjectMaskNames.General, GeneralSubjects.Music);
+        var engineering = AddSubject("Engineering", SubjectMaskNames.General, GeneralSubjects.Engineering);
+        var medicine = AddSubject("Medicine", SubjectMaskNames.General, GeneralSubjects.Medicine);
+        var finance = AddSubject("Finance", SubjectMaskNames.General, GeneralSubjects.Finance);
+        var economics = AddSubject("Economics", SubjectMaskNames.General, GeneralSubjects.Economics);
+        var education = AddSubject("Education", SubjectMaskNames.General, GeneralSubjects.Education);
 
         var biology = AddSubject("Biology", SubjectMaskNames.Science, ScienceExpertise.Biology, science.SubjectId);
         var chemistry = AddSubject("Chemistry", SubjectMaskNames.Science, ScienceExpertise.Chemistry, science.SubjectId);
@@ -232,11 +241,42 @@ public static class AuthorizationSeedData
         var algebra = AddSubject("Algebra", SubjectMaskNames.Mathematics, MathematicsExpertise.Algebra, mathematics.SubjectId);
         var english = AddSubject("English", SubjectMaskNames.Languages, LanguageExpertise.English, languages.SubjectId);
 
+        var worldHistory = AddSubject("World History", SubjectMaskNames.History, HistoryExpertise.WorldHistory, history.SubjectId);
+        var usHistory = AddSubject("US History", SubjectMaskNames.History, HistoryExpertise.UsHistory, history.SubjectId);
+
+        var marketing = AddSubject("Marketing", SubjectMaskNames.Business, BusinessExpertise.Marketing, business.SubjectId);
+        var management = AddSubject("Management", SubjectMaskNames.Business, BusinessExpertise.Management, business.SubjectId);
+
+        var drawing = AddSubject("Drawing", SubjectMaskNames.Art, ArtExpertise.Drawing, art.SubjectId);
+        var painting = AddSubject("Painting", SubjectMaskNames.Art, ArtExpertise.Painting, art.SubjectId);
+
+        var musicTheory = AddSubject("Music Theory", SubjectMaskNames.Music, MusicExpertise.MusicTheory, music.SubjectId);
+
+        var mechanical = AddSubject("Mechanical Engineering", SubjectMaskNames.Engineering, EngineeringExpertise.Mechanical, engineering.SubjectId);
+
+        var anatomy = AddSubject("Anatomy", SubjectMaskNames.Medicine, MedicineExpertise.Anatomy, medicine.SubjectId);
+
+        var investing = AddSubject("Investing", SubjectMaskNames.Finance, FinanceExpertise.Investing, finance.SubjectId);
+
+        var microeconomics = AddSubject("Microeconomics", SubjectMaskNames.Economics, EconomicsExpertise.Microeconomics, economics.SubjectId);
+
+        var curriculumDesign = AddSubject("Curriculum Design", SubjectMaskNames.Education, EducationExpertise.CurriculumDesign, education.SubjectId);
+
         db.Subjects.AddRange(
-            science, computerScience, mathematics, languages,
+            science, computerScience, mathematics, languages, history, business, art, music,
+            engineering, medicine, finance, economics, education,
             biology, chemistry, physics, philosophy, psychology,
             python, csharp, backend, docker,
-            algebra, english);
+            algebra, english,
+            worldHistory, usHistory,
+            marketing, management,
+            drawing, painting,
+            musicTheory,
+            mechanical,
+            anatomy,
+            investing,
+            microeconomics,
+            curriculumDesign);
 
         await db.SaveChangesAsync(ct);
     }

@@ -58,13 +58,18 @@ builder.Services.AddAuthorization(opts =>
     RegisterBitmaskPolicies(opts, MaskType.Moderation, ModerationPermissions.BanMembers);
     RegisterBitmaskPolicies(opts, MaskType.Feature, PlatformFeatures.PublicMessages);
     RegisterBitmaskPolicies(opts, MaskType.Role, PlatformRoles.Tutor);
+    RegisterBitmaskPolicies(opts, MaskType.SubjectExpertise, ComputerScienceExpertise.Python, SubjectMaskNames.ComputerScience);
 });
 
-static void RegisterBitmaskPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions opts, MaskType maskType, short exampleBit)
+static void RegisterBitmaskPolicies(
+    Microsoft.AspNetCore.Authorization.AuthorizationOptions opts,
+    MaskType maskType,
+    short exampleBit,
+    string? subjectCategory = null)
 {
     opts.AddPolicy(
-        AuthorizationPolicyNames.For(maskType, exampleBit),
-        policy => policy.AddRequirements(new BitmaskRequirement(maskType, exampleBit)));
+        AuthorizationPolicyNames.For(maskType, exampleBit, subjectCategory),
+        policy => policy.AddRequirements(new BitmaskRequirement(maskType, exampleBit, subjectCategory)));
 }
 builder.Services.AddControllers();
 

@@ -17,10 +17,7 @@ public class UserDto
     public string RoleMask { get; set; } = null!;
     public string FeatureMask { get; set; } = null!;
     public string GeneralSubjectMask { get; set; } = null!;
-    public string ComputerScienceMask { get; set; } = null!;
-    public string MathematicsMask { get; set; } = null!;
-    public string LanguageMask { get; set; } = null!;
-    public string ScienceMask { get; set; } = null!;
+    public Dictionary<string, string> SubjectExpertiseMasks { get; set; } = new();
     public string StatusMask { get; set; } = null!;
 }
 
@@ -30,9 +27,6 @@ public class EffectiveMaskDto
     public string ModerationMask { get; set; } = null!;
     public string FeatureMask { get; set; } = null!;
     public string GeneralSubjectMask { get; set; } = null!;
-    public string ComputerScienceMask { get; set; } = null!;
-    public string MathematicsMask { get; set; } = null!;
-    public string LanguageMask { get; set; } = null!;
-    public string ScienceMask { get; set; } = null!;
+    public Dictionary<string, string> SubjectExpertiseMasks { get; set; } = new();
     public string StatusMask { get; set; } = null!;
 }

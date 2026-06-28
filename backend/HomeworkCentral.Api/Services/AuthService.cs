@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
@@ -60,7 +61,8 @@ public class AuthService(
 
         var user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .Include(u => u.EffectiveMask)
+            .Include(u => u.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
 
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
@@ -84,7 +86,8 @@ public class AuthService(
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
-            .Include(rt => rt.User.EffectiveMask)
+            .Include(rt => rt.User.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
             .FirstAsync(rt => rt.TokenHash == tokenHash);
 
         return await BuildAuthResponseAsync(stored.User);
@@ -102,7 +105,8 @@ public class AuthService(
     {
         var user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .Include(u => u.EffectiveMask)
+            .Include(u => u.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(u => u.UserId == userId);
 
         if (user is null)
@@ -123,7 +127,12 @@ public class AuthService(
         }
 
         if (!db.Entry(user).Reference(u => u.EffectiveMask).IsLoaded)
-            await db.Entry(user).Reference(u => u.EffectiveMask).LoadAsync();
+        {
+            await db.Entry(user).Reference(u => u.EffectiveMask)
+                .Query()
+                .Include(m => m.SubjectExpertiseMasks)
+                .LoadAsync();
+        }
 
         var effectiveMask = user.EffectiveMask
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId);
@@ -167,27 +176,34 @@ public class AuthService(
             RoleMask = masks.RoleMask,
             FeatureMask = masks.FeatureMask,
             GeneralSubjectMask = masks.GeneralSubjectMask,
-            ComputerScienceMask = masks.ComputerScienceMask,
-            MathematicsMask = masks.MathematicsMask,
-            LanguageMask = masks.LanguageMask,
-            ScienceMask = masks.ScienceMask,
+            SubjectExpertiseMasks = masks.SubjectExpertiseMasks,
             StatusMask = masks.StatusMask,
         };
     }
 
-    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask) =>
-        new()
+    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
+    {
+        var subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
+            .ToDictionary(
+                category => category,
+                category =>
+                {
+                    var row = effectiveMask.SubjectExpertiseMasks
+                        .FirstOrDefault(m => m.Category == category);
+                    return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
+                },
+                StringComparer.Ordinal);
+
+        return new EffectiveMaskDto
         {
             RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
             ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
             FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
             GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
-            ComputerScienceMask = BitMask.ToBase64(effectiveMask.ComputerScienceMask),
-            MathematicsMask = BitMask.ToBase64(effectiveMask.MathematicsMask),
-            LanguageMask = BitMask.ToBase64(effectiveMask.LanguageMask),
-            ScienceMask = BitMask.ToBase64(effectiveMask.ScienceMask),
+            SubjectExpertiseMasks = subjectExpertiseMasks,
             StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
         };
+    }
 
     private void SetRefreshCookie(string rawToken, DateTime expires)
     {

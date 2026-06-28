@@ -10,16 +10,16 @@ public enum MaskType
     Feature,
     Role,
     GeneralSubject,
-    ComputerScience,
-    Mathematics,
-    Language,
+    SubjectExpertise,
     Status,
 }
 
-public sealed class BitmaskRequirement(MaskType maskType, short bit) : IAuthorizationRequirement
+public sealed class BitmaskRequirement(MaskType maskType, short bit, string? subjectCategory = null)
+    : IAuthorizationRequirement
 {
     public MaskType MaskType { get; } = maskType;
     public short Bit { get; } = bit;
+    public string? SubjectCategory { get; } = subjectCategory;
 }
 
 public class BitmaskAuthorizationHandler(
@@ -44,9 +44,8 @@ public class BitmaskAuthorizationHandler(
             MaskType.Feature => mask.EffectiveFeatureMask,
             MaskType.Role => mask.EffectiveRoleMask,
             MaskType.GeneralSubject => mask.GeneralSubjectMask,
-            MaskType.ComputerScience => mask.ComputerScienceMask,
-            MaskType.Mathematics => mask.MathematicsMask,
-            MaskType.Language => mask.LanguageMask,
+            MaskType.SubjectExpertise => mask.SubjectExpertiseMasks
+                .FirstOrDefault(m => m.Category == requirement.SubjectCategory)?.ExpertiseMask,
             MaskType.Status => mask.StatusMask,
             _ => null,
         };
@@ -58,5 +57,8 @@ public class BitmaskAuthorizationHandler(
 
 public static class AuthorizationPolicyNames
 {
-    public static string For(MaskType maskType, short bit) => $"mask:{maskType}:{bit}";
+    public static string For(MaskType maskType, short bit, string? subjectCategory = null) =>
+        subjectCategory is null
+            ? $"mask:{maskType}:{bit}"
+            : $"mask:{maskType}:{subjectCategory}:{bit}";
 }
