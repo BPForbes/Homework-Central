@@ -29,7 +29,9 @@ $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
 $DevPostgresUser = 'postgres'
 $DevPostgresPassword = 'postgres'
-$DevPostgresHostPort = '5433'
+$DevPostgresHostPort = '5434'
+$DevPostgresHostPortMin = 5434
+$DevPostgresHostPortMax = 5450
 
 function Show-Usage {
     @'
@@ -63,6 +65,105 @@ function New-RandomSecret {
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     # URL-safe base64 avoids special characters breaking connection strings and shells.
     return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Test-IsWindowsHost {
+    return $IsWindows -or $env:OS -match '(?i)Windows'
+}
+
+function Test-LoopbackPortListener([int]$Port) {
+    if (-not (Test-IsWindowsHost)) {
+        return $false
+    }
+
+    try {
+        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    } catch {
+        $listeners = @()
+    }
+
+    if ($listeners.Count -eq 0) {
+        $pattern = ":$Port\s"
+        $listeners = netstat -ano | Select-String 'LISTENING' | Select-String $pattern
+        foreach ($line in $listeners) {
+            $text = $line.ToString()
+            if ($text -match '127\.0\.0\.1:' -or $text -match '\[::1\]:') {
+                return $true
+            }
+        }
+        return $false
+    }
+
+    return $null -ne ($listeners | Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') } | Select-Object -First 1)
+}
+
+function Find-FreePostgresHostPort {
+    for ($port = $DevPostgresHostPortMin; $port -le $DevPostgresHostPortMax; $port++) {
+        if (Test-LoopbackPortListener $port) {
+            continue
+        }
+
+        $listeners = @()
+        try {
+            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+        } catch {
+            $listeners = @()
+        }
+
+        if ($listeners.Count -eq 0) {
+            return "$port"
+        }
+    }
+
+    return $null
+}
+
+function Update-EnvFileValues([hashtable]$Values) {
+    $lines = Get-Content $EnvFile
+    $newLines = @()
+    $seen = @{}
+
+    foreach ($line in $lines) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') {
+            $newLines += $line
+            continue
+        }
+
+        $name = ($line -split '=', 2)[0].Trim()
+        if ($Values.ContainsKey($name)) {
+            $newLines += "$name=$($Values[$name])"
+            $seen[$name] = $true
+        } else {
+            $newLines += $line
+        }
+    }
+
+    foreach ($key in $Values.Keys) {
+        if (-not $seen.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($Values[$key])) {
+            $newLines += "$key=$($Values[$key])"
+        }
+    }
+
+    Set-Content -Path $EnvFile -Value $newLines
+}
+
+function Resolve-PostgresHostPort([hashtable]$Values) {
+    $port = [int]$Values['POSTGRES_HOST_PORT']
+
+    if (-not (Test-LoopbackPortListener $port)) {
+        return $Values
+    }
+
+    Write-Step "Port $port is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
+    $freePort = Find-FreePostgresHostPort
+    if ([string]::IsNullOrWhiteSpace($freePort)) {
+        throw "No free Postgres host port found between $DevPostgresHostPortMin and $DevPostgresHostPortMax"
+    }
+
+    Write-Step "Using POSTGRES_HOST_PORT=$freePort instead"
+    $Values['POSTGRES_HOST_PORT'] = $freePort
+    Update-EnvFileValues @{ POSTGRES_HOST_PORT = $freePort }
+    return (Read-EnvFile)
 }
 
 function Set-ComposeEnv([hashtable]$EnvValues) {
@@ -234,9 +335,13 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
 
     if (-not (Test-PostgresHostConnection $EnvValues)) {
         $port = $EnvValues['POSTGRES_HOST_PORT']
+        $loopbackHint = ''
+        if (Test-LoopbackPortListener ([int]$port)) {
+            $loopbackHint = "`nPort $port is bound on 127.0.0.1 by another PostgreSQL install, so localhost does not reach Docker."
+        }
         throw @"
-Failed to reach homework_central on localhost:$port.
-If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
+Failed to reach homework_central on localhost:$port.$loopbackHint
+Pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
   docker compose down -v
   pwsh .\scripts\run-dev.ps1
 "@
@@ -286,8 +391,8 @@ function Ensure-EnvFile {
         $updated = $true
     }
 
-    if ($values['POSTGRES_HOST_PORT'] -eq '5432') {
-        Write-Step 'Using POSTGRES_HOST_PORT=5433 (port 5432 is often used by a local PostgreSQL install)'
+    if ($values['POSTGRES_HOST_PORT'] -eq '5432' -or $values['POSTGRES_HOST_PORT'] -eq '5433') {
+        Write-Step "Using POSTGRES_HOST_PORT=$DevPostgresHostPort (avoids local PostgreSQL on 5432/5433)"
         $values['POSTGRES_HOST_PORT'] = $DevPostgresHostPort
         $updated = $true
     }
@@ -328,7 +433,7 @@ function Ensure-EnvFile {
         throw 'POSTGRES_PASSWORD is not set in .env'
     }
 
-    return $values
+    return (Resolve-PostgresHostPort $values)
 }
 
 function Wait-ForPostgres {

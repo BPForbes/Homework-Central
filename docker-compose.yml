@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
     # Published for local dev (scripts/run-dev.*). Omit in production deployments.
     ports:
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
+      - "${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

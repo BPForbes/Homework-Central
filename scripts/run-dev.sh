@@ -19,12 +19,14 @@ FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
 DEV_POSTGRES_PASSWORD="postgres"
-DEV_POSTGRES_HOST_PORT="5433"
+DEV_POSTGRES_HOST_PORT="5434"
+DEV_POSTGRES_HOST_PORT_MIN=5434
+DEV_POSTGRES_HOST_PORT_MAX=5450
 BUILD_ONLY=false
 SKIP_DOCKER=false
 JWT_SECRET=""
 POSTGRES_PASSWORD=""
-POSTGRES_HOST_PORT="5433"
+POSTGRES_HOST_PORT="5434"
 
 usage() {
   cat <<'EOF'
@@ -93,6 +95,57 @@ generate_secret() {
   else
     fail "openssl is required to generate secrets for a new .env file"
   fi
+}
+
+loopback_port_in_use() {
+  local port="$1"
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -Command "
+          \$c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { \$_.LocalAddress -in @('127.0.0.1', '::1') } |
+            Select-Object -First 1
+          if (\$null -ne \$c) { exit 0 } else { exit 1 }
+        " >/dev/null 2>&1
+        return $?
+      fi
+      netstat -ano 2>/dev/null | grep LISTENING | grep -E "127\.0\.0\.1:${port}[[:space:]]" >/dev/null && return 0
+      netstat -ano 2>/dev/null | grep LISTENING | grep -E "\[::1\]:${port}[[:space:]]" >/dev/null && return 0
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+find_free_postgres_host_port() {
+  local port
+  for ((port = DEV_POSTGRES_HOST_PORT_MIN; port <= DEV_POSTGRES_HOST_PORT_MAX; port++)); do
+    if loopback_port_in_use "$port"; then
+      continue
+    fi
+    printf '%s' "$port"
+    return 0
+  done
+  return 1
+}
+
+resolve_postgres_host_port() {
+  if ! loopback_port_in_use "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  local free_port
+  log "Port ${POSTGRES_HOST_PORT} is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
+  free_port="$(find_free_postgres_host_port || true)"
+  [[ -n "$free_port" ]] || fail "No free Postgres host port found between ${DEV_POSTGRES_HOST_PORT_MIN} and ${DEV_POSTGRES_HOST_PORT_MAX}"
+
+  log "Using POSTGRES_HOST_PORT=${free_port} instead"
+  POSTGRES_HOST_PORT="$free_port"
+  set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
 }
 
 set_compose_env() {
@@ -254,7 +307,7 @@ trim_whitespace() {
 read_env_file() {
   JWT_SECRET=""
   POSTGRES_PASSWORD=""
-  POSTGRES_HOST_PORT="5433"
+  POSTGRES_HOST_PORT="5434"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -273,7 +326,7 @@ read_env_file() {
   done <"$ENV_FILE"
 
   POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5433"
+  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
 }
 
 set_env_var() {
@@ -320,8 +373,8 @@ ensure_env_file() {
     updated=true
   fi
 
-  if [[ "$POSTGRES_HOST_PORT" == "5432" ]]; then
-    log "Using POSTGRES_HOST_PORT=5433 (port 5432 is often used by a local PostgreSQL install)"
+  if [[ "$POSTGRES_HOST_PORT" == "5432" || "$POSTGRES_HOST_PORT" == "5433" ]]; then
+    log "Using POSTGRES_HOST_PORT=${DEV_POSTGRES_HOST_PORT} (avoids local PostgreSQL on 5432/5433)"
     POSTGRES_HOST_PORT="$DEV_POSTGRES_HOST_PORT"
     set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
     updated=true
@@ -331,6 +384,8 @@ ensure_env_file() {
     read_env_file
     log "Generated secrets in .env (local only, not committed)"
   fi
+
+  resolve_postgres_host_port
 
   [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
   [[ ${#JWT_SECRET} -ge 32 ]] || fail "JWT_SECRET must be at least 32 characters"

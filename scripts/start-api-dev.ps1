@@ -23,7 +23,7 @@ function Read-JwtSecret {
     }
 
     $jwtSecret = ''
-    $pgPort = '5433'
+    $pgPort = '5434'
 
     foreach ($line in Get-Content $EnvFile) {
         if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
