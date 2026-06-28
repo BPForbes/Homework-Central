@@ -20,7 +20,6 @@ appsettings.Local.json
 .env
 .env.local
 .env.*.local
-.postgres-volume-password
 
 # AI tooling (local only, per SETUP.md)
 .codegraph/

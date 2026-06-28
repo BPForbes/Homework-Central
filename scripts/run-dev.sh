@@ -15,6 +15,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
+DEV_POSTGRES_USER="postgres"
+DEV_POSTGRES_PASSWORD="postgres"
 BUILD_ONLY=false
 SKIP_DOCKER=false
 JWT_SECRET=""
@@ -90,63 +92,41 @@ generate_secret() {
   fi
 }
 
-password_fingerprint() {
-  printf '%s' "$1" | openssl dgst -sha256 -binary | openssl base64 | tr -d '\n'
-}
-
 set_compose_env() {
-  export POSTGRES_PASSWORD
+  export POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
   export POSTGRES_HOST_PORT
 }
 
 test_postgres_auth() {
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p 5432 -U postgres -d homework_central -tAc "SELECT 1"' >/dev/null 2>&1
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d homework_central -tAc 'SELECT 1'" >/dev/null 2>&1
 }
 
 reset_postgres_volume() {
-  log "Recreating Postgres Docker volume to match POSTGRES_PASSWORD in .env"
+  log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
 }
 
-save_volume_password_fingerprint() {
-  password_fingerprint "$POSTGRES_PASSWORD" >"$REPO_ROOT/.postgres-volume-password"
-}
-
 ensure_postgres_ready() {
-  local fingerprint_file="$REPO_ROOT/.postgres-volume-password"
-  local current_fingerprint stored_fingerprint
-
   set_compose_env
-  current_fingerprint="$(password_fingerprint "$POSTGRES_PASSWORD")"
-  if [[ -f "$fingerprint_file" ]]; then
-    stored_fingerprint="$(tr -d '\r\n' <"$fingerprint_file")"
-    if [[ "$stored_fingerprint" != "$current_fingerprint" ]]; then
-      log "POSTGRES_PASSWORD changed since the database volume was created"
-      reset_postgres_volume
-    fi
-  fi
 
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
   log "Waiting for Postgres to accept connections"
   wait_for_postgres
 
   if test_postgres_auth; then
-    save_volume_password_fingerprint
     return 0
   fi
 
-  log "Postgres is running but rejected the password from .env (stale Docker volume)"
+  log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
   reset_postgres_volume
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
   log "Waiting for Postgres to accept connections"
   wait_for_postgres
 
   if ! test_postgres_auth; then
-    fail "Postgres password verification failed after recreating the Docker volume. Check POSTGRES_PASSWORD in .env"
+    fail "Postgres password verification failed after recreating the Docker volume"
   fi
-
-  save_volume_password_fingerprint
 }
 
 trim_whitespace() {
@@ -219,8 +199,8 @@ ensure_env_file() {
     updated=true
   fi
 
-  if [[ "$POSTGRES_PASSWORD" == "replace-with-a-strong-password" || -z "$POSTGRES_PASSWORD" ]]; then
-    POSTGRES_PASSWORD="$(generate_secret)"
+  if [[ "$POSTGRES_PASSWORD" != "$DEV_POSTGRES_PASSWORD" ]]; then
+    POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
     set_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
     updated=true
   fi

@@ -25,6 +25,8 @@ $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.A
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
+$DevPostgresUser = 'postgres'
+$DevPostgresPassword = 'postgres'
 
 function Show-Usage {
     @'
@@ -60,47 +62,27 @@ function New-RandomSecret {
     return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
-function Get-PasswordFingerprint([string]$Password) {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
-    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
-    return [Convert]::ToBase64String($hash)
-}
-
 function Set-ComposeEnv([hashtable]$EnvValues) {
-    $env:POSTGRES_PASSWORD = $EnvValues['POSTGRES_PASSWORD']
+    $env:POSTGRES_PASSWORD = $DevPostgresPassword
     $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
 }
 
-function Test-PostgresAuth([hashtable]$EnvValues) {
-    # Use the password baked into the running container env (from docker compose + .env).
+function Test-PostgresAuth {
     docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p 5432 -U postgres -d homework_central -tAc "SELECT 1"' *> $null
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -p 5432 -U $DevPostgresUser -d homework_central -tAc `"SELECT 1`"" *> $null
     return $LASTEXITCODE -eq 0
 }
 
 function Reset-PostgresVolume {
-    Write-Step 'Recreating Postgres Docker volume to match POSTGRES_PASSWORD in .env'
+    Write-Step 'Recreating Postgres Docker volume (reset to postgres/postgres credentials)'
     docker compose -f $ComposeFile --env-file $EnvFile down -v --remove-orphans *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'Failed to remove Postgres Docker volume'
     }
 }
 
-function Save-VolumePasswordFingerprint([hashtable]$EnvValues) {
-    $fingerprintFile = Join-Path $RepoRoot '.postgres-volume-password'
-    $fingerprint = Get-PasswordFingerprint $EnvValues['POSTGRES_PASSWORD']
-    Set-Content -Path $fingerprintFile -Value $fingerprint -NoNewline
-}
-
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
-
-    $fingerprintFile = Join-Path $RepoRoot '.postgres-volume-password'
-    $currentFingerprint = Get-PasswordFingerprint $EnvValues['POSTGRES_PASSWORD']
-    if ((Test-Path $fingerprintFile) -and (Get-Content $fingerprintFile -Raw).Trim() -ne $currentFingerprint) {
-        Write-Step 'POSTGRES_PASSWORD changed since the database volume was created'
-        Reset-PostgresVolume
-    }
 
     docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
     if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
@@ -108,12 +90,9 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     Write-Step 'Waiting for Postgres to accept connections'
     Wait-ForPostgres
 
-    if (Test-PostgresAuth $EnvValues) {
-        Save-VolumePasswordFingerprint $EnvValues
-        return
-    }
+    if (Test-PostgresAuth) { return }
 
-    Write-Step 'Postgres is running but rejected the password from .env (stale Docker volume)'
+    Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
     Reset-PostgresVolume
 
     docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
@@ -122,11 +101,9 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     Write-Step 'Waiting for Postgres to accept connections'
     Wait-ForPostgres
 
-    if (-not (Test-PostgresAuth $EnvValues)) {
-        throw 'Postgres password verification failed after recreating the Docker volume. Check POSTGRES_PASSWORD in .env'
+    if (-not (Test-PostgresAuth)) {
+        throw 'Postgres password verification failed after recreating the Docker volume'
     }
-
-    Save-VolumePasswordFingerprint $EnvValues
 }
 
 function Read-EnvFile {
@@ -167,8 +144,8 @@ function Ensure-EnvFile {
         $updated = $true
     }
 
-    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD']) -or $values['POSTGRES_PASSWORD'] -eq 'replace-with-a-strong-password') {
-        $values['POSTGRES_PASSWORD'] = New-RandomSecret
+    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD']) -or $values['POSTGRES_PASSWORD'] -ne $DevPostgresPassword) {
+        $values['POSTGRES_PASSWORD'] = $DevPostgresPassword
         $updated = $true
     }
 
