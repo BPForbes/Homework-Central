@@ -6,8 +6,8 @@
 #   scripts/run-dev.ps1 -Help
 #
 # Environment:
-#   HC_SKIP_BUILD=1    Skip dotnet/npm builds (set by IDE after a fresh compile)
-#   HC_SKIP_DOCKER=1   Skip starting Postgres via Docker (use existing DB)
+#   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
+#   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 [CmdletBinding()]
 param(
     [switch]$BuildOnly,
@@ -33,7 +33,7 @@ Usage:
 
 Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
-  -SkipDocker   Do not start Postgres via Docker (expects DB on localhost:5432)
+  -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Help         Show this help
 
 After startup:
@@ -55,6 +55,29 @@ function New-RandomSecret {
     return [Convert]::ToBase64String($bytes)
 }
 
+function Read-EnvFile {
+    $values = @{
+        JWT_SECRET = ''
+        POSTGRES_PASSWORD = ''
+        POSTGRES_HOST_PORT = '5432'
+    }
+
+    foreach ($line in Get-Content $EnvFile) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+        $name, $value = $line -split '=', 2
+        $name = $name.Trim()
+        if ($values.ContainsKey($name)) {
+            $values[$name] = $value.Trim()
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_HOST_PORT'])) {
+        $values['POSTGRES_HOST_PORT'] = '5432'
+    }
+
+    return $values
+}
+
 function Ensure-EnvFile {
     if (-not (Test-Path $EnvFile)) {
         Write-Step "Creating .env from .env.example"
@@ -62,13 +85,7 @@ function Ensure-EnvFile {
     }
 
     $lines = Get-Content $EnvFile
-    $values = @{}
-    foreach ($line in $lines) {
-        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
-        $name, $value = $line -split '=', 2
-        $values[$name.Trim()] = $value.Trim()
-    }
-
+    $values = Read-EnvFile
     $updated = $false
 
     if ([string]::IsNullOrWhiteSpace($values['JWT_SECRET']) -or $values['JWT_SECRET'] -eq 'replace-with-a-long-random-secret') {
@@ -97,13 +114,14 @@ function Ensure-EnvFile {
                 $newLines += $line
             }
         }
-        foreach ($key in @('JWT_SECRET', 'POSTGRES_PASSWORD')) {
-            if (-not $seen.ContainsKey($key)) {
+        foreach ($key in @('JWT_SECRET', 'POSTGRES_PASSWORD', 'POSTGRES_HOST_PORT')) {
+            if (-not $seen.ContainsKey($key) -and $values.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($values[$key])) {
                 $newLines += "$key=$($values[$key])"
             }
         }
         Set-Content -Path $EnvFile -Value $newLines
         Write-Step 'Generated secrets in .env (local only, not committed)'
+        $values = Read-EnvFile
     }
 
     if ([string]::IsNullOrWhiteSpace($values['JWT_SECRET'])) {
@@ -129,13 +147,13 @@ function Wait-ForPostgres {
     throw "Postgres did not become ready within ${attempts}s"
 }
 
-function Start-Postgres {
+function Start-Postgres([hashtable]$EnvValues) {
     docker info *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'Docker is not running. Start Docker Desktop and retry.'
     }
 
-    Write-Step 'Starting Postgres (Docker)'
+    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
     docker compose -f $ComposeFile up -d postgres
     if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
 
@@ -144,14 +162,14 @@ function Start-Postgres {
 }
 
 function Build-Projects {
-    if ($env:HC_SKIP_BUILD -eq '1') {
-        Write-Step 'Skipping build (HC_SKIP_BUILD=1)'
-        return
+    $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
+    if ($skipDotnet) {
+        Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
+    } else {
+        Write-Step 'Building API'
+        dotnet build $ApiProject -c Debug
+        if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
     }
-
-    Write-Step 'Building API'
-    dotnet build $ApiProject -c Debug
-    if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
 
     if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
         Write-Step 'Installing frontend dependencies'
@@ -162,11 +180,39 @@ function Build-Projects {
     }
 }
 
+function Wait-ForFirstProcessExit {
+    param(
+        [System.Diagnostics.Process]$Backend,
+        [System.Diagnostics.Process]$Frontend
+    )
+
+    $exited = $null
+    while ($true) {
+        foreach ($proc in @($Backend, $Frontend)) {
+            if ($proc.HasExited) {
+                $exited = $proc
+                break
+            }
+        }
+        if ($null -ne $exited) { break }
+        Start-Sleep -Milliseconds 200
+    }
+
+    foreach ($proc in @($Backend, $Frontend)) {
+        if (-not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            $proc.WaitForExit()
+        }
+    }
+
+    return $exited.ExitCode
+}
+
 function Start-DevStack([hashtable]$EnvValues) {
     $env:ASPNETCORE_ENVIRONMENT = 'Development'
     $env:ASPNETCORE_URLS = 'http://localhost:5000'
     $env:Jwt__Secret = $EnvValues['JWT_SECRET']
-    $env:ConnectionStrings__DefaultConnection = "Host=localhost;Port=5432;Database=homework_central;Username=postgres;Password=$($EnvValues['POSTGRES_PASSWORD'])"
+    $env:ConnectionStrings__DefaultConnection = "Host=localhost;Port=$($EnvValues['POSTGRES_HOST_PORT']);Database=homework_central;Username=postgres;Password=$($EnvValues['POSTGRES_PASSWORD'])"
 
     Write-Step 'Starting API on http://localhost:5000'
     $backend = Start-Process -FilePath 'dotnet' `
@@ -183,15 +229,9 @@ function Start-DevStack([hashtable]$EnvValues) {
     Write-Output '  API:      http://localhost:5000'
     Write-Output 'Press Ctrl+C to stop'
 
-    try {
-        Wait-Process -Id @($backend.Id, $frontend.Id)
-    } finally {
-        Write-Step 'Stopping dev servers'
-        foreach ($proc in @($backend, $frontend)) {
-            if (-not $proc.HasExited) {
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            }
-        }
+    $exitCode = Wait-ForFirstProcessExit -Backend $backend -Frontend $frontend
+    if ($exitCode -ne 0) {
+        exit $exitCode
     }
 }
 
@@ -207,18 +247,17 @@ if ($env:HC_SKIP_DOCKER -eq '1') {
 Push-Location $RepoRoot
 try {
     $envValues = Ensure-EnvFile
-
-    if (-not $SkipDocker) {
-        Start-Postgres
-    } else {
-        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
-    }
-
     Build-Projects
 
     if ($BuildOnly) {
         Write-Step 'Build complete (-BuildOnly)'
         exit 0
+    }
+
+    if (-not $SkipDocker) {
+        Start-Postgres -EnvValues $envValues
+    } else {
+        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
     }
 
     Start-DevStack -EnvValues $envValues

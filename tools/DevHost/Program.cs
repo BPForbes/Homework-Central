@@ -57,8 +57,8 @@ static int RunScript(string repoRoot)
         };
     }
 
-    // Visual Studio / Rider already compiled DevHost (and the API via project reference).
-    startInfo.Environment["HC_SKIP_BUILD"] = "1";
+    // IDE already compiled the API via the DevHost project reference; still install frontend deps.
+    startInfo.Environment["HC_SKIP_DOTNET_BUILD"] = "1";
 
     using Process process = Process.Start(startInfo)
         ?? throw new InvalidOperationException("Failed to start dev stack script.");
