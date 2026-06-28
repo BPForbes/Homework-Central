@@ -36,17 +36,19 @@ Options:
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Help         Show this help
 
-After startup:
+After startup (each server opens in its own terminal window):
   Frontend  http://localhost:5173
   API       http://localhost:5000
   Health    http://localhost:5000/healthz
 
-Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+
+Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+, PowerShell 7+ (pwsh)
 '@ | Write-Output
 }
 
 function Write-Step([string]$Message) {
-    Write-Output "==> $Message"
+    # Write-Host keeps status lines off the function output stream (Write-Output would
+    # pollute return values, e.g. Ensure-EnvFile returning Object[] instead of hashtable).
+    Write-Host "==> $Message"
 }
 
 function New-RandomSecret {
@@ -180,59 +182,38 @@ function Build-Projects {
     }
 }
 
-function Wait-ForFirstProcessExit {
-    param(
-        [System.Diagnostics.Process]$Backend,
-        [System.Diagnostics.Process]$Frontend
-    )
-
-    $exited = $null
-    while ($true) {
-        foreach ($proc in @($Backend, $Frontend)) {
-            if ($proc.HasExited) {
-                $exited = $proc
-                break
-            }
-        }
-        if ($null -ne $exited) { break }
-        Start-Sleep -Milliseconds 200
-    }
-
-    foreach ($proc in @($Backend, $Frontend)) {
-        if (-not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            $proc.WaitForExit()
-        }
-    }
-
-    return $exited.ExitCode
-}
-
 function Start-DevStack([hashtable]$EnvValues) {
-    $env:ASPNETCORE_ENVIRONMENT = 'Development'
-    $env:ASPNETCORE_URLS = 'http://localhost:5000'
-    $env:Jwt__Secret = $EnvValues['JWT_SECRET']
-    $env:ConnectionStrings__DefaultConnection = "Host=localhost;Port=$($EnvValues['POSTGRES_HOST_PORT']);Database=homework_central;Username=postgres;Password=$($EnvValues['POSTGRES_PASSWORD'])"
+    $jwtSecret = $EnvValues['JWT_SECRET'].Replace("'", "''")
+    $pgPort = $EnvValues['POSTGRES_HOST_PORT']
+    $pgPassword = $EnvValues['POSTGRES_PASSWORD'].Replace("'", "''")
+    $connectionString = "Host=localhost;Port=$pgPort;Database=homework_central;Username=postgres;Password=$pgPassword".Replace("'", "''")
+    $apiProjectLiteral = $ApiProject.Replace("'", "''")
 
-    Write-Step 'Starting API on http://localhost:5000'
-    $backend = Start-Process -FilePath 'dotnet' `
-        -ArgumentList @('run', '--project', $ApiProject, '--no-build', '--urls', 'http://localhost:5000') `
-        -PassThru -NoNewWindow
+    $backendCommand = @"
+`$env:ASPNETCORE_ENVIRONMENT = 'Development'
+`$env:ASPNETCORE_URLS = 'http://localhost:5000'
+`$env:Jwt__Secret = '$jwtSecret'
+`$env:ConnectionStrings__DefaultConnection = '$connectionString'
+Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
+dotnet run --project '$apiProjectLiteral' --no-build --urls http://localhost:5000
+"@
 
-    Write-Step 'Starting frontend on http://localhost:5173'
-    $frontend = Start-Process -FilePath 'npm' `
-        -ArgumentList @('run', 'dev', '--prefix', $FrontendDir) `
-        -PassThru -NoNewWindow
+    Write-Step 'Starting API in a new terminal (http://localhost:5000)'
+    Start-Process -FilePath 'pwsh' `
+        -ArgumentList @('-NoExit', '-NoLogo', '-Command', $backendCommand) `
+        -WorkingDirectory $RepoRoot
 
-    Write-Step 'Dev stack is running'
-    Write-Output '  Frontend: http://localhost:5173'
-    Write-Output '  API:      http://localhost:5000'
-    Write-Output 'Press Ctrl+C to stop'
+    $frontendCommand = "Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan; npm run dev"
 
-    $exitCode = Wait-ForFirstProcessExit -Backend $backend -Frontend $frontend
-    if ($exitCode -ne 0) {
-        exit $exitCode
-    }
+    Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
+    Start-Process -FilePath 'pwsh' `
+        -ArgumentList @('-NoExit', '-NoLogo', '-Command', $frontendCommand) `
+        -WorkingDirectory $FrontendDir
+
+    Write-Step 'Dev stack is running in separate terminals'
+    Write-Host '  Frontend: http://localhost:5173'
+    Write-Host '  API:      http://localhost:5000'
+    Write-Host 'Close each terminal window to stop its server'
 }
 
 if ($Help) {
