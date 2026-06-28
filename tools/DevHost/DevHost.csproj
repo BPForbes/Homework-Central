@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HomeworkCentral.DevHost</RootNamespace>
+    <AssemblyName>HomeworkCentral.DevHost</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Build the API when DevHost builds, but do not reference its assembly. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\backend\HomeworkCentral.Api\HomeworkCentral.Api.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>
