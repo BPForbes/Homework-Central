@@ -67,10 +67,70 @@ function Set-ComposeEnv([hashtable]$EnvValues) {
     $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
 }
 
-function Test-PostgresAuth {
+function Invoke-PostgresAdminSql {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Sql
+    )
+
     docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -p 5432 -U $DevPostgresUser -d homework_central -tAc `"SELECT 1`"" *> $null
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -v ON_ERROR_STOP=1 -c `"$Sql`""
+    if ($LASTEXITCODE -ne 0) {
+        throw "Postgres command failed: $Sql"
+    }
+}
+
+function Test-PostgresAuth {
+    param(
+        [string]$Database = 'postgres'
+    )
+
+    docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -p 5432 -U $DevPostgresUser -d $Database -tAc `"SELECT 1`"" *> $null
     return $LASTEXITCODE -eq 0
+}
+
+function Repair-PostgresCollation {
+    Write-Step 'Refreshing Postgres collation versions (fixes stale Docker volumes)'
+    Invoke-PostgresAdminSql 'ALTER DATABASE template1 REFRESH COLLATION VERSION;'
+    Invoke-PostgresAdminSql 'ALTER DATABASE postgres REFRESH COLLATION VERSION;'
+
+    $output = docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`""
+    if ($LASTEXITCODE -eq 0 -and $output.Trim() -eq '1') {
+        Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
+    }
+}
+
+function Ensure-HomeworkCentralDatabase {
+    try {
+        Repair-PostgresCollation
+    } catch {
+        return $false
+    }
+
+    $output = docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`""
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    if ($output.Trim() -ne '1') {
+        Write-Step 'Creating homework_central database'
+        try {
+            Invoke-PostgresAdminSql 'CREATE DATABASE homework_central;'
+            Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
+        } catch {
+            return $false
+        }
+    }
+
+    return (Test-PostgresAuth -Database 'homework_central')
+}
+
+function Start-PostgresContainer {
+    docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
 }
 
 function Reset-PostgresVolume {
@@ -84,25 +144,32 @@ function Reset-PostgresVolume {
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
-    docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+    Start-PostgresContainer
 
     Write-Step 'Waiting for Postgres to accept connections'
     Wait-ForPostgres
 
-    if (Test-PostgresAuth) { return }
+    if (-not (Test-PostgresAuth -Database 'postgres')) {
+        Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
+        Reset-PostgresVolume
+        Start-PostgresContainer
+        Write-Step 'Waiting for Postgres to accept connections'
+        Wait-ForPostgres
+        if (-not (Test-PostgresAuth -Database 'postgres')) {
+            throw 'Postgres password verification failed after recreating the Docker volume'
+        }
+    }
 
-    Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
+    if (Ensure-HomeworkCentralDatabase) { return }
+
+    Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
     Reset-PostgresVolume
-
-    docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed after volume reset' }
-
+    Start-PostgresContainer
     Write-Step 'Waiting for Postgres to accept connections'
     Wait-ForPostgres
 
-    if (-not (Test-PostgresAuth)) {
-        throw 'Postgres password verification failed after recreating the Docker volume'
+    if (-not (Ensure-HomeworkCentralDatabase)) {
+        throw 'Failed to prepare homework_central database. Try: docker compose down -v'
     }
 }
 

@@ -97,9 +97,51 @@ set_compose_env() {
   export POSTGRES_HOST_PORT
 }
 
-test_postgres_auth() {
+invoke_postgres_admin_sql() {
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d homework_central -tAc 'SELECT 1'" >/dev/null 2>&1
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c \"$1\""
+}
+
+test_postgres_auth() {
+  local database="${1:-postgres}"
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d $database -tAc 'SELECT 1'" >/dev/null 2>&1
+}
+
+repair_postgres_collation() {
+  log "Refreshing Postgres collation versions (fixes stale Docker volumes)"
+  invoke_postgres_admin_sql "ALTER DATABASE template1 REFRESH COLLATION VERSION;" || return 1
+  invoke_postgres_admin_sql "ALTER DATABASE postgres REFRESH COLLATION VERSION;" || return 1
+  if [[ "$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
+    | tr -d '\r\n')" == "1" ]]; then
+    invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;" || return 1
+  fi
+}
+
+ensure_homework_central_database() {
+  local exists
+
+  if ! repair_postgres_collation; then
+    return 1
+  fi
+
+  exists="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
+    | tr -d '\r\n')"
+  if [[ "$exists" != "1" ]]; then
+    log "Creating homework_central database"
+    if ! invoke_postgres_admin_sql "CREATE DATABASE homework_central;"; then
+      return 1
+    fi
+    invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;"
+  fi
+
+  test_postgres_auth homework_central
+}
+
+start_postgres_container() {
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
 }
 
 reset_postgres_volume() {
@@ -110,22 +152,33 @@ reset_postgres_volume() {
 ensure_postgres_ready() {
   set_compose_env
 
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  start_postgres_container
   log "Waiting for Postgres to accept connections"
   wait_for_postgres
 
-  if test_postgres_auth; then
+  if ! test_postgres_auth postgres; then
+    log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
+    reset_postgres_volume
+    start_postgres_container
+    log "Waiting for Postgres to accept connections"
+    wait_for_postgres
+    if ! test_postgres_auth postgres; then
+      fail "Postgres password verification failed after recreating the Docker volume"
+    fi
+  fi
+
+  if ensure_homework_central_database; then
     return 0
   fi
 
-  log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
+  log "Postgres volume is unhealthy (collation mismatch); recreating"
   reset_postgres_volume
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  start_postgres_container
   log "Waiting for Postgres to accept connections"
   wait_for_postgres
 
-  if ! test_postgres_auth; then
-    fail "Postgres password verification failed after recreating the Docker volume"
+  if ! ensure_homework_central_database; then
+    fail "Failed to prepare homework_central database. Try: docker compose down -v"
   fi
 }
 
