@@ -34,6 +34,26 @@ namespace HomeworkCentral.Api.Migrations
                 oldType: "smallint")
                 .OldAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn);
 
+            migrationBuilder.Sql("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT lower("Email")
+                        FROM "Users"
+                        GROUP BY lower("Email")
+                        HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Cannot normalize emails: case-insensitive duplicate addresses exist';
+                    END IF;
+                END $$;
+                """);
+
+            migrationBuilder.Sql("""
+                UPDATE "Users"
+                SET "Email" = lower("Email")
+                WHERE "Email" <> lower("Email");
+                """);
+
             migrationBuilder.AddCheckConstraint(
                 name: "CK_Users_Email_Lower",
                 table: "Users",

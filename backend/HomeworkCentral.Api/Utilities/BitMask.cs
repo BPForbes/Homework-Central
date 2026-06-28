@@ -8,9 +8,9 @@ public static class BitMask
 
     public static BitArray Or(BitArray left, BitArray right)
     {
-        var length = Math.Max(left.Length, right.Length);
-        var result = new BitArray(length);
-        for (var i = 0; i < length; i++)
+        int length = Math.Max(left.Length, right.Length);
+        BitArray result = new(length);
+        for (int i = 0; i < length; i++)
             result[i] = GetBit(left, i) || GetBit(right, i);
         return result;
     }
@@ -18,7 +18,7 @@ public static class BitMask
     public static BitArray Or(IEnumerable<BitArray> masks)
     {
         BitArray? combined = null;
-        foreach (var mask in masks)
+        foreach (BitArray mask in masks)
         {
             if (combined is null)
                 combined = (BitArray)mask.Clone();
@@ -41,20 +41,24 @@ public static class BitMask
 
     public static string ToBase64(BitArray mask)
     {
-        var byteCount = (mask.Length + 7) / 8;
-        var bytes = new byte[byteCount];
+        int byteCount = (mask.Length + 7) / 8;
+        byte[] bytes = new byte[byteCount];
         mask.CopyTo(bytes, 0);
         return Convert.ToBase64String(bytes);
     }
 
     public static BitArray FromBase64(string base64, int length)
     {
-        var bytes = Convert.FromBase64String(base64);
-        var mask = new BitArray(length);
-        for (var i = 0; i < length; i++)
+        byte[] bytes = Convert.FromBase64String(base64);
+        int expectedByteCount = (length + 7) / 8;
+        if (bytes.Length != expectedByteCount)
+            throw new FormatException($"Expected {expectedByteCount} bytes for a {length}-bit mask, got {bytes.Length}.");
+
+        BitArray mask = new(length);
+        for (int i = 0; i < length; i++)
         {
-            var byteIndex = i / 8;
-            var bitIndex = i % 8;
+            int byteIndex = i / 8;
+            int bitIndex = i % 8;
             mask[i] = byteIndex < bytes.Length && (bytes[byteIndex] & (1 << bitIndex)) != 0;
         }
 

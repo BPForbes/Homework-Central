@@ -28,15 +28,40 @@ fi
 migration_name="$1"
 shift
 
+extra_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project)
+      project="$2"
+      extra_args+=("$1" "$2")
+      shift 2
+      ;;
+    --startup-project)
+      startup_project="$2"
+      extra_args+=("$1" "$2")
+      shift 2
+      ;;
+    *)
+      extra_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
 export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
 export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"
 
 dotnet ef migrations add "$migration_name" \
   --project "$project" \
   --startup-project "$startup_project" \
-  "$@"
+  "${extra_args[@]}"
 
-migrations_dir="$project/Migrations"
+project_dir="$project"
+if [[ "$project_dir" == *.csproj ]]; then
+  project_dir="$(dirname "$project_dir")"
+fi
+
+migrations_dir="$project_dir/Migrations"
 
 shopt -s nullglob
 for designer in "$migrations_dir"/*.Designer.cs; do

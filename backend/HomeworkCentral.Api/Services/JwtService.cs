@@ -19,7 +19,7 @@ public class JwtService(IConfiguration config) : IJwtService
 
     public string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks)
     {
-        var claims = new List<Claim>
+        List<Claim> claims = new()
         {
             new(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
@@ -31,10 +31,10 @@ public class JwtService(IConfiguration config) : IJwtService
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_secret));
+        SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
 
-        var token = new JwtSecurityToken(
+        JwtSecurityToken token = new(
             issuer: _issuer,
             audience: _audience,
             claims: claims,
@@ -46,16 +46,16 @@ public class JwtService(IConfiguration config) : IJwtService
 
     public (string token, DateTime expires) GenerateRefreshToken()
     {
-        var bytes = RandomNumberGenerator.GetBytes(64);
-        var token = Convert.ToBase64String(bytes);
-        var expires = DateTime.UtcNow.AddDays(_refreshTokenDays);
+        byte[] bytes = RandomNumberGenerator.GetBytes(64);
+        string token = Convert.ToBase64String(bytes);
+        DateTime expires = DateTime.UtcNow.AddDays(_refreshTokenDays);
         return (token, expires);
     }
 
     public Guid? ValidateAccessToken(string token)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
-        var handler = new JwtSecurityTokenHandler();
+        SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_secret));
+        JwtSecurityTokenHandler handler = new();
         try
         {
             handler.ValidateToken(token, new TokenValidationParameters
@@ -68,10 +68,10 @@ public class JwtService(IConfiguration config) : IJwtService
                 ValidAudience = _audience,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero,
-            }, out var validatedToken);
+            }, out SecurityToken validatedToken);
 
-            var jwt = (JwtSecurityToken)validatedToken;
-            var sub = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Sub).Value;
+            JwtSecurityToken jwt = (JwtSecurityToken)validatedToken;
+            string sub = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Sub).Value;
             return Guid.Parse(sub);
         }
         catch

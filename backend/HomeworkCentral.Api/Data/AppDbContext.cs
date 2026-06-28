@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -94,6 +95,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             e.Property(s => s.SubjectMask).HasMaxLength(64).IsRequired();
             e.Property(s => s.Name).HasMaxLength(128).IsRequired();
             e.HasIndex(s => new { s.SubjectMask, s.BitIndex }).IsUnique();
+            e.HasCheckConstraint("CK_Subjects_BitIndex_Range", "\"BitIndex\" BETWEEN 0 AND 127");
+            e.HasCheckConstraint("CK_Subjects_SubjectMask_Allowed", SubjectMaskAllowedSql());
             e.HasOne(s => s.ParentSubject)
                 .WithMany(s => s.ChildSubjects)
                 .HasForeignKey(s => s.ParentSubjectId)
@@ -137,6 +140,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
         {
             e.HasKey(m => new { m.UserId, m.Category });
             e.Property(m => m.Category).HasMaxLength(64).IsRequired();
+            e.HasCheckConstraint("CK_UserSubjectExpertiseMasks_Category_Allowed", ExpertiseCategoryAllowedSql());
             e.Property(m => m.ExpertiseMask).HasBitColumn("bit(128)", 128);
             e.HasOne(m => m.EffectiveMask)
                 .WithMany(m => m.SubjectExpertiseMasks)
@@ -157,5 +161,21 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
                 .HasForeignKey(rt => rt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+    }
+
+    private static string SubjectMaskAllowedSql()
+    {
+        string[] allowed =
+        [
+            SubjectMaskNames.General,
+            .. SubjectExpertiseCatalog.AllExpertiseCategoryNames(),
+        ];
+        return $"\"SubjectMask\" IN ({string.Join(", ", allowed.Select(v => $"'{v}'"))})";
+    }
+
+    private static string ExpertiseCategoryAllowedSql()
+    {
+        string[] allowed = SubjectExpertiseCatalog.AllExpertiseCategoryNames().ToArray();
+        return $"\"Category\" IN ({string.Join(", ", allowed.Select(v => $"'{v}'"))})";
     }
 }

@@ -25,39 +25,50 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
 
     public async Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
-        var user = await db.Users
+        User user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .Include(u => u.UserSubjects).ThenInclude(us => us.Subject)
             .FirstOrDefaultAsync(u => u.UserId == userId, ct)
             ?? throw new InvalidOperationException($"User {userId} was not found.");
 
-        var roleMask = BitMask.Create(64);
-        var moderationMask = BitMask.Create(256);
-        var featureMask = BitMask.Create(256);
+        Dictionary<short, Role> rolesByBit = await BuildRolesByBitAsync(ct);
 
-        foreach (var userRole in user.UserRoles)
+        BitArray roleMask = BitMask.Create(64);
+        BitArray moderationMask = BitMask.Create(256);
+        BitArray featureMask = BitMask.Create(256);
+
+        foreach (UserRole userRole in user.UserRoles)
         {
-            roleMask = BitMask.Or(roleMask, userRole.Role.RoleMask);
-            moderationMask = BitMask.Or(moderationMask, userRole.Role.PermissionMask);
-            featureMask = BitMask.Or(featureMask, userRole.Role.FeatureMask);
+            if (!PlatformRoleCatalog.TryGetRoleBit(userRole.Role.Name, out short directBit))
+                continue;
+
+            foreach (short bit in RoleHierarchy.ExpandRoleBits(directBit))
+            {
+                if (!rolesByBit.TryGetValue(bit, out Role? inheritedRole))
+                    continue;
+
+                BitMask.SetBit(roleMask, bit);
+                moderationMask = BitMask.Or(moderationMask, inheritedRole.PermissionMask);
+                featureMask = BitMask.Or(featureMask, inheritedRole.FeatureMask);
+            }
         }
 
         roleMask = roleMaskService.ExpandRoleIdentityMask(roleMask);
 
-        var generalSubjectMask = BitMask.Create(128);
-        var expertiseMasks = SubjectExpertiseCatalog.Categories
+        BitArray generalSubjectMask = BitMask.Create(128);
+        Dictionary<string, BitArray> expertiseMasks = SubjectExpertiseCatalog.Categories
             .ToDictionary(c => c.ExpertiseMaskName, _ => BitMask.Create(128), StringComparer.Ordinal);
 
-        var subjectsById = await db.Subjects
+        Dictionary<Guid, Subject> subjectsById = await db.Subjects
             .AsNoTracking()
             .ToDictionaryAsync(s => s.SubjectId, ct);
 
-        foreach (var userSubject in user.UserSubjects)
+        foreach (UserSubject userSubject in user.UserSubjects)
             ApplySubjectHierarchy(userSubject.Subject, subjectsById, generalSubjectMask, expertiseMasks);
 
-        var statusMask = BuildDefaultStatusMask();
+        BitArray statusMask = BuildDefaultStatusMask();
 
-        var existing = await db.UserEffectiveMasks
+        UserEffectiveMask? existing = await db.UserEffectiveMasks
             .Include(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(m => m.UserId == userId, ct);
 
@@ -80,16 +91,29 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         return existing;
     }
 
+    private async Task<Dictionary<short, Role>> BuildRolesByBitAsync(CancellationToken ct)
+    {
+        Dictionary<short, Role> rolesByBit = new();
+        List<Role> roles = await db.Roles.AsNoTracking().ToListAsync(ct);
+        foreach (Role role in roles)
+        {
+            if (PlatformRoleCatalog.TryGetRoleBit(role.Name, out short bit))
+                rolesByBit[bit] = role;
+        }
+
+        return rolesByBit;
+    }
+
     private static void SyncSubjectExpertiseMasks(
         UserEffectiveMask effectiveMask,
         IReadOnlyDictionary<string, BitArray> expertiseMasks)
     {
-        var existingByCategory = effectiveMask.SubjectExpertiseMasks
+        Dictionary<string, UserSubjectExpertiseMask> existingByCategory = effectiveMask.SubjectExpertiseMasks
             .ToDictionary(m => m.Category, StringComparer.Ordinal);
 
-        foreach (var category in SubjectExpertiseCatalog.AllExpertiseCategoryNames())
+        foreach (string category in SubjectExpertiseCatalog.AllExpertiseCategoryNames())
         {
-            if (!existingByCategory.TryGetValue(category, out var row))
+            if (!existingByCategory.TryGetValue(category, out UserSubjectExpertiseMask? row))
             {
                 row = new UserSubjectExpertiseMask
                 {
@@ -105,7 +129,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
 
     private static BitArray BuildDefaultStatusMask()
     {
-        var mask = BitMask.Create(64);
+        BitArray mask = BitMask.Create(64);
         BitMask.SetBit(mask, AccountStatus.GoodStanding);
         return mask;
     }
@@ -116,8 +140,8 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         BitArray generalSubjectMask,
         Dictionary<string, BitArray> expertiseMasks)
     {
-        var current = subject;
-        var visited = new HashSet<Guid>();
+        Subject current = subject;
+        HashSet<Guid> visited = new();
 
         while (true)
         {
@@ -127,7 +151,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
             ApplySubjectBit(current, generalSubjectMask, expertiseMasks);
 
             if (current.ParentSubjectId is null ||
-                !subjectsById.TryGetValue(current.ParentSubjectId.Value, out var parent))
+                !subjectsById.TryGetValue(current.ParentSubjectId.Value, out Subject? parent))
                 break;
 
             current = parent;
@@ -145,7 +169,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
             return;
         }
 
-        if (expertiseMasks.TryGetValue(subject.SubjectMask, out var expertiseMask))
+        if (expertiseMasks.TryGetValue(subject.SubjectMask, out BitArray? expertiseMask))
             BitMask.SetBit(expertiseMask, subject.BitIndex);
     }
 }

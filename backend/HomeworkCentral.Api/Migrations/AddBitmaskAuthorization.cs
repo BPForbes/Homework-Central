@@ -21,6 +21,20 @@ namespace HomeworkCentral.Api.Migrations
                     ADD COLUMN "FeatureMask" bit(256) NOT NULL DEFAULT B'0'::bit(256);
                 """);
 
+            migrationBuilder.Sql("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM "Permissions"
+                        WHERE "Category" IS NOT NULL
+                          AND length("Category") > 64
+                    ) THEN
+                        RAISE EXCEPTION 'Permissions.Category contains values longer than 64 characters';
+                    END IF;
+                END $$;
+                """);
+
             migrationBuilder.AlterColumn<string>(
                 name: "Category",
                 table: "Permissions",

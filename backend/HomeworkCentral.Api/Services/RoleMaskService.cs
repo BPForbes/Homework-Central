@@ -18,14 +18,14 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
 {
     public async Task RebuildAllRoleMasksAsync(CancellationToken ct = default)
     {
-        var roleIds = await db.Roles.Select(r => r.RoleId).ToListAsync(ct);
-        foreach (var roleId in roleIds)
+        List<Guid> roleIds = await db.Roles.Select(r => r.RoleId).ToListAsync(ct);
+        foreach (Guid roleId in roleIds)
             await RebuildRoleMasksAsync(roleId, ct);
     }
 
     public async Task RebuildRoleMasksAsync(Guid roleId, CancellationToken ct = default)
     {
-        var role = await db.Roles
+        Role? role = await db.Roles
             .Include(r => r.RolePermissions)
             .FirstOrDefaultAsync(r => r.RoleId == roleId, ct);
 
@@ -41,13 +41,13 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
 
     public BitArray ExpandRoleIdentityMask(BitArray roleMask)
     {
-        var expanded = (BitArray)roleMask.Clone();
-        for (var bit = 0; bit < roleMask.Length; bit++)
+        BitArray expanded = (BitArray)roleMask.Clone();
+        for (int bit = 0; bit < roleMask.Length; bit++)
         {
             if (!roleMask[bit])
                 continue;
 
-            foreach (var inherited in RoleHierarchy.ExpandRoleBits((short)bit))
+            foreach (short inherited in RoleHierarchy.ExpandRoleBits((short)bit))
             {
                 if (inherited != bit)
                     BitMask.SetBit(expanded, inherited);
@@ -59,20 +59,23 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
 
     private static BitArray BuildPermissionMask(IEnumerable<RolePermission> rolePermissions)
     {
-        var mask = BitMask.Create(256);
-        foreach (var rp in rolePermissions)
+        BitArray mask = BitMask.Create(256);
+        foreach (RolePermission rp in rolePermissions)
             BitMask.SetBit(mask, rp.PermissionId);
         return mask;
     }
 
-    private static BitArray BuildRoleIdentityMask(string roleName) =>
-        PlatformRoleCatalog.TryGetRoleBit(roleName, out var bit)
-            ? SetSingleBit(64, bit)
-            : BitMask.Create(64);
+    private static BitArray BuildRoleIdentityMask(string roleName)
+    {
+        if (!PlatformRoleCatalog.TryGetRoleBit(roleName, out short bit))
+            throw new InvalidOperationException($"Role '{roleName}' is not defined in PlatformRoleCatalog.");
+
+        return SetSingleBit(64, bit);
+    }
 
     private static BitArray BuildFeatureMask(string roleName)
     {
-        var mask = BitMask.Create(256);
+        BitArray mask = BitMask.Create(256);
 
         switch (roleName)
         {
@@ -198,19 +201,19 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
 
     private static void EnableAllFeatures(BitArray mask)
     {
-        for (var i = 0; i <= PlatformFeatures.BetaFeatures; i++)
+        for (int i = 0; i <= PlatformFeatures.BetaFeatures; i++)
             BitMask.SetBit(mask, i);
     }
 
     private static void SetFeatures(BitArray mask, params short[] features)
     {
-        foreach (var feature in features)
+        foreach (short feature in features)
             BitMask.SetBit(mask, feature);
     }
 
     private static BitArray SetSingleBit(int length, short bit)
     {
-        var mask = BitMask.Create(length);
+        BitArray mask = BitMask.Create(length);
         BitMask.SetBit(mask, bit);
         return mask;
     }

@@ -3,6 +3,7 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Utilities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using System.Security.Cryptography;
@@ -20,10 +21,10 @@ public class AuthService(
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
-        var normalizedEmail = req.Email.ToLowerInvariant();
+        string normalizedEmail = req.Email.ToLowerInvariant();
 
-        var now = DateTime.UtcNow;
-        var user = new User
+        DateTime now = DateTime.UtcNow;
+        User user = new User
         {
             UserId = Guid.NewGuid(),
             Email = normalizedEmail,
@@ -33,22 +34,30 @@ public class AuthService(
             UpdatedAt = now,
         };
 
-        db.Users.Add(user);
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await db.Database.BeginTransactionAsync();
         try
         {
+            db.Users.Add(user);
             await db.SaveChangesAsync();
             await db.AssignDefaultRolesAsync(user, effectiveMaskService);
+            await transaction.CommitAsync();
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)
         {
+            await transaction.RollbackAsync();
             if (pg.SqlState == "23505")
             {
-                var detail = pg.Detail ?? string.Empty;
+                string detail = pg.Detail ?? string.Empty;
                 if (detail.Contains("Email"))
                     throw new InvalidOperationException("An account with that email already exists.");
                 if (detail.Contains("Username"))
                     throw new InvalidOperationException("That username is already taken.");
             }
+            throw;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
             throw;
         }
 
@@ -57,9 +66,9 @@ public class AuthService(
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req)
     {
-        var normalizedEmail = req.Email.ToLowerInvariant();
+        string normalizedEmail = req.Email.ToLowerInvariant();
 
-        var user = await db.Users
+        User? user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .Include(u => u.EffectiveMask!)
                 .ThenInclude(m => m.SubjectExpertiseMasks)
@@ -73,16 +82,16 @@ public class AuthService(
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
     {
-        var tokenHash = HashToken(rawToken);
+        string tokenHash = HashToken(rawToken);
 
-        var revoked = await db.RefreshTokens
+        int revoked = await db.RefreshTokens
             .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
             .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
 
         if (revoked == 0)
             throw new UnauthorizedAccessException("Invalid or expired refresh token.");
 
-        var stored = await db.RefreshTokens
+        RefreshToken stored = await db.RefreshTokens
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
@@ -95,7 +104,7 @@ public class AuthService(
 
     public async Task RevokeRefreshTokenAsync(string rawToken)
     {
-        var tokenHash = HashToken(rawToken);
+        string tokenHash = HashToken(rawToken);
         await db.RefreshTokens
             .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked)
             .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
@@ -103,7 +112,7 @@ public class AuthService(
 
     public async Task<UserDto?> GetCurrentUserAsync(Guid userId)
     {
-        var user = await db.Users
+        User? user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .Include(u => u.EffectiveMask!)
                 .ThenInclude(m => m.SubjectExpertiseMasks)
@@ -112,7 +121,7 @@ public class AuthService(
         if (user is null)
             return null;
 
-        var effectiveMask = user.EffectiveMask
+        UserEffectiveMask effectiveMask = user.EffectiveMask
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
 
         return BuildUserDto(user, effectiveMask);
@@ -134,10 +143,10 @@ public class AuthService(
                 .LoadAsync();
         }
 
-        var effectiveMask = user.EffectiveMask
+        UserEffectiveMask effectiveMask = user.EffectiveMask
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId);
 
-        var (rawToken, refreshExpires) = jwt.GenerateRefreshToken();
+        (string rawToken, DateTime refreshExpires) = jwt.GenerateRefreshToken();
         db.RefreshTokens.Add(new RefreshToken
         {
             Id = Guid.NewGuid(),
@@ -150,8 +159,8 @@ public class AuthService(
 
         SetRefreshCookie(rawToken, refreshExpires);
 
-        var dto = BuildUserDto(user, effectiveMask);
-        var accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask));
+        UserDto dto = BuildUserDto(user, effectiveMask);
+        string accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask));
 
         return new AuthResponse
         {
@@ -163,8 +172,8 @@ public class AuthService(
 
     private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask)
     {
-        var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-        var masks = ToEffectiveMaskDto(effectiveMask);
+        List<string> roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+        EffectiveMaskDto masks = ToEffectiveMaskDto(effectiveMask);
 
         return new UserDto
         {
@@ -183,12 +192,12 @@ public class AuthService(
 
     private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
     {
-        var subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
+        Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
             .ToDictionary(
                 category => category,
                 category =>
                 {
-                    var row = effectiveMask.SubjectExpertiseMasks
+                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
                         .FirstOrDefault(m => m.Category == category);
                     return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
                 },
@@ -207,7 +216,7 @@ public class AuthService(
 
     private void SetRefreshCookie(string rawToken, DateTime expires)
     {
-        var response = http.HttpContext?.Response;
+        HttpResponse? response = http.HttpContext?.Response;
         if (response is null) return;
 
         response.Cookies.Append("refresh_token", rawToken, new CookieOptions
@@ -222,7 +231,7 @@ public class AuthService(
 
     private static string HashToken(string token)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }

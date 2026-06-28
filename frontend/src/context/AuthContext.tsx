@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { authApi } from '../api/auth'
+import { authApi } from '../api/authApi'
 import type { CoreMaskField, UserInfo } from '../types/auth'
 import { hasMaskBit } from '../utils/bitmask'
 
@@ -29,9 +29,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const token = sessionStorage.getItem('accessToken')
         if (token) {
-          const { data } = await authApi.me()
-          setUser(data)
-          return
+          try {
+            const { data } = await authApi.me()
+            setUser(data)
+            return
+          } catch {
+            sessionStorage.removeItem('accessToken')
+          }
         }
         const { data } = await authApi.refresh()
         sessionStorage.setItem('accessToken', data.accessToken)

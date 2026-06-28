@@ -23,12 +23,12 @@ public static class RoleHierarchy
     {
         yield return roleBit;
 
-        if (!ParentRoleBits.TryGetValue(roleBit, out var parents))
+        if (!ParentRoleBits.TryGetValue(roleBit, out short[]? parents))
             yield break;
 
-        foreach (var parent in parents)
+        foreach (short parent in parents)
         {
-            foreach (var expanded in ExpandRoleBits(parent))
+            foreach (short expanded in ExpandRoleBits(parent))
                 yield return expanded;
         }
     }

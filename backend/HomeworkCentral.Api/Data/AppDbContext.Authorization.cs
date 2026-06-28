@@ -11,8 +11,13 @@ public partial class AppDbContext
         IEffectiveMaskService effectiveMaskService,
         CancellationToken ct = default)
     {
-        var guestRole = await Roles.FirstOrDefaultAsync(r => r.Name == "Guest", ct);
-        if (guestRole is not null)
+        Role guestRole = await Roles.FirstOrDefaultAsync(r => r.Name == "Guest", ct)
+            ?? throw new InvalidOperationException("Guest role is not configured.");
+
+        bool hasGuest = await UserRoles.AnyAsync(
+            ur => ur.UserId == user.UserId && ur.RoleId == guestRole.RoleId, ct);
+
+        if (!hasGuest)
         {
             UserRoles.Add(new UserRole
             {
@@ -32,19 +37,19 @@ public partial class AppDbContext
         IEffectiveMaskService effectiveMaskService,
         CancellationToken ct = default)
     {
-        var guestRole = await Roles.FirstOrDefaultAsync(r => r.Name == "Guest", ct);
+        Role? guestRole = await Roles.FirstOrDefaultAsync(r => r.Name == "Guest", ct);
         if (guestRole is not null)
         {
-            var guestAssignment = await UserRoles
+            UserRole? guestAssignment = await UserRoles
                 .FirstOrDefaultAsync(ur => ur.UserId == user.UserId && ur.RoleId == guestRole.RoleId, ct);
             if (guestAssignment is not null)
                 UserRoles.Remove(guestAssignment);
         }
 
-        var verifiedRole = await Roles.FirstOrDefaultAsync(r => r.Name == "VerifiedUser", ct)
+        Role verifiedRole = await Roles.FirstOrDefaultAsync(r => r.Name == "VerifiedUser", ct)
             ?? throw new InvalidOperationException("VerifiedUser role is not configured.");
 
-        var hasVerified = await UserRoles.AnyAsync(
+        bool hasVerified = await UserRoles.AnyAsync(
             ur => ur.UserId == user.UserId && ur.RoleId == verifiedRole.RoleId, ct);
 
         if (!hasVerified)

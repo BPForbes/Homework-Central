@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Authorization;
@@ -29,16 +30,16 @@ public class BitmaskAuthorizationHandler(
         AuthorizationHandlerContext context,
         BitmaskRequirement requirement)
     {
-        var userIdClaim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        string? userIdClaim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? context.User.FindFirst("sub")?.Value;
 
-        if (userIdClaim is null || !Guid.TryParse(userIdClaim, out var userId))
+        if (userIdClaim is null || !Guid.TryParse(userIdClaim, out Guid userId))
             return;
 
-        var mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId)
+        UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
 
-        var bitArray = requirement.MaskType switch
+        System.Collections.BitArray? bitArray = requirement.MaskType switch
         {
             MaskType.Moderation => mask.EffectiveModerationMask,
             MaskType.Feature => mask.EffectiveFeatureMask,

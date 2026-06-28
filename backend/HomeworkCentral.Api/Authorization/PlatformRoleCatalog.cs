@@ -34,9 +34,9 @@ public static class PlatformRoleCatalog
     public static short GetHighestRoleBit(IEnumerable<string> roleNames)
     {
         short highest = PlatformRoles.Guest;
-        foreach (var roleName in roleNames)
+        foreach (string roleName in roleNames)
         {
-            if (TryGetRoleBit(roleName, out var bit) && bit > highest)
+            if (TryGetRoleBit(roleName, out short bit) && bit > highest)
                 highest = bit;
         }
 

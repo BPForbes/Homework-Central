@@ -14,30 +14,93 @@ public class RolesController(IRoleAssignmentService roleAssignments) : Controlle
     [HttpPost("grant")]
     public async Task<IActionResult> GrantRole([FromBody] GrantRoleRequest request, CancellationToken ct)
     {
-        var granterId = GetUserId();
-        await roleAssignments.AssignRoleAsync(granterId, request.UserId, request.RoleName, ct);
-        return NoContent();
+        IActionResult? validation = ValidateRoleRequest(request.UserId, request.RoleName);
+        if (validation is not null)
+            return validation;
+
+        try
+        {
+            Guid granterId = GetUserId();
+            await roleAssignments.AssignRoleAsync(granterId, request.UserId, request.RoleName, ct);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return MapInvalidOperation(ex);
+        }
     }
 
     [HttpPost("revoke")]
     public async Task<IActionResult> RevokeRole([FromBody] RevokeRoleRequest request, CancellationToken ct)
     {
-        var granterId = GetUserId();
-        await roleAssignments.RevokeRoleAsync(granterId, request.UserId, request.RoleName, ct);
-        return NoContent();
+        IActionResult? validation = ValidateRoleRequest(request.UserId, request.RoleName);
+        if (validation is not null)
+            return validation;
+
+        try
+        {
+            Guid granterId = GetUserId();
+            await roleAssignments.RevokeRoleAsync(granterId, request.UserId, request.RoleName, ct);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return MapInvalidOperation(ex);
+        }
     }
 
     [HttpPost("verify-user")]
     public async Task<IActionResult> VerifyUser([FromBody] VerifyUserRequest request, CancellationToken ct)
     {
-        var granterId = GetUserId();
-        await roleAssignments.AssignRoleAsync(granterId, request.UserId, "VerifiedUser", ct);
-        return NoContent();
+        if (request.UserId == Guid.Empty)
+            return BadRequest(new { error = "UserId is required." });
+
+        try
+        {
+            Guid granterId = GetUserId();
+            await roleAssignments.AssignRoleAsync(granterId, request.UserId, "VerifiedUser", ct);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return MapInvalidOperation(ex);
+        }
+    }
+
+    private static IActionResult? ValidateRoleRequest(Guid userId, string? roleName)
+    {
+        if (userId == Guid.Empty)
+            return new BadRequestObjectResult(new { error = "UserId is required." });
+
+        if (string.IsNullOrWhiteSpace(roleName))
+            return new BadRequestObjectResult(new { error = "RoleName is required." });
+
+        return null;
+    }
+
+    private static IActionResult MapInvalidOperation(InvalidOperationException ex)
+    {
+        if (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+            return new NotFoundObjectResult(new { error = ex.Message });
+
+        return new BadRequestObjectResult(new { error = ex.Message });
     }
 
     private Guid GetUserId()
     {
-        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
+        string? sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? User.FindFirstValue("sub")
             ?? throw new UnauthorizedAccessException();
 

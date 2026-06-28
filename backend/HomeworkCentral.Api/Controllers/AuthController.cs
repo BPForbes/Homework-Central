@@ -15,7 +15,7 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
     {
         try
         {
-            var result = await auth.RegisterAsync(req);
+            AuthResponse result = await auth.RegisterAsync(req);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
@@ -29,7 +29,7 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
     {
         try
         {
-            var result = await auth.LoginAsync(req);
+            AuthResponse result = await auth.LoginAsync(req);
             return Ok(result);
         }
         catch (UnauthorizedAccessException ex)
@@ -44,13 +44,13 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         if (!IsValidOrigin())
             return Forbid();
 
-        var token = Request.Cookies["refresh_token"];
+        string? token = Request.Cookies["refresh_token"];
         if (string.IsNullOrEmpty(token))
             return Unauthorized(new { message = "No refresh token." });
 
         try
         {
-            var result = await auth.RefreshAsync(token);
+            AuthResponse result = await auth.RefreshAsync(token);
             return Ok(result);
         }
         catch (UnauthorizedAccessException ex)
@@ -65,7 +65,7 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         if (!IsValidOrigin())
             return Forbid();
 
-        var token = Request.Cookies["refresh_token"];
+        string? token = Request.Cookies["refresh_token"];
         if (!string.IsNullOrEmpty(token))
             await auth.RevokeRefreshTokenAsync(token);
 
@@ -84,13 +84,13 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
     [Authorize]
     public async Task<IActionResult> Me()
     {
-        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
+        string? sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? User.FindFirstValue("sub");
 
-        if (!Guid.TryParse(sub, out var userId))
+        if (!Guid.TryParse(sub, out Guid userId))
             return Unauthorized();
 
-        var user = await auth.GetCurrentUserAsync(userId);
+        UserDto? user = await auth.GetCurrentUserAsync(userId);
         if (user is null) return NotFound();
 
         return Ok(user);
@@ -100,10 +100,10 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
     // SameSite=Strict is the primary protection; this is a secondary layer.
     private bool IsValidOrigin()
     {
-        var origin = Request.Headers.Origin.ToString();
+        string origin = Request.Headers.Origin.ToString();
         if (string.IsNullOrEmpty(origin))
             return true; // Same-origin or non-browser requests don't send Origin
-        var allowedOrigin = config["Cors:AllowedOrigin"] ?? "http://localhost:5173";
+        string allowedOrigin = config["Cors:AllowedOrigin"] ?? "http://localhost:5173";
         return origin == allowedOrigin;
     }
 }

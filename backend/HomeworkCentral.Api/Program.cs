@@ -2,7 +2,6 @@ using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
-using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -10,7 +9,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Trust forwarded headers from the nginx reverse proxy so rate limiting
 // buckets by the real client IP rather than the proxy address.
@@ -33,9 +32,10 @@ builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
 
 // JWT authentication
-var jwtSecret = builder.Configuration["Jwt:Secret"]
+string jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret must be set via environment variable or user-secrets.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opts =>
@@ -53,24 +53,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization(opts =>
-{
-    RegisterBitmaskPolicies(opts, MaskType.Moderation, ModerationPermissions.BanMembers);
-    RegisterBitmaskPolicies(opts, MaskType.Feature, PlatformFeatures.PublicMessages);
-    RegisterBitmaskPolicies(opts, MaskType.Role, PlatformRoles.Tutor);
-    RegisterBitmaskPolicies(opts, MaskType.SubjectExpertise, ComputerScienceExpertise.Python, SubjectMaskNames.ComputerScience);
-});
-
-static void RegisterBitmaskPolicies(
-    Microsoft.AspNetCore.Authorization.AuthorizationOptions opts,
-    MaskType maskType,
-    short exampleBit,
-    string? subjectCategory = null)
-{
-    opts.AddPolicy(
-        AuthorizationPolicyNames.For(maskType, exampleBit, subjectCategory),
-        policy => policy.AddRequirements(new BitmaskRequirement(maskType, exampleBit, subjectCategory)));
-}
+builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 
 // Rate limiting
@@ -91,7 +74,7 @@ builder.Services.AddCors(opts =>
             .AllowAnyHeader()
             .AllowAnyMethod()));
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
@@ -119,11 +102,16 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
 {
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var roleMaskService = scope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    using IServiceScope scope = app.Services.CreateScope();
+    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
-    await AuthorizationSeedData.SeedAsync(db, roleMaskService);
+}
+
+using (IServiceScope seedScope = app.Services.CreateScope())
+{
+    AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
 }
 
 app.Run();
