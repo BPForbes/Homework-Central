@@ -100,12 +100,43 @@ set_compose_env() {
 
 invoke_postgres_admin_sql() {
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c \"$1\""
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c \"$1\"" >/dev/null 2>&1
 }
 
-test_postgres_from_host() {
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h host.docker.internal -p $POSTGRES_HOST_PORT -U $DEV_POSTGRES_USER -d homework_central -tAc 'SELECT 1'" >/dev/null 2>&1
+get_postgres_published_port() {
+  local raw
+  raw="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" port postgres 5432 2>/dev/null | tr -d '\r\n')"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  if [[ "$raw" =~ :([0-9]+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+test_postgres_host_connection() {
+  local published
+  local gateway_args=()
+
+  published="$(get_postgres_published_port || true)"
+  if [[ "$published" != "$POSTGRES_HOST_PORT" ]]; then
+    log "Docker Postgres is not published on localhost:${POSTGRES_HOST_PORT} (container maps to ${published:-unknown})"
+    return 1
+  fi
+
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    gateway_args=(--add-host=host.docker.internal:host-gateway)
+  fi
+
+  if docker run --rm "${gateway_args[@]}" postgres:16-alpine \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h host.docker.internal -p $POSTGRES_HOST_PORT -U $DEV_POSTGRES_USER -d homework_central -tAc 'SELECT 1'" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log "Docker Postgres is not reachable at localhost:${POSTGRES_HOST_PORT} from the host (another PostgreSQL may own that port)"
+  return 1
 }
 
 test_postgres_auth() {
@@ -125,7 +156,7 @@ repair_postgres_collation() {
   fi
 }
 
-ensure_homework_central_database() {
+prepare_homework_central_database() {
   local exists
 
   if ! repair_postgres_collation; then
@@ -134,7 +165,7 @@ ensure_homework_central_database() {
 
   exists="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
     sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
-    | tr -d '\r\n')"
+    2>/dev/null | tr -d '\r\n')"
   if [[ "$exists" != "1" ]]; then
     log "Creating homework_central database"
     if ! invoke_postgres_admin_sql "CREATE DATABASE homework_central;"; then
@@ -147,12 +178,7 @@ ensure_homework_central_database() {
     return 1
   fi
 
-  if test_postgres_from_host; then
-    return 0
-  fi
-
-  log "Docker Postgres is not reachable at localhost:${POSTGRES_HOST_PORT} from the host (another PostgreSQL may own that port)"
-  return 1
+  return 0
 }
 
 start_postgres_container() {
@@ -182,18 +208,20 @@ ensure_postgres_ready() {
     fi
   fi
 
-  if ensure_homework_central_database; then
-    return 0
+  if ! prepare_homework_central_database; then
+    log "Postgres volume is unhealthy (collation mismatch); recreating"
+    reset_postgres_volume
+    start_postgres_container
+    log "Waiting for Postgres to accept connections"
+    wait_for_postgres
+
+    if ! prepare_homework_central_database; then
+      fail "Failed to prepare homework_central inside the Docker Postgres container"
+    fi
   fi
 
-  log "Postgres volume is unhealthy (collation mismatch); recreating"
-  reset_postgres_volume
-  start_postgres_container
-  log "Waiting for Postgres to accept connections"
-  wait_for_postgres
-
-  if ! ensure_homework_central_database; then
-    fail "Failed to prepare homework_central on localhost:${POSTGRES_HOST_PORT}. If port 5432 is in use by another PostgreSQL install, set POSTGRES_HOST_PORT=5433 in .env and run: docker compose down -v"
+  if ! test_postgres_host_connection; then
+    fail "Failed to reach Docker Postgres at localhost:${POSTGRES_HOST_PORT}. Another PostgreSQL install may own that port. Try: docker compose down -v, set POSTGRES_HOST_PORT to a free port in .env, then rerun scripts/run-dev.sh"
   fi
 }
 

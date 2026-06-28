@@ -74,18 +74,49 @@ function Invoke-PostgresAdminSql {
         [string]$Sql
     )
 
+    # Suppress psql NOTICE lines — uncaptured stdout would pollute caller return values in PowerShell.
     docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -v ON_ERROR_STOP=1 -c `"$Sql`""
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -v ON_ERROR_STOP=1 -c `"$Sql`"" *> $null
     if ($LASTEXITCODE -ne 0) {
         throw "Postgres command failed: $Sql"
     }
 }
 
-function Test-PostgresFromHost([hashtable]$EnvValues) {
+function Get-PostgresPublishedPort {
+    $raw = (docker compose -f $ComposeFile --env-file $EnvFile port postgres 5432 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+        return $null
+    }
+
+    if ($raw -match ':(\d+)$') {
+        return $Matches[1]
+    }
+
+    return $null
+}
+
+function Test-PostgresHostConnection([hashtable]$EnvValues) {
     $port = $EnvValues['POSTGRES_HOST_PORT']
-    docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h host.docker.internal -p $port -U $DevPostgresUser -d homework_central -tAc `"SELECT 1`"" *> $null
-    return $LASTEXITCODE -eq 0
+    $published = Get-PostgresPublishedPort
+    if ($published -ne $port) {
+        Write-Step "Docker Postgres is not published on localhost:$port (container maps to ${published})"
+        return $false
+    }
+
+    $gatewayArgs = @()
+    if ($IsLinux) {
+        $gatewayArgs = @('--add-host=host.docker.internal:host-gateway')
+    }
+
+    # Ephemeral client container mirrors how the host reaches the published port.
+    docker run --rm @gatewayArgs postgres:16-alpine `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h host.docker.internal -p $port -U $DevPostgresUser -d homework_central -tAc 'SELECT 1'" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Step "Docker Postgres is not reachable at localhost:$port from the host (another PostgreSQL may own that port)"
+        return $false
+    }
+
+    return $true
 }
 
 function Test-PostgresAuth {
@@ -103,27 +134,27 @@ function Repair-PostgresCollation {
     Invoke-PostgresAdminSql 'ALTER DATABASE template1 REFRESH COLLATION VERSION;'
     Invoke-PostgresAdminSql 'ALTER DATABASE postgres REFRESH COLLATION VERSION;'
 
-    $output = docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`""
-    if ($LASTEXITCODE -eq 0 -and $output.Trim() -eq '1') {
+    $output = (docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`"" 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0 -and $output -eq '1') {
         Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
     }
 }
 
-function Ensure-HomeworkCentralDatabase([hashtable]$EnvValues) {
+function Prepare-HomeworkCentralDatabase {
     try {
         Repair-PostgresCollation
     } catch {
         return $false
     }
 
-    $output = docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`""
+    $output = (docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`"" 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         return $false
     }
 
-    if ($output.Trim() -ne '1') {
+    if ($output -ne '1') {
         Write-Step 'Creating homework_central database'
         try {
             Invoke-PostgresAdminSql 'CREATE DATABASE homework_central;'
@@ -137,12 +168,7 @@ function Ensure-HomeworkCentralDatabase([hashtable]$EnvValues) {
         return $false
     }
 
-    if (Test-PostgresFromHost $EnvValues) {
-        return $true
-    }
-
-    Write-Step "Docker Postgres is not reachable at localhost:$($EnvValues['POSTGRES_HOST_PORT']) from the host (another PostgreSQL may own that port)"
-    return $false
+    return $true
 }
 
 function Start-PostgresContainer {
@@ -177,16 +203,20 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         }
     }
 
-    if (Ensure-HomeworkCentralDatabase $EnvValues) { return }
+    if (-not (Prepare-HomeworkCentralDatabase)) {
+        Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
+        Reset-PostgresVolume
+        Start-PostgresContainer
+        Write-Step 'Waiting for Postgres to accept connections'
+        Wait-ForPostgres
 
-    Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
-    Reset-PostgresVolume
-    Start-PostgresContainer
-    Write-Step 'Waiting for Postgres to accept connections'
-    Wait-ForPostgres
+        if (-not (Prepare-HomeworkCentralDatabase)) {
+            throw 'Failed to prepare homework_central inside the Docker Postgres container'
+        }
+    }
 
-    if (-not (Ensure-HomeworkCentralDatabase $EnvValues)) {
-        throw "Failed to prepare homework_central on localhost:$($EnvValues['POSTGRES_HOST_PORT']). If port 5432 is in use by another PostgreSQL install, set POSTGRES_HOST_PORT=5433 in .env and run: docker compose down -v"
+    if (-not (Test-PostgresHostConnection $EnvValues)) {
+        throw "Failed to reach Docker Postgres at localhost:$($EnvValues['POSTGRES_HOST_PORT']). Another PostgreSQL install may own that port. Try: docker compose down -v, set POSTGRES_HOST_PORT to a free port in .env, then rerun scripts/run-dev.ps1"
     }
 }
 
