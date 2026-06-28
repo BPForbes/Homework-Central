@@ -8,6 +8,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/dev-stack-lib.sh
+source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
@@ -62,6 +64,8 @@ export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST
 
 printf 'Homework Central API - http://localhost:5000\n'
 printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
+
+ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 
 cd "$REPO_ROOT"
 dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000

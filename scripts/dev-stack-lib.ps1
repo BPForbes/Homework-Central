@@ -35,6 +35,82 @@ function Write-DevStackState([hashtable]$State) {
     Set-Content -Path $script:DevStackStateFile -Value $lines
 }
 
+function Get-PostgresHostCheckDll {
+    return Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll'
+}
+
+function Build-PostgresHostCheckIfNeeded {
+    $dll = Get-PostgresHostCheckDll
+    if (Test-Path $dll) {
+        return
+    }
+
+    $project = Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
+    dotnet build $project -c Debug -v q *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'PostgresHostCheck build failed'
+    }
+}
+
+function Test-DevPostgresConnection([string]$Port) {
+    Build-PostgresHostCheckIfNeeded
+    $dll = Get-PostgresHostCheckDll
+    if (-not (Test-Path $dll)) {
+        return $false
+    }
+
+    dotnet $dll $Port *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+function Start-DevStackPostgresContainer([string]$Port) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop or run scripts/run-dev.ps1 first.'
+    }
+
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker is not running. Start Docker Desktop and retry.'
+    }
+
+    $env:POSTGRES_PASSWORD = $script:DevPostgresPassword
+    $env:POSTGRES_HOST_PORT = $Port
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile up -d postgres
+    if ($LASTEXITCODE -ne 0) {
+        throw 'docker compose up postgres failed'
+    }
+}
+
+function Wait-DevPostgresReady([string]$Port) {
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        if (Test-DevPostgresConnection $Port) {
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    throw "Postgres did not become ready on localhost:$Port within 30s"
+}
+
+function Ensure-DevPostgresRunning([string]$Port) {
+    if (Test-DevPostgresConnection $Port) {
+        return
+    }
+
+    Write-Host "==> Starting Docker Postgres on localhost:$Port" -ForegroundColor DarkGray
+    Start-DevStackPostgresContainer $Port
+    Wait-DevPostgresReady $Port
+
+    $state = Read-DevStackState
+    if ($null -eq $state) {
+        Write-DevStackState @{
+            managed_postgres = '1'
+            postgres_port = $Port
+            refcount = '1'
+        }
+    }
+}
+
 function Stop-DevStackPostgres([string]$Port) {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         return

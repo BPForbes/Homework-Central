@@ -60,6 +60,8 @@ $env:ConnectionStrings__DefaultConnection = $connectionString
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
 Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
 
+Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+
 Push-Location $RepoRoot
 try {
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000

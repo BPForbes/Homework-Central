@@ -54,7 +54,8 @@ After startup (each server opens in its own terminal window):
 
 Stop:
   scripts/stop-dev.ps1
-  Closing both API and frontend terminals also stops Docker Postgres and frees its port.
+  Closing both API and frontend terminals stops Docker Postgres and frees its port.
+  Restarting the API alone will auto-start Postgres if needed.
 
 Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+, PowerShell 7+ (pwsh)
 '@ | Write-Output
