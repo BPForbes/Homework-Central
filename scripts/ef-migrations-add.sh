@@ -95,5 +95,13 @@ done
 
 rm -f "$migrations_dir"/*ModelSnapshot.cs
 
+# Rename timestamp-prefixed files to name-only (keep [Migration] id for history).
+for stamped in "$migrations_dir"/*_"${migration_name}.cs"; do
+  if [[ -f "$stamped" ]]; then
+    mv "$stamped" "$migrations_dir/${migration_name}.cs"
+    break
+  fi
+done
+
 echo "Migration scaffolded. Auto-generated *.Designer.cs and *ModelSnapshot.cs were removed."
-echo "Review and edit: $migrations_dir/*_${migration_name}.cs"
+echo "Review and edit: $migrations_dir/${migration_name}.cs"
