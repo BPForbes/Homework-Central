@@ -94,23 +94,6 @@ password_fingerprint() {
   printf '%s' "$1" | openssl dgst -sha256 -binary | openssl base64 | tr -d '\n'
 }
 
-postgres_connection_string() {
-  local quoted_password
-  quoted_password="${POSTGRES_PASSWORD//\'/\'\'}"
-  printf "Host=localhost;Port=%s;Database=homework_central;Username=postgres;Password='%s'" \
-    "$POSTGRES_HOST_PORT" "$quoted_password"
-}
-
-urlencode() {
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
-  elif command -v node >/dev/null 2>&1; then
-    node -e "console.log(encodeURIComponent(process.argv[1]))" "$1"
-  else
-    fail "python3 or node is required to verify the Postgres password"
-  fi
-}
-
 set_compose_env() {
   export POSTGRES_PASSWORD
   export POSTGRES_HOST_PORT
