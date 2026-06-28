@@ -23,7 +23,7 @@ function Read-JwtSecret {
     }
 
     $jwtSecret = ''
-    $pgPort = '5432'
+    $pgPort = '5433'
 
     foreach ($line in Get-Content $EnvFile) {
         if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
@@ -56,7 +56,7 @@ $env:Jwt__Secret = $envValues['JWT_SECRET']
 $env:ConnectionStrings__DefaultConnection = $connectionString
 
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
-Write-Host "Using Postgres user $DevPostgresUser (local dev)" -ForegroundColor DarkGray
+Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
 
 Push-Location $RepoRoot
 try {

@@ -17,11 +17,12 @@ FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
 DEV_POSTGRES_PASSWORD="postgres"
+DEV_POSTGRES_HOST_PORT="5433"
 BUILD_ONLY=false
 SKIP_DOCKER=false
 JWT_SECRET=""
 POSTGRES_PASSWORD=""
-POSTGRES_HOST_PORT="5432"
+POSTGRES_HOST_PORT="5433"
 
 usage() {
   cat <<'EOF'
@@ -102,6 +103,11 @@ invoke_postgres_admin_sql() {
     sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c \"$1\""
 }
 
+test_postgres_from_host() {
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h host.docker.internal -p $POSTGRES_HOST_PORT -U $DEV_POSTGRES_USER -d homework_central -tAc 'SELECT 1'" >/dev/null 2>&1
+}
+
 test_postgres_auth() {
   local database="${1:-postgres}"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
@@ -137,7 +143,16 @@ ensure_homework_central_database() {
     invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;"
   fi
 
-  test_postgres_auth homework_central
+  if ! test_postgres_auth homework_central; then
+    return 1
+  fi
+
+  if test_postgres_from_host; then
+    return 0
+  fi
+
+  log "Docker Postgres is not reachable at localhost:${POSTGRES_HOST_PORT} from the host (another PostgreSQL may own that port)"
+  return 1
 }
 
 start_postgres_container() {
@@ -178,7 +193,7 @@ ensure_postgres_ready() {
   wait_for_postgres
 
   if ! ensure_homework_central_database; then
-    fail "Failed to prepare homework_central database. Try: docker compose down -v"
+    fail "Failed to prepare homework_central on localhost:${POSTGRES_HOST_PORT}. If port 5432 is in use by another PostgreSQL install, set POSTGRES_HOST_PORT=5433 in .env and run: docker compose down -v"
   fi
 }
 
@@ -192,7 +207,7 @@ trim_whitespace() {
 read_env_file() {
   JWT_SECRET=""
   POSTGRES_PASSWORD=""
-  POSTGRES_HOST_PORT="5432"
+  POSTGRES_HOST_PORT="5433"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -211,7 +226,7 @@ read_env_file() {
   done <"$ENV_FILE"
 
   POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5432"
+  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5433"
 }
 
 set_env_var() {
@@ -255,6 +270,13 @@ ensure_env_file() {
   if [[ "$POSTGRES_PASSWORD" != "$DEV_POSTGRES_PASSWORD" ]]; then
     POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
     set_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    updated=true
+  fi
+
+  if [[ "$POSTGRES_HOST_PORT" == "5432" ]]; then
+    log "Using POSTGRES_HOST_PORT=5433 (port 5432 is often used by a local PostgreSQL install)"
+    POSTGRES_HOST_PORT="$DEV_POSTGRES_HOST_PORT"
+    set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
     updated=true
   fi
 

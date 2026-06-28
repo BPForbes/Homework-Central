@@ -27,6 +27,7 @@ $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
 $DevPostgresUser = 'postgres'
 $DevPostgresPassword = 'postgres'
+$DevPostgresHostPort = '5433'
 
 function Show-Usage {
     @'
@@ -80,6 +81,13 @@ function Invoke-PostgresAdminSql {
     }
 }
 
+function Test-PostgresFromHost([hashtable]$EnvValues) {
+    $port = $EnvValues['POSTGRES_HOST_PORT']
+    docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h host.docker.internal -p $port -U $DevPostgresUser -d homework_central -tAc `"SELECT 1`"" *> $null
+    return $LASTEXITCODE -eq 0
+}
+
 function Test-PostgresAuth {
     param(
         [string]$Database = 'postgres'
@@ -102,7 +110,7 @@ function Repair-PostgresCollation {
     }
 }
 
-function Ensure-HomeworkCentralDatabase {
+function Ensure-HomeworkCentralDatabase([hashtable]$EnvValues) {
     try {
         Repair-PostgresCollation
     } catch {
@@ -125,7 +133,16 @@ function Ensure-HomeworkCentralDatabase {
         }
     }
 
-    return (Test-PostgresAuth -Database 'homework_central')
+    if (-not (Test-PostgresAuth -Database 'homework_central')) {
+        return $false
+    }
+
+    if (Test-PostgresFromHost $EnvValues) {
+        return $true
+    }
+
+    Write-Step "Docker Postgres is not reachable at localhost:$($EnvValues['POSTGRES_HOST_PORT']) from the host (another PostgreSQL may own that port)"
+    return $false
 }
 
 function Start-PostgresContainer {
@@ -160,7 +177,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         }
     }
 
-    if (Ensure-HomeworkCentralDatabase) { return }
+    if (Ensure-HomeworkCentralDatabase $EnvValues) { return }
 
     Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
     Reset-PostgresVolume
@@ -168,8 +185,8 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     Write-Step 'Waiting for Postgres to accept connections'
     Wait-ForPostgres
 
-    if (-not (Ensure-HomeworkCentralDatabase)) {
-        throw 'Failed to prepare homework_central database. Try: docker compose down -v'
+    if (-not (Ensure-HomeworkCentralDatabase $EnvValues)) {
+        throw "Failed to prepare homework_central on localhost:$($EnvValues['POSTGRES_HOST_PORT']). If port 5432 is in use by another PostgreSQL install, set POSTGRES_HOST_PORT=5433 in .env and run: docker compose down -v"
     }
 }
 
@@ -177,7 +194,7 @@ function Read-EnvFile {
     $values = @{
         JWT_SECRET = ''
         POSTGRES_PASSWORD = ''
-        POSTGRES_HOST_PORT = '5432'
+        POSTGRES_HOST_PORT = $DevPostgresHostPort
     }
 
     foreach ($line in Get-Content $EnvFile) {
@@ -190,7 +207,7 @@ function Read-EnvFile {
     }
 
     if ([string]::IsNullOrWhiteSpace($values['POSTGRES_HOST_PORT'])) {
-        $values['POSTGRES_HOST_PORT'] = '5432'
+        $values['POSTGRES_HOST_PORT'] = $DevPostgresHostPort
     }
 
     return $values
@@ -213,6 +230,12 @@ function Ensure-EnvFile {
 
     if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD']) -or $values['POSTGRES_PASSWORD'] -ne $DevPostgresPassword) {
         $values['POSTGRES_PASSWORD'] = $DevPostgresPassword
+        $updated = $true
+    }
+
+    if ($values['POSTGRES_HOST_PORT'] -eq '5432') {
+        Write-Step 'Using POSTGRES_HOST_PORT=5433 (port 5432 is often used by a local PostgreSQL install)'
+        $values['POSTGRES_HOST_PORT'] = $DevPostgresHostPort
         $updated = $true
     }
 

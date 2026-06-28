@@ -13,7 +13,7 @@ ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
 DEV_POSTGRES_PASSWORD="postgres"
 JWT_SECRET=""
-POSTGRES_HOST_PORT="5432"
+POSTGRES_HOST_PORT="5433"
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -31,7 +31,7 @@ read_jwt_secret() {
   [[ -f "$ENV_FILE" ]] || fail ".env not found at $ENV_FILE. Run scripts/run-dev.sh first."
 
   JWT_SECRET=""
-  POSTGRES_HOST_PORT="5432"
+  POSTGRES_HOST_PORT="5433"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -49,7 +49,7 @@ read_jwt_secret() {
   done <"$ENV_FILE"
 
   POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5432"
+  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5433"
   [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
 }
 
@@ -61,7 +61,7 @@ export Jwt__Secret="$JWT_SECRET"
 export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 
 printf 'Homework Central API - http://localhost:5000\n'
-printf 'Using Postgres user %s (local dev)\n' "$DEV_POSTGRES_USER"
+printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
 
 cd "$REPO_ROOT"
 dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000
