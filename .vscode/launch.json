@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dev Stack",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-dev-stack",
+      "program": "${workspaceFolder}/tools/DevHost/bin/Debug/net8.0/HomeworkCentral.DevHost.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Frontend:\\s+(https?://\\S+)",
+        "uriFormat": "%s"
+      }
+    }
+  ]
+}
