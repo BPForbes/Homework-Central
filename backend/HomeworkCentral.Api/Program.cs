@@ -17,7 +17,11 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 {
     opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // .NET 10: KnownNetworks is obsolete; clear KnownIPNetworks (and legacy KnownNetworks during transition).
+#pragma warning disable ASPDEPR005
     opts.KnownNetworks.Clear();
+#pragma warning restore ASPDEPR005
+    opts.KnownIPNetworks.Clear();
     opts.KnownProxies.Clear();
 });
 
@@ -130,3 +134,6 @@ using (IServiceScope seedScope = app.Services.CreateScope())
 }
 
 app.Run();
+
+/// <summary>Entry point type for WebApplicationFactory integration tests.</summary>
+public partial class Program;

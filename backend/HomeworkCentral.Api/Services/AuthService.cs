@@ -83,12 +83,13 @@ public class AuthService(
     /// <inheritdoc />
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
-        List<Guid> developerUserIdList = await db.UserRoles
+        // Legacy (.NET 8 / EF Core 8): ToHashSetAsync was unavailable on IQueryable; used
+        // ToListAsync() then ToHashSet(). EF Core 10 provides ToHashSetAsync directly.
+        HashSet<Guid> developerUserIds = await db.UserRoles
             .AsNoTracking()
             .Where(userRole => userRole.Role.Name == "Developer")
             .Select(userRole => userRole.UserId)
-            .ToListAsync();
-        HashSet<Guid> developerUserIds = developerUserIdList.ToHashSet();
+            .ToHashSetAsync();
 
         Dictionary<string, User> usersByEmail = await db.Users
             .AsNoTracking()
