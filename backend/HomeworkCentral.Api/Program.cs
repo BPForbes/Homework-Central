@@ -3,6 +3,7 @@ using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
+using HomeworkCentral.Api.Legacy;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -17,10 +18,7 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 {
     opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    // .NET 10: KnownNetworks is obsolete; clear KnownIPNetworks (and legacy KnownNetworks during transition).
-#pragma warning disable ASPDEPR005
-    opts.KnownNetworks.Clear();
-#pragma warning restore ASPDEPR005
+    LegacyForwardedHeaders.ClearKnownNetworks(opts);
     opts.KnownIPNetworks.Clear();
     opts.KnownProxies.Clear();
 });
