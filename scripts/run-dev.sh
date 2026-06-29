@@ -28,6 +28,7 @@ DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
 BUILD_ONLY=false
 SKIP_DOCKER=false
+HC_API_BUILD_FAILED=0
 JWT_SECRET=""
 POSTGRES_PASSWORD=""
 POSTGRES_HOST_PORT="5434"
@@ -429,6 +430,7 @@ build_postgres_host_check() {
 
 build_projects() {
   local skip_dotnet=false
+  HC_API_BUILD_FAILED=0
   if [[ "${HC_SKIP_DOTNET_BUILD:-}" == "1" || "${HC_SKIP_BUILD:-}" == "1" ]]; then
     log "Skipping API build (HC_SKIP_DOTNET_BUILD=1)"
     skip_dotnet=true
@@ -441,9 +443,11 @@ build_projects() {
     if ! dotnet build "$API_PROJECT" -c Debug 2>&1 | tee "$api_build_log"; then
       "$REPO_ROOT/scripts/open-api-error-page.sh" "API Build Errors" "$api_build_log" || true
       rm -f "$api_build_log"
-      fail "dotnet build failed"
+      HC_API_BUILD_FAILED=1
+      log "API build failed; frontend will start and show unable to connect to API"
+    else
+      rm -f "$api_build_log"
     fi
-    rm -f "$api_build_log"
   fi
 
   require_cmd npm
@@ -464,9 +468,16 @@ build_projects() {
 }
 
 supervise_children() {
+  local exit_code=0
+
+  if [[ $# -eq 1 ]]; then
+    wait "$1" 2>/dev/null || exit_code=$?
+    trap - EXIT INT TERM
+    return "$exit_code"
+  fi
+
   local backend_pid=$1
   local frontend_pid=$2
-  local exit_code=0
 
   while kill -0 "$backend_pid" 2>/dev/null && kill -0 "$frontend_pid" 2>/dev/null; do
     sleep 0.2
@@ -498,34 +509,50 @@ run_stack() {
     init_dev_stack_state "$POSTGRES_HOST_PORT" 2
   fi
 
-  log "Starting API on http://localhost:5000"
-  if [[ "$SKIP_DOCKER" == true ]]; then
-    HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
-  else
-    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
-  fi
-  BACKEND_PID=$!
+  local api_ready=0
+  BACKEND_PID=""
 
-  log "Waiting for API to become ready before starting frontend"
-  if ! "$REPO_ROOT/scripts/wait-for-dev-server.sh" "http://localhost:5000/healthz" "API" 300; then
-    kill "$BACKEND_PID" 2>/dev/null || true
-    wait "$BACKEND_PID" 2>/dev/null || true
-    fail "API did not become ready within 300s"
+  if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
+    log "Starting API on http://localhost:5000"
+    if [[ "$SKIP_DOCKER" == true ]]; then
+      HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    else
+      HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    fi
+    BACKEND_PID=$!
+
+    log "Waiting for API to become ready before starting frontend"
+    if "$REPO_ROOT/scripts/wait-for-dev-server.sh" "http://localhost:5000/healthz" "API" 300; then
+      api_ready=1
+    else
+      log "API is not ready; starting frontend with unable to connect to API"
+    fi
+  else
+    log "Skipping API start because the build failed (see API Build Errors browser tab)"
   fi
 
   log "Starting frontend on http://localhost:5173"
   VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
 
-  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
-  API_BROWSER_PID=$!
+  if [[ "$api_ready" -eq 1 ]]; then
+    "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+    API_BROWSER_PID=$!
+  else
+    API_BROWSER_PID=""
+  fi
   "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/login" "Frontend" 300 &
   FRONTEND_BROWSER_PID=$!
 
   cleanup() {
     log "Stopping dev servers"
-    kill "$BACKEND_PID" "$FRONTEND_PID" "$API_BROWSER_PID" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
-    wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    if [[ -n "$BACKEND_PID" ]]; then
+      kill "$BACKEND_PID" "$FRONTEND_PID" "${API_BROWSER_PID:-}" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
+      wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    else
+      kill "$FRONTEND_PID" "${API_BROWSER_PID:-}" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
+      wait "$FRONTEND_PID" 2>/dev/null || true
+    fi
     if [[ "$SKIP_DOCKER" == false ]]; then
       unregister_dev_stack_server
     fi
@@ -534,14 +561,22 @@ run_stack() {
 
   log "Dev stack is running"
   log "  Frontend: http://localhost:5173/login"
-  log "  API:      http://localhost:5000"
+  if [[ "$api_ready" -eq 1 ]]; then
+    log "  API:      http://localhost:5000"
+  else
+    log "  API:      unavailable (check API Build Errors or API terminal output)"
+  fi
   if [[ "$SKIP_DOCKER" == false ]]; then
     log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
   fi
   log "Press Ctrl+C to stop servers and free the Postgres port"
   log "Or run: scripts/stop-dev.sh"
 
-  supervise_children "$BACKEND_PID" "$FRONTEND_PID"
+  if [[ -n "$BACKEND_PID" ]]; then
+    supervise_children "$BACKEND_PID" "$FRONTEND_PID"
+  else
+    supervise_children "$FRONTEND_PID"
+  fi
   local status=$?
   if [[ $status -ne 0 ]]; then
     exit "$status"

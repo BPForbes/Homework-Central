@@ -33,6 +33,7 @@ $DevPostgresPassword = 'postgres'
 $DevPostgresHostPort = '5434'
 $DevPostgresHostPortMin = 5434
 $DevPostgresHostPortMax = 5450
+$script:ApiBuildFailed = $false
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
@@ -475,6 +476,7 @@ function Build-PostgresHostCheck {
 }
 
 function Build-Projects {
+    $script:ApiBuildFailed = $false
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
@@ -486,7 +488,8 @@ function Build-Projects {
             if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
                 & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
             }
-            throw 'dotnet build failed'
+            $script:ApiBuildFailed = $true
+            Write-Step 'API build failed; frontend will start and show unable to connect to API'
         }
     }
 
@@ -519,21 +522,28 @@ function Start-DevStack([hashtable]$EnvValues) {
         Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
     }
 
-    Write-Step 'Starting API in a new terminal (http://localhost:5000)'
-    $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
-    if ($SkipDocker) {
-        $apiArgs += '-SkipDocker'
-    } else {
-        $apiArgs += '-PreRegistered'
-    }
-    Start-Process -FilePath 'pwsh' `
-        -ArgumentList $apiArgs `
-        -WorkingDirectory $RepoRoot
+    $apiReady = $false
+    if (-not $script:ApiBuildFailed) {
+        Write-Step 'Starting API in a new terminal (http://localhost:5000)'
+        $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
+        if ($SkipDocker) {
+            $apiArgs += '-SkipDocker'
+        } else {
+            $apiArgs += '-PreRegistered'
+        }
+        Start-Process -FilePath 'pwsh' `
+            -ArgumentList $apiArgs `
+            -WorkingDirectory $RepoRoot
 
-    Write-Step 'Waiting for API to become ready before starting frontend'
-    & (Join-Path $PSScriptRoot 'wait-for-dev-server.ps1') -Url 'http://localhost:5000/healthz' -Label 'API' -MaxAttempts 300
-    if ($LASTEXITCODE -ne 0) {
-        throw 'API did not become ready within 300s'
+        Write-Step 'Waiting for API to become ready before starting frontend'
+        & (Join-Path $PSScriptRoot 'wait-for-dev-server.ps1') -Url 'http://localhost:5000/healthz' -Label 'API' -MaxAttempts 300
+        if ($LASTEXITCODE -eq 0) {
+            $apiReady = $true
+        } else {
+            Write-Step 'API is not ready; starting frontend with unable to connect to API'
+        }
+    } else {
+        Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
@@ -547,7 +557,11 @@ function Start-DevStack([hashtable]$EnvValues) {
 
     Write-Step 'Dev stack is running in separate terminals'
     Write-Host '  Frontend: http://localhost:5173/login'
-    Write-Host '  API:      http://localhost:5000'
+    if ($apiReady) {
+        Write-Host '  API:      http://localhost:5000'
+    } else {
+        Write-Host '  API:      unavailable (check API Build Errors or API terminal output)'
+    }
     if (-not $SkipDocker) {
         Write-Host '  Postgres: localhost:' -NoNewline
         Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline

@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { ApiUnavailableBanner } from '../components/ApiUnavailableBanner'
+import { useApiAvailability } from '../hooks/useApiAvailability'
 
 export function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const { apiUnavailable, isChecking } = useApiAvailability()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -13,6 +16,8 @@ export function Login() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+
+    if (apiUnavailable) return
 
     if (!email.trim()) {
       setError('Email is required.')
@@ -47,6 +52,9 @@ export function Login() {
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Sign in</h2>
+
+        {apiUnavailable && <ApiUnavailableBanner />}
+
         <form onSubmit={handleSubmit}>
           <div className="field">
             <label htmlFor="email">Email</label>
@@ -57,7 +65,7 @@ export function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              disabled={isSubmitting}
+              disabled={isSubmitting || apiUnavailable || isChecking}
             />
           </div>
           <div className="field">
@@ -69,11 +77,11 @@ export function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              disabled={isSubmitting}
+              disabled={isSubmitting || apiUnavailable || isChecking}
             />
           </div>
           {error && <p className="error">{error}</p>}
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
+          <button type="submit" className="btn-primary" disabled={isSubmitting || apiUnavailable || isChecking}>
             {isSubmitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>

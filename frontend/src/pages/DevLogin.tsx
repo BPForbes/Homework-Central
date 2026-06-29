@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../api/authApi'
+import { ApiUnavailableBanner } from '../components/ApiUnavailableBanner'
 import type { DevDeveloperOption } from '../types/devAuth'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
@@ -123,14 +124,7 @@ export function DevLogin() {
         <h1>Homework Central</h1>
         <h2>Developer sign in</h2>
 
-        {apiUnavailable && (
-          <div className="api-unavailable" role="alert">
-            <span className="api-unavailable-icon" aria-hidden="true">
-              <span className="api-unavailable-x">X</span>
-            </span>
-            <span>unable to connect to API</span>
-          </div>
-        )}
+        {apiUnavailable && <ApiUnavailableBanner />}
 
         <form onSubmit={handleSubmit}>
           <div className="field">
