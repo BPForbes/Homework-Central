@@ -502,14 +502,12 @@ run_stack() {
   VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
 
-  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 120 &
-  API_BROWSER_PID=$!
   "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/devlogin" "Frontend" 120 &
   FRONTEND_BROWSER_PID=$!
 
   cleanup() {
     log "Stopping dev servers"
-    kill "$BACKEND_PID" "$FRONTEND_PID" "$API_BROWSER_PID" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
+    kill "$BACKEND_PID" "$FRONTEND_PID" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
     wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     if [[ "$SKIP_DOCKER" == false ]]; then
       unregister_dev_stack_server

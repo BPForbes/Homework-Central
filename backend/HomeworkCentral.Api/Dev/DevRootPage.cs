@@ -167,7 +167,7 @@ public static class DevRootPage
           <main class="page">
             <div class="lock" aria-hidden="true"></div>
             <div class="message">
-              <div class="server-error">Server Error</div>
+              <div class="server-error">Access Restricted</div>
               <div class="message-body">
                 <h1 class="forbidden">403 - Forbidden Access is denied.</h1>
                 <p class="detail">You do not have access to this directory or page while using the credentials you supplied.</p>

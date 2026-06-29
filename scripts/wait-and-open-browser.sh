@@ -15,7 +15,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for ((attempt = 1; attempt <= max_attempts; attempt++)); do
   status="$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"
-  if [[ "$status" =~ ^[23] ]]; then
+  if [[ "$status" =~ ^[23] || "$status" == "403" ]]; then
     "$script_dir/open-dev-browser.sh" "$url"
     exit 0
   fi

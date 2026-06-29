@@ -81,8 +81,16 @@ fi
 BROWSER_WAIT_PID=$!
 
 cd "$REPO_ROOT"
+API_ERROR_LOG="$(mktemp /tmp/hc-api-run-errors-XXXXXX.log)"
+
+cleanup_on_exit() {
+  rm -f "$API_ERROR_LOG"
+  cleanup_api
+}
+trap cleanup_on_exit EXIT
+
 set +e
-dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee /tmp/hc-api-run-errors.log >&2)
+dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 api_status=$?
 set -e
 
@@ -90,8 +98,8 @@ kill "$BROWSER_WAIT_PID" 2>/dev/null || true
 wait "$BROWSER_WAIT_PID" 2>/dev/null || true
 
 if [[ $api_status -ne 0 ]]; then
-  if [[ -s /tmp/hc-api-run-errors.log ]]; then
-    "$REPO_ROOT/scripts/open-api-error-page.sh" "API Errors" /tmp/hc-api-run-errors.log || true
+  if [[ -s "$API_ERROR_LOG" ]]; then
+    "$REPO_ROOT/scripts/open-api-error-page.sh" "API Errors" "$API_ERROR_LOG" || true
   fi
   exit "$api_status"
 fi

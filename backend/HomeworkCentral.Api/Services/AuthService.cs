@@ -82,6 +82,12 @@ public class AuthService(
 
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
+        HashSet<Guid> developerUserIds = await db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.Role.Name == "Developer")
+            .Select(userRole => userRole.UserId)
+            .ToHashSetAsync();
+
         Dictionary<string, User> usersByEmail = await db.Users
             .AsNoTracking()
             .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
@@ -91,6 +97,9 @@ public class AuthService(
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
             if (!usersByEmail.TryGetValue(account.DeveloperEmail, out User? developer))
+                continue;
+
+            if (!developerUserIds.Contains(developer.UserId))
                 continue;
 
             List<DevUserOption> personas = new();

@@ -78,11 +78,10 @@ try {
     }
 
     $browserJob = Start-Job -ScriptBlock {
-        param($ScriptRoot)
-        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5000/' -Label 'API' -MaxAttempts 120
-    } -ArgumentList $PSScriptRoot
+        & (Join-Path $using:ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5000/' -Label 'API' -MaxAttempts 120
+    }
 
-    $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-run-errors.log'
+    $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
     if (Test-Path $errorLog) { Remove-Item $errorLog -Force }
 
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
@@ -94,6 +93,7 @@ try {
 
     if ($exitCode -ne 0 -and (Test-Path $errorLog) -and (Get-Item $errorLog).Length -gt 0) {
         & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Errors' -ErrorLogFile $errorLog
+        Remove-Item $errorLog -Force -ErrorAction SilentlyContinue
     }
 
     if ($exitCode -ne 0) {

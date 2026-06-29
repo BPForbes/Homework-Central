@@ -35,6 +35,7 @@ export function DevLogin() {
     async function loadOptions() {
       setIsLoadingOptions(true)
       setApiUnavailable(false)
+      setError('')
       try {
         const { data } = await authApi.devStatus()
         if (!data.available) {
@@ -47,8 +48,15 @@ export function DevLogin() {
         if (options.data.developers.length > 0) {
           setDeveloperUserId(options.data.developers[0].userId)
         }
-      } catch {
-        if (!cancelled) setApiUnavailable(true)
+      } catch (err: unknown) {
+        if (cancelled) return
+        const message =
+          (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        if (message) {
+          setError(message)
+        } else {
+          setApiUnavailable(true)
+        }
       } finally {
         if (!cancelled) setIsLoadingOptions(false)
       }

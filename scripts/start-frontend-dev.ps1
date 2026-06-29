@@ -28,9 +28,8 @@ $env:VITE_HC_DEV_BYPASS = 'true'
 Push-Location $FrontendDir
 try {
     $browserJob = Start-Job -ScriptBlock {
-        param($ScriptRoot)
-        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/devlogin' -Label 'Frontend' -MaxAttempts 120
-    } -ArgumentList (Split-Path -Parent $PSScriptRoot)
+        & (Join-Path $using:ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/devlogin' -Label 'Frontend' -MaxAttempts 120
+    }
 
     npm run dev
     $exitCode = $LASTEXITCODE

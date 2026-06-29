@@ -528,16 +528,6 @@ function Start-DevStack([hashtable]$EnvValues) {
         -ArgumentList $frontendArgs `
         -WorkingDirectory $RepoRoot
 
-    Start-Job -ScriptBlock {
-        param($ScriptRoot)
-        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5000/' -Label 'API' -MaxAttempts 120
-    } -ArgumentList $PSScriptRoot | Out-Null
-
-    Start-Job -ScriptBlock {
-        param($ScriptRoot)
-        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/devlogin' -Label 'Frontend' -MaxAttempts 120
-    } -ArgumentList $PSScriptRoot | Out-Null
-
     Write-Step 'Dev stack is running in separate terminals'
     Write-Host '  Frontend: http://localhost:5173/devlogin'
     Write-Host '  API:      http://localhost:5000'
