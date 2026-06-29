@@ -14,7 +14,7 @@
       "serverReadyAction": {
         "action": "openExternally",
         "pattern": "Frontend:\\s+(https?://\\S+)",
-        "uriFormat": "%s"
+        "uriFormat": "http://localhost:5173/devlogin"
       }
     }
   ]

@@ -59,6 +59,8 @@ static int RunScript(string repoRoot)
 
     // IDE already compiled the API via the DevHost project reference; still install frontend deps.
     startInfo.Environment["HC_SKIP_DOTNET_BUILD"] = "1";
+    startInfo.Environment["HC_DEV_BYPASS"] = "1";
+    startInfo.Environment["VITE_HC_DEV_BYPASS"] = "true";
 
     using Process process = Process.Start(startInfo)
         ?? throw new InvalidOperationException("Failed to start dev stack script.");

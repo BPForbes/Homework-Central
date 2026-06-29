@@ -435,7 +435,13 @@ build_projects() {
   if [[ "$skip_dotnet" == false ]]; then
     require_cmd dotnet
     log "Building API"
-    dotnet build "$API_PROJECT" -c Debug
+    api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
+    if ! dotnet build "$API_PROJECT" -c Debug 2>&1 | tee "$api_build_log"; then
+      "$REPO_ROOT/scripts/open-api-error-page.sh" "API Build Errors" "$api_build_log" || true
+      rm -f "$api_build_log"
+      fail "dotnet build failed"
+    fi
+    rm -f "$api_build_log"
   fi
 
   build_postgres_host_check
@@ -486,19 +492,24 @@ run_stack() {
 
   log "Starting API on http://localhost:5000"
   if [[ "$SKIP_DOCKER" == true ]]; then
-    HC_SKIP_DOCKER=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   else
-    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   fi
   BACKEND_PID=$!
 
   log "Starting frontend on http://localhost:5173"
-  npm run dev --prefix "$FRONTEND_DIR" &
+  VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
+
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 120 &
+  API_BROWSER_PID=$!
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/devlogin" "Frontend" 120 &
+  FRONTEND_BROWSER_PID=$!
 
   cleanup() {
     log "Stopping dev servers"
-    kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    kill "$BACKEND_PID" "$FRONTEND_PID" "$API_BROWSER_PID" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
     wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     if [[ "$SKIP_DOCKER" == false ]]; then
       unregister_dev_stack_server
@@ -507,7 +518,7 @@ run_stack() {
   trap cleanup EXIT INT TERM
 
   log "Dev stack is running"
-  log "  Frontend: http://localhost:5173"
+  log "  Frontend: http://localhost:5173/devlogin"
   log "  API:      http://localhost:5000"
   if [[ "$SKIP_DOCKER" == false ]]; then
     log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"

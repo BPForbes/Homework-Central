@@ -2,6 +2,7 @@ using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -98,6 +99,12 @@ app.MapControllers();
 // Health probe for Docker / load balancers
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
 
+bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
+if (devBypassEnabled)
+{
+    app.MapGet("/", DevRootPage.ForbiddenDirectoryPage);
+}
+
 // Auto-migrate only in Development to avoid blocking production deploys
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
@@ -111,7 +118,10 @@ using (IServiceScope seedScope = app.Services.CreateScope())
 {
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
     await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
+    if (devBypassEnabled)
+        await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
 }
 
 app.Run();

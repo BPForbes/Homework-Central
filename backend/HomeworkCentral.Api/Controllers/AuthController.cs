@@ -72,7 +72,7 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         Response.Cookies.Delete("refresh_token", new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,
+            Secure = Request.IsHttps,
             SameSite = SameSiteMode.Strict,
             Path = "/api/auth",
         });

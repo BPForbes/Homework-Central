@@ -8,6 +8,7 @@ interface AuthContextValue {
   user: UserInfo | null
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
+  devLogin: (developerUserId: string, targetUserId: string | null) => Promise<void>
   register: (email: string, username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   hasPermission: (bit: number) => boolean
@@ -56,6 +57,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user)
   }, [])
 
+  const devLogin = useCallback(async (developerUserId: string, targetUserId: string | null) => {
+    const { data } = await authApi.devLogin({
+      developerUserId,
+      targetUserId: targetUserId || undefined,
+    })
+    sessionStorage.setItem('accessToken', data.accessToken)
+    setUser(data.user)
+  }, [])
+
   const register = useCallback(async (email: string, username: string, password: string) => {
     const { data } = await authApi.register({ email, username, password })
     sessionStorage.setItem('accessToken', data.accessToken)
@@ -90,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isLoading,
         login,
+        devLogin,
         register,
         logout,
         hasPermission,

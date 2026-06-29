@@ -23,11 +23,23 @@ if ($PreRegistered) {
 
 Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan
 
+$env:VITE_HC_DEV_BYPASS = 'true'
+
 Push-Location $FrontendDir
 try {
+    $browserJob = Start-Job -ScriptBlock {
+        param($ScriptRoot)
+        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/devlogin' -Label 'Frontend' -MaxAttempts 120
+    } -ArgumentList (Split-Path -Parent $PSScriptRoot)
+
     npm run dev
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+    $exitCode = $LASTEXITCODE
+
+    Stop-Job $browserJob -ErrorAction SilentlyContinue
+    Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
+
+    if ($exitCode -ne 0) {
+        exit $exitCode
     }
 }
 finally {

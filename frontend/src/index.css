@@ -72,6 +72,59 @@ body {
   cursor: not-allowed;
 }
 
+.field select {
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.15s;
+  background: #fff;
+}
+
+.field select:focus {
+  border-color: #3b82f6;
+}
+
+.field select:disabled {
+  background: #f9fafb;
+  cursor: not-allowed;
+}
+
+.api-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #fee2e2;
+  border-radius: 9999px;
+  padding: 0.55rem 1rem;
+  margin-bottom: 1rem;
+  color: #dc2626;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.api-unavailable-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  border: 2px solid #dc2626;
+  flex-shrink: 0;
+}
+
+.api-unavailable-x {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dev-login-hint {
+  font-size: 0.8rem;
+}
+
 .error {
   color: #dc2626;
   font-size: 0.875rem;

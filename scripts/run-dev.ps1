@@ -480,8 +480,14 @@ function Build-Projects {
         Build-PostgresHostCheck
     } else {
         Write-Step 'Building API'
-        dotnet build $ApiProject -c Debug
-        if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
+        $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
+        dotnet build $ApiProject -c Debug 2>&1 | Tee-Object -FilePath $apiBuildLog
+        if ($LASTEXITCODE -ne 0) {
+            if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
+                & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
+            }
+            throw 'dotnet build failed'
+        }
         Build-PostgresHostCheck
     }
 
@@ -522,8 +528,18 @@ function Start-DevStack([hashtable]$EnvValues) {
         -ArgumentList $frontendArgs `
         -WorkingDirectory $RepoRoot
 
+    Start-Job -ScriptBlock {
+        param($ScriptRoot)
+        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5000/' -Label 'API' -MaxAttempts 120
+    } -ArgumentList $PSScriptRoot | Out-Null
+
+    Start-Job -ScriptBlock {
+        param($ScriptRoot)
+        & (Join-Path $ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/devlogin' -Label 'Frontend' -MaxAttempts 120
+    } -ArgumentList $PSScriptRoot | Out-Null
+
     Write-Step 'Dev stack is running in separate terminals'
-    Write-Host '  Frontend: http://localhost:5173'
+    Write-Host '  Frontend: http://localhost:5173/devlogin'
     Write-Host '  API:      http://localhost:5000'
     if (-not $SkipDocker) {
         Write-Host '  Postgres: localhost:' -NoNewline

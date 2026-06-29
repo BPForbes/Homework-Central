@@ -1,7 +1,9 @@
 import axios from 'axios'
 import type { AuthResponse, LoginRequest, RegisterRequest } from '../types/auth'
 
-const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh']
+import type { DevLoginOptions, DevLoginRequest } from '../types/devAuth'
+
+const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login']
 
 const api = axios.create({
   baseURL: '/api',
@@ -47,6 +49,9 @@ export const authApi = {
   logout: () => api.post('/auth/logout'),
   refresh: () => api.post<AuthResponse>('/auth/refresh'),
   me: () => api.get<AuthResponse['user']>('/auth/me'),
+  devStatus: () => api.get<{ available: boolean }>('/auth/dev/status'),
+  devOptions: () => api.get<DevLoginOptions>('/auth/dev/options'),
+  devLogin: (data: DevLoginRequest) => api.post<AuthResponse>('/auth/dev/login', data),
 }
 
 export default api
