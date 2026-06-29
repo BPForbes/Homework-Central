@@ -30,27 +30,33 @@ public static class DevRootPage
         </html>
         """;
 
+    private const string ApiErrorHtmlPrefix = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>API Error</title>
+          <style>
+            body { margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+            .header { background: #808080; color: #ffffff; padding: 0.5rem 1rem; font-size: 1.25rem; font-weight: 600; }
+            pre { margin: 0; padding: 1rem; background: #ffffff; color: #000000; white-space: pre-wrap; word-break: break-word; font-size: 0.9rem; line-height: 1.4; }
+          </style>
+        </head>
+        <body>
+          <div class="header">API Errors</div>
+          <pre>
+        """;
+
+    private const string ApiErrorHtmlSuffix = """
+        </pre>
+        </body>
+        </html>
+        """;
+
     private static string BuildApiErrorHtml(string errors)
     {
         string encoded = System.Net.WebUtility.HtmlEncode(errors);
-        return $"""
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-              <meta charset="UTF-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <title>API Error</title>
-              <style>
-                body {{ margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }}
-                .header {{ background: #808080; color: #ffffff; padding: 0.5rem 1rem; font-size: 1.25rem; font-weight: 600; }}
-                pre {{ margin: 0; padding: 1rem; background: #ffffff; color: #000000; white-space: pre-wrap; word-break: break-word; font-size: 0.9rem; line-height: 1.4; }}
-              </style>
-            </head>
-            <body>
-              <div class="header">API Errors</div>
-              <pre>{encoded}</pre>
-            </body>
-            </html>
-            """;
+        return ApiErrorHtmlPrefix + encoded + ApiErrorHtmlSuffix;
     }
 }
