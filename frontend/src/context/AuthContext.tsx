@@ -57,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user)
   }, [])
 
+  /** Localhost dev bypass sign-in (see /devlogin). Empty targetUserId signs in as DevAdmin. */
   const devLogin = useCallback(async (developerUserId: string, targetUserId: string | null) => {
     const { data } = await authApi.devLogin({
       developerUserId,

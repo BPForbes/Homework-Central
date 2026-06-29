@@ -2,6 +2,7 @@
 # Launch the API for local development.
 #
 # Local Postgres credentials are fixed: postgres / postgres
+# Sets HC_DEV_BYPASS=1 so localhost dev auth endpoints and the styled 403 root page are enabled.
 #
 # Usage:
 #   scripts/start-api-dev.sh
@@ -60,6 +61,7 @@ read_jwt_secret
 export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5000
 export Jwt__Secret="$JWT_SECRET"
+# Enables DevAuthController, dev seed data, and the styled localhost root page.
 export HC_DEV_BYPASS=1
 export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 

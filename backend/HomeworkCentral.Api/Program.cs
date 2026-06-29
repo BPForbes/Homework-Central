@@ -76,6 +76,8 @@ builder.Services.AddCors(opts =>
             .AllowAnyMethod()));
 
 WebApplication app = builder.Build();
+
+// Localhost-only developer bypass (HC_DEV_BYPASS=1 + Development + loopback).
 bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
 
 // ForwardedHeaders must run before any middleware that inspects the IP

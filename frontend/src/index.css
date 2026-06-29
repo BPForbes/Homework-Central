@@ -72,6 +72,7 @@ body {
   cursor: not-allowed;
 }
 
+/* Dev login (/devlogin) dropdowns and API-unavailable banner */
 .field select {
   border: 1.5px solid #d1d5db;
   border-radius: 8px;

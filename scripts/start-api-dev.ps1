@@ -1,6 +1,7 @@
 # Launch the API for local development.
 #
 # Local Postgres credentials are fixed: postgres / postgres
+# Sets HC_DEV_BYPASS=1 so localhost dev auth endpoints and the styled 403 root page are enabled.
 #
 # Usage:
 #   scripts/start-api-dev.ps1
@@ -60,6 +61,7 @@ $connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Dat
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
 $env:Jwt__Secret = $envValues['JWT_SECRET']
+# Enables DevAuthController, dev seed data, and the styled localhost root page.
 $env:HC_DEV_BYPASS = '1'
 $env:ConnectionStrings__DefaultConnection = $connectionString
 

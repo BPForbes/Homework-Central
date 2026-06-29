@@ -8,6 +8,7 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+# Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
 [CmdletBinding()]
 param(
     [switch]$BuildOnly,

@@ -9,6 +9,8 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+#   HC_DEV_BYPASS=1         Set for the API child process (enables /devlogin backend)
+#   VITE_HC_DEV_BYPASS=true Set for the frontend (enables /devlogin route)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

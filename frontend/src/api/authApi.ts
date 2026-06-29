@@ -3,6 +3,7 @@ import type { AuthResponse, LoginRequest, RegisterRequest } from '../types/auth'
 
 import type { DevLoginOptions, DevLoginRequest } from '../types/devAuth'
 
+/** Auth endpoints excluded from the automatic 401 refresh retry loop. */
 const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login']
 
 const api = axios.create({
@@ -49,8 +50,11 @@ export const authApi = {
   logout: () => api.post('/auth/logout'),
   refresh: () => api.post<AuthResponse>('/auth/refresh'),
   me: () => api.get<AuthResponse['user']>('/auth/me'),
+  /** Probe whether localhost dev bypass endpoints are enabled on the API. */
   devStatus: () => api.get<{ available: boolean }>('/auth/dev/status'),
+  /** Fetch developer accounts and personas for the /devlogin dropdowns. */
   devOptions: () => api.get<DevLoginOptions>('/auth/dev/options'),
+  /** Sign in via dev bypass; blank targetUserId signs in as DevAdmin on the server. */
   devLogin: (data: DevLoginRequest) => api.post<AuthResponse>('/auth/dev/login', data),
 }
 

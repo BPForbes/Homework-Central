@@ -1,4 +1,5 @@
 # Launch the frontend for local development.
+# Sets VITE_HC_DEV_BYPASS=true and opens http://localhost:5173/devlogin when ready.
 #
 # Usage:
 #   scripts/start-frontend-dev.ps1
@@ -23,7 +24,7 @@ if ($PreRegistered) {
 
 Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan
 
-$env:VITE_HC_DEV_BYPASS = 'true'
+$env:VITE_HC_DEV_BYPASS = 'true' # Exposes the /devlogin route in the frontend router.
 
 Push-Location $FrontendDir
 try {
