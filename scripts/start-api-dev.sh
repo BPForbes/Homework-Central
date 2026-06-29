@@ -79,8 +79,10 @@ if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
-"$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 120 &
-BROWSER_WAIT_PID=$!
+if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+  BROWSER_WAIT_PID=$!
+fi
 
 cd "$REPO_ROOT"
 API_ERROR_LOG="$(mktemp /tmp/hc-api-run-errors-XXXXXX.log)"
@@ -96,8 +98,8 @@ dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http:/
 api_status=$?
 set -e
 
-kill "$BROWSER_WAIT_PID" 2>/dev/null || true
-wait "$BROWSER_WAIT_PID" 2>/dev/null || true
+kill "${BROWSER_WAIT_PID:-}" 2>/dev/null || true
+wait "${BROWSER_WAIT_PID:-}" 2>/dev/null || true
 
 if [[ $api_status -ne 0 ]]; then
   if [[ -s "$API_ERROR_LOG" ]]; then

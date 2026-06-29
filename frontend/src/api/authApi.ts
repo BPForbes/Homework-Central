@@ -9,6 +9,8 @@ const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
+  // Fail fast when the API is still starting so auth bootstrap does not block the UI.
+  timeout: 5000,
 })
 
 api.interceptors.request.use((config) => {

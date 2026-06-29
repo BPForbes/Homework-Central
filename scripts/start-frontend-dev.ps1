@@ -1,5 +1,5 @@
 # Launch the frontend for local development.
-# Sets VITE_HC_DEV_BYPASS=true and opens http://localhost:5173/devlogin when ready.
+# Sets VITE_HC_DEV_BYPASS=true and opens http://localhost:5173/login when ready.
 #
 # Usage:
 #   scripts/start-frontend-dev.ps1
@@ -29,15 +29,20 @@ $env:VITE_HC_DEV_BYPASS = 'true' # Exposes the /devlogin route in the frontend r
 
 Push-Location $FrontendDir
 try {
-    $browserJob = Start-Job -ScriptBlock {
-        & (Join-Path $using:ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/devlogin' -Label 'Frontend' -MaxAttempts 120
+    $browserJob = $null
+    if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
+        $browserJob = Start-Job -ScriptBlock {
+            & (Join-Path $using:ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/login' -Label 'Frontend' -MaxAttempts 300
+        }
     }
 
     npm run dev
     $exitCode = $LASTEXITCODE
 
-    Stop-Job $browserJob -ErrorAction SilentlyContinue
-    Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
+    if ($null -ne $browserJob) {
+        Stop-Job $browserJob -ErrorAction SilentlyContinue
+        Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
+    }
 
     if ($exitCode -ne 0) {
         exit $exitCode

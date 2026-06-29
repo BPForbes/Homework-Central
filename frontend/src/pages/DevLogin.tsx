@@ -36,7 +36,7 @@ export function DevLogin() {
 
     let cancelled = false
 
-    async function loadOptions() {
+    async function loadOptions(): Promise<boolean> {
       setIsLoadingOptions(true)
       setApiUnavailable(false)
       setError('')
@@ -44,29 +44,39 @@ export function DevLogin() {
         const { data } = await authApi.devStatus()
         if (!data.available) {
           if (!cancelled) setApiUnavailable(true)
-          return
+          return false
         }
         const options = await authApi.devOptions()
-        if (cancelled) return
+        if (cancelled) return false
         setDevelopers(options.data.developers)
         if (options.data.developers.length > 0) {
           setDeveloperUserId(options.data.developers[0].userId)
         }
+        return true
       } catch (err: unknown) {
-        if (cancelled) return
+        if (cancelled) return false
         const message =
           (err as { response?: { data?: { message?: string } } })?.response?.data?.message
         if (message) {
           setError(message)
-        } else {
-          setApiUnavailable(true)
+          return true
         }
+        setApiUnavailable(true)
+        return false
       } finally {
         if (!cancelled) setIsLoadingOptions(false)
       }
     }
 
-    void loadOptions()
+    async function pollUntilReady() {
+      while (!cancelled) {
+        const ready = await loadOptions()
+        if (ready || cancelled) break
+        await new Promise((resolve) => setTimeout(resolve, 3000))
+      }
+    }
+
+    void pollUntilReady()
     return () => {
       cancelled = true
     }

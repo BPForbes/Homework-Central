@@ -530,7 +530,7 @@ function Start-DevStack([hashtable]$EnvValues) {
         -WorkingDirectory $RepoRoot
 
     Write-Step 'Dev stack is running in separate terminals'
-    Write-Host '  Frontend: http://localhost:5173/devlogin'
+    Write-Host '  Frontend: http://localhost:5173/login'
     Write-Host '  API:      http://localhost:5000'
     if (-not $SkipDocker) {
         Write-Host '  Postgres: localhost:' -NoNewline

@@ -15,7 +15,7 @@
       "serverReadyAction": {
         "action": "openExternally",
         "pattern": "Frontend:\\s+(https?://\\S+)",
-        "uriFormat": "%s/devlogin"
+        "uriFormat": "%s/login"
       }
     }
   ]

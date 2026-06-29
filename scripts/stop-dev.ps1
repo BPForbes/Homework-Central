@@ -23,9 +23,11 @@ Usage:
 
 Stops Docker Postgres started by scripts/run-dev.ps1 and frees its host port.
 API and frontend terminals must still be closed manually on Windows.
+Account data is preserved in the pgdata Docker volume.
 
-To wipe the database volume as well:
-  docker compose down -v
+To wipe the database volume (removes registered accounts):
+  scripts/reset-dev-db.ps1
+  # or: docker compose down -v
 '@ | Write-Output
 }
 

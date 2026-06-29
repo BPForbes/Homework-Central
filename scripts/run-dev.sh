@@ -301,7 +301,7 @@ ensure_postgres_ready() {
   fi
 
   if ! test_postgres_host_connection; then
-    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: docker compose down -v && scripts/run-dev.sh"
+    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh"
   fi
 }
 
@@ -494,9 +494,9 @@ run_stack() {
 
   log "Starting API on http://localhost:5000"
   if [[ "$SKIP_DOCKER" == true ]]; then
-    HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   else
-    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   fi
   BACKEND_PID=$!
 
@@ -504,12 +504,14 @@ run_stack() {
   VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
 
-  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/devlogin" "Frontend" 120 &
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+  API_BROWSER_PID=$!
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/login" "Frontend" 300 &
   FRONTEND_BROWSER_PID=$!
 
   cleanup() {
     log "Stopping dev servers"
-    kill "$BACKEND_PID" "$FRONTEND_PID" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
+    kill "$BACKEND_PID" "$FRONTEND_PID" "$API_BROWSER_PID" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
     wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     if [[ "$SKIP_DOCKER" == false ]]; then
       unregister_dev_stack_server
@@ -518,7 +520,7 @@ run_stack() {
   trap cleanup EXIT INT TERM
 
   log "Dev stack is running"
-  log "  Frontend: http://localhost:5173/devlogin"
+  log "  Frontend: http://localhost:5173/login"
   log "  API:      http://localhost:5000"
   if [[ "$SKIP_DOCKER" == false ]]; then
     log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"

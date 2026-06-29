@@ -45,4 +45,7 @@ services:
       - backend
 
 volumes:
+  # Persists registered accounts and migrations between restarts.
+  # Use `docker compose down` (no -v) or scripts/stop-dev.sh to keep this data.
+  # Only `docker compose down -v` or scripts/reset-dev-db.sh wipes it.
   pgdata:

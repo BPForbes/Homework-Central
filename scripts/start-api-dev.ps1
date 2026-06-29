@@ -80,8 +80,14 @@ try {
         Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
     }
 
-    $browserJob = Start-Job -ScriptBlock {
-        & (Join-Path $using:ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5000/' -Label 'API' -MaxAttempts 120
+    if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
+        Start-Process -FilePath 'pwsh' -WindowStyle Hidden -ArgumentList @(
+            '-NoProfile',
+            '-File', (Join-Path $ScriptRoot 'wait-and-open-browser.ps1'),
+            '-Url', 'http://localhost:5000/',
+            '-Label', 'API',
+            '-MaxAttempts', '300'
+        ) | Out-Null
     }
 
     $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
@@ -90,9 +96,6 @@ try {
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
         Tee-Object -FilePath $errorLog
     $exitCode = $LASTEXITCODE
-
-    Stop-Job $browserJob -ErrorAction SilentlyContinue
-    Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
 
     if ($exitCode -ne 0 -and (Test-Path $errorLog) -and (Get-Item $errorLog).Length -gt 0) {
         & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Errors' -ErrorLogFile $errorLog
