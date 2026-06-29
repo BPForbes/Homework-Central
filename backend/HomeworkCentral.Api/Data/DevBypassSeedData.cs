@@ -1,4 +1,3 @@
-using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
@@ -13,6 +12,8 @@ public static class DevBypassSeedData
         IEffectiveMaskService effectiveMaskService,
         CancellationToken ct = default)
     {
+        DevAccountCatalog.ValidateUniquePersonas();
+
         Dictionary<string, Role> rolesByName = await db.Roles.ToDictionaryAsync(r => r.Name, ct);
         Role developerRole = rolesByName["Developer"];
         Role ownerRole = rolesByName["Owner"];
@@ -23,8 +24,8 @@ public static class DevBypassSeedData
             DevBypass.DevAdminUsername,
             [ownerRole],
             ct);
-
-        List<User> seededUsers = [devAdmin];
+        await db.SaveChangesAsync(ct);
+        await effectiveMaskService.RebuildUserEffectiveMaskAsync(devAdmin.UserId, ct);
 
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
@@ -34,7 +35,6 @@ public static class DevBypassSeedData
                 account.DeveloperUsername,
                 [developerRole],
                 ct);
-            seededUsers.Add(developer);
 
             foreach (DevPersonaDefinition persona in account.Personas)
             {
@@ -42,20 +42,26 @@ public static class DevBypassSeedData
                     .Select(roleName => rolesByName[roleName])
                     .ToArray();
 
-                User user = await EnsureUserWithRolesAsync(
+                await EnsureUserWithRolesAsync(
                     db,
                     persona.Email,
                     persona.Username,
                     personaRoles,
                     ct);
-                seededUsers.Add(user);
+            }
+
+            await db.SaveChangesAsync(ct);
+            await effectiveMaskService.RebuildUserEffectiveMaskAsync(developer.UserId, ct);
+
+            foreach (DevPersonaDefinition persona in account.Personas)
+            {
+                User? personaUser = await db.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(user => user.Email == persona.Email, ct);
+                if (personaUser is not null)
+                    await effectiveMaskService.RebuildUserEffectiveMaskAsync(personaUser.UserId, ct);
             }
         }
-
-        await db.SaveChangesAsync(ct);
-
-        foreach (User user in seededUsers.DistinctBy(u => u.UserId))
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId, ct);
     }
 
     private static async Task<User> EnsureUserWithRolesAsync(
@@ -72,6 +78,14 @@ public static class DevBypassSeedData
         DateTime now = DateTime.UtcNow;
         if (user is null)
         {
+            bool usernameTaken = await db.Users
+                .AnyAsync(existing => existing.Username == username, ct);
+            if (usernameTaken)
+            {
+                throw new InvalidOperationException(
+                    $"Dev seed username '{username}' is already assigned to another account.");
+            }
+
             user = new User
             {
                 UserId = Guid.NewGuid(),
@@ -85,6 +99,14 @@ public static class DevBypassSeedData
         }
         else
         {
+            bool usernameTaken = await db.Users
+                .AnyAsync(existing => existing.Username == username && existing.UserId != user.UserId, ct);
+            if (usernameTaken)
+            {
+                throw new InvalidOperationException(
+                    $"Dev seed username '{username}' is already assigned to another account.");
+            }
+
             user.Username = username;
             user.UpdatedAt = now;
         }

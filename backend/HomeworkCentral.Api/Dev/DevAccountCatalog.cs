@@ -41,6 +41,30 @@ public static class DevAccountCatalog
         account.Personas.Any(persona =>
             string.Equals(persona.Email, personaEmail, StringComparison.OrdinalIgnoreCase));
 
+    public static void ValidateUniquePersonas()
+    {
+        HashSet<string> emails = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> usernames = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (DevAccountDefinition account in All)
+        {
+            if (!emails.Add(account.DeveloperEmail))
+                throw new InvalidOperationException($"Duplicate developer email in dev catalog: {account.DeveloperEmail}");
+
+            if (!usernames.Add(account.DeveloperUsername))
+                throw new InvalidOperationException($"Duplicate developer username in dev catalog: {account.DeveloperUsername}");
+
+            foreach (DevPersonaDefinition persona in account.Personas)
+            {
+                if (!emails.Add(persona.Email))
+                    throw new InvalidOperationException($"Duplicate persona email in dev catalog: {persona.Email}");
+
+                if (!usernames.Add(persona.Username))
+                    throw new InvalidOperationException($"Duplicate persona username in dev catalog: {persona.Username}");
+            }
+        }
+    }
+
     private static DevAccountDefinition ScienceAccount() => new()
     {
         DeveloperUsername = "Science Developer",
@@ -167,8 +191,8 @@ public static class DevAccountCatalog
             Persona("Tony Stark", "tony.stark@engineering.dev", "Tutor", "Developer"),
             Persona("Thomas Edison", "thomas.edison@engineering.dev", "SeniorTutor"),
             Persona("Isambard Kingdom Brunel", "isambard.brunel@engineering.dev", "Student"),
-            Persona("Katherine Johnson", "katherine.johnson@engineering.dev", "HeadTutor"),
-            Persona("Nikola Tesla", "nikola.tesla@engineering.dev", "Tutor", "SeminarHost"),
+            Persona("Rosalind Franklin", "rosalind.franklin@engineering.dev", "HeadTutor"),
+            Persona("James Watt", "james.watt@engineering.dev", "Tutor", "SeminarHost"),
         ],
     };
 
@@ -193,7 +217,7 @@ public static class DevAccountCatalog
         Personas =
         [
             Persona("Janet Yellen", "janet.yellen@finance.dev", "Administrator"),
-            Persona("Warren Buffett", "warren.buffett@finance.dev", "Tutor"),
+            Persona("Charlie Munger", "charlie.munger@finance.dev", "Tutor"),
             Persona("Jordan Belfort", "jordan.belfort@finance.dev", "Student"),
             Persona("Alexander Hamilton", "alexander.hamilton@finance.dev", "BoardMember"),
             Persona("Molly Bloom", "molly.bloom@finance.dev", "Moderator"),
