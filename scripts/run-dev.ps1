@@ -502,16 +502,9 @@ function Build-Projects {
     }
 
     Write-Step 'Type-checking frontend (parallel with Postgres host check build)'
-    $frontendTscProcess = Start-Process -FilePath 'npx' `
-        -ArgumentList @('tsc', '-b') `
-        -WorkingDirectory $FrontendDir `
-        -PassThru `
-        -NoNewWindow
+    $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
     Build-PostgresHostCheck
-    $frontendTscProcess.WaitForExit()
-    if ($frontendTscProcess.ExitCode -ne 0) {
-        throw 'frontend typecheck failed'
-    }
+    Wait-FrontendTypecheckJob -Job $frontendTscJob
 }
 
 function Start-DevStack([hashtable]$EnvValues) {
@@ -523,6 +516,7 @@ function Start-DevStack([hashtable]$EnvValues) {
     }
 
     $apiReady = $false
+    $pwshExe = Get-DevStackPowerShellExe
     if (-not $script:ApiBuildFailed) {
         Write-Step 'Starting API in a new terminal (http://localhost:5000)'
         $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
@@ -531,7 +525,7 @@ function Start-DevStack([hashtable]$EnvValues) {
         } else {
             $apiArgs += '-PreRegistered'
         }
-        Start-Process -FilePath 'pwsh' `
+        Start-Process -FilePath $pwshExe `
             -ArgumentList $apiArgs `
             -WorkingDirectory $RepoRoot
 
@@ -551,7 +545,7 @@ function Start-DevStack([hashtable]$EnvValues) {
     if (-not $SkipDocker) {
         $frontendArgs += '-PreRegistered'
     }
-    Start-Process -FilePath 'pwsh' `
+    Start-Process -FilePath $pwshExe `
         -ArgumentList $frontendArgs `
         -WorkingDirectory $RepoRoot
 

@@ -231,3 +231,45 @@ function Stop-DevStack {
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
     }
 }
+
+function Get-DevStackPowerShellExe {
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) {
+        return $pwsh.Source
+    }
+
+    $powershell = Get-Command powershell -ErrorAction SilentlyContinue
+    if ($powershell) {
+        return $powershell.Source
+    }
+
+    throw 'PowerShell executable not found (install PowerShell 7+ or use Windows PowerShell).'
+}
+
+function Start-FrontendTypecheckJob([string]$FrontendDir) {
+    return Start-Job -ScriptBlock {
+        param($Dir)
+        Push-Location $Dir
+        try {
+            npx tsc -b
+            if ($LASTEXITCODE -ne 0) {
+                throw "frontend typecheck failed with exit code $LASTEXITCODE"
+            }
+        } finally {
+            Pop-Location
+        }
+    } -ArgumentList $FrontendDir
+}
+
+function Wait-FrontendTypecheckJob($Job) {
+    Wait-Job $Job | Out-Null
+    $output = Receive-Job $Job
+    Remove-Job $Job -Force
+
+    if ($Job.State -eq 'Failed') {
+        if ($output) {
+            $output | Write-Host
+        }
+        throw 'frontend typecheck failed'
+    }
+}

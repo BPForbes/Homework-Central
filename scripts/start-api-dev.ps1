@@ -81,7 +81,8 @@ try {
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
-        Start-Process -FilePath 'pwsh' -WindowStyle Hidden -ArgumentList @(
+        $pwshExe = Get-DevStackPowerShellExe
+        Start-Process -FilePath $pwshExe -WindowStyle Hidden -ArgumentList @(
             '-NoProfile',
             '-File', (Join-Path $ScriptRoot 'wait-and-open-browser.ps1'),
             '-Url', 'http://localhost:5000/',
