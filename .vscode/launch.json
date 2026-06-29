@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // Launches tools/DevHost, which enables HC_DEV_BYPASS and opens /devlogin when ready.
+      // Launches tools/DevHost, which enables HC_DEV_BYPASS and opens /login when ready.
       "name": "Dev Stack",
       "type": "coreclr",
       "request": "launch",
