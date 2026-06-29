@@ -488,7 +488,7 @@ run_stack() {
   if [[ "$SKIP_DOCKER" == true ]]; then
     HC_SKIP_DOCKER=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   else
-    HC_SKIP_DOCKER=0 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   fi
   BACKEND_PID=$!
 

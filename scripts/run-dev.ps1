@@ -503,17 +503,23 @@ function Start-DevStack([hashtable]$EnvValues) {
     }
 
     Write-Step 'Starting API in a new terminal (http://localhost:5000)'
-    $apiStarterEnv = @{
-        HC_SKIP_DOCKER = if ($SkipDocker) { '1' } else { '0' }
+    $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
+    if ($SkipDocker) {
+        $apiArgs += '-SkipDocker'
+    } else {
+        $apiArgs += '-PreRegistered'
     }
     Start-Process -FilePath 'pwsh' `
-        -ArgumentList @('-NoExit', '-NoLogo', '-File', $apiStarter) `
-        -WorkingDirectory $RepoRoot `
-        -Environment $apiStarterEnv
+        -ArgumentList $apiArgs `
+        -WorkingDirectory $RepoRoot
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
+    $frontendArgs = @('-NoExit', '-NoLogo', '-File', $frontendStarter)
+    if (-not $SkipDocker) {
+        $frontendArgs += '-PreRegistered'
+    }
     Start-Process -FilePath 'pwsh' `
-        -ArgumentList @('-NoExit', '-NoLogo', '-File', $frontendStarter) `
+        -ArgumentList $frontendArgs `
         -WorkingDirectory $RepoRoot
 
     Write-Step 'Dev stack is running in separate terminals'

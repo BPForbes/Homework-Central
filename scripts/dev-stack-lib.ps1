@@ -12,6 +12,7 @@ $script:DevStackMutexName = 'Global\HomeworkCentralDevStack'
 $script:DevStackComposeFile = Join-Path $script:RepoRoot 'docker-compose.yml'
 $script:DevStackEnvFile = Join-Path $script:RepoRoot '.env'
 $script:DevPostgresPassword = 'postgres'
+$script:DevStackServerRegistered = $false
 
 function Read-DevStackState {
     if (-not (Test-Path $script:DevStackStateFile)) {
@@ -92,8 +93,31 @@ function Wait-DevPostgresReady([string]$Port) {
     throw "Postgres did not become ready on localhost:$Port within 30s"
 }
 
+function Join-DevStackIfManaged([string]$Port) {
+    if ($env:HC_DEV_STACK_PREREGISTERED -eq '1') {
+        return
+    }
+
+    Invoke-DevStackStateUpdate {
+        $state = Read-DevStackState
+        if ($null -eq $state -or $state['managed_postgres'] -ne '1') {
+            return
+        }
+
+        if ($state['postgres_port'] -ne $Port) {
+            return
+        }
+
+        $refcount = [int]$state['refcount'] + 1
+        $state['refcount'] = "$refcount"
+        Write-DevStackState $state
+        $script:DevStackServerRegistered = $true
+    }
+}
+
 function Ensure-DevPostgresRunning([string]$Port) {
     if (Test-DevPostgresConnection $Port) {
+        Join-DevStackIfManaged -Port $Port
         return
     }
 
@@ -109,8 +133,13 @@ function Ensure-DevPostgresRunning([string]$Port) {
                 postgres_port = $Port
                 refcount = '1'
             }
+            $script:DevStackServerRegistered = $true
         }
     }
+}
+
+function Test-DevStackServerOwnsRef {
+    return $script:DevStackServerRegistered -or $env:HC_DEV_STACK_PREREGISTERED -eq '1'
 }
 
 function Stop-DevStackPostgres([string]$Port) {
@@ -166,6 +195,10 @@ function Invoke-DevStackStateUpdate([scriptblock]$Action) {
 }
 
 function Unregister-DevStackServer {
+    if (-not (Test-DevStackServerOwnsRef)) {
+        return
+    }
+
     Invoke-DevStackStateUpdate {
         $state = Read-DevStackState
         if ($null -eq $state -or $state['managed_postgres'] -ne '1') {
@@ -184,6 +217,8 @@ function Unregister-DevStackServer {
         Stop-DevStackPostgres -Port $port
         Write-Host '==> Stopped Docker Postgres and freed localhost port' -ForegroundColor DarkGray
     }
+
+    $script:DevStackServerRegistered = $false
 }
 
 function Stop-DevStack {

@@ -2,8 +2,11 @@
 #
 # Usage:
 #   scripts/start-frontend-dev.ps1
+#   scripts/start-frontend-dev.ps1 -PreRegistered
 [CmdletBinding()]
-param()
+param(
+    [switch]$PreRegistered
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -13,6 +16,10 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
+
+if ($PreRegistered) {
+    $env:HC_DEV_STACK_PREREGISTERED = '1'
+}
 
 Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan
 
@@ -25,5 +32,7 @@ try {
 }
 finally {
     Pop-Location
-    Unregister-DevStackServer
+    if ($env:HC_DEV_STACK_PREREGISTERED -eq '1') {
+        Unregister-DevStackServer
+    }
 }

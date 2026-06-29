@@ -7,6 +7,7 @@ DEV_STACK_STATE_FILE="$DEV_STACK_REPO_ROOT/.hc-dev-stack.state"
 DEV_STACK_COMPOSE_FILE="$DEV_STACK_REPO_ROOT/docker-compose.yml"
 DEV_STACK_ENV_FILE="$DEV_STACK_REPO_ROOT/.env"
 DEV_STACK_POSTGRES_PASSWORD="postgres"
+DEV_STACK_SERVER_REGISTERED=0
 
 read_dev_stack_state() {
   local key value
@@ -38,11 +39,17 @@ EOF
 
 with_dev_stack_lock() {
   local lock_dir="${DEV_STACK_STATE_FILE}.lock.d"
-  local attempt rc
+  local attempt rc restore_errexit=0
   for ((attempt = 0; attempt < 150; attempt++)); do
     if mkdir "$lock_dir" 2>/dev/null; then
+      case "$-" in
+        *e*) restore_errexit=1; set +e ;;
+      esac
       "$@"
       rc=$?
+      if (( restore_errexit )); then
+        set -e
+      fi
       rmdir "$lock_dir" 2>/dev/null || true
       return $rc
     fi
@@ -109,9 +116,30 @@ wait_dev_postgres_ready() {
   return 1
 }
 
+_join_dev_stack_if_managed() {
+  local port="$1"
+  if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  if ! read_dev_stack_state || [[ "${DEV_STACK_STATE_managed_postgres:-}" != "1" ]]; then
+    return 0
+  fi
+
+  if [[ "${DEV_STACK_STATE_postgres_port}" != "$port" ]]; then
+    return 0
+  fi
+
+  local current_refcount="${DEV_STACK_STATE_refcount:-1}"
+  [[ "$current_refcount" =~ ^[0-9]+$ ]] || current_refcount=1
+  write_dev_stack_state "$port" "$((current_refcount + 1))"
+  DEV_STACK_SERVER_REGISTERED=1
+}
+
 ensure_dev_postgres_running() {
   local port="$1"
   if test_dev_postgres_connection "$port"; then
+    with_dev_stack_lock _join_dev_stack_if_managed "$port"
     return 0
   fi
 
@@ -126,7 +154,12 @@ _ensure_dev_postgres_state() {
   local port="$1"
   if ! read_dev_stack_state; then
     write_dev_stack_state "$port" 1
+    DEV_STACK_SERVER_REGISTERED=1
   fi
+}
+
+dev_stack_server_owns_ref() {
+  [[ "$DEV_STACK_SERVER_REGISTERED" -eq 1 || "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]
 }
 
 init_dev_stack_state() {
@@ -162,19 +195,27 @@ unregister_dev_stack_server() {
 }
 
 _unregister_dev_stack_server_impl() {
+  if ! dev_stack_server_owns_ref; then
+    return 0
+  fi
+
   if ! read_dev_stack_state || [[ "${DEV_STACK_STATE_managed_postgres:-}" != "1" ]]; then
     return 0
   fi
 
-  local refcount=$((DEV_STACK_STATE_refcount - 1))
+  local current_refcount="${DEV_STACK_STATE_refcount:-1}"
+  [[ "$current_refcount" =~ ^[0-9]+$ ]] || current_refcount=1
+  local refcount=$((current_refcount - 1))
   if (( refcount > 0 )); then
     write_dev_stack_state "${DEV_STACK_STATE_postgres_port}" "$refcount"
+    DEV_STACK_SERVER_REGISTERED=0
     return 0
   fi
 
   local port="${DEV_STACK_STATE_postgres_port}"
   rm -f "$DEV_STACK_STATE_FILE"
   stop_dev_stack_postgres "$port"
+  DEV_STACK_SERVER_REGISTERED=0
   printf '==> Stopped Docker Postgres and freed localhost port\n'
 }
 

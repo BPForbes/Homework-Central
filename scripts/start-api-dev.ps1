@@ -4,8 +4,13 @@
 #
 # Usage:
 #   scripts/start-api-dev.ps1
+#   scripts/start-api-dev.ps1 -SkipDocker
+#   scripts/start-api-dev.ps1 -PreRegistered
 [CmdletBinding()]
-param()
+param(
+    [switch]$SkipDocker,
+    [switch]$PreRegistered
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -60,12 +65,17 @@ $env:ConnectionStrings__DefaultConnection = $connectionString
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
 Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
 
-if ($env:HC_SKIP_DOCKER -ne '1') {
-    Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+$skipDocker = $SkipDocker -or $env:HC_SKIP_DOCKER -eq '1'
+if ($PreRegistered) {
+    $env:HC_DEV_STACK_PREREGISTERED = '1'
 }
 
 Push-Location $RepoRoot
 try {
+    if (-not $skipDocker) {
+        Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+    }
+
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
@@ -73,5 +83,7 @@ try {
 }
 finally {
     Pop-Location
-    Unregister-DevStackServer
+    if (-not $skipDocker) {
+        Unregister-DevStackServer
+    }
 }
