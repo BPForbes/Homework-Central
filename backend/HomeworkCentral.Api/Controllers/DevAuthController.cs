@@ -5,6 +5,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace HomeworkCentral.Api.Controllers;
 
+/// <summary>
+/// Localhost-only developer bypass auth endpoints. Hidden (404) unless
+/// <see cref="DevBypass.IsEnabled"/> and the caller is on loopback.
+/// </summary>
 [ApiController]
 [Route("api/auth/dev")]
 public class DevAuthController(
@@ -12,6 +16,7 @@ public class DevAuthController(
     IConfiguration config,
     IWebHostEnvironment env) : ControllerBase
 {
+    /// <summary>Returns developer accounts and personas for the /devlogin dropdowns.</summary>
     [HttpGet("options")]
     public async Task<IActionResult> Options()
     {
@@ -22,6 +27,7 @@ public class DevAuthController(
         return Ok(options);
     }
 
+    /// <summary>Signs in as the selected persona, or DevAdmin when no persona is chosen.</summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] DevLoginRequest req)
     {
@@ -43,6 +49,7 @@ public class DevAuthController(
         }
     }
 
+    /// <summary>Lets the frontend probe whether dev bypass endpoints are reachable.</summary>
     [HttpGet("status")]
     public IActionResult Status()
     {

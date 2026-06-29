@@ -1,3 +1,7 @@
+/**
+ * Localhost-only developer sign-in page (VITE_HC_DEV_BYPASS).
+ * Select a developer account and optionally impersonate a persona; blank user uses DevAdmin.
+ */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'

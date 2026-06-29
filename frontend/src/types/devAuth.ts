@@ -1,8 +1,11 @@
+/** Types for the localhost-only /devlogin developer bypass flow. */
+
 export interface DevUserOption {
   userId: string
   username: string
 }
 
+/** Subject-area developer account with personas scoped to that account. */
 export interface DevDeveloperOption {
   userId: string
   username: string

@@ -1,5 +1,6 @@
 namespace HomeworkCentral.Api.Dev;
 
+/// <summary>A fictional user persona seeded for local dev impersonation.</summary>
 public sealed class DevPersonaDefinition
 {
     public required string Username { get; init; }
@@ -7,6 +8,7 @@ public sealed class DevPersonaDefinition
     public required string[] Roles { get; init; }
 }
 
+/// <summary>A subject-area developer account and its impersonation personas.</summary>
 public sealed class DevAccountDefinition
 {
     public required string DeveloperUsername { get; init; }
@@ -14,6 +16,10 @@ public sealed class DevAccountDefinition
     public required DevPersonaDefinition[] Personas { get; init; }
 }
 
+/// <summary>
+/// Static catalog of dev developer accounts and personas. Emails/usernames must remain
+/// unique because they map directly to rows in the Users table.
+/// </summary>
 public static class DevAccountCatalog
 {
     public static IReadOnlyList<DevAccountDefinition> All { get; } =
@@ -41,6 +47,7 @@ public static class DevAccountCatalog
         account.Personas.Any(persona =>
             string.Equals(persona.Email, personaEmail, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>Throws if any developer or persona email/username is duplicated in the catalog.</summary>
     public static void ValidateUniquePersonas()
     {
         HashSet<string> emails = new(StringComparer.OrdinalIgnoreCase);

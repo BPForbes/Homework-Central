@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Wait until an HTTP endpoint responds, then open it in the browser.
+# Treats 403 as healthy for the API root page (intentional dev forbidden landing).
 set -euo pipefail
 
 url="${1:-}"

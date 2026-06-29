@@ -1,4 +1,5 @@
 # Wait until an HTTP endpoint responds, then open it in the browser.
+# Treats 403 as healthy for the API root page (intentional dev forbidden landing).
 param(
     [Parameter(Mandatory = $true)]
     [string]$Url,

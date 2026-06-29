@@ -12,6 +12,7 @@ if (-not (Test-Path $ErrorLogFile)) {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $faviconSrc = Join-Path $repoRoot 'frontend/public/favicon.svg'
+# Canonical favicon path (see backend DevAssets.CanonicalFaviconRepoPath).
 $errorDir = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-errors-{0}" -f ([guid]::NewGuid().ToString('N')))
 $htmlPath = Join-Path $errorDir 'index.html'
 New-Item -ItemType Directory -Path $errorDir -Force | Out-Null

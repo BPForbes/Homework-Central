@@ -13,6 +13,7 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 favicon_src="$repo_root/frontend/public/favicon.svg"
+# Canonical favicon path (see backend DevAssets.CanonicalFaviconRepoPath).
 error_dir="$(mktemp -d /tmp/hc-api-errors-XXXXXX)"
 html_file="$error_dir/index.html"
 encoded_title="$(python3 -c 'import html,sys; print(html.escape(sys.argv[1]))' "$title")"

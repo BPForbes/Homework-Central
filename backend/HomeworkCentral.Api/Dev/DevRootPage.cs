@@ -4,15 +4,18 @@ public static class DevRootPage
 {
     public const string FaviconPath = "/favicon.svg";
 
+    /// <summary>Serves the styled localhost root page shown when the API is healthy in dev.</summary>
     public static IResult ForbiddenDirectoryPage() =>
         Results.Content(ForbiddenHtml, "text/html; charset=utf-8", statusCode: 403);
 
+    /// <summary>Serves captured API startup errors as HTML (used when runtime failures occur).</summary>
     public static IResult ApiErrorPage(string errors) =>
         Results.Content(BuildApiErrorHtml(errors), "text/html; charset=utf-8", statusCode: 500);
 
+    /// <summary>Serves the linked copy of <see cref="DevAssets.CanonicalFaviconRepoPath"/>.</summary>
     public static IResult Favicon()
     {
-        string faviconPath = Path.Combine(AppContext.BaseDirectory, "Dev", "favicon.svg");
+        string faviconPath = DevAssets.FaviconOutputPath(AppContext.BaseDirectory);
         if (!File.Exists(faviconPath))
             return Results.NotFound();
 

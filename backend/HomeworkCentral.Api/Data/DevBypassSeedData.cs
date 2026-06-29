@@ -5,8 +5,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Data;
 
+/// <summary>
+/// Seeds fictional developer accounts and personas from <see cref="Dev.DevAccountCatalog"/>
+/// when localhost dev bypass is enabled.
+/// </summary>
 public static class DevBypassSeedData
 {
+    /// <summary>Creates or updates DevAdmin, developer accounts, and personas idempotently.</summary>
     public static async Task SeedAsync(
         AppDbContext db,
         IEffectiveMaskService effectiveMaskService,

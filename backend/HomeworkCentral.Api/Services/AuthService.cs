@@ -80,6 +80,7 @@ public class AuthService(
         return await BuildAuthResponseAsync(user);
     }
 
+    /// <inheritdoc />
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
         HashSet<Guid> developerUserIds = await db.UserRoles
@@ -129,6 +130,7 @@ public class AuthService(
         };
     }
 
+    /// <inheritdoc />
     public async Task<AuthResponse> DevLoginAsync(DevLoginRequest req)
     {
         User? developer = await db.Users
