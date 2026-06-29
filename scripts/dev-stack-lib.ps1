@@ -233,17 +233,31 @@ function Stop-DevStack {
 }
 
 function Get-DevStackPowerShellExe {
-    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-    if ($pwsh) {
-        return $pwsh.Source
-    }
+    $candidates = @(
+        (Get-Command pwsh -ErrorAction SilentlyContinue),
+        (Get-Command 'C:\Program Files\PowerShell\7\pwsh.exe' -ErrorAction SilentlyContinue),
+        (Get-Command powershell -ErrorAction SilentlyContinue)
+    ) | Where-Object { $_ -ne $null }
 
-    $powershell = Get-Command powershell -ErrorAction SilentlyContinue
-    if ($powershell) {
-        return $powershell.Source
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate.Source) {
+            return $candidate.Source
+        }
     }
 
     throw 'PowerShell executable not found (install PowerShell 7+ or use Windows PowerShell).'
+}
+
+function Start-DevStackPowerShellProcess {
+    param(
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory = $script:RepoRoot,
+        [System.Diagnostics.ProcessWindowStyle]$WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+    )
+
+    $exe = Get-DevStackPowerShellExe
+    $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass') + $ArgumentList
+    Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $WorkingDirectory -WindowStyle $WindowStyle | Out-Null
 }
 
 function Start-FrontendTypecheckJob([string]$FrontendDir) {
@@ -263,13 +277,15 @@ function Start-FrontendTypecheckJob([string]$FrontendDir) {
 
 function Wait-FrontendTypecheckJob($Job) {
     Wait-Job $Job | Out-Null
-    $output = Receive-Job $Job
-    Remove-Job $Job -Force
-
     if ($Job.State -eq 'Failed') {
+        $output = Receive-Job $Job
+        Remove-Job $Job -Force
         if ($output) {
             $output | Write-Host
         }
         throw 'frontend typecheck failed'
     }
+
+    Receive-Job $Job | Out-Null
+    Remove-Job $Job -Force
 }

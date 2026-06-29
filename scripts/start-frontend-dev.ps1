@@ -29,20 +29,17 @@ $env:VITE_HC_DEV_BYPASS = 'true' # Exposes the /devlogin route in the frontend r
 
 Push-Location $FrontendDir
 try {
-    $browserJob = $null
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
-        $browserJob = Start-Job -ScriptBlock {
-            & (Join-Path $using:ScriptRoot 'wait-and-open-browser.ps1') -Url 'http://localhost:5173/login' -Label 'Frontend' -MaxAttempts 300
-        }
+        Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
+            '-File', (Join-Path $ScriptRoot 'wait-and-open-browser.ps1'),
+            '-Url', 'http://localhost:5173/login',
+            '-Label', 'Frontend',
+            '-MaxAttempts', '300'
+        ) -WorkingDirectory $RepoRoot
     }
 
     npm run dev
     $exitCode = $LASTEXITCODE
-
-    if ($null -ne $browserJob) {
-        Stop-Job $browserJob -ErrorAction SilentlyContinue
-        Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
-    }
 
     if ($exitCode -ne 0) {
         exit $exitCode

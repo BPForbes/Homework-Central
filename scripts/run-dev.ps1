@@ -515,46 +515,52 @@ function Start-DevStack([hashtable]$EnvValues) {
         Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
     }
 
-    $apiReady = $false
-    $pwshExe = Get-DevStackPowerShellExe
+    $env:HC_SKIP_BROWSER_OPEN = '1'
+
     if (-not $script:ApiBuildFailed) {
         Write-Step 'Starting API in a new terminal (http://localhost:5000)'
-        $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
+        $apiArgs = @('-NoExit', '-File', $apiStarter)
         if ($SkipDocker) {
             $apiArgs += '-SkipDocker'
         } else {
             $apiArgs += '-PreRegistered'
         }
-        Start-Process -FilePath $pwshExe `
-            -ArgumentList $apiArgs `
-            -WorkingDirectory $RepoRoot
-
-        Write-Step 'Waiting for API to become ready before starting frontend'
-        & (Join-Path $PSScriptRoot 'wait-for-dev-server.ps1') -Url 'http://localhost:5000/healthz' -Label 'API' -MaxAttempts 300
-        if ($LASTEXITCODE -eq 0) {
-            $apiReady = $true
-        } else {
-            Write-Step 'API is not ready; starting frontend with unable to connect to API'
-        }
+        Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
     } else {
         Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
-    $frontendArgs = @('-NoExit', '-NoLogo', '-File', $frontendStarter)
+    $frontendArgs = @('-NoExit', '-File', $frontendStarter)
     if (-not $SkipDocker) {
         $frontendArgs += '-PreRegistered'
     }
-    Start-Process -FilePath $pwshExe `
-        -ArgumentList $frontendArgs `
-        -WorkingDirectory $RepoRoot
+    Start-DevStackPowerShellProcess -ArgumentList $frontendArgs -WorkingDirectory $RepoRoot
+
+    Write-Step 'Opening browser tabs when servers are ready'
+    if (-not $script:ApiBuildFailed) {
+        Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
+            '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
+            '-Url', 'http://localhost:5000/',
+            '-Label', 'API',
+            '-MaxAttempts', '300'
+        ) -WorkingDirectory $RepoRoot
+    }
+    Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
+        '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
+        '-Url', 'http://localhost:5173/login',
+        '-Label', 'Frontend',
+        '-MaxAttempts', '300'
+    ) -WorkingDirectory $RepoRoot
+
+    Remove-Item Env:HC_SKIP_BROWSER_OPEN -ErrorAction SilentlyContinue
 
     Write-Step 'Dev stack is running in separate terminals'
     Write-Host '  Frontend: http://localhost:5173/login'
-    if ($apiReady) {
+    if (-not $script:ApiBuildFailed) {
         Write-Host '  API:      http://localhost:5000'
     } else {
-        Write-Host '  API:      unavailable (check API Build Errors or API terminal output)'
+        Write-Host '  API:      unavailable (check API Build Errors browser tab)'
     }
     if (-not $SkipDocker) {
         Write-Host '  Postgres: localhost:' -NoNewline
