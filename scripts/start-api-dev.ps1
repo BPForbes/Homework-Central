@@ -18,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$ScriptRoot = $PSScriptRoot
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
 $EnvFile = Join-Path $RepoRoot '.env'
 $DevPostgresUser = 'postgres'

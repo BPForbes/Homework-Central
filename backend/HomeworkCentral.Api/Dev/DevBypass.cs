@@ -28,11 +28,6 @@ public static class DevBypass
         if (connection.RemoteIpAddress is null)
             return true;
 
-        if (System.Net.IPAddress.IsLoopback(connection.RemoteIpAddress))
-            return true;
-
-        string? host = ctx.Request.Host.Host;
-        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(host, "127.0.0.1", StringComparison.Ordinal);
+        return System.Net.IPAddress.IsLoopback(connection.RemoteIpAddress);
     }
 }

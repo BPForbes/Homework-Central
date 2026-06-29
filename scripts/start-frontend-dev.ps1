@@ -14,6 +14,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$ScriptRoot = $PSScriptRoot
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
