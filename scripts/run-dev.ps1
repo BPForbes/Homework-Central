@@ -478,7 +478,6 @@ function Build-Projects {
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
-        Build-PostgresHostCheck
     } else {
         Write-Step 'Building API'
         $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
@@ -489,7 +488,6 @@ function Build-Projects {
             }
             throw 'dotnet build failed'
         }
-        Build-PostgresHostCheck
     }
 
     if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
@@ -498,6 +496,18 @@ function Build-Projects {
         if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
     } else {
         Write-Step 'Frontend dependencies already installed'
+    }
+
+    Write-Step 'Type-checking frontend (parallel with Postgres host check build)'
+    $frontendTscProcess = Start-Process -FilePath 'npx' `
+        -ArgumentList @('tsc', '-b') `
+        -WorkingDirectory $FrontendDir `
+        -PassThru `
+        -NoNewWindow
+    Build-PostgresHostCheck
+    $frontendTscProcess.WaitForExit()
+    if ($frontendTscProcess.ExitCode -ne 0) {
+        throw 'frontend typecheck failed'
     }
 }
 
@@ -519,6 +529,12 @@ function Start-DevStack([hashtable]$EnvValues) {
     Start-Process -FilePath 'pwsh' `
         -ArgumentList $apiArgs `
         -WorkingDirectory $RepoRoot
+
+    Write-Step 'Waiting for API to become ready before starting frontend'
+    & (Join-Path $PSScriptRoot 'wait-for-dev-server.ps1') -Url 'http://localhost:5000/healthz' -Label 'API' -MaxAttempts 300
+    if ($LASTEXITCODE -ne 0) {
+        throw 'API did not become ready within 300s'
+    }
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
     $frontendArgs = @('-NoExit', '-NoLogo', '-File', $frontendStarter)

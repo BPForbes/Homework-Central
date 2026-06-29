@@ -446,14 +446,20 @@ build_projects() {
     rm -f "$api_build_log"
   fi
 
-  build_postgres_host_check
-
   require_cmd npm
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
     log "Installing frontend dependencies"
     npm ci --prefix "$FRONTEND_DIR"
   else
     log "Frontend dependencies already installed"
+  fi
+
+  log "Type-checking frontend (parallel with Postgres host check build)"
+  (cd "$FRONTEND_DIR" && npx tsc -b) &
+  frontend_tsc_pid=$!
+  build_postgres_host_check
+  if ! wait "$frontend_tsc_pid"; then
+    fail "frontend typecheck failed"
   fi
 }
 
@@ -499,6 +505,13 @@ run_stack() {
     HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
   fi
   BACKEND_PID=$!
+
+  log "Waiting for API to become ready before starting frontend"
+  if ! "$REPO_ROOT/scripts/wait-for-dev-server.sh" "http://localhost:5000/healthz" "API" 300; then
+    kill "$BACKEND_PID" 2>/dev/null || true
+    wait "$BACKEND_PID" 2>/dev/null || true
+    fail "API did not become ready within 300s"
+  fi
 
   log "Starting frontend on http://localhost:5173"
   VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &

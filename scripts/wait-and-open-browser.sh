@@ -14,14 +14,5 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-  status="$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"
-  if [[ "$status" =~ ^[23] || "$status" == "403" ]]; then
-    "$script_dir/open-dev-browser.sh" "$url"
-    exit 0
-  fi
-  sleep 1
-done
-
-printf '==> Timed out waiting for %s at %s\n' "$label" "$url" >&2
-exit 1
+"$script_dir/wait-for-dev-server.sh" "$url" "$label" "$max_attempts"
+"$script_dir/open-dev-browser.sh" "$url"
