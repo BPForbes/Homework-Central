@@ -3,7 +3,6 @@ using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
-using HomeworkCentral.Api.Legacy;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +17,6 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 {
     opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    LegacyForwardedHeaders.ClearKnownNetworks(opts);
     opts.KnownIPNetworks.Clear();
     opts.KnownProxies.Clear();
 });
