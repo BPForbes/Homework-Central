@@ -1,5 +1,6 @@
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Utilities;
@@ -77,6 +78,97 @@ public class AuthService(
             throw new UnauthorizedAccessException("Invalid email or password.");
 
         return await BuildAuthResponseAsync(user);
+    }
+
+    /// <inheritdoc />
+    public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
+    {
+        List<Guid> developerUserIdList = await db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.Role.Name == "Developer")
+            .Select(userRole => userRole.UserId)
+            .ToListAsync();
+        HashSet<Guid> developerUserIds = developerUserIdList.ToHashSet();
+
+        Dictionary<string, User> usersByEmail = await db.Users
+            .AsNoTracking()
+            .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
+
+        List<DevDeveloperOption> developers = new();
+
+        foreach (DevAccountDefinition account in DevAccountCatalog.All)
+        {
+            if (!usersByEmail.TryGetValue(account.DeveloperEmail, out User? developer))
+                continue;
+
+            if (!developerUserIds.Contains(developer.UserId))
+                continue;
+
+            List<DevUserOption> personas = new();
+            foreach (DevPersonaDefinition persona in account.Personas)
+            {
+                if (!usersByEmail.TryGetValue(persona.Email, out User? user))
+                    continue;
+
+                personas.Add(new DevUserOption
+                {
+                    UserId = user.UserId,
+                    Username = user.Username,
+                });
+            }
+
+            developers.Add(new DevDeveloperOption
+            {
+                UserId = developer.UserId,
+                Username = developer.Username,
+                Users = personas,
+            });
+        }
+
+        return new DevLoginOptionsResponse
+        {
+            Developers = developers,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<AuthResponse> DevLoginAsync(DevLoginRequest req)
+    {
+        User? developer = await db.Users
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.UserId == req.DeveloperUserId);
+
+        if (developer is null)
+            throw new UnauthorizedAccessException("Selected developer account was not found.");
+
+        DevAccountDefinition? account = DevAccountCatalog.FindByDeveloperEmail(developer.Email);
+        if (account is null || !developer.UserRoles.Any(ur => ur.Role.Name == "Developer"))
+            throw new UnauthorizedAccessException("Selected account is not a developer.");
+
+        User loginUser;
+        if (req.TargetUserId is null || req.TargetUserId == Guid.Empty)
+        {
+            loginUser = await db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .Include(u => u.EffectiveMask!)
+                    .ThenInclude(m => m.SubjectExpertiseMasks)
+                .FirstOrDefaultAsync(u => u.Username == DevBypass.DevAdminUsername)
+                ?? throw new InvalidOperationException("DevAdmin account is not configured.");
+        }
+        else
+        {
+            loginUser = await db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .Include(u => u.EffectiveMask!)
+                    .ThenInclude(m => m.SubjectExpertiseMasks)
+                .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
+                ?? throw new InvalidOperationException("Selected user was not found.");
+
+            if (account is null || !DevAccountCatalog.PersonaBelongsToAccount(account, loginUser.Email))
+                throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
+        }
+
+        return await BuildAuthResponseAsync(loginUser);
     }
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
@@ -221,7 +313,7 @@ public class AuthService(
         response.Cookies.Append("refresh_token", rawToken, new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,
+            Secure = http.HttpContext?.Request.IsHttps ?? false,
             SameSite = SameSiteMode.Strict,
             Expires = expires,
             Path = "/api/auth",

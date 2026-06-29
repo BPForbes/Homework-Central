@@ -1,3 +1,4 @@
+// IDE launch host: finds the repo root and runs scripts/run-dev.* with dev bypass enabled.
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -59,6 +60,9 @@ static int RunScript(string repoRoot)
 
     // IDE already compiled the API via the DevHost project reference; still install frontend deps.
     startInfo.Environment["HC_SKIP_DOTNET_BUILD"] = "1";
+    // Enable localhost dev bypass for API endpoints and the /devlogin frontend route.
+    startInfo.Environment["HC_DEV_BYPASS"] = "1";
+    startInfo.Environment["VITE_HC_DEV_BYPASS"] = "true";
 
     using Process process = Process.Start(startInfo)
         ?? throw new InvalidOperationException("Failed to start dev stack script.");

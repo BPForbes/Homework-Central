@@ -9,6 +9,8 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+#   HC_DEV_BYPASS=1         Set for the API child process (enables /devlogin backend)
+#   VITE_HC_DEV_BYPASS=true Set for the frontend (enables /devlogin route)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,6 +28,7 @@ DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
 BUILD_ONLY=false
 SKIP_DOCKER=false
+HC_API_BUILD_FAILED=0
 JWT_SECRET=""
 POSTGRES_PASSWORD=""
 POSTGRES_HOST_PORT="5434"
@@ -299,7 +302,7 @@ ensure_postgres_ready() {
   fi
 
   if ! test_postgres_host_connection; then
-    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: docker compose down -v && scripts/run-dev.sh"
+    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh"
   fi
 }
 
@@ -427,6 +430,7 @@ build_postgres_host_check() {
 
 build_projects() {
   local skip_dotnet=false
+  HC_API_BUILD_FAILED=0
   if [[ "${HC_SKIP_DOTNET_BUILD:-}" == "1" || "${HC_SKIP_BUILD:-}" == "1" ]]; then
     log "Skipping API build (HC_SKIP_DOTNET_BUILD=1)"
     skip_dotnet=true
@@ -435,10 +439,16 @@ build_projects() {
   if [[ "$skip_dotnet" == false ]]; then
     require_cmd dotnet
     log "Building API"
-    dotnet build "$API_PROJECT" -c Debug
+    api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
+    if ! dotnet build "$API_PROJECT" -c Debug 2>&1 | tee "$api_build_log"; then
+      "$REPO_ROOT/scripts/open-api-error-page.sh" "API Build Errors" "$api_build_log" || true
+      rm -f "$api_build_log"
+      HC_API_BUILD_FAILED=1
+      log "API build failed; frontend will start and show unable to connect to API"
+    else
+      rm -f "$api_build_log"
+    fi
   fi
-
-  build_postgres_host_check
 
   require_cmd npm
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
@@ -447,12 +457,27 @@ build_projects() {
   else
     log "Frontend dependencies already installed"
   fi
+
+  log "Type-checking frontend (parallel with Postgres host check build)"
+  (cd "$FRONTEND_DIR" && npx tsc -b) &
+  frontend_tsc_pid=$!
+  build_postgres_host_check
+  if ! wait "$frontend_tsc_pid"; then
+    fail "frontend typecheck failed"
+  fi
 }
 
 supervise_children() {
+  local exit_code=0
+
+  if [[ $# -eq 1 ]]; then
+    wait "$1" 2>/dev/null || exit_code=$?
+    trap - EXIT INT TERM
+    return "$exit_code"
+  fi
+
   local backend_pid=$1
   local frontend_pid=$2
-  local exit_code=0
 
   while kill -0 "$backend_pid" 2>/dev/null && kill -0 "$frontend_pid" 2>/dev/null; do
     sleep 0.2
@@ -484,22 +509,50 @@ run_stack() {
     init_dev_stack_state "$POSTGRES_HOST_PORT" 2
   fi
 
-  log "Starting API on http://localhost:5000"
-  if [[ "$SKIP_DOCKER" == true ]]; then
-    HC_SKIP_DOCKER=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+  local api_ready=0
+  BACKEND_PID=""
+
+  if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
+    log "Starting API on http://localhost:5000"
+    if [[ "$SKIP_DOCKER" == true ]]; then
+      HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    else
+      HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    fi
+    BACKEND_PID=$!
+
+    log "Waiting for API to become ready before starting frontend"
+    if "$REPO_ROOT/scripts/wait-for-dev-server.sh" "http://localhost:5000/healthz" "API" 300; then
+      api_ready=1
+    else
+      log "API is not ready; starting frontend with unable to connect to API"
+    fi
   else
-    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+    log "Skipping API start because the build failed (see API Build Errors browser tab)"
   fi
-  BACKEND_PID=$!
 
   log "Starting frontend on http://localhost:5173"
-  npm run dev --prefix "$FRONTEND_DIR" &
+  VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
+
+  if [[ "$api_ready" -eq 1 ]]; then
+    "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+    API_BROWSER_PID=$!
+  else
+    API_BROWSER_PID=""
+  fi
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/login" "Frontend" 300 &
+  FRONTEND_BROWSER_PID=$!
 
   cleanup() {
     log "Stopping dev servers"
-    kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
-    wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    if [[ -n "$BACKEND_PID" ]]; then
+      kill "$BACKEND_PID" "$FRONTEND_PID" "${API_BROWSER_PID:-}" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
+      wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    else
+      kill "$FRONTEND_PID" "${API_BROWSER_PID:-}" "$FRONTEND_BROWSER_PID" 2>/dev/null || true
+      wait "$FRONTEND_PID" 2>/dev/null || true
+    fi
     if [[ "$SKIP_DOCKER" == false ]]; then
       unregister_dev_stack_server
     fi
@@ -507,15 +560,23 @@ run_stack() {
   trap cleanup EXIT INT TERM
 
   log "Dev stack is running"
-  log "  Frontend: http://localhost:5173"
-  log "  API:      http://localhost:5000"
+  log "  Frontend: http://localhost:5173/login"
+  if [[ "$api_ready" -eq 1 ]]; then
+    log "  API:      http://localhost:5000"
+  else
+    log "  API:      unavailable (check API Build Errors or API terminal output)"
+  fi
   if [[ "$SKIP_DOCKER" == false ]]; then
     log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
   fi
   log "Press Ctrl+C to stop servers and free the Postgres port"
   log "Or run: scripts/stop-dev.sh"
 
-  supervise_children "$BACKEND_PID" "$FRONTEND_PID"
+  if [[ -n "$BACKEND_PID" ]]; then
+    supervise_children "$BACKEND_PID" "$FRONTEND_PID"
+  else
+    supervise_children "$FRONTEND_PID"
+  fi
   local status=$?
   if [[ $status -ne 0 ]]; then
     exit "$status"

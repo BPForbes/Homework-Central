@@ -231,3 +231,65 @@ function Stop-DevStack {
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
     }
 }
+
+function Get-DevStackPowerShellExe {
+    $candidates = @(
+        (Get-Command pwsh -ErrorAction SilentlyContinue),
+        (Get-Command 'C:\Program Files\PowerShell\7\pwsh.exe' -ErrorAction SilentlyContinue),
+        (Get-Command powershell -ErrorAction SilentlyContinue)
+    ) | Where-Object { $_ -ne $null }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate.Source) {
+            return $candidate.Source
+        }
+    }
+
+    throw 'PowerShell executable not found (install PowerShell 7+ or use Windows PowerShell).'
+}
+
+function Start-DevStackPowerShellProcess {
+    param(
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory = $script:RepoRoot,
+        [System.Diagnostics.ProcessWindowStyle]$WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal,
+        [switch]$PassThru
+    )
+
+    $exe = Get-DevStackPowerShellExe
+    $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass') + $ArgumentList
+    $process = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $WorkingDirectory -WindowStyle $WindowStyle -PassThru
+    if ($PassThru) {
+        return $process
+    }
+}
+
+function Start-FrontendTypecheckJob([string]$FrontendDir) {
+    return Start-Job -ScriptBlock {
+        param($Dir)
+        Push-Location $Dir
+        try {
+            npx tsc -b
+            if ($LASTEXITCODE -ne 0) {
+                throw "frontend typecheck failed with exit code $LASTEXITCODE"
+            }
+        } finally {
+            Pop-Location
+        }
+    } -ArgumentList $FrontendDir
+}
+
+function Wait-FrontendTypecheckJob($Job) {
+    Wait-Job $Job | Out-Null
+    if ($Job.State -eq 'Failed') {
+        $output = Receive-Job $Job
+        Remove-Job $Job -Force
+        if ($output) {
+            $output | Write-Host
+        }
+        throw 'frontend typecheck failed'
+    }
+
+    Receive-Job $Job | Out-Null
+    Remove-Job $Job -Force
+}

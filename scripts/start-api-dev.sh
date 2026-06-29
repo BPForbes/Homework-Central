@@ -2,6 +2,7 @@
 # Launch the API for local development.
 #
 # Local Postgres credentials are fixed: postgres / postgres
+# Sets HC_DEV_BYPASS=1 so localhost dev auth endpoints and the styled 403 root page are enabled.
 #
 # Usage:
 #   scripts/start-api-dev.sh
@@ -60,6 +61,8 @@ read_jwt_secret
 export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5000
 export Jwt__Secret="$JWT_SECRET"
+# Enables DevAuthController, dev seed data, and the styled localhost root page.
+export HC_DEV_BYPASS=1
 export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 
 printf 'Homework Central API - http://localhost:5000\n'
@@ -76,5 +79,31 @@ if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
+if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+  BROWSER_WAIT_PID=$!
+fi
+
 cd "$REPO_ROOT"
-dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000
+API_ERROR_LOG="$(mktemp /tmp/hc-api-run-errors-XXXXXX.log)"
+
+cleanup_on_exit() {
+  rm -f "$API_ERROR_LOG"
+  cleanup_api
+}
+trap cleanup_on_exit EXIT
+
+set +e
+dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+api_status=$?
+set -e
+
+kill "${BROWSER_WAIT_PID:-}" 2>/dev/null || true
+wait "${BROWSER_WAIT_PID:-}" 2>/dev/null || true
+
+if [[ $api_status -ne 0 ]]; then
+  if [[ -s "$API_ERROR_LOG" ]]; then
+    "$REPO_ROOT/scripts/open-api-error-page.sh" "API Errors" "$API_ERROR_LOG" || true
+  fi
+  exit "$api_status"
+fi
