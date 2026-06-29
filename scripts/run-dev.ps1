@@ -8,6 +8,7 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+# Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
 [CmdletBinding()]
 param(
     [switch]$BuildOnly,
@@ -32,6 +33,7 @@ $DevPostgresPassword = 'postgres'
 $DevPostgresHostPort = '5434'
 $DevPostgresHostPortMin = 5434
 $DevPostgresHostPortMax = 5450
+$script:ApiBuildFailed = $false
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
@@ -474,15 +476,24 @@ function Build-PostgresHostCheck {
 }
 
 function Build-Projects {
+    $script:ApiBuildFailed = $false
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
-        Build-PostgresHostCheck
     } else {
         Write-Step 'Building API'
-        dotnet build $ApiProject -c Debug
-        if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
-        Build-PostgresHostCheck
+        $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
+        dotnet build $ApiProject -c Debug 2>&1 | Tee-Object -FilePath $apiBuildLog
+        if ($LASTEXITCODE -ne 0) {
+            if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
+                & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
+            }
+            if ($BuildOnly) {
+                throw 'API build failed'
+            }
+            $script:ApiBuildFailed = $true
+            Write-Step 'API build failed; frontend will start and show unable to connect to API'
+        }
     }
 
     if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
@@ -492,6 +503,11 @@ function Build-Projects {
     } else {
         Write-Step 'Frontend dependencies already installed'
     }
+
+    Write-Step 'Type-checking frontend (parallel with Postgres host check build)'
+    $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
+    Build-PostgresHostCheck
+    Wait-FrontendTypecheckJob -Job $frontendTscJob
 }
 
 function Start-DevStack([hashtable]$EnvValues) {
@@ -502,29 +518,53 @@ function Start-DevStack([hashtable]$EnvValues) {
         Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
     }
 
-    Write-Step 'Starting API in a new terminal (http://localhost:5000)'
-    $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
-    if ($SkipDocker) {
-        $apiArgs += '-SkipDocker'
+    $env:HC_SKIP_BROWSER_OPEN = '1'
+
+    if (-not $script:ApiBuildFailed) {
+        Write-Step 'Starting API in a new terminal (http://localhost:5000)'
+        $apiArgs = @('-NoExit', '-File', $apiStarter)
+        if ($SkipDocker) {
+            $apiArgs += '-SkipDocker'
+        } else {
+            $apiArgs += '-PreRegistered'
+        }
+        Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
     } else {
-        $apiArgs += '-PreRegistered'
+        Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
-    Start-Process -FilePath 'pwsh' `
-        -ArgumentList $apiArgs `
-        -WorkingDirectory $RepoRoot
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
-    $frontendArgs = @('-NoExit', '-NoLogo', '-File', $frontendStarter)
+    $frontendArgs = @('-NoExit', '-File', $frontendStarter)
     if (-not $SkipDocker) {
         $frontendArgs += '-PreRegistered'
     }
-    Start-Process -FilePath 'pwsh' `
-        -ArgumentList $frontendArgs `
-        -WorkingDirectory $RepoRoot
+    Start-DevStackPowerShellProcess -ArgumentList $frontendArgs -WorkingDirectory $RepoRoot
+
+    Write-Step 'Opening browser tabs when servers are ready'
+    if (-not $script:ApiBuildFailed) {
+        Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
+            '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
+            '-Url', 'http://localhost:5000/',
+            '-Label', 'API',
+            '-MaxAttempts', '300'
+        ) -WorkingDirectory $RepoRoot
+    }
+    Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
+        '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
+        '-Url', 'http://localhost:5173/login',
+        '-Label', 'Frontend',
+        '-MaxAttempts', '300'
+    ) -WorkingDirectory $RepoRoot
+
+    Remove-Item Env:HC_SKIP_BROWSER_OPEN -ErrorAction SilentlyContinue
 
     Write-Step 'Dev stack is running in separate terminals'
-    Write-Host '  Frontend: http://localhost:5173'
-    Write-Host '  API:      http://localhost:5000'
+    Write-Host '  Frontend: http://localhost:5173/login'
+    if (-not $script:ApiBuildFailed) {
+        Write-Host '  API:      http://localhost:5000'
+    } else {
+        Write-Host '  API:      unavailable (check API Build Errors browser tab)'
+    }
     if (-not $SkipDocker) {
         Write-Host '  Postgres: localhost:' -NoNewline
         Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline

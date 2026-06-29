@@ -2,6 +2,7 @@ using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -76,6 +77,9 @@ builder.Services.AddCors(opts =>
 
 WebApplication app = builder.Build();
 
+// Localhost-only developer bypass (HC_DEV_BYPASS=1 + Development + loopback).
+bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
+
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
 
@@ -84,8 +88,9 @@ app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
     ctx.Response.Headers["X-Frame-Options"] = "DENY";
-    ctx.Response.Headers["Content-Security-Policy"] =
-        "default-src 'self'; frame-ancestors 'none';";
+    ctx.Response.Headers["Content-Security-Policy"] = devBypassEnabled
+        ? "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors 'none';"
+        : "default-src 'self'; frame-ancestors 'none';";
     await next();
 });
 
@@ -97,6 +102,13 @@ app.MapControllers();
 
 // Health probe for Docker / load balancers
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
+
+// Localhost-only dev landing routes and linked favicon (see DevAssets.CanonicalFaviconRepoPath).
+if (devBypassEnabled)
+{
+    app.MapGet("/", DevRootPage.ForbiddenDirectoryPage);
+    app.MapGet("/favicon.svg", DevRootPage.Favicon);
+}
 
 // Auto-migrate only in Development to avoid blocking production deploys
 // and concurrent startup races. In production, run migrations explicitly.
@@ -111,7 +123,10 @@ using (IServiceScope seedScope = app.Services.CreateScope())
 {
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
     await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
+    if (devBypassEnabled)
+        await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
 }
 
 app.Run();
