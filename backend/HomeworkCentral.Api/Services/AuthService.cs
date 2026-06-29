@@ -82,31 +82,41 @@ public class AuthService(
 
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
-        List<DevUserOption> developers = await db.Users
-            .Where(u => u.UserRoles.Any(ur => ur.Role.Name == "Developer"))
-            .OrderBy(u => u.Username)
-            .Select(u => new DevUserOption
-            {
-                UserId = u.UserId,
-                Username = u.Username,
-                Email = u.Email,
-            })
-            .ToListAsync();
+        Dictionary<string, User> usersByEmail = await db.Users
+            .AsNoTracking()
+            .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
 
-        List<DevUserOption> users = await db.Users
-            .OrderBy(u => u.Username)
-            .Select(u => new DevUserOption
+        List<DevDeveloperOption> developers = new();
+
+        foreach (DevAccountDefinition account in DevAccountCatalog.All)
+        {
+            if (!usersByEmail.TryGetValue(account.DeveloperEmail, out User? developer))
+                continue;
+
+            List<DevUserOption> personas = new();
+            foreach (DevPersonaDefinition persona in account.Personas)
             {
-                UserId = u.UserId,
-                Username = u.Username,
-                Email = u.Email,
-            })
-            .ToListAsync();
+                if (!usersByEmail.TryGetValue(persona.Email, out User? user))
+                    continue;
+
+                personas.Add(new DevUserOption
+                {
+                    UserId = user.UserId,
+                    Username = user.Username,
+                });
+            }
+
+            developers.Add(new DevDeveloperOption
+            {
+                UserId = developer.UserId,
+                Username = developer.Username,
+                Users = personas,
+            });
+        }
 
         return new DevLoginOptionsResponse
         {
             Developers = developers,
-            Users = users,
         };
     }
 
@@ -116,7 +126,11 @@ public class AuthService(
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.UserId == req.DeveloperUserId);
 
-        if (developer is null || !developer.UserRoles.Any(ur => ur.Role.Name == "Developer"))
+        if (developer is null)
+            throw new UnauthorizedAccessException("Selected developer account was not found.");
+
+        DevAccountDefinition? account = DevAccountCatalog.FindByDeveloperEmail(developer.Email);
+        if (account is null || !developer.UserRoles.Any(ur => ur.Role.Name == "Developer"))
             throw new UnauthorizedAccessException("Selected account is not a developer.");
 
         User loginUser;
@@ -137,6 +151,9 @@ public class AuthService(
                     .ThenInclude(m => m.SubjectExpertiseMasks)
                 .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
                 ?? throw new InvalidOperationException("Selected user was not found.");
+
+            if (account is null || !DevAccountCatalog.PersonaBelongsToAccount(account, loginUser.Email))
+                throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
         }
 
         return await BuildAuthResponseAsync(loginUser);

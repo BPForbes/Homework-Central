@@ -1,22 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../api/authApi'
-import type { DevUserOption } from '../types/devAuth'
+import type { DevDeveloperOption } from '../types/devAuth'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
 export function DevLogin() {
   const { devLogin } = useAuth()
   const navigate = useNavigate()
-  const [developers, setDevelopers] = useState<DevUserOption[]>([])
-  const [users, setUsers] = useState<DevUserOption[]>([])
+  const [developers, setDevelopers] = useState<DevDeveloperOption[]>([])
   const [developerUserId, setDeveloperUserId] = useState('')
   const [targetUserId, setTargetUserId] = useState('')
   const [error, setError] = useState('')
   const [apiUnavailable, setApiUnavailable] = useState(false)
   const [isLoadingOptions, setIsLoadingOptions] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const selectedDeveloper = useMemo(
+    () => developers.find((developer) => developer.userId === developerUserId) ?? null,
+    [developers, developerUserId]
+  )
+
+  const availableUsers = selectedDeveloper?.users ?? []
 
   useEffect(() => {
     if (!DEV_BYPASS_ENABLED) {
@@ -38,7 +44,6 @@ export function DevLogin() {
         const options = await authApi.devOptions()
         if (cancelled) return
         setDevelopers(options.data.developers)
-        setUsers(options.data.users)
         if (options.data.developers.length > 0) {
           setDeveloperUserId(options.data.developers[0].userId)
         }
@@ -54,6 +59,10 @@ export function DevLogin() {
       cancelled = true
     }
   }, [navigate])
+
+  useEffect(() => {
+    setTargetUserId('')
+  }, [developerUserId])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -113,7 +122,7 @@ export function DevLogin() {
               {developers.length === 0 && <option value="">No developers found</option>}
               {developers.map((dev) => (
                 <option key={dev.userId} value={dev.userId}>
-                  {dev.username} ({dev.email})
+                  {dev.username}
                 </option>
               ))}
             </select>
@@ -125,12 +134,12 @@ export function DevLogin() {
               id="targetUser"
               value={targetUserId}
               onChange={(e) => setTargetUserId(e.target.value)}
-              disabled={loginDisabled}
+              disabled={loginDisabled || availableUsers.length === 0}
             >
-              <option value="">DevAdmin (Owner permissions)</option>
-              {users.map((user) => (
+              <option value="">—</option>
+              {availableUsers.map((user) => (
                 <option key={user.userId} value={user.userId}>
-                  {user.username} ({user.email})
+                  {user.username}
                 </option>
               ))}
             </select>
@@ -142,10 +151,6 @@ export function DevLogin() {
             {isSubmitting ? 'Signing in…' : isLoadingOptions ? 'Loading…' : 'Sign in'}
           </button>
         </form>
-
-        <p className="auth-footer dev-login-hint">
-          Local development only. Leave user blank to sign in as DevAdmin.
-        </p>
       </div>
     </div>
   )

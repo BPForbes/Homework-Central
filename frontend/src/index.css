@@ -121,10 +121,6 @@ body {
   line-height: 1;
 }
 
-.dev-login-hint {
-  font-size: 0.8rem;
-}
-
 .error {
   color: #dc2626;
   font-size: 0.875rem;

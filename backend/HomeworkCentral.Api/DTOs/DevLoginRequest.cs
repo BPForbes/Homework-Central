@@ -8,7 +8,13 @@ public class DevLoginRequest
 
 public class DevLoginOptionsResponse
 {
-    public List<DevUserOption> Developers { get; set; } = new();
+    public List<DevDeveloperOption> Developers { get; set; } = new();
+}
+
+public class DevDeveloperOption
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = null!;
     public List<DevUserOption> Users { get; set; } = new();
 }
 
@@ -16,5 +22,4 @@ public class DevUserOption
 {
     public Guid UserId { get; set; }
     public string Username { get; set; } = null!;
-    public string Email { get; set; } = null!;
 }

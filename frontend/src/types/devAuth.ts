@@ -1,12 +1,16 @@
 export interface DevUserOption {
   userId: string
   username: string
-  email: string
+}
+
+export interface DevDeveloperOption {
+  userId: string
+  username: string
+  users: DevUserOption[]
 }
 
 export interface DevLoginOptions {
-  developers: DevUserOption[]
-  users: DevUserOption[]
+  developers: DevDeveloperOption[]
 }
 
 export interface DevLoginRequest {

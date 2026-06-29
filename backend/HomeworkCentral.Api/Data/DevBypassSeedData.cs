@@ -13,33 +13,56 @@ public static class DevBypassSeedData
         IEffectiveMaskService effectiveMaskService,
         CancellationToken ct = default)
     {
-        Role ownerRole = await db.Roles.FirstAsync(r => r.Name == "Owner", ct);
-        Role developerRole = await db.Roles.FirstAsync(r => r.Name == "Developer", ct);
+        Dictionary<string, Role> rolesByName = await db.Roles.ToDictionaryAsync(r => r.Name, ct);
+        Role developerRole = rolesByName["Developer"];
+        Role ownerRole = rolesByName["Owner"];
 
-        User devAdmin = await EnsureUserAsync(
+        User devAdmin = await EnsureUserWithRolesAsync(
             db,
             DevBypass.DevAdminEmail,
             DevBypass.DevAdminUsername,
-            ownerRole,
+            [ownerRole],
             ct);
 
-        User devDeveloper = await EnsureUserAsync(
-            db,
-            "devdeveloper@localhost.local",
-            "DevDeveloper",
-            developerRole,
-            ct);
+        List<User> seededUsers = [devAdmin];
+
+        foreach (DevAccountDefinition account in DevAccountCatalog.All)
+        {
+            User developer = await EnsureUserWithRolesAsync(
+                db,
+                account.DeveloperEmail,
+                account.DeveloperUsername,
+                [developerRole],
+                ct);
+            seededUsers.Add(developer);
+
+            foreach (DevPersonaDefinition persona in account.Personas)
+            {
+                Role[] personaRoles = persona.Roles
+                    .Select(roleName => rolesByName[roleName])
+                    .ToArray();
+
+                User user = await EnsureUserWithRolesAsync(
+                    db,
+                    persona.Email,
+                    persona.Username,
+                    personaRoles,
+                    ct);
+                seededUsers.Add(user);
+            }
+        }
 
         await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(devAdmin.UserId, ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(devDeveloper.UserId, ct);
+
+        foreach (User user in seededUsers.DistinctBy(u => u.UserId))
+            await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId, ct);
     }
 
-    private static async Task<User> EnsureUserAsync(
+    private static async Task<User> EnsureUserWithRolesAsync(
         AppDbContext db,
         string email,
         string username,
-        Role role,
+        IReadOnlyList<Role> roles,
         CancellationToken ct)
     {
         User? user = await db.Users
@@ -66,8 +89,18 @@ public static class DevBypassSeedData
             user.UpdatedAt = now;
         }
 
-        bool hasRole = user.UserRoles.Any(ur => ur.RoleId == role.RoleId);
-        if (!hasRole)
+        HashSet<Guid> desiredRoleIds = roles.Select(role => role.RoleId).ToHashSet();
+        List<UserRole> staleAssignments = user.UserRoles
+            .Where(userRole => !desiredRoleIds.Contains(userRole.RoleId))
+            .ToList();
+        foreach (UserRole staleAssignment in staleAssignments)
+            user.UserRoles.Remove(staleAssignment);
+
+        HashSet<Guid> existingRoleIds = user.UserRoles
+            .Select(userRole => userRole.RoleId)
+            .ToHashSet();
+
+        foreach (Role role in roles.Where(role => !existingRoleIds.Contains(role.RoleId)))
         {
             user.UserRoles.Add(new UserRole
             {
