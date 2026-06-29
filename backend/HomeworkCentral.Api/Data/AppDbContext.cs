@@ -21,11 +21,11 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     {
         mb.Entity<User>(e =>
         {
+            e.ToTable(t => t.HasCheckConstraint("CK_Users_Email_Lower", "\"Email\" = lower(\"Email\")"));
             e.HasKey(u => u.UserId);
             e.Property(u => u.UserId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(u => u.Email).HasMaxLength(320).IsRequired();
             e.HasIndex(u => u.Email).IsUnique();
-            e.HasCheckConstraint("CK_Users_Email_Lower", "\"Email\" = lower(\"Email\")");
             e.Property(u => u.Username).HasMaxLength(64).IsRequired();
             e.HasIndex(u => u.Username).IsUnique();
             e.Property(u => u.PasswordHash).IsRequired();
@@ -65,6 +65,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
         mb.Entity<Permission>(e =>
         {
+            e.ToTable(t => t.HasCheckConstraint("CK_Permissions_PermissionId_Range", "\"PermissionId\" BETWEEN 0 AND 255"));
             e.HasKey(p => p.PermissionId);
             e.Property(p => p.PermissionId).ValueGeneratedNever();
             e.Property(p => p.Name).HasMaxLength(64).IsRequired();
@@ -72,7 +73,6 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             e.Property(p => p.DisplayName).HasMaxLength(128).IsRequired();
             e.Property(p => p.IsReserved).HasDefaultValue(false);
             e.Property(p => p.Category).HasMaxLength(64);
-            e.HasCheckConstraint("CK_Permissions_PermissionId_Range", "\"PermissionId\" BETWEEN 0 AND 255");
         });
 
         mb.Entity<RolePermission>(e =>
@@ -90,13 +90,16 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
         mb.Entity<Subject>(e =>
         {
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_Subjects_BitIndex_Range", "\"BitIndex\" BETWEEN 0 AND 127");
+                t.HasCheckConstraint("CK_Subjects_SubjectMask_Allowed", SubjectMaskAllowedSql());
+            });
             e.HasKey(s => s.SubjectId);
             e.Property(s => s.SubjectId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(s => s.SubjectMask).HasMaxLength(64).IsRequired();
             e.Property(s => s.Name).HasMaxLength(128).IsRequired();
             e.HasIndex(s => new { s.SubjectMask, s.BitIndex }).IsUnique();
-            e.HasCheckConstraint("CK_Subjects_BitIndex_Range", "\"BitIndex\" BETWEEN 0 AND 127");
-            e.HasCheckConstraint("CK_Subjects_SubjectMask_Allowed", SubjectMaskAllowedSql());
             e.HasOne(s => s.ParentSubject)
                 .WithMany(s => s.ChildSubjects)
                 .HasForeignKey(s => s.ParentSubjectId)
@@ -138,9 +141,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
         mb.Entity<UserSubjectExpertiseMask>(e =>
         {
+            e.ToTable(t => t.HasCheckConstraint("CK_UserSubjectExpertiseMasks_Category_Allowed", ExpertiseCategoryAllowedSql()));
             e.HasKey(m => new { m.UserId, m.Category });
             e.Property(m => m.Category).HasMaxLength(64).IsRequired();
-            e.HasCheckConstraint("CK_UserSubjectExpertiseMasks_Category_Allowed", ExpertiseCategoryAllowedSql());
             e.Property(m => m.ExpertiseMask).HasBitColumn("bit(128)", 128);
             e.HasOne(m => m.EffectiveMask)
                 .WithMany(m => m.SubjectExpertiseMasks)

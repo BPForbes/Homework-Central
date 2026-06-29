@@ -17,12 +17,23 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# dotnet/msbuild may write warnings to stderr; do not treat that as a terminating error.
+$PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
+$PostgresHostCheckProject = Join-Path $RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
+$PostgresHostCheckDll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll'
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
+$DevPostgresUser = 'postgres'
+$DevPostgresPassword = 'postgres'
+$DevPostgresHostPort = '5434'
+$DevPostgresHostPortMin = 5434
+$DevPostgresHostPortMax = 5450
+
+. (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
 function Show-Usage {
     @'
@@ -36,30 +47,319 @@ Options:
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Help         Show this help
 
-After startup:
+After startup (each server opens in its own terminal window):
   Frontend  http://localhost:5173
   API       http://localhost:5000
   Health    http://localhost:5000/healthz
 
-Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+
+Stop:
+  scripts/stop-dev.ps1
+  Closing both API and frontend terminals stops Docker Postgres and frees its port.
+  Restarting the API alone will auto-start Postgres if needed.
+
+Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+, PowerShell 7+ (pwsh)
 '@ | Write-Output
 }
 
 function Write-Step([string]$Message) {
-    Write-Output "==> $Message"
+    # Write-Host keeps status lines off the function output stream (Write-Output would
+    # pollute return values, e.g. Ensure-EnvFile returning Object[] instead of hashtable).
+    Write-Host "==> $Message"
 }
 
 function New-RandomSecret {
     $bytes = New-Object byte[] 48
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    return [Convert]::ToBase64String($bytes)
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Test-IsWindowsHost {
+    return $IsWindows -or $env:OS -match '(?i)Windows'
+}
+
+function Test-LoopbackPortListener([int]$Port) {
+    if (-not (Test-IsWindowsHost)) {
+        return $false
+    }
+
+    try {
+        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    } catch {
+        $listeners = @()
+    }
+
+    if ($listeners.Count -eq 0) {
+        $pattern = ":$Port\s"
+        $listeners = netstat -ano | Select-String 'LISTENING' | Select-String $pattern
+        foreach ($line in $listeners) {
+            $text = $line.ToString()
+            if ($text -match '127\.0\.0\.1:' -or $text -match '\[::1\]:') {
+                return $true
+            }
+        }
+        return $false
+    }
+
+    return $null -ne ($listeners | Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') } | Select-Object -First 1)
+}
+
+function Find-FreePostgresHostPort {
+    for ($port = $DevPostgresHostPortMin; $port -le $DevPostgresHostPortMax; $port++) {
+        if (Test-LoopbackPortListener $port) {
+            continue
+        }
+
+        $listeners = @()
+        try {
+            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+        } catch {
+            $listeners = @()
+        }
+
+        if ($listeners.Count -eq 0) {
+            return "$port"
+        }
+    }
+
+    return $null
+}
+
+function Update-EnvFileValues([hashtable]$Values) {
+    $lines = Get-Content $EnvFile
+    $newLines = @()
+    $seen = @{}
+
+    foreach ($line in $lines) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') {
+            $newLines += $line
+            continue
+        }
+
+        $name = ($line -split '=', 2)[0].Trim()
+        if ($Values.ContainsKey($name)) {
+            $newLines += "$name=$($Values[$name])"
+            $seen[$name] = $true
+        } else {
+            $newLines += $line
+        }
+    }
+
+    foreach ($key in $Values.Keys) {
+        if (-not $seen.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($Values[$key])) {
+            $newLines += "$key=$($Values[$key])"
+        }
+    }
+
+    Set-Content -Path $EnvFile -Value $newLines
+}
+
+function Resolve-PostgresHostPort([hashtable]$Values) {
+    $port = [int]$Values['POSTGRES_HOST_PORT']
+
+    if (-not (Test-LoopbackPortListener $port)) {
+        return $Values
+    }
+
+    Write-Step "Port $port is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
+    $freePort = Find-FreePostgresHostPort
+    if ([string]::IsNullOrWhiteSpace($freePort)) {
+        throw "No free Postgres host port found between $DevPostgresHostPortMin and $DevPostgresHostPortMax"
+    }
+
+    Write-Step "Using POSTGRES_HOST_PORT=$freePort instead"
+    $Values['POSTGRES_HOST_PORT'] = $freePort
+    Update-EnvFileValues @{ POSTGRES_HOST_PORT = $freePort }
+    return (Read-EnvFile)
+}
+
+function Set-ComposeEnv([hashtable]$EnvValues) {
+    $env:POSTGRES_PASSWORD = $DevPostgresPassword
+    $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
+}
+
+function Invoke-PostgresAdminSql {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Sql
+    )
+
+    # Suppress psql NOTICE lines — uncaptured stdout would pollute caller return values in PowerShell.
+    docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -v ON_ERROR_STOP=1 -c `"$Sql`"" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Postgres command failed: $Sql"
+    }
+}
+
+function Get-PostgresPublishedPort {
+    $raw = (docker compose -f $ComposeFile --env-file $EnvFile port postgres 5432 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+        return $null
+    }
+
+    if ($raw -match ':(\d+)$') {
+        return $Matches[1]
+    }
+
+    return $null
+}
+
+function Test-PostgresHostConnection([hashtable]$EnvValues) {
+    $port = $EnvValues['POSTGRES_HOST_PORT']
+    $published = Get-PostgresPublishedPort
+    if ($published -and $published -ne $port) {
+        Write-Step "Docker Postgres is not published on localhost:$port (container maps to ${published})"
+        return $false
+    }
+
+    if (-not (Test-Path $PostgresHostCheckDll)) {
+        Build-PostgresHostCheck
+    }
+
+    # Same localhost path the API uses (docker run + host.docker.internal is unreliable on Windows).
+    $stderr = ''
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        $stderr = dotnet $PostgresHostCheckDll $port 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    Write-Step "Cannot connect to homework_central on localhost:$port from the host"
+    $detail = $stderr.Trim()
+    if ($detail) {
+        Write-Host "       $detail" -ForegroundColor DarkGray
+    }
+    return $false
+}
+
+function Test-PostgresAuth {
+    param(
+        [string]$Database = 'postgres'
+    )
+
+    docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -p 5432 -U $DevPostgresUser -d $Database -tAc `"SELECT 1`"" *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+function Repair-PostgresCollation {
+    Write-Step 'Refreshing Postgres collation versions (fixes stale Docker volumes)'
+    Invoke-PostgresAdminSql 'ALTER DATABASE template1 REFRESH COLLATION VERSION;'
+    Invoke-PostgresAdminSql 'ALTER DATABASE postgres REFRESH COLLATION VERSION;'
+
+    $output = (docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`"" 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0 -and $output -eq '1') {
+        Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
+    }
+}
+
+function Prepare-HomeworkCentralDatabase {
+    try {
+        Repair-PostgresCollation
+    } catch {
+        return $false
+    }
+
+    $output = (docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`"" 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    if ($output -ne '1') {
+        Write-Step 'Creating homework_central database'
+        try {
+            Invoke-PostgresAdminSql 'CREATE DATABASE homework_central;'
+            Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
+        } catch {
+            return $false
+        }
+    }
+
+    if (-not (Test-PostgresAuth -Database 'homework_central')) {
+        return $false
+    }
+
+    return $true
+}
+
+function Start-PostgresContainer([hashtable]$EnvValues) {
+    $expectedPort = $EnvValues['POSTGRES_HOST_PORT']
+    $published = Get-PostgresPublishedPort
+
+    if ($published -and $published -ne $expectedPort) {
+        Write-Step "Recreating Postgres container for localhost:$expectedPort"
+        docker compose -f $ComposeFile --env-file $EnvFile up -d --force-recreate postgres
+    } else {
+        docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    }
+
+    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+}
+
+function Reset-PostgresVolume {
+    Write-Step 'Recreating Postgres Docker volume (reset to postgres/postgres credentials)'
+    docker compose -f $ComposeFile --env-file $EnvFile down -v --remove-orphans *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to remove Postgres Docker volume'
+    }
+}
+
+function Ensure-PostgresReady([hashtable]$EnvValues) {
+    Set-ComposeEnv $EnvValues
+
+    Start-PostgresContainer -EnvValues $EnvValues
+
+    Write-Step 'Waiting for Postgres to accept connections'
+    Wait-ForPostgres
+
+    if (-not (Test-PostgresAuth -Database 'postgres')) {
+        Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
+        Reset-PostgresVolume
+        Start-PostgresContainer -EnvValues $EnvValues
+        Write-Step 'Waiting for Postgres to accept connections'
+        Wait-ForPostgres
+        if (-not (Test-PostgresAuth -Database 'postgres')) {
+            throw 'Postgres password verification failed after recreating the Docker volume'
+        }
+    }
+
+    if (-not (Prepare-HomeworkCentralDatabase)) {
+        Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
+        Reset-PostgresVolume
+        Start-PostgresContainer -EnvValues $EnvValues
+        Write-Step 'Waiting for Postgres to accept connections'
+        Wait-ForPostgres
+
+        if (-not (Prepare-HomeworkCentralDatabase)) {
+            throw 'Failed to prepare homework_central inside the Docker Postgres container'
+        }
+    }
+
+    if (-not (Test-PostgresHostConnection $EnvValues)) {
+        $port = $EnvValues['POSTGRES_HOST_PORT']
+        $loopbackHint = ''
+        if (Test-LoopbackPortListener ([int]$port)) {
+            $loopbackHint = "`nPort $port is bound on 127.0.0.1 by another PostgreSQL install, so localhost does not reach Docker."
+        }
+        throw @"
+Failed to reach homework_central on localhost:$port.$loopbackHint
+Pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
+  docker compose down -v
+  pwsh .\scripts\run-dev.ps1
+"@
+    }
 }
 
 function Read-EnvFile {
     $values = @{
         JWT_SECRET = ''
         POSTGRES_PASSWORD = ''
-        POSTGRES_HOST_PORT = '5432'
+        POSTGRES_HOST_PORT = $DevPostgresHostPort
     }
 
     foreach ($line in Get-Content $EnvFile) {
@@ -72,7 +372,7 @@ function Read-EnvFile {
     }
 
     if ([string]::IsNullOrWhiteSpace($values['POSTGRES_HOST_PORT'])) {
-        $values['POSTGRES_HOST_PORT'] = '5432'
+        $values['POSTGRES_HOST_PORT'] = $DevPostgresHostPort
     }
 
     return $values
@@ -93,8 +393,14 @@ function Ensure-EnvFile {
         $updated = $true
     }
 
-    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD']) -or $values['POSTGRES_PASSWORD'] -eq 'replace-with-a-strong-password') {
-        $values['POSTGRES_PASSWORD'] = New-RandomSecret
+    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD']) -or $values['POSTGRES_PASSWORD'] -ne $DevPostgresPassword) {
+        $values['POSTGRES_PASSWORD'] = $DevPostgresPassword
+        $updated = $true
+    }
+
+    if ($values['POSTGRES_HOST_PORT'] -eq '5432' -or $values['POSTGRES_HOST_PORT'] -eq '5433') {
+        Write-Step "Using POSTGRES_HOST_PORT=$DevPostgresHostPort (avoids local PostgreSQL on 5432/5433)"
+        $values['POSTGRES_HOST_PORT'] = $DevPostgresHostPort
         $updated = $true
     }
 
@@ -134,7 +440,7 @@ function Ensure-EnvFile {
         throw 'POSTGRES_PASSWORD is not set in .env'
     }
 
-    return $values
+    return (Resolve-PostgresHostPort $values)
 }
 
 function Wait-ForPostgres {
@@ -148,27 +454,35 @@ function Wait-ForPostgres {
 }
 
 function Start-Postgres([hashtable]$EnvValues) {
+    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop and ensure docker is on PATH.'
+    }
+
     docker info *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'Docker is not running. Start Docker Desktop and retry.'
     }
 
-    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
-    docker compose -f $ComposeFile up -d postgres
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+    Ensure-PostgresReady $EnvValues
+}
 
-    Write-Step 'Waiting for Postgres to accept connections'
-    Wait-ForPostgres
+function Build-PostgresHostCheck {
+    dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
 }
 
 function Build-Projects {
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
+        Build-PostgresHostCheck
     } else {
         Write-Step 'Building API'
         dotnet build $ApiProject -c Debug
         if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
+        Build-PostgresHostCheck
     }
 
     if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
@@ -180,59 +494,65 @@ function Build-Projects {
     }
 }
 
-function Wait-ForFirstProcessExit {
-    param(
-        [System.Diagnostics.Process]$Backend,
-        [System.Diagnostics.Process]$Frontend
-    )
+function Start-DevStack([hashtable]$EnvValues) {
+    $apiStarter = Join-Path $RepoRoot 'scripts/start-api-dev.ps1'
+    $frontendStarter = Join-Path $RepoRoot 'scripts/start-frontend-dev.ps1'
 
-    $exited = $null
-    while ($true) {
-        foreach ($proc in @($Backend, $Frontend)) {
-            if ($proc.HasExited) {
-                $exited = $proc
-                break
-            }
-        }
-        if ($null -ne $exited) { break }
-        Start-Sleep -Milliseconds 200
+    if (-not $SkipDocker) {
+        Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
     }
 
-    foreach ($proc in @($Backend, $Frontend)) {
-        if (-not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            $proc.WaitForExit()
-        }
+    Write-Step 'Starting API in a new terminal (http://localhost:5000)'
+    $apiArgs = @('-NoExit', '-NoLogo', '-File', $apiStarter)
+    if ($SkipDocker) {
+        $apiArgs += '-SkipDocker'
+    } else {
+        $apiArgs += '-PreRegistered'
     }
+    Start-Process -FilePath 'pwsh' `
+        -ArgumentList $apiArgs `
+        -WorkingDirectory $RepoRoot
 
-    return $exited.ExitCode
+    Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
+    $frontendArgs = @('-NoExit', '-NoLogo', '-File', $frontendStarter)
+    if (-not $SkipDocker) {
+        $frontendArgs += '-PreRegistered'
+    }
+    Start-Process -FilePath 'pwsh' `
+        -ArgumentList $frontendArgs `
+        -WorkingDirectory $RepoRoot
+
+    Write-Step 'Dev stack is running in separate terminals'
+    Write-Host '  Frontend: http://localhost:5173'
+    Write-Host '  API:      http://localhost:5000'
+    if (-not $SkipDocker) {
+        Write-Host '  Postgres: localhost:' -NoNewline
+        Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline
+        Write-Host ' (Docker; stops when both terminals are closed)'
+    }
+    Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
+    Write-Host 'Or run: scripts/stop-dev.ps1'
 }
 
-function Start-DevStack([hashtable]$EnvValues) {
-    $env:ASPNETCORE_ENVIRONMENT = 'Development'
-    $env:ASPNETCORE_URLS = 'http://localhost:5000'
-    $env:Jwt__Secret = $EnvValues['JWT_SECRET']
-    $env:ConnectionStrings__DefaultConnection = "Host=localhost;Port=$($EnvValues['POSTGRES_HOST_PORT']);Database=homework_central;Username=postgres;Password=$($EnvValues['POSTGRES_PASSWORD'])"
-
-    Write-Step 'Starting API on http://localhost:5000'
-    $backend = Start-Process -FilePath 'dotnet' `
-        -ArgumentList @('run', '--project', $ApiProject, '--no-build', '--urls', 'http://localhost:5000') `
-        -PassThru -NoNewWindow
-
-    Write-Step 'Starting frontend on http://localhost:5173'
-    $frontend = Start-Process -FilePath 'npm' `
-        -ArgumentList @('run', 'dev', '--prefix', $FrontendDir) `
-        -PassThru -NoNewWindow
-
-    Write-Step 'Dev stack is running'
-    Write-Output '  Frontend: http://localhost:5173'
-    Write-Output '  API:      http://localhost:5000'
-    Write-Output 'Press Ctrl+C to stop'
-
-    $exitCode = Wait-ForFirstProcessExit -Backend $backend -Frontend $frontend
-    if ($exitCode -ne 0) {
-        exit $exitCode
+function Get-EnvValues {
+    $raw = @(Ensure-EnvFile)
+    $values = $raw | Where-Object { $_ -is [hashtable] } | Select-Object -First 1
+    if ($null -eq $values) {
+        throw 'Ensure-EnvFile did not return environment values (internal script error)'
     }
+    return $values
+}
+
+function Start-RunPhase([hashtable]$EnvValues) {
+    Write-Step 'Preparing dev stack (Postgres, API, frontend)'
+
+    if (-not $SkipDocker) {
+        Start-Postgres -EnvValues $EnvValues
+    } else {
+        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
+    }
+
+    Start-DevStack -EnvValues $EnvValues
 }
 
 if ($Help) {
@@ -246,21 +566,20 @@ if ($env:HC_SKIP_DOCKER -eq '1') {
 
 Push-Location $RepoRoot
 try {
-    $envValues = Ensure-EnvFile
+    $envValues = Get-EnvValues
     Build-Projects
 
-    if ($BuildOnly) {
+    # Only stop for an explicit -BuildOnly on the command line (ignore profile defaults).
+    if ($PSBoundParameters.ContainsKey('BuildOnly') -and $BuildOnly.IsPresent) {
         Write-Step 'Build complete (-BuildOnly)'
         exit 0
     }
 
-    if (-not $SkipDocker) {
-        Start-Postgres -EnvValues $envValues
-    } else {
-        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
-    }
-
-    Start-DevStack -EnvValues $envValues
+    Start-RunPhase -EnvValues $envValues
+}
+catch {
+    Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
 finally {
     Pop-Location

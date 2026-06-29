@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,10 +5,10 @@ services:
     environment:
       POSTGRES_DB: homework_central
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
     # Published for local dev (scripts/run-dev.*). Omit in production deployments.
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -28,7 +26,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: >
-        Host=postgres;Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD}
+        Host=postgres;Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
       Jwt__Secret: "${JWT_SECRET:?JWT_SECRET must be set}"
     ports:
       - "5000:8080"

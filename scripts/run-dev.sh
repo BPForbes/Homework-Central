@@ -12,14 +12,23 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/dev-stack-lib.sh
+source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
+POSTGRES_HOST_CHECK_PROJECT="$REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
+POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
+DEV_POSTGRES_USER="postgres"
+DEV_POSTGRES_PASSWORD="postgres"
+DEV_POSTGRES_HOST_PORT="5434"
+DEV_POSTGRES_HOST_PORT_MIN=5434
+DEV_POSTGRES_HOST_PORT_MAX=5450
 BUILD_ONLY=false
 SKIP_DOCKER=false
 JWT_SECRET=""
 POSTGRES_PASSWORD=""
-POSTGRES_HOST_PORT="5432"
+POSTGRES_HOST_PORT="5434"
 
 usage() {
   cat <<'EOF'
@@ -37,6 +46,10 @@ After startup:
   Frontend  http://localhost:5173
   API       http://localhost:5000
   Health    http://localhost:5000/healthz
+
+Stop:
+  scripts/stop-dev.sh
+  Ctrl+C in this terminal also stops Docker Postgres and frees its port.
 
 Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+
 EOF
@@ -83,9 +96,210 @@ parse_args() {
 
 generate_secret() {
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 48 | tr -d '\n'
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n'
   else
     fail "openssl is required to generate secrets for a new .env file"
+  fi
+}
+
+loopback_port_in_use() {
+  local port="$1"
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -Command "
+          \$c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { \$_.LocalAddress -in @('127.0.0.1', '::1') } |
+            Select-Object -First 1
+          if (\$null -ne \$c) { exit 0 } else { exit 1 }
+        " >/dev/null 2>&1
+        return $?
+      fi
+      netstat -ano 2>/dev/null | grep LISTENING | grep -E "127\.0\.0\.1:${port}[[:space:]]" >/dev/null && return 0
+      netstat -ano 2>/dev/null | grep LISTENING | grep -E "\[::1\]:${port}[[:space:]]" >/dev/null && return 0
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+find_free_postgres_host_port() {
+  local port
+  for ((port = DEV_POSTGRES_HOST_PORT_MIN; port <= DEV_POSTGRES_HOST_PORT_MAX; port++)); do
+    if loopback_port_in_use "$port"; then
+      continue
+    fi
+    printf '%s' "$port"
+    return 0
+  done
+  return 1
+}
+
+resolve_postgres_host_port() {
+  if ! loopback_port_in_use "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  local free_port
+  log "Port ${POSTGRES_HOST_PORT} is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
+  free_port="$(find_free_postgres_host_port || true)"
+  [[ -n "$free_port" ]] || fail "No free Postgres host port found between ${DEV_POSTGRES_HOST_PORT_MIN} and ${DEV_POSTGRES_HOST_PORT_MAX}"
+
+  log "Using POSTGRES_HOST_PORT=${free_port} instead"
+  POSTGRES_HOST_PORT="$free_port"
+  set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
+}
+
+set_compose_env() {
+  export POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
+  export POSTGRES_HOST_PORT
+}
+
+invoke_postgres_admin_sql() {
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c \"$1\"" >/dev/null 2>&1
+}
+
+get_postgres_published_port() {
+  local raw
+  raw="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" port postgres 5432 2>/dev/null | tr -d '\r\n')"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  if [[ "$raw" =~ :([0-9]+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+test_postgres_host_connection() {
+  local published
+  local attempt
+  local output
+  local status
+
+  published="$(get_postgres_published_port || true)"
+  if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
+    log "Docker Postgres is not published on localhost:${POSTGRES_HOST_PORT} (container maps to ${published})"
+    return 1
+  fi
+
+  if [[ ! -f "$POSTGRES_HOST_CHECK_DLL" ]]; then
+    build_postgres_host_check
+  fi
+
+  for ((attempt = 1; attempt <= 10; attempt++)); do
+    output="$(dotnet "$POSTGRES_HOST_CHECK_DLL" "$POSTGRES_HOST_PORT" 2>&1)"
+    status=$?
+    if [[ $status -eq 0 ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Cannot connect to homework_central on localhost:${POSTGRES_HOST_PORT} from the host"
+  if [[ -n "$output" ]]; then
+    printf '       %s\n' "$output"
+  fi
+  return 1
+}
+
+test_postgres_auth() {
+  local database="${1:-postgres}"
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d $database -tAc 'SELECT 1'" >/dev/null 2>&1
+}
+
+repair_postgres_collation() {
+  log "Refreshing Postgres collation versions (fixes stale Docker volumes)"
+  invoke_postgres_admin_sql "ALTER DATABASE template1 REFRESH COLLATION VERSION;" || return 1
+  invoke_postgres_admin_sql "ALTER DATABASE postgres REFRESH COLLATION VERSION;" || return 1
+  if [[ "$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
+    | tr -d '\r\n')" == "1" ]]; then
+    invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;" || return 1
+  fi
+}
+
+prepare_homework_central_database() {
+  local exists
+
+  if ! repair_postgres_collation; then
+    return 1
+  fi
+
+  exists="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
+    2>/dev/null | tr -d '\r\n')"
+  if [[ "$exists" != "1" ]]; then
+    log "Creating homework_central database"
+    if ! invoke_postgres_admin_sql "CREATE DATABASE homework_central;"; then
+      return 1
+    fi
+    invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;"
+  fi
+
+  if ! test_postgres_auth homework_central; then
+    return 1
+  fi
+
+  return 0
+}
+
+start_postgres_container() {
+  local published
+  published="$(get_postgres_published_port || true)"
+
+  if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
+    log "Recreating Postgres container for localhost:${POSTGRES_HOST_PORT}"
+    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d --force-recreate postgres
+  else
+    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  fi
+}
+
+reset_postgres_volume() {
+  log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
+}
+
+ensure_postgres_ready() {
+  set_compose_env
+
+  start_postgres_container
+  log "Waiting for Postgres to accept connections"
+  wait_for_postgres
+
+  if ! test_postgres_auth postgres; then
+    log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
+    reset_postgres_volume
+    start_postgres_container
+    log "Waiting for Postgres to accept connections"
+    wait_for_postgres
+    if ! test_postgres_auth postgres; then
+      fail "Postgres password verification failed after recreating the Docker volume"
+    fi
+  fi
+
+  if ! prepare_homework_central_database; then
+    log "Postgres volume is unhealthy (collation mismatch); recreating"
+    reset_postgres_volume
+    start_postgres_container
+    log "Waiting for Postgres to accept connections"
+    wait_for_postgres
+
+    if ! prepare_homework_central_database; then
+      fail "Failed to prepare homework_central inside the Docker Postgres container"
+    fi
+  fi
+
+  if ! test_postgres_host_connection; then
+    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: docker compose down -v && scripts/run-dev.sh"
   fi
 }
 
@@ -99,7 +313,7 @@ trim_whitespace() {
 read_env_file() {
   JWT_SECRET=""
   POSTGRES_PASSWORD=""
-  POSTGRES_HOST_PORT="5432"
+  POSTGRES_HOST_PORT="5434"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -118,7 +332,7 @@ read_env_file() {
   done <"$ENV_FILE"
 
   POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5432"
+  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
 }
 
 set_env_var() {
@@ -159,9 +373,16 @@ ensure_env_file() {
     updated=true
   fi
 
-  if [[ "$POSTGRES_PASSWORD" == "replace-with-a-strong-password" || -z "$POSTGRES_PASSWORD" ]]; then
-    POSTGRES_PASSWORD="$(generate_secret)"
+  if [[ "$POSTGRES_PASSWORD" != "$DEV_POSTGRES_PASSWORD" ]]; then
+    POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
     set_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    updated=true
+  fi
+
+  if [[ "$POSTGRES_HOST_PORT" == "5432" || "$POSTGRES_HOST_PORT" == "5433" ]]; then
+    log "Using POSTGRES_HOST_PORT=${DEV_POSTGRES_HOST_PORT} (avoids local PostgreSQL on 5432/5433)"
+    POSTGRES_HOST_PORT="$DEV_POSTGRES_HOST_PORT"
+    set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
     updated=true
   fi
 
@@ -169,6 +390,8 @@ ensure_env_file() {
     read_env_file
     log "Generated secrets in .env (local only, not committed)"
   fi
+
+  resolve_postgres_host_port
 
   [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
   [[ ${#JWT_SECRET} -ge 32 ]] || fail "JWT_SECRET must be at least 32 characters"
@@ -195,9 +418,11 @@ start_postgres() {
   fi
 
   log "Starting Postgres (Docker) on localhost:${POSTGRES_HOST_PORT}"
-  docker compose -f "$REPO_ROOT/docker-compose.yml" up -d postgres
-  log "Waiting for Postgres to accept connections"
-  wait_for_postgres
+  ensure_postgres_ready
+}
+
+build_postgres_host_check() {
+  dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
 
 build_projects() {
@@ -213,6 +438,8 @@ build_projects() {
     dotnet build "$API_PROJECT" -c Debug
   fi
 
+  build_postgres_host_check
+
   require_cmd npm
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
     log "Installing frontend dependencies"
@@ -220,13 +447,6 @@ build_projects() {
   else
     log "Frontend dependencies already installed"
   fi
-}
-
-export_backend_env() {
-  export ASPNETCORE_ENVIRONMENT=Development
-  export ASPNETCORE_URLS=http://localhost:5000
-  export Jwt__Secret="$JWT_SECRET"
-  export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD}"
 }
 
 supervise_children() {
@@ -260,10 +480,16 @@ supervise_children() {
 }
 
 run_stack() {
-  export_backend_env
+  if [[ "$SKIP_DOCKER" == false ]]; then
+    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
+  fi
 
   log "Starting API on http://localhost:5000"
-  dotnet run --project "$API_PROJECT" --no-build --urls http://localhost:5000 &
+  if [[ "$SKIP_DOCKER" == true ]]; then
+    HC_SKIP_DOCKER=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+  else
+    HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+  fi
   BACKEND_PID=$!
 
   log "Starting frontend on http://localhost:5173"
@@ -274,13 +500,20 @@ run_stack() {
     log "Stopping dev servers"
     kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    if [[ "$SKIP_DOCKER" == false ]]; then
+      unregister_dev_stack_server
+    fi
   }
   trap cleanup EXIT INT TERM
 
   log "Dev stack is running"
   log "  Frontend: http://localhost:5173"
   log "  API:      http://localhost:5000"
-  log "Press Ctrl+C to stop"
+  if [[ "$SKIP_DOCKER" == false ]]; then
+    log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
+  fi
+  log "Press Ctrl+C to stop servers and free the Postgres port"
+  log "Or run: scripts/stop-dev.sh"
 
   supervise_children "$BACKEND_PID" "$FRONTEND_PID"
   local status=$?
