@@ -31,22 +31,24 @@ public static class DevRootPage
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
           <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet" />
           <style>
-            * {
-              position: relative;
+            html, body {
               margin: 0;
               padding: 0;
               box-sizing: border-box;
-              font-family: 'Lato', sans-serif;
+            }
+
+            *, *::before, *::after {
+              box-sizing: inherit;
             }
 
             body {
               min-height: 100vh;
               display: flex;
-              flex-direction: column;
               justify-content: center;
               align-items: center;
               background: linear-gradient(to bottom right, #eef2f7, #b8c4d4);
-              padding: 2rem 1rem;
+              padding: 3rem 1rem 2rem;
+              font-family: 'Lato', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }
 
             .page {
@@ -54,15 +56,18 @@ public static class DevRootPage
               flex-direction: column;
               align-items: center;
               width: min(100%, 32rem);
+              padding-top: 3rem;
             }
 
             .lock {
+              position: relative;
               border-radius: 5px;
               width: 55px;
               height: 45px;
               background-color: #334155;
-              animation: dip 1s;
+              animation: dip 1s ease-in-out;
               animation-delay: 1.5s;
+              flex-shrink: 0;
             }
 
             .lock::before,
@@ -81,13 +86,13 @@ public static class DevRootPage
               border-bottom-color: transparent;
               border-radius: 15px 15px 0 0;
               height: 30px;
-              animation: lock 2s, spin 2s;
+              animation: lock 2s ease-in-out, spin 2s ease-in-out;
             }
 
             .lock::after {
               top: -10px;
               border-right: 5px solid transparent;
-              animation: spin 2s;
+              animation: spin 2s ease-in-out;
             }
 
             .message {
@@ -118,17 +123,18 @@ public static class DevRootPage
               font-size: 1.35rem;
               font-weight: 700;
               line-height: 1.35;
-              margin-bottom: 1rem;
+              margin: 0 0 1rem;
             }
 
             .detail {
               color: #111827;
               font-size: 1rem;
               line-height: 1.55;
+              margin: 0;
             }
 
             .hint {
-              margin-top: 1.25rem;
+              margin: 1.25rem 0 0;
               color: #64748b;
               font-size: 0.9rem;
             }

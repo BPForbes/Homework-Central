@@ -76,6 +76,7 @@ builder.Services.AddCors(opts =>
             .AllowAnyMethod()));
 
 WebApplication app = builder.Build();
+bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
 
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
@@ -85,8 +86,9 @@ app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
     ctx.Response.Headers["X-Frame-Options"] = "DENY";
-    ctx.Response.Headers["Content-Security-Policy"] =
-        "default-src 'self'; frame-ancestors 'none';";
+    ctx.Response.Headers["Content-Security-Policy"] = devBypassEnabled
+        ? "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors 'none';"
+        : "default-src 'self'; frame-ancestors 'none';";
     await next();
 });
 
@@ -99,7 +101,6 @@ app.MapControllers();
 // Health probe for Docker / load balancers
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
 
-bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
 if (devBypassEnabled)
 {
     app.MapGet("/", DevRootPage.ForbiddenDirectoryPage);
