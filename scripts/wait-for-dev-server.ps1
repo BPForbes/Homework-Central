@@ -1,4 +1,4 @@
-# Wait until an HTTP endpoint responds. Treats 4xx below 500 as reachable for dev probes.
+# Wait until an HTTP endpoint responds. Treats 2xx/3xx and intentional 403 as reachable for dev probes.
 param(
     [Parameter(Mandatory = $true)]
     [string]$Url,
@@ -23,7 +23,7 @@ function Test-DevEndpointReady {
 
     try {
         $response = Invoke-WebRequest @requestParams
-        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 500
+        return (($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) -or $response.StatusCode -eq 403)
     } catch {
         $webResponse = $_.Exception.Response
         if ($null -eq $webResponse) {
@@ -31,7 +31,7 @@ function Test-DevEndpointReady {
         }
 
         $statusCode = [int]$webResponse.StatusCode
-        return $statusCode -ge 200 -and $statusCode -lt 500
+        return (($statusCode -ge 200 -and $statusCode -lt 400) -or $statusCode -eq 403)
     }
 }
 

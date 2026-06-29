@@ -75,13 +75,14 @@ if ($PreRegistered) {
 }
 
 Push-Location $RepoRoot
+$browserProcess = $null
 try {
     if (-not $skipDocker) {
         Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
-        Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
+        $browserProcess = Start-DevStackPowerShellProcess -WindowStyle Hidden -PassThru -ArgumentList @(
             '-File', (Join-Path $ScriptRoot 'wait-and-open-browser.ps1'),
             '-Url', 'http://localhost:5000/',
             '-Label', 'API',
@@ -106,6 +107,9 @@ try {
     }
 }
 finally {
+    if ($null -ne $browserProcess -and -not $browserProcess.HasExited) {
+        Stop-Process -Id $browserProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
     if (-not $skipDocker) {
         Unregister-DevStackServer

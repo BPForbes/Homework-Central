@@ -21,7 +21,7 @@ Stops Docker Postgres started by scripts/run-dev.sh and frees its host port.
 Account data is preserved in the pgdata Docker volume.
 
 To wipe the database volume (removes registered accounts):
-  scripts/reset-dev-db.sh
+  scripts/reset-dev-db.sh --yes
   # or: docker compose down -v
 EOF
 }

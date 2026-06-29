@@ -26,5 +26,9 @@ fi
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
 export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5434}"
 
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v --remove-orphans
+compose_args=(-f "$COMPOSE_FILE")
+if [[ -f "$ENV_FILE" ]]; then
+  compose_args+=(--env-file "$ENV_FILE")
+fi
+docker compose "${compose_args[@]}" down -v --remove-orphans
 printf '==> Dev database volume removed. Run scripts/run-dev.sh to start fresh.\n'

@@ -44,8 +44,10 @@ export function DevLogin() {
       try {
         const { data } = await authApi.devStatus()
         if (!data.available) {
-          if (!cancelled) setApiUnavailable(true)
-          return false
+          if (!cancelled) {
+            setError('Developer bypass is not enabled on the API.')
+          }
+          return true
         }
         const options = await authApi.devOptions()
         if (cancelled) return false
@@ -56,10 +58,14 @@ export function DevLogin() {
         return true
       } catch (err: unknown) {
         if (cancelled) return false
-        const message =
-          (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        if (message) {
-          setError(message)
+        const response = (err as { response?: { status?: number; data?: { message?: string } } })
+          ?.response
+        if (response?.status === 404) {
+          setError('Developer bypass is not enabled on the API.')
+          return true
+        }
+        if (response?.data?.message) {
+          setError(response.data.message)
           return true
         }
         setApiUnavailable(true)

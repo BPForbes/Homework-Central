@@ -252,12 +252,16 @@ function Start-DevStackPowerShellProcess {
     param(
         [string[]]$ArgumentList,
         [string]$WorkingDirectory = $script:RepoRoot,
-        [System.Diagnostics.ProcessWindowStyle]$WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+        [System.Diagnostics.ProcessWindowStyle]$WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal,
+        [switch]$PassThru
     )
 
     $exe = Get-DevStackPowerShellExe
     $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass') + $ArgumentList
-    Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $WorkingDirectory -WindowStyle $WindowStyle | Out-Null
+    $process = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $WorkingDirectory -WindowStyle $WindowStyle -PassThru
+    if ($PassThru) {
+        return $process
+    }
 }
 
 function Start-FrontendTypecheckJob([string]$FrontendDir) {

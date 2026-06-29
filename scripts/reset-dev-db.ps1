@@ -32,5 +32,10 @@ if (Test-Path $EnvFile) {
 if (-not $env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD = 'postgres' }
 if (-not $env:POSTGRES_HOST_PORT) { $env:POSTGRES_HOST_PORT = '5434' }
 
-docker compose -f $ComposeFile --env-file $EnvFile down -v --remove-orphans
+$composeArgs = @('-f', $ComposeFile)
+if (Test-Path $EnvFile) {
+    $composeArgs += @('--env-file', $EnvFile)
+}
+docker compose @composeArgs down -v --remove-orphans
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host '==> Dev database volume removed. Run scripts/run-dev.ps1 to start fresh.'

@@ -488,6 +488,9 @@ function Build-Projects {
             if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
                 & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
             }
+            if ($BuildOnly) {
+                throw 'API build failed'
+            }
             $script:ApiBuildFailed = $true
             Write-Step 'API build failed; frontend will start and show unable to connect to API'
         }
