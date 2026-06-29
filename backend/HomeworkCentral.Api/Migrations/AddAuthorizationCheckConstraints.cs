@@ -28,25 +28,10 @@ namespace HomeworkCentral.Api.Migrations
                         'Finance', 'Economics', 'Education'
                     )
                     """);
-
-            migrationBuilder.AddCheckConstraint(
-                name: "CK_UserSubjectExpertiseMasks_Category_Allowed",
-                table: "UserSubjectExpertiseMasks",
-                sql: """
-                    "Category" IN (
-                        'Mathematics', 'Science', 'ComputerScience', 'Languages', 'History',
-                        'Business', 'Art', 'Music', 'Engineering', 'Medicine', 'Finance',
-                        'Economics', 'Education'
-                    )
-                    """);
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropCheckConstraint(
-                name: "CK_UserSubjectExpertiseMasks_Category_Allowed",
-                table: "UserSubjectExpertiseMasks");
-
             migrationBuilder.DropCheckConstraint(
                 name: "CK_Subjects_SubjectMask_Allowed",
                 table: "Subjects");

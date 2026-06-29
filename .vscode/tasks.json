@@ -21,6 +21,11 @@
       "label": "run-dev-stack",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/run-dev.sh",
+      "options": {
+        "env": {
+          "HC_SKIP_DOTNET_BUILD": "1"
+        }
+      },
       "windows": {
         "command": "pwsh",
         "args": [
@@ -29,7 +34,12 @@
           "Bypass",
           "-File",
           "${workspaceFolder}/scripts/run-dev.ps1"
-        ]
+        ],
+        "options": {
+          "env": {
+            "HC_SKIP_DOTNET_BUILD": "1"
+          }
+        }
       },
       "isBackground": true,
       "dependsOn": ["build-dev-stack"],
@@ -41,7 +51,7 @@
         "background": {
           "activeOnStart": true,
           "beginsPattern": "^==>",
-          "endsPattern": "Dev stack is running"
+          "endsPattern": "^==> Dev stack is running( in separate terminals)?$"
         }
       },
       "presentation": {
