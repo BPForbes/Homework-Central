@@ -126,7 +126,8 @@ _join_dev_stack_if_managed() {
     return 0
   fi
 
-  if [[ "${DEV_STACK_STATE_postgres_port}" != "$port" ]]; then
+  local state_port="${DEV_STACK_STATE_postgres_port:-}"
+  if [[ -z "$state_port" || "$state_port" != "$port" ]]; then
     return 0
   fi
 
@@ -171,8 +172,11 @@ _init_dev_stack_state_impl() {
   local server_count="$2"
 
   if read_dev_stack_state && [[ "${DEV_STACK_STATE_managed_postgres:-}" == "1" ]]; then
-    printf '==> Stopping previous dev stack Postgres session\n'
-    stop_dev_stack_postgres "${DEV_STACK_STATE_postgres_port}"
+    local state_port="${DEV_STACK_STATE_postgres_port:-}"
+    if [[ -n "$state_port" ]]; then
+      printf '==> Stopping previous dev stack Postgres session\n'
+      stop_dev_stack_postgres "$state_port"
+    fi
   fi
 
   write_dev_stack_state "$postgres_port" "$server_count"
@@ -184,7 +188,10 @@ stop_dev_stack() {
 
 _stop_dev_stack_impl() {
   if read_dev_stack_state && [[ "${DEV_STACK_STATE_managed_postgres:-}" == "1" ]]; then
-    stop_dev_stack_postgres "${DEV_STACK_STATE_postgres_port}"
+    local state_port="${DEV_STACK_STATE_postgres_port:-}"
+    if [[ -n "$state_port" ]]; then
+      stop_dev_stack_postgres "$state_port"
+    fi
   fi
 
   rm -f "$DEV_STACK_STATE_FILE"
@@ -203,18 +210,24 @@ _unregister_dev_stack_server_impl() {
     return 0
   fi
 
-  local current_refcount="${DEV_STACK_STATE_refcount:-1}"
-  [[ "$current_refcount" =~ ^[0-9]+$ ]] || current_refcount=1
-  local refcount=$((current_refcount - 1))
-  if (( refcount > 0 )); then
-    write_dev_stack_state "${DEV_STACK_STATE_postgres_port}" "$refcount"
+  local state_port="${DEV_STACK_STATE_postgres_port:-}"
+  if [[ -z "$state_port" ]]; then
+    rm -f "$DEV_STACK_STATE_FILE"
     DEV_STACK_SERVER_REGISTERED=0
     return 0
   fi
 
-  local port="${DEV_STACK_STATE_postgres_port}"
+  local current_refcount="${DEV_STACK_STATE_refcount:-1}"
+  [[ "$current_refcount" =~ ^[0-9]+$ ]] || current_refcount=1
+  local refcount=$((current_refcount - 1))
+  if (( refcount > 0 )); then
+    write_dev_stack_state "$state_port" "$refcount"
+    DEV_STACK_SERVER_REGISTERED=0
+    return 0
+  fi
+
   rm -f "$DEV_STACK_STATE_FILE"
-  stop_dev_stack_postgres "$port"
+  stop_dev_stack_postgres "$state_port"
   DEV_STACK_SERVER_REGISTERED=0
   printf '==> Stopped Docker Postgres and freed localhost port\n'
 }
