@@ -10,9 +10,23 @@ if (-not (Test-Path $ErrorLogFile)) {
     throw "Error log not found: $ErrorLogFile"
 }
 
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$faviconSrc = Join-Path $repoRoot 'frontend/public/favicon.svg'
+$errorDir = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-errors-{0}" -f ([guid]::NewGuid().ToString('N')))
+$htmlPath = Join-Path $errorDir 'index.html'
+New-Item -ItemType Directory -Path $errorDir -Force | Out-Null
+
+if (Test-Path $faviconSrc) {
+    Copy-Item -Path $faviconSrc -Destination (Join-Path $errorDir 'favicon.svg') -Force
+}
+
 $encodedTitle = [System.Net.WebUtility]::HtmlEncode($Title)
 $encodedBody = [System.Net.WebUtility]::HtmlEncode((Get-Content -Raw -Path $ErrorLogFile))
-$htmlPath = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-errors-{0}.html" -f ([guid]::NewGuid().ToString('N')))
+$faviconTag = if (Test-Path (Join-Path $errorDir 'favicon.svg')) {
+    '  <link rel="icon" type="image/svg+xml" href="favicon.svg" />'
+} else {
+    ''
+}
 
 @"
 
@@ -21,6 +35,7 @@ $htmlPath = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-errors-{0}.html
 <head>
   <meta charset="UTF-8" />
   <title>$encodedTitle</title>
+$faviconTag
   <style>
     body { margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
     .header { background: #808080; color: #ffffff; padding: 0.5rem 1rem; font-size: 1.25rem; font-weight: 600; }

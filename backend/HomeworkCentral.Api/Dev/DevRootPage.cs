@@ -2,11 +2,22 @@ namespace HomeworkCentral.Api.Dev;
 
 public static class DevRootPage
 {
+    public const string FaviconPath = "/favicon.svg";
+
     public static IResult ForbiddenDirectoryPage() =>
         Results.Content(ForbiddenHtml, "text/html; charset=utf-8", statusCode: 403);
 
     public static IResult ApiErrorPage(string errors) =>
         Results.Content(BuildApiErrorHtml(errors), "text/html; charset=utf-8", statusCode: 500);
+
+    public static IResult Favicon()
+    {
+        string faviconPath = Path.Combine(AppContext.BaseDirectory, "Dev", "favicon.svg");
+        if (!File.Exists(faviconPath))
+            return Results.NotFound();
+
+        return Results.File(faviconPath, "image/svg+xml");
+    }
 
     private const string ForbiddenHtml = """
         <!DOCTYPE html>
@@ -15,6 +26,7 @@ public static class DevRootPage
           <meta charset="UTF-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>403 - Forbidden</title>
+          <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
           <link rel="preconnect" href="https://fonts.googleapis.com" />
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
           <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet" />
@@ -168,6 +180,7 @@ public static class DevRootPage
           <meta charset="UTF-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>API Error</title>
+          <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
           <style>
             body { margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
             .header { background: #808080; color: #ffffff; padding: 0.5rem 1rem; font-size: 1.25rem; font-weight: 600; }

@@ -103,6 +103,7 @@ bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environme
 if (devBypassEnabled)
 {
     app.MapGet("/", DevRootPage.ForbiddenDirectoryPage);
+    app.MapGet("/favicon.svg", DevRootPage.Favicon);
 }
 
 // Auto-migrate only in Development to avoid blocking production deploys

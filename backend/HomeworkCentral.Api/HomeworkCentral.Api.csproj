@@ -36,4 +36,8 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Dev\favicon.svg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

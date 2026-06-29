@@ -11,12 +11,22 @@ if [[ -z "$error_file" || ! -f "$error_file" ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-html_file="$(mktemp /tmp/hc-api-errors-XXXXXX.html)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+favicon_src="$repo_root/frontend/public/favicon.svg"
+error_dir="$(mktemp -d /tmp/hc-api-errors-XXXXXX)"
+html_file="$error_dir/index.html"
 encoded_title="$(python3 -c 'import html,sys; print(html.escape(sys.argv[1]))' "$title")"
+
+if [[ -f "$favicon_src" ]]; then
+  cp "$favicon_src" "$error_dir/favicon.svg"
+fi
 
 {
   printf '%s\n' '<!DOCTYPE html>'
   printf '<html lang="en"><head><meta charset="UTF-8" /><title>%s</title>' "$encoded_title"
+  if [[ -f "$error_dir/favicon.svg" ]]; then
+    printf '%s\n' '<link rel="icon" type="image/svg+xml" href="favicon.svg" />'
+  fi
   cat <<'EOF'
 <style>
   body { margin: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
