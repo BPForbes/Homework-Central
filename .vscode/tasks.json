@@ -51,7 +51,7 @@
         "background": {
           "activeOnStart": true,
           "beginsPattern": "^==>",
-          "endsPattern": "Dev stack is running in separate terminals"
+          "endsPattern": "^==> Dev stack is running( in separate terminals)?$"
         }
       },
       "presentation": {

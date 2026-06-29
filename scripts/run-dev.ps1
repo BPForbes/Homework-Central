@@ -503,9 +503,13 @@ function Start-DevStack([hashtable]$EnvValues) {
     }
 
     Write-Step 'Starting API in a new terminal (http://localhost:5000)'
+    $apiStarterEnv = @{
+        HC_SKIP_DOCKER = if ($SkipDocker) { '1' } else { '0' }
+    }
     Start-Process -FilePath 'pwsh' `
         -ArgumentList @('-NoExit', '-NoLogo', '-File', $apiStarter) `
-        -WorkingDirectory $RepoRoot
+        -WorkingDirectory $RepoRoot `
+        -Environment $apiStarterEnv
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
     Start-Process -FilePath 'pwsh' `

@@ -26,7 +26,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: >
-        Host=postgres;Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD}
+        Host=postgres;Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
       Jwt__Secret: "${JWT_SECRET:?JWT_SECRET must be set}"
     ports:
       - "5000:8080"

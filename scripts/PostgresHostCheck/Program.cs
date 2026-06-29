@@ -1,6 +1,6 @@
 using Npgsql;
 
-if (args.Length < 1 || !int.TryParse(args[0], out int port) || port <= 0)
+if (args.Length < 1 || !int.TryParse(args[0], out int port) || port <= 0 || port > 65535)
 {
     Console.Error.WriteLine("Usage: PostgresHostCheck <port>");
     return 2;

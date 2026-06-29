@@ -101,12 +101,14 @@ function Ensure-DevPostgresRunning([string]$Port) {
     Start-DevStackPostgresContainer $Port
     Wait-DevPostgresReady $Port
 
-    $state = Read-DevStackState
-    if ($null -eq $state) {
-        Write-DevStackState @{
-            managed_postgres = '1'
-            postgres_port = $Port
-            refcount = '1'
+    Invoke-DevStackStateUpdate {
+        $state = Read-DevStackState
+        if ($null -eq $state) {
+            Write-DevStackState @{
+                managed_postgres = '1'
+                postgres_port = $Port
+                refcount = '1'
+            }
         }
     }
 }
@@ -129,16 +131,18 @@ function Initialize-DevStackState {
         [int]$ServerCount
     )
 
-    $existing = Read-DevStackState
-    if ($null -ne $existing -and $existing['managed_postgres'] -eq '1') {
-        Write-Host '==> Stopping previous dev stack Postgres session' -ForegroundColor DarkGray
-        Stop-DevStackPostgres -Port $existing['postgres_port']
-    }
+    Invoke-DevStackStateUpdate {
+        $existing = Read-DevStackState
+        if ($null -ne $existing -and $existing['managed_postgres'] -eq '1') {
+            Write-Host '==> Stopping previous dev stack Postgres session' -ForegroundColor DarkGray
+            Stop-DevStackPostgres -Port $existing['postgres_port']
+        }
 
-    Write-DevStackState @{
-        managed_postgres = '1'
-        postgres_port = $PostgresPort
-        refcount = "$ServerCount"
+        Write-DevStackState @{
+            managed_postgres = '1'
+            postgres_port = $PostgresPort
+            refcount = "$ServerCount"
+        }
     }
 }
 
@@ -183,10 +187,12 @@ function Unregister-DevStackServer {
 }
 
 function Stop-DevStack {
-    $state = Read-DevStackState
-    if ($null -ne $state -and $state['managed_postgres'] -eq '1') {
-        Stop-DevStackPostgres -Port $state['postgres_port']
-    }
+    Invoke-DevStackStateUpdate {
+        $state = Read-DevStackState
+        if ($null -ne $state -and $state['managed_postgres'] -eq '1') {
+            Stop-DevStackPostgres -Port $state['postgres_port']
+        }
 
-    Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
+    }
 }

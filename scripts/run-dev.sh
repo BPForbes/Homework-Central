@@ -485,7 +485,11 @@ run_stack() {
   fi
 
   log "Starting API on http://localhost:5000"
-  "$REPO_ROOT/scripts/start-api-dev.sh" &
+  if [[ "$SKIP_DOCKER" == true ]]; then
+    HC_SKIP_DOCKER=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+  else
+    HC_SKIP_DOCKER=0 "$REPO_ROOT/scripts/start-api-dev.sh" &
+  fi
   BACKEND_PID=$!
 
   log "Starting frontend on http://localhost:5173"
@@ -497,7 +501,7 @@ run_stack() {
     kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     if [[ "$SKIP_DOCKER" == false ]]; then
-      release_dev_stack_postgres
+      unregister_dev_stack_server
     fi
   }
   trap cleanup EXIT INT TERM

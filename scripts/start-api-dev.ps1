@@ -60,7 +60,9 @@ $env:ConnectionStrings__DefaultConnection = $connectionString
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
 Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
 
-Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+if ($env:HC_SKIP_DOCKER -ne '1') {
+    Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+}
 
 Push-Location $RepoRoot
 try {

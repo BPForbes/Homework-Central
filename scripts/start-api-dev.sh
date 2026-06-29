@@ -65,7 +65,14 @@ export ConnectionStrings__DefaultConnection="Host=localhost;Port=${POSTGRES_HOST
 printf 'Homework Central API - http://localhost:5000\n'
 printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
 
-ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
+  ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+fi
+
+cleanup_api() {
+  unregister_dev_stack_server
+}
+trap cleanup_api EXIT
 
 cd "$REPO_ROOT"
 dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000
