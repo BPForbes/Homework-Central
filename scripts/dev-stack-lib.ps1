@@ -269,14 +269,42 @@ function Start-FrontendTypecheckJob([string]$FrontendDir) {
         param($Dir)
         Push-Location $Dir
         try {
-            npx tsc -b
+            $output = npx tsc -b --pretty 2>&1
             if ($LASTEXITCODE -ne 0) {
+                if ($output) {
+                    $output | Write-Output
+                }
                 throw "frontend typecheck failed with exit code $LASTEXITCODE"
             }
         } finally {
             Pop-Location
         }
     } -ArgumentList $FrontendDir
+}
+
+function Test-FrontendDependenciesStale([string]$FrontendDir) {
+    $nodeModules = Join-Path $FrontendDir 'node_modules'
+    if (-not (Test-Path $nodeModules)) {
+        return $true
+    }
+
+    $lockFile = Join-Path $FrontendDir 'package-lock.json'
+    $stampFile = Join-Path $nodeModules '.package-lock.json'
+    if (-not (Test-Path $stampFile)) {
+        return $true
+    }
+
+    return (Get-Item $lockFile).LastWriteTimeUtc -gt (Get-Item $stampFile).LastWriteTimeUtc
+}
+
+function Ensure-FrontendDependencies([string]$FrontendDir) {
+    if (Test-FrontendDependenciesStale $FrontendDir) {
+        Write-Step 'Installing frontend dependencies'
+        npm ci --prefix $FrontendDir
+        if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+    } else {
+        Write-Step 'Frontend dependencies already installed'
+    }
 }
 
 function Wait-FrontendTypecheckJob($Job) {

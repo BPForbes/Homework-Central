@@ -451,7 +451,9 @@ build_projects() {
   fi
 
   require_cmd npm
-  if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+  if [[ ! -d "$FRONTEND_DIR/node_modules" ]] \
+    || [[ ! -f "$FRONTEND_DIR/node_modules/.package-lock.json" ]] \
+    || [[ "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_DIR/node_modules/.package-lock.json" ]]; then
     log "Installing frontend dependencies"
     npm ci --prefix "$FRONTEND_DIR"
   else
@@ -459,7 +461,7 @@ build_projects() {
   fi
 
   log "Type-checking frontend (parallel with Postgres host check build)"
-  (cd "$FRONTEND_DIR" && npx tsc -b) &
+  (cd "$FRONTEND_DIR" && npx tsc -b --pretty) &
   frontend_tsc_pid=$!
   build_postgres_host_check
   if ! wait "$frontend_tsc_pid"; then

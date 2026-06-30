@@ -496,13 +496,7 @@ function Build-Projects {
         }
     }
 
-    if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
-        Write-Step 'Installing frontend dependencies'
-        npm ci --prefix $FrontendDir
-        if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
-    } else {
-        Write-Step 'Frontend dependencies already installed'
-    }
+    Ensure-FrontendDependencies -FrontendDir $FrontendDir
 
     Write-Step 'Type-checking frontend (parallel with Postgres host check build)'
     $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
