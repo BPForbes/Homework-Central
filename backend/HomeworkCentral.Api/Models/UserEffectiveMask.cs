@@ -13,5 +13,5 @@ public class UserEffectiveMask
     public DateTime UpdatedAt { get; set; }
 
     public User User { get; set; } = null!;
-    public ICollection<UserSubjectExpertiseMask> SubjectExpertiseMasks { get; set; } = new List<UserSubjectExpertiseMask>();
+    public ICollection<UserSubjectExpertiseMask> SubjectExpertiseMasks { get; set; } = [];
 }

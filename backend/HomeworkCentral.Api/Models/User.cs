@@ -9,8 +9,8 @@ public class User
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-    public ICollection<UserSubject> UserSubjects { get; set; } = new List<UserSubject>();
+    public ICollection<UserRole> UserRoles { get; set; } = [];
+    public ICollection<UserSubject> UserSubjects { get; set; } = [];
     public UserEffectiveMask? EffectiveMask { get; set; }
-    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+    public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
 }

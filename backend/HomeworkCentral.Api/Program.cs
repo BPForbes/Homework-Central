@@ -115,7 +115,7 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Health probe for Docker / load balancers
-app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/healthz", () => TypedResults.Ok(new { status = "healthy" }));
 
 // Localhost-only dev landing routes and linked favicon (see DevAssets.CanonicalFaviconRepoPath).
 if (devBypassEnabled)

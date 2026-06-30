@@ -17,8 +17,8 @@ public static class AuthorizationSeedData
 
     private static async Task UpsertPermissionsAsync(AppDbContext db, CancellationToken ct)
     {
-        (short Id, string Name, string Description)[] permissions = new (short Id, string Name, string Description)[]
-        {
+        (short Id, string Name, string Description)[] permissions =
+        [
             (ModerationPermissions.ViewReports, "ViewReports", "View moderation reports."),
             (ModerationPermissions.ResolveReports, "ResolveReports", "Resolve moderation reports."),
             (ModerationPermissions.WarnUser, "WarnUser", "Issue warnings to members."),
@@ -39,7 +39,7 @@ public static class AuthorizationSeedData
             (ModerationPermissions.ModerateResources, "ModerateResources", "Moderate shared resources."),
             (ModerationPermissions.SuspendAccounts, "SuspendAccounts", "Suspend and restore accounts."),
             (ModerationPermissions.HandleAppeals, "HandleAppeals", "Handle moderation appeals."),
-        };
+        ];
 
         Dictionary<short, Permission> existing = await db.Permissions.ToDictionaryAsync(p => p.PermissionId, ct);
 
@@ -81,8 +81,8 @@ public static class AuthorizationSeedData
 
     private static async Task UpsertRolesAsync(AppDbContext db, IRoleMaskService roleMaskService, CancellationToken ct)
     {
-        (string Name, string Description, short[] Permissions)[] roleDefinitions = new (string Name, string Description, short[] Permissions)[]
-        {
+        (string Name, string Description, short[] Permissions)[] roleDefinitions =
+        [
             ("Guest", "Unauthenticated or newly registered visitor.", []),
             ("VerifiedUser", "Verified community member.", []),
             ("Student", "Student participant.", []),
@@ -171,7 +171,7 @@ public static class AuthorizationSeedData
             ]),
             ("Owner", "Platform owner.", Enumerable.Range(0, ModerationPermissions.HandleAppeals + 1).Select(i => (short)i).ToArray()),
             ("Founder", "Platform founder.", Enumerable.Range(0, ModerationPermissions.HandleAppeals + 1).Select(i => (short)i).ToArray()),
-        };
+        ];
 
         Dictionary<string, Role> rolesByName = await db.Roles.ToDictionaryAsync(r => r.Name, ct);
 
