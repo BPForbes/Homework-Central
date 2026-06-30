@@ -11,7 +11,8 @@ public class TenantDbContextFactory(
     public AppDbContext Create(string databaseName)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(connectionResolver.BuildConnectionString(databaseName))
+            .UseNpgsql(connectionResolver.BuildConnectionString(databaseName), npgsql =>
+                npgsql.MigrationsHistoryTable(TenancyConstants.AppMigrationsHistoryTable))
             .Options;
         return new AppDbContext(options);
     }

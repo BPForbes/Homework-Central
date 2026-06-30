@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
@@ -9,7 +10,8 @@ public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
     {
         string port = Environment.GetEnvironmentVariable("POSTGRES_HOST_PORT") ?? "5434";
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql($"Host=localhost;Port={port};Database=homework_central_master;Username=postgres;Password=postgres")
+            .UseNpgsql($"Host=localhost;Port={port};Database=homework_central_master;Username=postgres;Password=postgres", npgsql =>
+                npgsql.MigrationsHistoryTable(TenancyConstants.AppMigrationsHistoryTable))
             .Options;
         return new AppDbContext(opts);
     }

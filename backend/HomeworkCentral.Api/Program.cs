@@ -42,10 +42,12 @@ string masterConnection = builder.Configuration.GetConnectionString("MasterConne
     ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be set.");
 
 builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseNpgsql(masterConnection));
+    opts.UseNpgsql(masterConnection, npgsql =>
+        npgsql.MigrationsHistoryTable(TenancyConstants.AppMigrationsHistoryTable)));
 
 builder.Services.AddDbContext<MasterDbContext>(opts =>
-    opts.UseNpgsql(masterConnection));
+    opts.UseNpgsql(masterConnection, npgsql =>
+        npgsql.MigrationsHistoryTable(TenancyConstants.MasterMigrationsHistoryTable)));
 
 builder.Services.AddSingleton<ITenantConnectionResolver, TenantConnectionResolver>();
 builder.Services.AddScoped<ITenantDbContextFactory, TenantDbContextFactory>();
@@ -139,15 +141,23 @@ if (devBypassEnabled)
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
 {
-    using IServiceScope scope = app.Services.CreateScope();
-    ITenantConnectionResolver connectionResolver = scope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
-    await TenantDatabaseProvisioner.EnsureMasterDatabaseExistsAsync(connectionResolver);
-
-    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-
-    MasterDbContext masterRegistry = scope.ServiceProvider.GetRequiredService<MasterDbContext>();
-    await masterRegistry.Database.MigrateAsync();
+    try
+    {
+        await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
+    }
+    catch (Exception ex)
+    {
+        ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
+        ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
+        logger.LogCritical(
+            ex,
+            "Database migration failed for master database '{DatabaseName}'. "
+            + "If you upgraded from the single-database layout, reset the local Docker volume: "
+            + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
+            + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
+            resolver.MasterDatabaseName);
+        throw;
+    }
 }
 
 using (IServiceScope seedScope = app.Services.CreateScope())
