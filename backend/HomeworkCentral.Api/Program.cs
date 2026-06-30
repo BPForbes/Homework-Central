@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
@@ -17,8 +18,21 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 {
     opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
     opts.KnownIPNetworks.Clear();
     opts.KnownProxies.Clear();
+
+    foreach (string cidr in builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [])
+    {
+        if (System.Net.IPNetwork.TryParse(cidr, out System.Net.IPNetwork network))
+            opts.KnownIPNetworks.Add(network);
+    }
+
+    foreach (string address in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+    {
+        if (IPAddress.TryParse(address, out IPAddress? proxy) && proxy is not null)
+            opts.KnownProxies.Add(proxy);
+    }
 });
 
 // Database
@@ -132,4 +146,6 @@ using (IServiceScope seedScope = app.Services.CreateScope())
 app.Run();
 
 /// <summary>Entry point type for WebApplicationFactory integration tests.</summary>
-public partial class Program;
+public partial class Program
+{
+}

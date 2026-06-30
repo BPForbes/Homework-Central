@@ -36,4 +36,12 @@ public class BitMaskTests
         Assert.True(BitMask.HasBit(decoded, 15));
         Assert.False(BitMask.HasBit(decoded, 1));
     }
+
+    [Fact]
+    public void FromBase64_rejects_mismatched_lengths()
+    {
+        string encoded = BitMask.ToBase64(BitMask.Create(16));
+
+        Assert.Throws<FormatException>(() => BitMask.FromBase64(encoded, 8));
+    }
 }

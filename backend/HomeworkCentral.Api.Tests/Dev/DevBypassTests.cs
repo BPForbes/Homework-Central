@@ -25,9 +25,11 @@ public class DevBypassTests
     {
         DefaultHttpContext loopback = new() { Connection = { RemoteIpAddress = System.Net.IPAddress.Loopback } };
         DefaultHttpContext remote = new() { Connection = { RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.10") } };
+        DefaultHttpContext missingRemoteIp = new();
 
         Assert.True(DevBypass.IsLocalhost(loopback));
         Assert.False(DevBypass.IsLocalhost(remote));
+        Assert.True(DevBypass.IsLocalhost(missingRemoteIp));
     }
 
     private sealed class TestWebHostEnvironment(string environmentName) : IWebHostEnvironment

@@ -21,8 +21,9 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     HttpResponseMessage response = await client.GetAsync("/healthz");
 
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    string body = await response.Content.ReadAsStringAsync();
-    Assert.Contains("healthy", body, StringComparison.OrdinalIgnoreCase);
+    Dictionary<string, string>? body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+    Assert.NotNull(body);
+    Assert.Equal("healthy", body["status"]);
   }
 
   [SkippableFact]
@@ -57,6 +58,7 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
 
     AuthResponse? loggedIn = await loginResponse.Content.ReadFromJsonAsync<AuthResponse>();
     Assert.NotNull(loggedIn);
+    Assert.False(string.IsNullOrWhiteSpace(loggedIn.AccessToken));
     Assert.Equal(registered.User.UserId, loggedIn.User.UserId);
   }
 }
