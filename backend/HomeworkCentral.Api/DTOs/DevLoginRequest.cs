@@ -13,7 +13,7 @@ public class DevLoginRequest
 /// <summary>Dropdown data for /devlogin.</summary>
 public class DevLoginOptionsResponse
 {
-    public List<DevDeveloperOption> Developers { get; set; } = new();
+    public List<DevDeveloperOption> Developers { get; set; } = [];
 }
 
 /// <summary>A subject-area developer account with its scoped persona list.</summary>
@@ -21,7 +21,7 @@ public class DevDeveloperOption
 {
     public Guid UserId { get; set; }
     public string Username { get; set; } = null!;
-    public List<DevUserOption> Users { get; set; } = new();
+    public List<DevUserOption> Users { get; set; } = [];
 }
 
 /// <summary>A persona that can be impersonated under a developer account.</summary>

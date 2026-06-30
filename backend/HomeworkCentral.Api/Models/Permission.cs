@@ -9,5 +9,5 @@ public class Permission
     public string? Category { get; set; }
     public bool IsReserved { get; set; } = false;
 
-    public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
+    public ICollection<RolePermission> RolePermissions { get; set; } = [];
 }

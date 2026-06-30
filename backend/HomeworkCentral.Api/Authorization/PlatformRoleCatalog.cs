@@ -1,9 +1,11 @@
+using System.Collections.Frozen;
+
 namespace HomeworkCentral.Api.Authorization;
 
 /// <summary>Maps platform role names to authority levels (bit index) for grant checks.</summary>
 public static class PlatformRoleCatalog
 {
-    private static readonly IReadOnlyDictionary<string, short> RoleBits =
+    private static readonly FrozenDictionary<string, short> RoleBits =
         new Dictionary<string, short>(StringComparer.OrdinalIgnoreCase)
         {
             ["Guest"] = PlatformRoles.Guest,
@@ -26,26 +28,24 @@ public static class PlatformRoleCatalog
             ["BoardMember"] = PlatformRoles.BoardMember,
             ["Owner"] = PlatformRoles.Owner,
             ["Founder"] = PlatformRoles.Founder,
-        };
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FrozenDictionary<string, string> CanonicalRoleNames =
+        RoleBits.Keys.ToFrozenDictionary(k => k, k => k, StringComparer.OrdinalIgnoreCase);
 
     public static bool TryGetRoleBit(string roleName, out short bit) =>
         RoleBits.TryGetValue(roleName, out bit);
 
     public static bool TryGetCanonicalRoleName(string roleName, out string canonicalName, out short bit)
     {
-        foreach (KeyValuePair<string, short> entry in RoleBits)
+        if (!RoleBits.TryGetValue(roleName, out bit))
         {
-            if (!string.Equals(entry.Key, roleName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            canonicalName = entry.Key;
-            bit = entry.Value;
-            return true;
+            canonicalName = string.Empty;
+            return false;
         }
 
-        canonicalName = string.Empty;
-        bit = 0;
-        return false;
+        canonicalName = CanonicalRoleNames[roleName];
+        return true;
     }
 
     public static short GetHighestRoleBit(IEnumerable<string> roleNames)

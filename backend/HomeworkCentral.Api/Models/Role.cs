@@ -11,6 +11,6 @@ public class Role
     public BitArray PermissionMask { get; set; } = new(256);
     public BitArray FeatureMask { get; set; } = new(256);
 
-    public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-    public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
+    public ICollection<UserRole> UserRoles { get; set; } = [];
+    public ICollection<RolePermission> RolePermissions { get; set; } = [];
 }

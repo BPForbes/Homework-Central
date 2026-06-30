@@ -9,6 +9,6 @@ public class Subject
     public string Name { get; set; } = null!;
 
     public Subject? ParentSubject { get; set; }
-    public ICollection<Subject> ChildSubjects { get; set; } = new List<Subject>();
-    public ICollection<UserSubject> UserSubjects { get; set; } = new List<UserSubject>();
+    public ICollection<Subject> ChildSubjects { get; set; } = [];
+    public ICollection<UserSubject> UserSubjects { get; set; } = [];
 }

@@ -24,7 +24,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
 $PostgresHostCheckProject = Join-Path $RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
-$PostgresHostCheckDll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll'
+$PostgresHostCheckDll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
@@ -59,7 +59,7 @@ Stop:
   Closing both API and frontend terminals stops Docker Postgres and frees its port.
   Restarting the API alone will auto-start Postgres if needed.
 
-Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+, PowerShell 7+ (pwsh)
+Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, PowerShell 7+ (pwsh)
 '@ | Write-Output
 }
 

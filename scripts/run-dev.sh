@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
 POSTGRES_HOST_CHECK_PROJECT="$REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
-POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll"
+POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
@@ -54,7 +54,7 @@ Stop:
   scripts/stop-dev.sh
   Ctrl+C in this terminal also stops Docker Postgres and frees its port.
 
-Requires: Docker (for Postgres), .NET 8 SDK, Node.js 18+
+Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+
 EOF
 }
 
