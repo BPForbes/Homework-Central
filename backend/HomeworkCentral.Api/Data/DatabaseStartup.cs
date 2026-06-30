@@ -43,6 +43,12 @@ public static class DatabaseStartup
         using IServiceScope scope = services.CreateScope();
         ITenantConnectionResolver connectionResolver =
             scope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
+        ILogger<Program>? logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+
+        logger?.LogInformation(
+            "Applying migrations to master database '{DatabaseName}'. "
+            + "Failed queries against __EFAppMigrationsHistory / __EFMasterMigrationsHistory on first run are expected.",
+            connectionResolver.MasterDatabaseName);
 
         await TenantDatabaseProvisioner.EnsureMasterDatabaseExistsAsync(connectionResolver, ct);
 
@@ -51,6 +57,8 @@ public static class DatabaseStartup
 
         MasterDbContext masterDb = scope.ServiceProvider.GetRequiredService<MasterDbContext>();
         await masterDb.Database.MigrateAsync(ct);
+
+        logger?.LogInformation("Master database migrations complete.");
     }
 
     private static bool IsTransient(Exception ex)

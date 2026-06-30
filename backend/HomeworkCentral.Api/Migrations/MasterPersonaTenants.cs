@@ -47,6 +47,9 @@ public class MasterPersonaTenants : Migration
             oldType: "character varying(32)",
             oldMaxLength: 32);
 
+        // Group-level tenant rows from the earlier layout cannot be upgraded in place.
+        migrationBuilder.Sql("DELETE FROM \"Tenants\";");
+
         migrationBuilder.CreateIndex(
             name: "IX_Tenants_ClusterSlug",
             table: "Tenants",

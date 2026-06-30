@@ -69,6 +69,8 @@ export Tenancy__ClusterEnvironment=dev
 
 printf 'Homework Central API - http://localhost:5000\n'
 printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
+printf 'Note: first-run EF logs about missing __EF*MigrationsHistory tables are normal.\n'
+printf 'Note: first startup provisions ~70 persona databases and may take several minutes.\n'
 
 cleanup_api() {
   if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then

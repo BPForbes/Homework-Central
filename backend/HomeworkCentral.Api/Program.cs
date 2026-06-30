@@ -167,12 +167,19 @@ using (IServiceScope seedScope = app.Services.CreateScope())
     MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
     IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
     IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
+    ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
     if (devBypassEnabled)
     {
         await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
         await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
+
+        int personaCount = DevAccountCatalog.All.Sum(account => account.Personas.Length);
+        int provisioned = 0;
+        startupLogger.LogInformation(
+            "Provisioning {PersonaCount} persona tenant databases (first startup may take several minutes)...",
+            personaCount);
 
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
@@ -181,8 +188,20 @@ using (IServiceScope seedScope = app.Services.CreateScope())
                 string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
                 await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName);
                 await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(connectionResolver, account, persona);
+                provisioned++;
+
+                if (provisioned == 1 || provisioned == personaCount || provisioned % 10 == 0)
+                {
+                    startupLogger.LogInformation(
+                        "Provisioned persona database {Current}/{Total}: {DatabaseName}",
+                        provisioned,
+                        personaCount,
+                        databaseName);
+                }
             }
         }
+
+        startupLogger.LogInformation("Persona tenant database provisioning complete.");
     }
 }
 

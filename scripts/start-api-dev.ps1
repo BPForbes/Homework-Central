@@ -71,6 +71,8 @@ $env:Tenancy__ClusterEnvironment = 'dev'
 
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
 Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
+Write-Host "Note: first-run EF logs about missing __EF*MigrationsHistory tables are normal." -ForegroundColor DarkGray
+Write-Host "Note: first startup provisions ~70 persona databases and may take several minutes." -ForegroundColor DarkGray
 
 $skipDocker = $SkipDocker -or $env:HC_SKIP_DOCKER -eq '1'
 if ($PreRegistered) {
