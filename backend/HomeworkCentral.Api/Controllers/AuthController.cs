@@ -90,7 +90,8 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         if (!Guid.TryParse(sub, out Guid userId))
             return Unauthorized();
 
-        UserDto? user = await auth.GetCurrentUserAsync(userId);
+        string? tenantDb = User.FindFirstValue("tenant_db");
+        UserDto? user = await auth.GetCurrentUserAsync(userId, tenantDb);
         if (user is null) return NotFound();
 
         return Ok(user);

@@ -3,14 +3,14 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace HomeworkCentral.Api.Data;
 
-public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
+public class MasterDbContextFactory : IDesignTimeDbContextFactory<MasterDbContext>
 {
-    public AppDbContext CreateDbContext(string[] args)
+    public MasterDbContext CreateDbContext(string[] args)
     {
         string port = Environment.GetEnvironmentVariable("POSTGRES_HOST_PORT") ?? "5434";
-        DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<MasterDbContext> opts = new DbContextOptionsBuilder<MasterDbContext>()
             .UseNpgsql($"Host=localhost;Port={port};Database=homework_central_master;Username=postgres;Password=postgres")
             .Options;
-        return new AppDbContext(opts);
+        return new MasterDbContext(opts);
     }
 }

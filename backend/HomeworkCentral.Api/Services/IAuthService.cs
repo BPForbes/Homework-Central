@@ -15,5 +15,5 @@ public interface IAuthService
 
     Task<AuthResponse> RefreshAsync(string refreshToken);
     Task RevokeRefreshTokenAsync(string refreshToken);
-    Task<UserDto?> GetCurrentUserAsync(Guid userId);
+    Task<UserDto?> GetCurrentUserAsync(Guid userId, string? tenantDatabaseName = null);
 }

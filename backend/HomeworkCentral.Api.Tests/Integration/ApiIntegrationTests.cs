@@ -69,6 +69,7 @@ public sealed class IntegrationTestCollection : ICollectionFixture<IntegrationTe
 public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
 {
   private readonly string _connectionString;
+  private readonly string _adminConnectionString;
   private HttpClient? _client;
 
   public bool IsDatabaseAvailable { get; }
@@ -78,6 +79,8 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
   {
     _connectionString = Environment.GetEnvironmentVariable("TEST_DATABASE_URL")
       ?? "Host=localhost;Port=5432;Database=homework_central_test;Username=postgres;Password=postgres";
+    _adminConnectionString = Environment.GetEnvironmentVariable("TEST_POSTGRES_ADMIN_URL")
+      ?? "Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres";
 
     IsDatabaseAvailable = CanConnectToDatabase(_connectionString);
     SkipReason = "Integration tests require Postgres at TEST_DATABASE_URL.";
@@ -88,7 +91,9 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
   protected override void ConfigureWebHost(IWebHostBuilder builder)
   {
     builder.UseEnvironment(Environments.Development);
-    builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
+    builder.UseSetting("ConnectionStrings:MasterConnection", _connectionString);
+    builder.UseSetting("ConnectionStrings:PostgresAdmin", _adminConnectionString);
+    builder.UseSetting("Tenancy:ClusterEnvironment", "dev");
     builder.UseSetting("Jwt:Secret", "integration-test-jwt-secret-key-32chars!");
     builder.UseSetting(DevBypass.EnvVarName, "0");
   }

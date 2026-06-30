@@ -3,6 +3,7 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -13,12 +14,14 @@ using System.Text;
 namespace HomeworkCentral.Api.Services;
 
 public class AuthService(
-    AppDbContext db,
+    AppDbContext masterDb,
+    ITenantDbContextFactory tenantFactory,
     IJwtService jwt,
     IHttpContextAccessor http,
     IEffectiveMaskService effectiveMaskService) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
+    private const string TenantDbCookieName = "tenant_db";
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
@@ -35,12 +38,12 @@ public class AuthService(
             UpdatedAt = now,
         };
 
-        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await db.Database.BeginTransactionAsync();
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await masterDb.Database.BeginTransactionAsync();
         try
         {
-            db.Users.Add(user);
-            await db.SaveChangesAsync();
-            await db.AssignDefaultRolesAsync(user, effectiveMaskService);
+            masterDb.Users.Add(user);
+            await masterDb.SaveChangesAsync();
+            await masterDb.AssignDefaultRolesAsync(user, effectiveMaskService);
             await transaction.CommitAsync();
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)
@@ -61,14 +64,14 @@ public class AuthService(
             throw;
         }
 
-        return await BuildAuthResponseAsync(user);
+        return await BuildAuthResponseAsync(user, masterDb, tenantDatabaseName: null);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req)
     {
         string normalizedEmail = req.Email.ToLowerInvariant();
 
-        User? user = await db.Users
+        User? user = await masterDb.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .Include(u => u.EffectiveMask!)
                 .ThenInclude(m => m.SubjectExpertiseMasks)
@@ -77,19 +80,19 @@ public class AuthService(
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid email or password.");
 
-        return await BuildAuthResponseAsync(user);
+        return await BuildAuthResponseAsync(user, masterDb, tenantDatabaseName: null);
     }
 
     /// <inheritdoc />
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
-        HashSet<Guid> developerUserIds = await db.UserRoles
+        HashSet<Guid> developerUserIds = await masterDb.UserRoles
             .AsNoTracking()
             .Where(userRole => userRole.Role.Name == "Developer")
             .Select(userRole => userRole.UserId)
             .ToHashSetAsync();
 
-        Dictionary<string, User> usersByEmail = await db.Users
+        Dictionary<string, User> masterUsersByEmail = await masterDb.Users
             .AsNoTracking()
             .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
 
@@ -97,16 +100,21 @@ public class AuthService(
 
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
-            if (!usersByEmail.TryGetValue(account.DeveloperEmail, out User? developer))
+            if (!masterUsersByEmail.TryGetValue(account.DeveloperEmail, out User? developer))
                 continue;
 
             if (!developerUserIds.Contains(developer.UserId))
                 continue;
 
+            await using AppDbContext tenantDb = tenantFactory.Create(account.TenantDatabaseName);
+            Dictionary<string, User> tenantUsersByEmail = await tenantDb.Users
+                .AsNoTracking()
+                .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
+
             List<DevUserOption> personas = new();
             foreach (DevPersonaDefinition persona in account.Personas)
             {
-                if (!usersByEmail.TryGetValue(persona.Email, out User? user))
+                if (!tenantUsersByEmail.TryGetValue(persona.Email, out User? user))
                     continue;
 
                 personas.Add(new DevUserOption
@@ -133,7 +141,7 @@ public class AuthService(
     /// <inheritdoc />
     public async Task<AuthResponse> DevLoginAsync(DevLoginRequest req)
     {
-        User? developer = await db.Users
+        User? developer = await masterDb.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.UserId == req.DeveloperUserId);
 
@@ -144,80 +152,123 @@ public class AuthService(
         if (account is null || !developer.UserRoles.Any(ur => ur.Role.Name == "Developer"))
             throw new UnauthorizedAccessException("Selected account is not a developer.");
 
-        User loginUser;
         if (req.TargetUserId is null || req.TargetUserId == Guid.Empty)
         {
-            loginUser = await db.Users
+            User loginUser = await masterDb.Users
                 .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
                 .Include(u => u.EffectiveMask!)
                     .ThenInclude(m => m.SubjectExpertiseMasks)
                 .FirstOrDefaultAsync(u => u.Username == DevBypass.DevAdminUsername)
                 ?? throw new InvalidOperationException("DevAdmin account is not configured.");
-        }
-        else
-        {
-            loginUser = await db.Users
-                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-                .Include(u => u.EffectiveMask!)
-                    .ThenInclude(m => m.SubjectExpertiseMasks)
-                .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
-                ?? throw new InvalidOperationException("Selected user was not found.");
 
-            if (account is null || !DevAccountCatalog.PersonaBelongsToAccount(account, loginUser.Email))
-                throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
+            return await BuildAuthResponseAsync(loginUser, masterDb, tenantDatabaseName: null);
         }
 
-        return await BuildAuthResponseAsync(loginUser);
+        await using AppDbContext tenantDb = tenantFactory.Create(account.TenantDatabaseName);
+        User loginPersona = await tenantDb.Users
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .Include(u => u.EffectiveMask!)
+                .ThenInclude(m => m.SubjectExpertiseMasks)
+            .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
+            ?? throw new InvalidOperationException("Selected user was not found.");
+
+        if (!DevAccountCatalog.PersonaBelongsToAccount(account, loginPersona.Email))
+            throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
+
+        return await BuildAuthResponseAsync(loginPersona, tenantDb, account.TenantDatabaseName);
     }
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
     {
-        string tokenHash = HashToken(rawToken);
+        string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenantDbCookieName];
+        AppDbContext db = ResolveDbContext(tenantDatabaseName);
+        bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
-        int revoked = await db.RefreshTokens
-            .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
-            .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
+        try
+        {
+            string tokenHash = HashToken(rawToken);
 
-        if (revoked == 0)
-            throw new UnauthorizedAccessException("Invalid or expired refresh token.");
+            int revoked = await db.RefreshTokens
+                .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
+                .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
 
-        RefreshToken stored = await db.RefreshTokens
-            .Include(rt => rt.User)
-                .ThenInclude(u => u.UserRoles)
-                    .ThenInclude(ur => ur.Role)
-            .Include(rt => rt.User.EffectiveMask!)
-                .ThenInclude(m => m.SubjectExpertiseMasks)
-            .FirstAsync(rt => rt.TokenHash == tokenHash);
+            if (revoked == 0)
+                throw new UnauthorizedAccessException("Invalid or expired refresh token.");
 
-        return await BuildAuthResponseAsync(stored.User);
+            RefreshToken stored = await db.RefreshTokens
+                .Include(rt => rt.User)
+                    .ThenInclude(u => u.UserRoles)
+                        .ThenInclude(ur => ur.Role)
+                .Include(rt => rt.User.EffectiveMask!)
+                    .ThenInclude(m => m.SubjectExpertiseMasks)
+                .FirstAsync(rt => rt.TokenHash == tokenHash);
+
+            return await BuildAuthResponseAsync(stored.User, db, tenantDatabaseName);
+        }
+        finally
+        {
+            if (disposeTenantDb)
+                await db.DisposeAsync();
+        }
     }
 
     public async Task RevokeRefreshTokenAsync(string rawToken)
     {
-        string tokenHash = HashToken(rawToken);
-        await db.RefreshTokens
-            .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked)
-            .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
+        string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenantDbCookieName];
+        AppDbContext db = ResolveDbContext(tenantDatabaseName);
+        bool disposeTenantDb = !ReferenceEquals(db, masterDb);
+
+        try
+        {
+            string tokenHash = HashToken(rawToken);
+            await db.RefreshTokens
+                .Where(rt => rt.TokenHash == tokenHash && !rt.IsRevoked)
+                .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true));
+        }
+        finally
+        {
+            if (disposeTenantDb)
+                await db.DisposeAsync();
+        }
     }
 
-    public async Task<UserDto?> GetCurrentUserAsync(Guid userId)
+    public async Task<UserDto?> GetCurrentUserAsync(Guid userId, string? tenantDatabaseName = null)
     {
-        User? user = await db.Users
-            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .Include(u => u.EffectiveMask!)
-                .ThenInclude(m => m.SubjectExpertiseMasks)
-            .FirstOrDefaultAsync(u => u.UserId == userId);
+        AppDbContext db = ResolveDbContext(tenantDatabaseName);
+        bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
-        if (user is null)
-            return null;
+        try
+        {
+            User? user = await db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .Include(u => u.EffectiveMask!)
+                    .ThenInclude(m => m.SubjectExpertiseMasks)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
 
-        UserEffectiveMask effectiveMask = user.EffectiveMask
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
+            if (user is null)
+                return null;
 
-        return BuildUserDto(user, effectiveMask);
+            UserEffectiveMask effectiveMask = user.EffectiveMask
+                ?? await RebuildMaskAsync(db, userId);
+
+            return BuildUserDto(user, effectiveMask);
+        }
+        finally
+        {
+            if (disposeTenantDb)
+                await db.DisposeAsync();
+        }
     }
 
-    private async Task<AuthResponse> BuildAuthResponseAsync(User user)
+    private AppDbContext ResolveDbContext(string? tenantDatabaseName) =>
+        string.IsNullOrEmpty(tenantDatabaseName)
+            ? masterDb
+            : tenantFactory.Create(tenantDatabaseName);
+
+    private async Task<AuthResponse> BuildAuthResponseAsync(
+        User user,
+        AppDbContext db,
+        string? tenantDatabaseName)
     {
         if (!db.Entry(user).Collection(u => u.UserRoles).IsLoaded)
         {
@@ -234,7 +285,7 @@ public class AuthService(
         }
 
         UserEffectiveMask effectiveMask = user.EffectiveMask
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId);
+            ?? await EffectiveMaskService.RebuildOnContextAsync(db, user.UserId);
 
         (string rawToken, DateTime refreshExpires) = jwt.GenerateRefreshToken();
         db.RefreshTokens.Add(new RefreshToken
@@ -247,10 +298,10 @@ public class AuthService(
         });
         await db.SaveChangesAsync();
 
-        SetRefreshCookie(rawToken, refreshExpires);
+        SetRefreshCookie(rawToken, refreshExpires, tenantDatabaseName);
 
         UserDto dto = BuildUserDto(user, effectiveMask);
-        string accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask));
+        string accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask), tenantDatabaseName);
 
         return new AuthResponse
         {
@@ -259,6 +310,9 @@ public class AuthService(
             User = dto,
         };
     }
+
+    private static async Task<UserEffectiveMask> RebuildMaskAsync(AppDbContext db, Guid userId) =>
+        await EffectiveMaskService.RebuildOnContextAsync(db, userId);
 
     private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask)
     {
@@ -304,19 +358,29 @@ public class AuthService(
         };
     }
 
-    private void SetRefreshCookie(string rawToken, DateTime expires)
+    private void SetRefreshCookie(string rawToken, DateTime expires, string? tenantDatabaseName)
     {
         HttpResponse? response = http.HttpContext?.Response;
         if (response is null) return;
 
-        response.Cookies.Append("refresh_token", rawToken, new CookieOptions
+        CookieOptions cookieOptions = new()
         {
             HttpOnly = true,
             Secure = http.HttpContext?.Request.IsHttps ?? false,
             SameSite = SameSiteMode.Strict,
             Expires = expires,
             Path = "/api/auth",
-        });
+        };
+
+        response.Cookies.Append("refresh_token", rawToken, cookieOptions);
+
+        if (string.IsNullOrEmpty(tenantDatabaseName))
+        {
+            response.Cookies.Delete(TenantDbCookieName, cookieOptions);
+            return;
+        }
+
+        response.Cookies.Append(TenantDbCookieName, tenantDatabaseName, cookieOptions);
     }
 
     private static string HashToken(string token)

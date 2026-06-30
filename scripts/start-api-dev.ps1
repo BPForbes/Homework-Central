@@ -57,14 +57,17 @@ function Read-JwtSecret {
 }
 
 $envValues = Read-JwtSecret
-$connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central;Username=$DevPostgresUser;Password=$DevPostgresPassword"
+$connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
+$adminConnectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
 $env:Jwt__Secret = $envValues['JWT_SECRET']
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 $env:HC_DEV_BYPASS = '1'
-$env:ConnectionStrings__DefaultConnection = $connectionString
+$env:ConnectionStrings__MasterConnection = $connectionString
+$env:ConnectionStrings__PostgresAdmin = $adminConnectionString
+$env:Tenancy__ClusterEnvironment = 'dev'
 
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
 Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray

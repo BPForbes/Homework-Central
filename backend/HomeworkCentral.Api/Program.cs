@@ -5,6 +5,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -35,9 +36,19 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
     }
 });
 
-// Database
+// Database — master registry; tenant databases are resolved dynamically at runtime.
+string masterConnection = builder.Configuration.GetConnectionString("MasterConnection")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be set.");
+
 builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    opts.UseNpgsql(masterConnection));
+
+builder.Services.AddDbContext<MasterDbContext>(opts =>
+    opts.UseNpgsql(masterConnection));
+
+builder.Services.AddSingleton<ITenantConnectionResolver, TenantConnectionResolver>();
+builder.Services.AddScoped<ITenantDbContextFactory, TenantDbContextFactory>();
 
 // Auth services
 builder.Services.AddHttpContextAccessor();
@@ -129,18 +140,37 @@ if (devBypassEnabled)
 if (app.Environment.IsDevelopment())
 {
     using IServiceScope scope = app.Services.CreateScope();
+    ITenantConnectionResolver connectionResolver = scope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
+    await TenantDatabaseProvisioner.EnsureMasterDatabaseExistsAsync(connectionResolver);
+
     AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    await db.Database.MigrateAsync();
+
+    MasterDbContext masterRegistry = scope.ServiceProvider.GetRequiredService<MasterDbContext>();
+    await masterRegistry.Database.MigrateAsync();
 }
 
 using (IServiceScope seedScope = app.Services.CreateScope())
 {
+    ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
+    ITenantDbContextFactory tenantFactory = seedScope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
     IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
     IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
+
     await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
     if (devBypassEnabled)
+    {
+        await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
         await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
+
+        foreach (DevAccountDefinition account in DevAccountCatalog.All)
+        {
+            await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, account.TenantDatabaseName);
+            await TenantDatabaseProvisioner.MigrateAndSeedTenantAsync(tenantFactory, roleMaskService, account);
+        }
+    }
 }
 
 app.Run();

@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: homework_central
+      POSTGRES_DB: postgres
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
     # Published for local dev (scripts/run-dev.*). Omit in production deployments.
@@ -12,7 +12,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d homework_central"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,8 +25,11 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__DefaultConnection: >
-        Host=postgres;Database=homework_central;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
+      ConnectionStrings__MasterConnection: >
+        Host=postgres;Database=homework_central_master;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
+      ConnectionStrings__PostgresAdmin: >
+        Host=postgres;Database=postgres;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
+      Tenancy__ClusterEnvironment: dev
       Jwt__Secret: "${JWT_SECRET:?JWT_SECRET must be set}"
     ports:
       - "5000:8080"

@@ -5,7 +5,7 @@ namespace HomeworkCentral.Api.Services;
 
 public interface IJwtService
 {
-    string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks);
+    string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks, string? tenantDatabaseName = null);
     (string token, DateTime expires) GenerateRefreshToken();
     Guid? ValidateAccessToken(string token);
 }

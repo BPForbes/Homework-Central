@@ -13,7 +13,11 @@ public sealed class DevAccountDefinition
 {
     public required string DeveloperUsername { get; init; }
     public required string DeveloperEmail { get; init; }
+    public required string TenantSlug { get; init; }
     public required DevPersonaDefinition[] Personas { get; init; }
+
+    /// <summary>Isolated Postgres database for this developer group (e.g. tenant_math).</summary>
+    public string TenantDatabaseName => $"tenant_{TenantSlug}";
 }
 
 /// <summary>
@@ -43,6 +47,10 @@ public static class DevAccountCatalog
         All.FirstOrDefault(account =>
             string.Equals(account.DeveloperEmail, email, StringComparison.OrdinalIgnoreCase));
 
+    public static DevAccountDefinition? FindByTenantDatabaseName(string databaseName) =>
+        All.FirstOrDefault(account =>
+            string.Equals(account.TenantDatabaseName, databaseName, StringComparison.OrdinalIgnoreCase));
+
     public static bool PersonaBelongsToAccount(DevAccountDefinition account, string personaEmail) =>
         account.Personas.Any(persona =>
             string.Equals(persona.Email, personaEmail, StringComparison.OrdinalIgnoreCase));
@@ -52,9 +60,13 @@ public static class DevAccountCatalog
     {
         HashSet<string> emails = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> usernames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> tenantSlugs = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (DevAccountDefinition account in All)
         {
+            if (!tenantSlugs.Add(account.TenantSlug))
+                throw new InvalidOperationException($"Duplicate tenant slug in dev catalog: {account.TenantSlug}");
+
             if (!emails.Add(account.DeveloperEmail))
                 throw new InvalidOperationException($"Duplicate developer email in dev catalog: {account.DeveloperEmail}");
 
@@ -76,6 +88,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Science Developer",
         DeveloperEmail = "science.developer@dev.local",
+        TenantSlug = "science",
         Personas =
         [
             Persona("Dr. Emmett Brown", "doc.brown@science.dev", "Tutor"),
@@ -91,6 +104,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Math Developer",
         DeveloperEmail = "math.developer@dev.local",
+        TenantSlug = "math",
         Personas =
         [
             Persona("Fibonacci", "fibonacci@math.dev", "Tutor"),
@@ -106,6 +120,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Computer Science Developer",
         DeveloperEmail = "cs.developer@dev.local",
+        TenantSlug = "cs",
         Personas =
         [
             Persona("Grace Hopper", "grace.hopper@cs.dev", "SeniorTutor"),
@@ -121,6 +136,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Languages Developer",
         DeveloperEmail = "languages.developer@dev.local",
+        TenantSlug = "languages",
         Personas =
         [
             Persona("William Shakespeare", "william.shakespeare@languages.dev", "VerifiedEducator"),
@@ -136,6 +152,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "History Developer",
         DeveloperEmail = "history.developer@dev.local",
+        TenantSlug = "history",
         Personas =
         [
             Persona("Cleopatra", "cleopatra@history.dev", "Student"),
@@ -151,6 +168,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Business Developer",
         DeveloperEmail = "business.developer@dev.local",
+        TenantSlug = "business",
         Personas =
         [
             Persona("Warren Buffett", "warren.buffett@business.dev", "Tutor"),
@@ -165,6 +183,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Art Developer",
         DeveloperEmail = "art.developer@dev.local",
+        TenantSlug = "art",
         Personas =
         [
             Persona("Vincent van Gogh", "vincent.vangogh@art.dev", "Student"),
@@ -179,6 +198,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Music Developer",
         DeveloperEmail = "music.developer@dev.local",
+        TenantSlug = "music",
         Personas =
         [
             Persona("Ludwig van Beethoven", "ludwig.beethoven@music.dev", "Tutor"),
@@ -193,6 +213,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Engineering Developer",
         DeveloperEmail = "engineering.developer@dev.local",
+        TenantSlug = "engineering",
         Personas =
         [
             Persona("Tony Stark", "tony.stark@engineering.dev", "Tutor", "Developer"),
@@ -207,6 +228,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Medicine Developer",
         DeveloperEmail = "medicine.developer@dev.local",
+        TenantSlug = "medicine",
         Personas =
         [
             Persona("Dr. Gregory House", "gregory.house@medicine.dev", "Tutor"),
@@ -221,6 +243,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Finance Developer",
         DeveloperEmail = "finance.developer@dev.local",
+        TenantSlug = "finance",
         Personas =
         [
             Persona("Janet Yellen", "janet.yellen@finance.dev", "Administrator"),
@@ -235,6 +258,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Economics Developer",
         DeveloperEmail = "economics.developer@dev.local",
+        TenantSlug = "economics",
         Personas =
         [
             Persona("Adam Smith", "adam.smith@economics.dev", "Tutor"),
@@ -249,6 +273,7 @@ public static class DevAccountCatalog
     {
         DeveloperUsername = "Education Developer",
         DeveloperEmail = "education.developer@dev.local",
+        TenantSlug = "education",
         Personas =
         [
             Persona("Ms. Frizzle", "ms.frizzle@education.dev", "Tutor", "SeminarHost"),

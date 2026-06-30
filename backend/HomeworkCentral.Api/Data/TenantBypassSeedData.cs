@@ -5,44 +5,31 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Data;
 
-/// <summary>
-/// Seeds developer accounts and DevAdmin into the master database when localhost dev bypass is enabled.
-/// Personas are seeded separately into isolated tenant databases.
-/// </summary>
-public static class DevBypassSeedData
+/// <summary>Seeds personas into an isolated tenant database.</summary>
+public static class TenantBypassSeedData
 {
-    /// <summary>Creates or updates DevAdmin and developer accounts on the master database.</summary>
-    public static async Task SeedAsync(
-        AppDbContext masterDb,
-        IEffectiveMaskService effectiveMaskService,
+    public static async Task SeedPersonasAsync(
+        AppDbContext tenantDb,
+        DevAccountDefinition account,
         CancellationToken ct = default)
     {
-        DevAccountCatalog.ValidateUniquePersonas();
+        Dictionary<string, Role> rolesByName = await tenantDb.Roles.ToDictionaryAsync(r => r.Name, ct);
 
-        Dictionary<string, Role> rolesByName = await masterDb.Roles.ToDictionaryAsync(r => r.Name, ct);
-        Role developerRole = rolesByName["Developer"];
-        Role ownerRole = rolesByName["Owner"];
-
-        User devAdmin = await EnsureUserWithRolesAsync(
-            masterDb,
-            DevBypass.DevAdminEmail,
-            DevBypass.DevAdminUsername,
-            [ownerRole],
-            ct);
-        await masterDb.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(devAdmin.UserId, ct);
-
-        foreach (DevAccountDefinition account in DevAccountCatalog.All)
+        foreach (DevPersonaDefinition persona in account.Personas)
         {
-            User developer = await EnsureUserWithRolesAsync(
-                masterDb,
-                account.DeveloperEmail,
-                account.DeveloperUsername,
-                [developerRole],
+            Role[] personaRoles = persona.Roles
+                .Select(roleName => rolesByName[roleName])
+                .ToArray();
+
+            User personaUser = await EnsureUserWithRolesAsync(
+                tenantDb,
+                persona.Email,
+                persona.Username,
+                personaRoles,
                 ct);
 
-            await masterDb.SaveChangesAsync(ct);
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(developer.UserId, ct);
+            await tenantDb.SaveChangesAsync(ct);
+            await EffectiveMaskService.RebuildOnContextAsync(tenantDb, personaUser.UserId, ct);
         }
     }
 
@@ -65,7 +52,7 @@ public static class DevBypassSeedData
             if (usernameTaken)
             {
                 throw new InvalidOperationException(
-                    $"Dev seed username '{username}' is already assigned to another account.");
+                    $"Dev seed username '{username}' is already assigned to another account in tenant database.");
             }
 
             user = new User
@@ -86,7 +73,7 @@ public static class DevBypassSeedData
             if (usernameTaken)
             {
                 throw new InvalidOperationException(
-                    $"Dev seed username '{username}' is already assigned to another account.");
+                    $"Dev seed username '{username}' is already assigned to another account in tenant database.");
             }
 
             user.Username = username;
