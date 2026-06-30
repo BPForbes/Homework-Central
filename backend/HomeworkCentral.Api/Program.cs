@@ -37,9 +37,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 });
 
 // Database — master registry; tenant databases are resolved dynamically at runtime.
-string masterConnection = builder.Configuration.GetConnectionString("MasterConnection")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be set.");
+string masterConnection = ConnectionStringHelpers.ResolveMasterConnection(builder.Configuration);
 
 builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseNpgsql(masterConnection, npgsql =>

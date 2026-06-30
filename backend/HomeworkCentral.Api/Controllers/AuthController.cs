@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -78,7 +79,7 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         };
 
         Response.Cookies.Delete("refresh_token", cookieOptions);
-        Response.Cookies.Delete("tenant_db", cookieOptions);
+        Response.Cookies.Delete(TenancyConstants.TenantDbClaimName, cookieOptions);
 
         return NoContent();
     }
@@ -93,7 +94,7 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         if (!Guid.TryParse(sub, out Guid userId))
             return Unauthorized();
 
-        string? tenantDb = User.FindFirstValue("tenant_db");
+        string? tenantDb = User.FindFirstValue(TenancyConstants.TenantDbClaimName);
         UserDto? user = await auth.GetCurrentUserAsync(userId, tenantDb);
         if (user is null) return NotFound();
 

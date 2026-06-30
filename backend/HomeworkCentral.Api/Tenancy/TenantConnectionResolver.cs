@@ -2,13 +2,22 @@ using Npgsql;
 
 namespace HomeworkCentral.Api.Tenancy;
 
-public class TenantConnectionResolver(IConfiguration config) : ITenantConnectionResolver
+public class TenantConnectionResolver : ITenantConnectionResolver
 {
-    private readonly string _baseConnectionString = ResolveMasterConnection(config);
+    private readonly IConfiguration _config;
+    private readonly string _baseConnectionString;
 
-    public string MasterDatabaseName { get; } = ParseDatabaseName(ResolveMasterConnection(config));
+    public TenantConnectionResolver(IConfiguration config)
+    {
+        _config = config;
+        _baseConnectionString = ConnectionStringHelpers.ResolveMasterConnection(config);
+        MasterDatabaseName = ParseDatabaseName(_baseConnectionString);
+        ClusterEnvironment = config["Tenancy:ClusterEnvironment"] ?? "dev";
+    }
 
-    public string ClusterEnvironment { get; } = config["Tenancy:ClusterEnvironment"] ?? "dev";
+    public string MasterDatabaseName { get; }
+
+    public string ClusterEnvironment { get; }
 
     public string BuildConnectionString(string databaseName)
     {
@@ -21,7 +30,7 @@ public class TenantConnectionResolver(IConfiguration config) : ITenantConnection
 
     public string BuildAdminConnectionString()
     {
-        string? admin = config.GetConnectionString("PostgresAdmin");
+        string? admin = _config.GetConnectionString("PostgresAdmin");
         if (!string.IsNullOrWhiteSpace(admin))
             return admin;
 
@@ -31,11 +40,6 @@ public class TenantConnectionResolver(IConfiguration config) : ITenantConnection
         };
         return builder.ConnectionString;
     }
-
-    private static string ResolveMasterConnection(IConfiguration config) =>
-        config.GetConnectionString("MasterConnection")
-        ?? config.GetConnectionString("DefaultConnection")
-        ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be configured.");
 
     private static string ParseDatabaseName(string connectionString)
     {

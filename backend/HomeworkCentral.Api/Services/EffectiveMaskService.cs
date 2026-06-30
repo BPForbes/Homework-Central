@@ -70,7 +70,7 @@ public class EffectiveMaskService(
         if (httpContext is null)
             return null;
 
-        return httpContext.User.FindFirst("tenant_db")?.Value;
+        return httpContext.User.FindFirst(TenancyConstants.TenantDbClaimName)?.Value;
     }
 
     private static async Task<UserEffectiveMask> RebuildOnContextAsync(

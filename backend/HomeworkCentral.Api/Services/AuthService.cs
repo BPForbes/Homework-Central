@@ -21,7 +21,6 @@ public class AuthService(
     IEffectiveMaskService effectiveMaskService) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
-    private const string TenantDbCookieName = "tenant_db";
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
@@ -200,7 +199,7 @@ public class AuthService(
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
     {
-        string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenantDbCookieName];
+        string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenancyConstants.TenantDbClaimName];
         AppDbContext db = await ResolveDbContextAsync(tenantDatabaseName);
         bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
@@ -234,7 +233,7 @@ public class AuthService(
 
     public async Task RevokeRefreshTokenAsync(string rawToken)
     {
-        string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenantDbCookieName];
+        string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenancyConstants.TenantDbClaimName];
         AppDbContext db = await ResolveDbContextAsync(tenantDatabaseName);
         bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
@@ -396,11 +395,11 @@ public class AuthService(
 
         if (string.IsNullOrEmpty(tenantDatabaseName))
         {
-            response.Cookies.Delete(TenantDbCookieName, cookieOptions);
+            response.Cookies.Delete(TenancyConstants.TenantDbClaimName, cookieOptions);
             return;
         }
 
-        response.Cookies.Append(TenantDbCookieName, tenantDatabaseName, cookieOptions);
+        response.Cookies.Append(TenancyConstants.TenantDbClaimName, tenantDatabaseName, cookieOptions);
     }
 
     private static string HashToken(string token)

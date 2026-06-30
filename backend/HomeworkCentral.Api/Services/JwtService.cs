@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.IdentityModel.Tokens;
 
 namespace HomeworkCentral.Api.Services;
@@ -32,7 +33,7 @@ public class JwtService(IConfiguration config) : IJwtService
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
         if (!string.IsNullOrEmpty(tenantDatabaseName))
-            claims.Add(new Claim("tenant_db", tenantDatabaseName));
+            claims.Add(new Claim(TenancyConstants.TenantDbClaimName, tenantDatabaseName));
 
         SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_secret));
         SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
