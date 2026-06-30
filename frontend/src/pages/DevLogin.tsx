@@ -17,6 +17,7 @@ export function DevLogin() {
   const [developers, setDevelopers] = useState<DevDeveloperOption[]>([])
   const [developerUserId, setDeveloperUserId] = useState('')
   const [targetUserId, setTargetUserId] = useState('')
+  const [tenantDatabaseName, setTenantDatabaseName] = useState('')
   const [error, setError] = useState('')
   const [apiUnavailable, setApiUnavailable] = useState(false)
   const [isLoadingOptions, setIsLoadingOptions] = useState(true)
@@ -91,6 +92,7 @@ export function DevLogin() {
 
   useEffect(() => {
     setTargetUserId('')
+    setTenantDatabaseName('')
   }, [developerUserId])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -106,7 +108,7 @@ export function DevLogin() {
 
     setIsSubmitting(true)
     try {
-      await devLogin(developerUserId, targetUserId || null)
+      await devLogin(developerUserId, targetUserId || null, tenantDatabaseName || null)
       navigate('/dashboard')
     } catch (err: unknown) {
       const msg =
@@ -154,13 +156,24 @@ export function DevLogin() {
             <label htmlFor="targetUser">Sign in as user (optional)</label>
             <select
               id="targetUser"
-              value={targetUserId}
-              onChange={(e) => setTargetUserId(e.target.value)}
+              value={targetUserId ? `${tenantDatabaseName}:${targetUserId}` : ''}
+              onChange={(e) => {
+                const value = e.target.value
+                if (!value) {
+                  setTargetUserId('')
+                  setTenantDatabaseName('')
+                  return
+                }
+
+                const separatorIndex = value.indexOf(':')
+                setTenantDatabaseName(value.slice(0, separatorIndex))
+                setTargetUserId(value.slice(separatorIndex + 1))
+              }}
               disabled={loginDisabled || availableUsers.length === 0}
             >
               <option value="">—</option>
               {availableUsers.map((user) => (
-                <option key={user.userId} value={user.userId}>
+                <option key={`${user.tenantDatabaseName}:${user.userId}`} value={`${user.tenantDatabaseName}:${user.userId}`}>
                   {user.username}
                 </option>
               ))}

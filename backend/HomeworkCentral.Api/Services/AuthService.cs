@@ -106,33 +106,35 @@ public class AuthService(
             if (!developerUserIds.Contains(developer.UserId))
                 continue;
 
-            AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(account.TenantDatabaseName);
-            await using (tenantDb)
+            List<DevUserOption> personas = new();
+            foreach (DevPersonaDefinition persona in account.Personas)
             {
-                Dictionary<string, User> tenantUsersByEmail = await tenantDb.Users
-                    .AsNoTracking()
-                    .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
-
-                List<DevUserOption> personas = new();
-                foreach (DevPersonaDefinition persona in account.Personas)
+                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+                AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName);
+                await using (tenantDb)
                 {
-                    if (!tenantUsersByEmail.TryGetValue(persona.Email, out User? user))
+                    User? user = await tenantDb.Users
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(u => u.Email == persona.Email);
+
+                    if (user is null)
                         continue;
 
                     personas.Add(new DevUserOption
                     {
                         UserId = user.UserId,
                         Username = user.Username,
+                        TenantDatabaseName = databaseName,
                     });
                 }
-
-                developers.Add(new DevDeveloperOption
-                {
-                    UserId = developer.UserId,
-                    Username = developer.Username,
-                    Users = personas,
-                });
             }
+
+            developers.Add(new DevDeveloperOption
+            {
+                UserId = developer.UserId,
+                Username = developer.Username,
+                Users = personas,
+            });
         }
 
         return new DevLoginOptionsResponse
@@ -167,7 +169,19 @@ public class AuthService(
             return await BuildAuthResponseAsync(loginUser, masterDb, tenantDatabaseName: null);
         }
 
-        AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(account.TenantDatabaseName);
+        if (string.IsNullOrWhiteSpace(req.TenantDatabaseName))
+            throw new InvalidOperationException("Tenant database name is required when impersonating a persona.");
+
+        (DevAccountDefinition Account, DevPersonaDefinition Persona)? personaMatch =
+            DevAccountCatalog.FindByPersonaDatabaseName(req.TenantDatabaseName);
+
+        if (personaMatch is null
+            || !string.Equals(personaMatch.Value.Account.DeveloperEmail, developer.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("Selected persona does not belong to this developer account.");
+        }
+
+        AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(req.TenantDatabaseName);
         await using (tenantDb)
         {
             User loginPersona = await tenantDb.Users
@@ -177,10 +191,10 @@ public class AuthService(
                 .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
                 ?? throw new InvalidOperationException("Selected user was not found.");
 
-            if (!DevAccountCatalog.PersonaBelongsToAccount(account, loginPersona.Email))
+            if (!string.Equals(loginPersona.Email, personaMatch.Value.Persona.Email, StringComparison.OrdinalIgnoreCase))
                 throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
 
-            return await BuildAuthResponseAsync(loginPersona, tenantDb, account.TenantDatabaseName);
+            return await BuildAuthResponseAsync(loginPersona, tenantDb, req.TenantDatabaseName);
         }
     }
 

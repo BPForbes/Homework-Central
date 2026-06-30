@@ -176,8 +176,12 @@ using (IServiceScope seedScope = app.Services.CreateScope())
 
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
-            await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, account.TenantDatabaseName);
-            await TenantDatabaseProvisioner.MigrateAndSeedTenantAsync(connectionResolver, account);
+            foreach (DevPersonaDefinition persona in account.Personas)
+            {
+                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+                await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName);
+                await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(connectionResolver, account, persona);
+            }
         }
     }
 }

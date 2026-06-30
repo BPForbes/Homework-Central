@@ -5,32 +5,29 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Data;
 
-/// <summary>Seeds personas into an isolated tenant database.</summary>
+/// <summary>Seeds a single persona into an isolated tenant database.</summary>
 public static class TenantBypassSeedData
 {
-    public static async Task SeedPersonasAsync(
+    public static async Task SeedPersonaAsync(
         AppDbContext tenantDb,
-        DevAccountDefinition account,
+        DevPersonaDefinition persona,
         CancellationToken ct = default)
     {
         Dictionary<string, Role> rolesByName = await tenantDb.Roles.ToDictionaryAsync(r => r.Name, ct);
 
-        foreach (DevPersonaDefinition persona in account.Personas)
-        {
-            Role[] personaRoles = persona.Roles
-                .Select(roleName => rolesByName[roleName])
-                .ToArray();
+        Role[] personaRoles = persona.Roles
+            .Select(roleName => rolesByName[roleName])
+            .ToArray();
 
-            User personaUser = await DevSeedHelpers.EnsureUserWithRolesAsync(
-                tenantDb,
-                persona.Email,
-                persona.Username,
-                personaRoles,
-                usernameConflictScope: " in tenant database",
-                ct);
+        User personaUser = await DevSeedHelpers.EnsureUserWithRolesAsync(
+            tenantDb,
+            persona.Email,
+            persona.Username,
+            personaRoles,
+            usernameConflictScope: " in tenant database",
+            ct);
 
-            await tenantDb.SaveChangesAsync(ct);
-            await EffectiveMaskService.RebuildOnContextAsync(tenantDb, personaUser.UserId, ct);
-        }
+        await tenantDb.SaveChangesAsync(ct);
+        await EffectiveMaskService.RebuildOnContextAsync(tenantDb, personaUser.UserId, ct);
     }
 }

@@ -1,5 +1,4 @@
 using HomeworkCentral.Api.Dev;
-using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.EntityFrameworkCore;
@@ -45,18 +44,21 @@ public static class TenantDatabaseProvisioner
         await EnsureDatabaseExistsAsync(connectionResolver, connectionResolver.MasterDatabaseName, ct);
     }
 
-    public static async Task MigrateAndSeedTenantAsync(
+    public static async Task MigrateAndSeedPersonaAsync(
         ITenantConnectionResolver connectionResolver,
         DevAccountDefinition account,
+        DevPersonaDefinition persona,
         CancellationToken ct = default)
     {
+        string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+
         await using AppDbContext tenantDb = TenantDbContextFactory.BuildProvisioningContext(
             connectionResolver,
-            account.TenantDatabaseName);
+            databaseName);
         await tenantDb.Database.MigrateAsync(ct);
 
         RoleMaskService tenantRoleMaskService = new(tenantDb);
         await AuthorizationSeedData.SeedAsync(tenantDb, tenantRoleMaskService, ct);
-        await TenantBypassSeedData.SeedPersonasAsync(tenantDb, account, ct);
+        await TenantBypassSeedData.SeedPersonaAsync(tenantDb, persona, ct);
     }
 }

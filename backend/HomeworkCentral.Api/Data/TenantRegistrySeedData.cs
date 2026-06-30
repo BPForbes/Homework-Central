@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Data;
 
-/// <summary>Registers developer tenant databases in the master registry.</summary>
+/// <summary>Registers persona tenant databases in the master registry.</summary>
 public static class TenantRegistrySeedData
 {
     public static async Task SeedAsync(
@@ -18,29 +18,41 @@ public static class TenantRegistrySeedData
 
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
-            string normalizedEmail = account.DeveloperEmail.ToLowerInvariant();
-            Tenant? existing = await masterDb.Tenants
-                .FirstOrDefaultAsync(t => t.DeveloperEmail == normalizedEmail, ct);
+            string normalizedDeveloperEmail = account.DeveloperEmail.ToLowerInvariant();
 
-            if (existing is null)
+            foreach (DevPersonaDefinition persona in account.Personas)
             {
-                masterDb.Tenants.Add(new Tenant
+                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+                string normalizedPersonaEmail = persona.Email.ToLowerInvariant();
+                string personaSlug = DevAccountCatalog.GetPersonaSlug(persona.Email);
+
+                Tenant? existing = await masterDb.Tenants
+                    .FirstOrDefaultAsync(t => t.DatabaseName == databaseName, ct);
+
+                if (existing is null)
                 {
-                    TenantId = Guid.NewGuid(),
-                    DatabaseName = account.TenantDatabaseName,
-                    Slug = account.TenantSlug,
-                    DisplayName = account.DeveloperUsername,
-                    DeveloperEmail = normalizedEmail,
-                    ClusterEnvironment = connectionResolver.ClusterEnvironment,
-                    CreatedAt = now,
-                });
-            }
-            else
-            {
-                existing.DatabaseName = account.TenantDatabaseName;
-                existing.Slug = account.TenantSlug;
-                existing.DisplayName = account.DeveloperUsername;
-                existing.ClusterEnvironment = connectionResolver.ClusterEnvironment;
+                    masterDb.Tenants.Add(new Tenant
+                    {
+                        TenantId = Guid.NewGuid(),
+                        DatabaseName = databaseName,
+                        ClusterSlug = account.TenantSlug,
+                        Slug = personaSlug,
+                        DisplayName = persona.Username,
+                        DeveloperEmail = normalizedDeveloperEmail,
+                        PersonaEmail = normalizedPersonaEmail,
+                        ClusterEnvironment = connectionResolver.ClusterEnvironment,
+                        CreatedAt = now,
+                    });
+                }
+                else
+                {
+                    existing.ClusterSlug = account.TenantSlug;
+                    existing.Slug = personaSlug;
+                    existing.DisplayName = persona.Username;
+                    existing.DeveloperEmail = normalizedDeveloperEmail;
+                    existing.PersonaEmail = normalizedPersonaEmail;
+                    existing.ClusterEnvironment = connectionResolver.ClusterEnvironment;
+                }
             }
         }
 

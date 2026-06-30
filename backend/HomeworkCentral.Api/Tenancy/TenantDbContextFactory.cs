@@ -1,5 +1,4 @@
 using HomeworkCentral.Api.Data;
-using HomeworkCentral.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Tenancy;
@@ -21,19 +20,6 @@ public class TenantDbContextFactory(
             throw new InvalidOperationException($"Tenant database '{databaseName}' is not registered.");
 
         return Build(databaseName);
-    }
-
-    public async Task<AppDbContext> CreateForDeveloperEmailAsync(string developerEmail, CancellationToken ct = default)
-    {
-        string normalizedEmail = developerEmail.ToLowerInvariant();
-        Tenant? tenant = await masterDb.Tenants
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.DeveloperEmail == normalizedEmail, ct);
-
-        if (tenant is null)
-            throw new InvalidOperationException($"No tenant is registered for developer email '{developerEmail}'.");
-
-        return Build(tenant.DatabaseName);
     }
 
     internal static AppDbContext BuildProvisioningContext(ITenantConnectionResolver connectionResolver, string databaseName) =>
