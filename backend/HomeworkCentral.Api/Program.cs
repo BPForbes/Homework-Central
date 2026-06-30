@@ -163,7 +163,6 @@ if (app.Environment.IsDevelopment())
 using (IServiceScope seedScope = app.Services.CreateScope())
 {
     ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
-    ITenantDbContextFactory tenantFactory = seedScope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
     IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
@@ -178,7 +177,7 @@ using (IServiceScope seedScope = app.Services.CreateScope())
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
             await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, account.TenantDatabaseName);
-            await TenantDatabaseProvisioner.MigrateAndSeedTenantAsync(tenantFactory, roleMaskService, account);
+            await TenantDatabaseProvisioner.MigrateAndSeedTenantAsync(connectionResolver, account);
         }
     }
 }

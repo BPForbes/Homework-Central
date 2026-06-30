@@ -26,7 +26,7 @@ public class EffectiveMaskService(
 
     public async Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
-        (AppDbContext db, _) = GetContext();
+        (AppDbContext db, _) = await GetContextAsync(ct);
         return await db.UserEffectiveMasks
             .AsNoTracking()
             .Include(m => m.SubjectExpertiseMasks)
@@ -35,7 +35,7 @@ public class EffectiveMaskService(
 
     public async Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
-        (AppDbContext db, IRoleMaskService roleMaskService) = GetContext();
+        (AppDbContext db, IRoleMaskService roleMaskService) = await GetContextAsync(ct);
         return await RebuildOnContextAsync(db, roleMaskService, userId, ct);
     }
 
@@ -53,13 +53,13 @@ public class EffectiveMaskService(
         _tenantDb?.Dispose();
     }
 
-    private (AppDbContext db, IRoleMaskService roleMaskService) GetContext()
+    private async Task<(AppDbContext db, IRoleMaskService roleMaskService)> GetContextAsync(CancellationToken ct)
     {
         string? tenantDatabase = ResolveTenantDatabaseName();
         if (string.IsNullOrEmpty(tenantDatabase))
             return (masterDb, masterRoleMaskService);
 
-        _tenantDb ??= tenantFactory.Create(tenantDatabase);
+        _tenantDb ??= await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabase, ct);
         _tenantRoleMaskService ??= new RoleMaskService(_tenantDb);
         return (_tenantDb, _tenantRoleMaskService);
     }
@@ -70,11 +70,7 @@ public class EffectiveMaskService(
         if (httpContext is null)
             return null;
 
-        string? fromClaim = httpContext.User.FindFirst("tenant_db")?.Value;
-        if (!string.IsNullOrEmpty(fromClaim))
-            return fromClaim;
-
-        return httpContext.Request.Cookies["tenant_db"];
+        return httpContext.User.FindFirst("tenant_db")?.Value;
     }
 
     private static async Task<UserEffectiveMask> RebuildOnContextAsync(

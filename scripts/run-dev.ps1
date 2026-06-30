@@ -448,7 +448,7 @@ function Ensure-EnvFile {
 function Wait-ForPostgres {
     $attempts = 30
     for ($i = 1; $i -le $attempts; $i++) {
-        docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d homework_central_master *> $null
+        docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
         if ($LASTEXITCODE -eq 0) { return }
         Start-Sleep -Seconds 1
     }

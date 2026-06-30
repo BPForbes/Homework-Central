@@ -406,7 +406,7 @@ wait_for_postgres() {
   local i
   for ((i = 1; i <= attempts; i++)); do
     if docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres \
-      pg_isready -U postgres -d homework_central_master >/dev/null 2>&1; then
+      pg_isready -U postgres -d postgres >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

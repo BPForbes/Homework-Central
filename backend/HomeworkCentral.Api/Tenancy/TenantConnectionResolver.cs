@@ -4,12 +4,9 @@ namespace HomeworkCentral.Api.Tenancy;
 
 public class TenantConnectionResolver(IConfiguration config) : ITenantConnectionResolver
 {
-    private readonly string _baseConnectionString = config.GetConnectionString("MasterConnection")
-        ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be configured.");
+    private readonly string _baseConnectionString = ResolveMasterConnection(config);
 
-    public string MasterDatabaseName { get; } = ParseDatabaseName(
-        config.GetConnectionString("MasterConnection")
-            ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be configured."));
+    public string MasterDatabaseName { get; } = ParseDatabaseName(ResolveMasterConnection(config));
 
     public string ClusterEnvironment { get; } = config["Tenancy:ClusterEnvironment"] ?? "dev";
 
@@ -34,6 +31,11 @@ public class TenantConnectionResolver(IConfiguration config) : ITenantConnection
         };
         return builder.ConnectionString;
     }
+
+    private static string ResolveMasterConnection(IConfiguration config) =>
+        config.GetConnectionString("MasterConnection")
+        ?? config.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:MasterConnection must be configured.");
 
     private static string ParseDatabaseName(string connectionString)
     {

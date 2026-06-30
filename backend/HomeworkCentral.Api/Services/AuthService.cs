@@ -106,30 +106,33 @@ public class AuthService(
             if (!developerUserIds.Contains(developer.UserId))
                 continue;
 
-            await using AppDbContext tenantDb = tenantFactory.Create(account.TenantDatabaseName);
-            Dictionary<string, User> tenantUsersByEmail = await tenantDb.Users
-                .AsNoTracking()
-                .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
-
-            List<DevUserOption> personas = new();
-            foreach (DevPersonaDefinition persona in account.Personas)
+            AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(account.TenantDatabaseName);
+            await using (tenantDb)
             {
-                if (!tenantUsersByEmail.TryGetValue(persona.Email, out User? user))
-                    continue;
+                Dictionary<string, User> tenantUsersByEmail = await tenantDb.Users
+                    .AsNoTracking()
+                    .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
 
-                personas.Add(new DevUserOption
+                List<DevUserOption> personas = new();
+                foreach (DevPersonaDefinition persona in account.Personas)
                 {
-                    UserId = user.UserId,
-                    Username = user.Username,
+                    if (!tenantUsersByEmail.TryGetValue(persona.Email, out User? user))
+                        continue;
+
+                    personas.Add(new DevUserOption
+                    {
+                        UserId = user.UserId,
+                        Username = user.Username,
+                    });
+                }
+
+                developers.Add(new DevDeveloperOption
+                {
+                    UserId = developer.UserId,
+                    Username = developer.Username,
+                    Users = personas,
                 });
             }
-
-            developers.Add(new DevDeveloperOption
-            {
-                UserId = developer.UserId,
-                Username = developer.Username,
-                Users = personas,
-            });
         }
 
         return new DevLoginOptionsResponse
@@ -164,24 +167,27 @@ public class AuthService(
             return await BuildAuthResponseAsync(loginUser, masterDb, tenantDatabaseName: null);
         }
 
-        await using AppDbContext tenantDb = tenantFactory.Create(account.TenantDatabaseName);
-        User loginPersona = await tenantDb.Users
-            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .Include(u => u.EffectiveMask!)
-                .ThenInclude(m => m.SubjectExpertiseMasks)
-            .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
-            ?? throw new InvalidOperationException("Selected user was not found.");
+        AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(account.TenantDatabaseName);
+        await using (tenantDb)
+        {
+            User loginPersona = await tenantDb.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .Include(u => u.EffectiveMask!)
+                    .ThenInclude(m => m.SubjectExpertiseMasks)
+                .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
+                ?? throw new InvalidOperationException("Selected user was not found.");
 
-        if (!DevAccountCatalog.PersonaBelongsToAccount(account, loginPersona.Email))
-            throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
+            if (!DevAccountCatalog.PersonaBelongsToAccount(account, loginPersona.Email))
+                throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
 
-        return await BuildAuthResponseAsync(loginPersona, tenantDb, account.TenantDatabaseName);
+            return await BuildAuthResponseAsync(loginPersona, tenantDb, account.TenantDatabaseName);
+        }
     }
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
     {
         string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenantDbCookieName];
-        AppDbContext db = ResolveDbContext(tenantDatabaseName);
+        AppDbContext db = await ResolveDbContextAsync(tenantDatabaseName);
         bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
         try
@@ -215,7 +221,7 @@ public class AuthService(
     public async Task RevokeRefreshTokenAsync(string rawToken)
     {
         string? tenantDatabaseName = http.HttpContext?.Request.Cookies[TenantDbCookieName];
-        AppDbContext db = ResolveDbContext(tenantDatabaseName);
+        AppDbContext db = await ResolveDbContextAsync(tenantDatabaseName);
         bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
         try
@@ -234,7 +240,7 @@ public class AuthService(
 
     public async Task<UserDto?> GetCurrentUserAsync(Guid userId, string? tenantDatabaseName = null)
     {
-        AppDbContext db = ResolveDbContext(tenantDatabaseName);
+        AppDbContext db = await ResolveDbContextAsync(tenantDatabaseName);
         bool disposeTenantDb = !ReferenceEquals(db, masterDb);
 
         try
@@ -260,10 +266,10 @@ public class AuthService(
         }
     }
 
-    private AppDbContext ResolveDbContext(string? tenantDatabaseName) =>
+    private async Task<AppDbContext> ResolveDbContextAsync(string? tenantDatabaseName, CancellationToken ct = default) =>
         string.IsNullOrEmpty(tenantDatabaseName)
             ? masterDb
-            : tenantFactory.Create(tenantDatabaseName);
+            : await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabaseName, ct);
 
     private async Task<AuthResponse> BuildAuthResponseAsync(
         User user,

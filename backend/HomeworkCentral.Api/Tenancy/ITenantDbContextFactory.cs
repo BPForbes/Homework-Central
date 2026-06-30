@@ -4,6 +4,6 @@ namespace HomeworkCentral.Api.Tenancy;
 
 public interface ITenantDbContextFactory
 {
-    AppDbContext Create(string databaseName);
+    Task<AppDbContext> CreateForRegisteredTenantAsync(string databaseName, CancellationToken ct = default);
     Task<AppDbContext> CreateForDeveloperEmailAsync(string developerEmail, CancellationToken ct = default);
 }

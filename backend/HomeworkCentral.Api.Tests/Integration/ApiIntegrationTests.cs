@@ -80,7 +80,7 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
     _connectionString = Environment.GetEnvironmentVariable("TEST_DATABASE_URL")
       ?? "Host=localhost;Port=5432;Database=homework_central_test;Username=postgres;Password=postgres";
     _adminConnectionString = Environment.GetEnvironmentVariable("TEST_POSTGRES_ADMIN_URL")
-      ?? "Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres";
+      ?? new NpgsqlConnectionStringBuilder(_connectionString) { Database = "postgres" }.ConnectionString;
 
     IsDatabaseAvailable = CanConnectToDatabase(_connectionString);
     SkipReason = "Integration tests require Postgres at TEST_DATABASE_URL.";

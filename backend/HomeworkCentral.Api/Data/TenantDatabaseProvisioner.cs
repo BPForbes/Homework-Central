@@ -28,7 +28,14 @@ public static class TenantDatabaseProvisioner
 
         string escapedName = databaseName.Replace("\"", "\"\"");
         await using NpgsqlCommand createCommand = new($"CREATE DATABASE \"{escapedName}\"", connection);
-        await createCommand.ExecuteNonQueryAsync(ct);
+        try
+        {
+            await createCommand.ExecuteNonQueryAsync(ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DuplicateDatabase)
+        {
+            // Another startup path created the database between the existence check and CREATE DATABASE.
+        }
     }
 
     public static async Task EnsureMasterDatabaseExistsAsync(
@@ -39,14 +46,17 @@ public static class TenantDatabaseProvisioner
     }
 
     public static async Task MigrateAndSeedTenantAsync(
-        ITenantDbContextFactory tenantFactory,
-        IRoleMaskService roleMaskService,
+        ITenantConnectionResolver connectionResolver,
         DevAccountDefinition account,
         CancellationToken ct = default)
     {
-        await using AppDbContext tenantDb = tenantFactory.Create(account.TenantDatabaseName);
+        await using AppDbContext tenantDb = TenantDbContextFactory.BuildProvisioningContext(
+            connectionResolver,
+            account.TenantDatabaseName);
         await tenantDb.Database.MigrateAsync(ct);
-        await AuthorizationSeedData.SeedAsync(tenantDb, roleMaskService, ct);
+
+        RoleMaskService tenantRoleMaskService = new(tenantDb);
+        await AuthorizationSeedData.SeedAsync(tenantDb, tenantRoleMaskService, ct);
         await TenantBypassSeedData.SeedPersonasAsync(tenantDb, account, ct);
     }
 }

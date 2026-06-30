@@ -69,13 +69,16 @@ public class AuthController(IAuthService auth, IConfiguration config) : Controll
         if (!string.IsNullOrEmpty(token))
             await auth.RevokeRefreshTokenAsync(token);
 
-        Response.Cookies.Delete("refresh_token", new CookieOptions
+        CookieOptions cookieOptions = new()
         {
             HttpOnly = true,
             Secure = Request.IsHttps,
             SameSite = SameSiteMode.Strict,
             Path = "/api/auth",
-        });
+        };
+
+        Response.Cookies.Delete("refresh_token", cookieOptions);
+        Response.Cookies.Delete("tenant_db", cookieOptions);
 
         return NoContent();
     }
