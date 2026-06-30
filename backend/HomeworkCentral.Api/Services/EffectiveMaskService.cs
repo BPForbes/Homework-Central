@@ -1,8 +1,10 @@
-using System.Collections;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Services;
@@ -13,10 +15,18 @@ public interface IEffectiveMaskService
     Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default);
 }
 
-public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskService) : IEffectiveMaskService
+public class EffectiveMaskService(
+    AppDbContext masterDb,
+    ITenantDbContextFactory tenantFactory,
+    IHttpContextAccessor httpContextAccessor,
+    IRoleMaskService masterRoleMaskService) : IEffectiveMaskService, IDisposable
 {
+    private AppDbContext? _tenantDb;
+    private IRoleMaskService? _tenantRoleMaskService;
+
     public async Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
+        (AppDbContext db, _) = await GetContextAsync(ct);
         return await db.UserEffectiveMasks
             .AsNoTracking()
             .Include(m => m.SubjectExpertiseMasks)
@@ -25,17 +35,61 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
 
     public async Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
+        (AppDbContext db, IRoleMaskService roleMaskService) = await GetContextAsync(ct);
+        return await RebuildOnContextAsync(db, roleMaskService, userId, ct);
+    }
+
+    public static async Task<UserEffectiveMask> RebuildOnContextAsync(
+        AppDbContext db,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        RoleMaskService roleMaskService = new(db);
+        return await RebuildOnContextAsync(db, roleMaskService, userId, ct);
+    }
+
+    public void Dispose()
+    {
+        _tenantDb?.Dispose();
+    }
+
+    private async Task<(AppDbContext db, IRoleMaskService roleMaskService)> GetContextAsync(CancellationToken ct)
+    {
+        string? tenantDatabase = ResolveTenantDatabaseName();
+        if (string.IsNullOrEmpty(tenantDatabase))
+            return (masterDb, masterRoleMaskService);
+
+        _tenantDb ??= await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabase, ct);
+        _tenantRoleMaskService ??= new RoleMaskService(_tenantDb);
+        return (_tenantDb, _tenantRoleMaskService);
+    }
+
+    private string? ResolveTenantDatabaseName()
+    {
+        HttpContext? httpContext = httpContextAccessor.HttpContext;
+        if (httpContext is null)
+            return null;
+
+        return httpContext.User.FindFirst(TenancyConstants.TenantDbClaimName)?.Value;
+    }
+
+    private static async Task<UserEffectiveMask> RebuildOnContextAsync(
+        AppDbContext db,
+        IRoleMaskService roleMaskService,
+        Guid userId,
+        CancellationToken ct)
+    {
         User user = await db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .Include(u => u.UserSubjects).ThenInclude(us => us.Subject)
             .FirstOrDefaultAsync(u => u.UserId == userId, ct)
             ?? throw new InvalidOperationException($"User {userId} was not found.");
 
-        Dictionary<short, Role> rolesByBit = await BuildRolesByBitAsync(ct);
+        Dictionary<short, Role> rolesByBit = await BuildRolesByBitAsync(db, ct);
 
-        BitArray roleMask = BitMask.Create(64);
-        BitArray moderationMask = BitMask.Create(256);
-        BitArray featureMask = BitMask.Create(256);
+        System.Collections.BitArray roleMask = BitMask.Create(64);
+        System.Collections.BitArray moderationMask = BitMask.Create(256);
+        System.Collections.BitArray featureMask = BitMask.Create(256);
 
         foreach (UserRole userRole in user.UserRoles)
         {
@@ -55,8 +109,8 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
 
         roleMask = roleMaskService.ExpandRoleIdentityMask(roleMask);
 
-        BitArray generalSubjectMask = BitMask.Create(128);
-        Dictionary<string, BitArray> expertiseMasks = SubjectExpertiseCatalog.Categories
+        System.Collections.BitArray generalSubjectMask = BitMask.Create(128);
+        Dictionary<string, System.Collections.BitArray> expertiseMasks = SubjectExpertiseCatalog.Categories
             .ToDictionary(c => c.ExpertiseMaskName, _ => BitMask.Create(128), StringComparer.Ordinal);
 
         Dictionary<Guid, Subject> subjectsById = await db.Subjects
@@ -66,7 +120,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         foreach (UserSubject userSubject in user.UserSubjects)
             ApplySubjectHierarchy(userSubject.Subject, subjectsById, generalSubjectMask, expertiseMasks);
 
-        BitArray statusMask = BuildDefaultStatusMask();
+        System.Collections.BitArray statusMask = BuildDefaultStatusMask();
 
         UserEffectiveMask? existing = await db.UserEffectiveMasks
             .Include(m => m.SubjectExpertiseMasks)
@@ -91,7 +145,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         return existing;
     }
 
-    private async Task<Dictionary<short, Role>> BuildRolesByBitAsync(CancellationToken ct)
+    private static async Task<Dictionary<short, Role>> BuildRolesByBitAsync(AppDbContext db, CancellationToken ct)
     {
         Dictionary<short, Role> rolesByBit = new();
         List<Role> roles = await db.Roles.AsNoTracking().ToListAsync(ct);
@@ -106,7 +160,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
 
     private static void SyncSubjectExpertiseMasks(
         UserEffectiveMask effectiveMask,
-        IReadOnlyDictionary<string, BitArray> expertiseMasks)
+        IReadOnlyDictionary<string, System.Collections.BitArray> expertiseMasks)
     {
         Dictionary<string, UserSubjectExpertiseMask> existingByCategory = effectiveMask.SubjectExpertiseMasks
             .ToDictionary(m => m.Category, StringComparer.Ordinal);
@@ -127,9 +181,9 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
         }
     }
 
-    private static BitArray BuildDefaultStatusMask()
+    private static System.Collections.BitArray BuildDefaultStatusMask()
     {
-        BitArray mask = BitMask.Create(64);
+        System.Collections.BitArray mask = BitMask.Create(64);
         BitMask.SetBit(mask, AccountStatus.GoodStanding);
         return mask;
     }
@@ -137,8 +191,8 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
     private static void ApplySubjectHierarchy(
         Subject subject,
         IReadOnlyDictionary<Guid, Subject> subjectsById,
-        BitArray generalSubjectMask,
-        Dictionary<string, BitArray> expertiseMasks)
+        System.Collections.BitArray generalSubjectMask,
+        Dictionary<string, System.Collections.BitArray> expertiseMasks)
     {
         Subject current = subject;
         HashSet<Guid> visited = new();
@@ -160,8 +214,8 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
 
     private static void ApplySubjectBit(
         Subject subject,
-        BitArray generalSubjectMask,
-        Dictionary<string, BitArray> expertiseMasks)
+        System.Collections.BitArray generalSubjectMask,
+        Dictionary<string, System.Collections.BitArray> expertiseMasks)
     {
         if (subject.SubjectMask == SubjectMaskNames.General)
         {
@@ -169,7 +223,7 @@ public class EffectiveMaskService(AppDbContext db, IRoleMaskService roleMaskServ
             return;
         }
 
-        if (expertiseMasks.TryGetValue(subject.SubjectMask, out BitArray? expertiseMask))
+        if (expertiseMasks.TryGetValue(subject.SubjectMask, out System.Collections.BitArray? expertiseMask))
             BitMask.SetBit(expertiseMask, subject.BitIndex);
     }
 }

@@ -5,6 +5,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -35,9 +36,19 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
     }
 });
 
-// Database
+// Database — master registry; tenant databases are resolved dynamically at runtime.
+string masterConnection = ConnectionStringHelpers.ResolveMasterConnection(builder.Configuration);
+
 builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    opts.UseNpgsql(masterConnection, npgsql =>
+        npgsql.MigrationsHistoryTable(TenancyConstants.AppMigrationsHistoryTable)));
+
+builder.Services.AddDbContext<MasterDbContext>(opts =>
+    opts.UseNpgsql(masterConnection, npgsql =>
+        npgsql.MigrationsHistoryTable(TenancyConstants.MasterMigrationsHistoryTable)));
+
+builder.Services.AddSingleton<ITenantConnectionResolver, TenantConnectionResolver>();
+builder.Services.AddScoped<ITenantDbContextFactory, TenantDbContextFactory>();
 
 // Auth services
 builder.Services.AddHttpContextAccessor();
@@ -128,19 +139,68 @@ if (devBypassEnabled)
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
 {
-    using IServiceScope scope = app.Services.CreateScope();
-    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    try
+    {
+        await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
+    }
+    catch (Exception ex)
+    {
+        ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
+        ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
+        logger.LogCritical(
+            ex,
+            "Database migration failed for master database '{DatabaseName}'. "
+            + "If you upgraded from the single-database layout, reset the local Docker volume: "
+            + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
+            + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
+            resolver.MasterDatabaseName);
+        throw;
+    }
 }
 
 using (IServiceScope seedScope = app.Services.CreateScope())
 {
+    ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
     IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
     IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
+    ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
     await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
     if (devBypassEnabled)
+    {
+        await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
         await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
+
+        int personaCount = DevAccountCatalog.All.Sum(account => account.Personas.Length);
+        int provisioned = 0;
+        startupLogger.LogInformation(
+            "Provisioning {PersonaCount} persona tenant databases (first startup may take several minutes)...",
+            personaCount);
+
+        foreach (DevAccountDefinition account in DevAccountCatalog.All)
+        {
+            foreach (DevPersonaDefinition persona in account.Personas)
+            {
+                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+                await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName);
+                await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(connectionResolver, account, persona);
+                provisioned++;
+
+                if (provisioned == 1 || provisioned == personaCount || provisioned % 10 == 0)
+                {
+                    startupLogger.LogInformation(
+                        "Provisioned persona database {Current}/{Total}: {DatabaseName}",
+                        provisioned,
+                        personaCount,
+                        databaseName);
+                }
+            }
+        }
+
+        startupLogger.LogInformation("Persona tenant database provisioning complete.");
+    }
 }
 
 app.Run();

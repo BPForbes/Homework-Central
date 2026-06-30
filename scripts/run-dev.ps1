@@ -229,7 +229,7 @@ function Test-PostgresHostConnection([hashtable]$EnvValues) {
         Start-Sleep -Seconds 1
     }
 
-    Write-Step "Cannot connect to homework_central on localhost:$port from the host"
+    Write-Step "Cannot connect to homework_central_master on localhost:$port from the host"
     $detail = $stderr.Trim()
     if ($detail) {
         Write-Host "       $detail" -ForegroundColor DarkGray
@@ -253,9 +253,9 @@ function Repair-PostgresCollation {
     Invoke-PostgresAdminSql 'ALTER DATABASE postgres REFRESH COLLATION VERSION;'
 
     $output = (docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`"" 2>$null | Out-String).Trim()
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central_master'`"" 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -eq 0 -and $output -eq '1') {
-        Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
+        Invoke-PostgresAdminSql 'ALTER DATABASE homework_central_master REFRESH COLLATION VERSION;'
     }
 }
 
@@ -267,22 +267,22 @@ function Prepare-HomeworkCentralDatabase {
     }
 
     $output = (docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
-        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central'`"" 2>$null | Out-String).Trim()
+        sh -c "PGPASSWORD='$DevPostgresPassword' psql -h 127.0.0.1 -U $DevPostgresUser -d postgres -tAc `"SELECT 1 FROM pg_database WHERE datname = 'homework_central_master'`"" 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         return $false
     }
 
     if ($output -ne '1') {
-        Write-Step 'Creating homework_central database'
+        Write-Step 'Creating homework_central_master database'
         try {
-            Invoke-PostgresAdminSql 'CREATE DATABASE homework_central;'
-            Invoke-PostgresAdminSql 'ALTER DATABASE homework_central REFRESH COLLATION VERSION;'
+            Invoke-PostgresAdminSql 'CREATE DATABASE homework_central_master;'
+            Invoke-PostgresAdminSql 'ALTER DATABASE homework_central_master REFRESH COLLATION VERSION;'
         } catch {
             return $false
         }
     }
 
-    if (-not (Test-PostgresAuth -Database 'homework_central')) {
+    if (-not (Test-PostgresAuth -Database 'homework_central_master')) {
         return $false
     }
 
@@ -338,7 +338,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         Wait-ForPostgres
 
         if (-not (Prepare-HomeworkCentralDatabase)) {
-            throw 'Failed to prepare homework_central inside the Docker Postgres container'
+            throw 'Failed to prepare homework_central_master inside the Docker Postgres container'
         }
     }
 
@@ -349,7 +349,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
             $loopbackHint = "`nPort $port is bound on 127.0.0.1 by another PostgreSQL install, so localhost does not reach Docker."
         }
         throw @"
-Failed to reach homework_central on localhost:$port.$loopbackHint
+Failed to reach homework_central_master on localhost:$port.$loopbackHint
 Pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
   docker compose down -v
   pwsh .\scripts\run-dev.ps1
@@ -448,7 +448,7 @@ function Ensure-EnvFile {
 function Wait-ForPostgres {
     $attempts = 30
     for ($i = 1; $i -le $attempts; $i++) {
-        docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d homework_central *> $null
+        docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
         if ($LASTEXITCODE -eq 0) { return }
         Start-Sleep -Seconds 1
     }
