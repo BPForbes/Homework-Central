@@ -4,10 +4,13 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { AppLayout } from './components/layout/AppLayout'
 import { Login } from './pages/Login'
 import { DevLogin } from './pages/DevLogin'
 import { Register } from './pages/Register'
 import { Dashboard } from './pages/Dashboard'
+import { ChatRoom } from './pages/ChatRoom'
+import { ChatIndex } from './pages/ChatIndex'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
@@ -29,13 +32,16 @@ export default function App() {
           {DEV_BYPASS_ENABLED && <Route path="/devlogin" element={<DevLogin />} />}
           <Route path="/register" element={<Register />} />
           <Route
-            path="/dashboard"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <AppLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/chat" element={<ChatIndex />} />
+            <Route path="/chat/:roomId" element={<ChatRoom />} />
+          </Route>
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </AuthProvider>
