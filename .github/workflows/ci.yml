@@ -53,6 +53,13 @@ jobs:
       - name: Build
         run: dotnet build HomeworkCentral.sln --configuration Release --no-restore
 
+      - name: Reject unparameterized raw SQL
+        run: |
+          if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(' backend/HomeworkCentral.Api --type cs; then
+            echo "Unparameterized raw SQL is not allowed. Use FromSqlInterpolated/ExecuteSqlInterpolated."
+            exit 1
+          fi
+
       - name: Test
         run: dotnet test HomeworkCentral.sln --configuration Release --no-build --verbosity normal
 

@@ -270,7 +270,7 @@ public class AuthService(
             UserEffectiveMask effectiveMask = user.EffectiveMask
                 ?? await RebuildMaskAsync(db, userId);
 
-            return BuildUserDto(user, effectiveMask);
+            return BuildUserDto(user, effectiveMask, ResolveAccountClassFromClaim());
         }
         finally
         {
@@ -319,8 +319,10 @@ public class AuthService(
 
         SetRefreshCookie(rawToken, refreshExpires, tenantDatabaseName);
 
-        UserDto dto = BuildUserDto(user, effectiveMask);
-        string accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask), tenantDatabaseName);
+        AccountClass accountClass = ResolveAccountClass(user, tenantDatabaseName);
+        UserDto dto = BuildUserDto(user, effectiveMask, accountClass);
+        string accessToken = jwt.GenerateAccessToken(
+            user, dto.Roles, ToEffectiveMaskDto(effectiveMask), accountClass, tenantDatabaseName);
 
         return new AuthResponse
         {
@@ -333,7 +335,7 @@ public class AuthService(
     private static async Task<UserEffectiveMask> RebuildMaskAsync(AppDbContext db, Guid userId) =>
         await EffectiveMaskService.RebuildOnContextAsync(db, userId);
 
-    private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask)
+    private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask, AccountClass accountClass)
     {
         List<string> roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
         EffectiveMaskDto masks = ToEffectiveMaskDto(effectiveMask);
@@ -344,6 +346,7 @@ public class AuthService(
             Email = user.Email,
             Username = user.Username,
             Roles = roles,
+            AccountClass = accountClass.ToString(),
             PermissionMask = masks.ModerationMask,
             RoleMask = masks.RoleMask,
             FeatureMask = masks.FeatureMask,
@@ -406,5 +409,31 @@ public class AuthService(
     {
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private static AccountClass ResolveAccountClass(User user, string? tenantDatabaseName)
+    {
+        if (string.Equals(user.Username, DevBypass.DevAdminUsername, StringComparison.Ordinal)
+            && string.IsNullOrEmpty(tenantDatabaseName))
+        {
+            return AccountClass.DevAdmin;
+        }
+
+        if (!string.IsNullOrEmpty(tenantDatabaseName))
+            return AccountClass.DeveloperAccount;
+
+        return AccountClass.RealAccount;
+    }
+
+    private AccountClass ResolveAccountClassFromClaim()
+    {
+        string? claim = http.HttpContext?.User.FindFirst(TenancyConstants.AccountClassClaimName)?.Value;
+        if (!string.IsNullOrWhiteSpace(claim)
+            && Enum.TryParse(claim, ignoreCase: false, out AccountClass accountClass))
+        {
+            return accountClass;
+        }
+
+        return AccountClass.RealAccount;
     }
 }

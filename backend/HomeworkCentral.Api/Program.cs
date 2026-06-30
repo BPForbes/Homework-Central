@@ -2,8 +2,10 @@ using System.Net;
 using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
+using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -57,7 +59,11 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
+builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
+builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
+builder.Services.AddScoped<IContentSanitizer, HtmlContentSanitizer>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, ResourceVisibilityHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
 
 // JWT authentication
@@ -79,7 +85,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(opts =>
+    opts.AddPolicy(AuthorizationPolicyNames.ResourceVisibility,
+        policy => policy.AddRequirements(new ResourceVisibilityRequirement())));
 builder.Services.AddControllers();
 
 // Rate limiting
