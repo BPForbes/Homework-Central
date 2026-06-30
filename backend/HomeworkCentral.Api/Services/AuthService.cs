@@ -83,12 +83,11 @@ public class AuthService(
     /// <inheritdoc />
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
-        List<Guid> developerUserIdList = await db.UserRoles
+        HashSet<Guid> developerUserIds = await db.UserRoles
             .AsNoTracking()
             .Where(userRole => userRole.Role.Name == "Developer")
             .Select(userRole => userRole.UserId)
-            .ToListAsync();
-        HashSet<Guid> developerUserIds = developerUserIdList.ToHashSet();
+            .ToHashSetAsync();
 
         Dictionary<string, User> usersByEmail = await db.Users
             .AsNoTracking()

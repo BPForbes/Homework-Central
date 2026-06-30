@@ -5,6 +5,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace HomeworkCentral.Api.Data;
 
+/// <summary>
+/// Maps <see cref="BitArray"/> properties to PostgreSQL <c>bit(n)</c> columns.
+/// EF Core 10 still requires explicit value conversion for bit columns; there is no built-in provider mapping.
+/// </summary>
 internal static class BitArrayConfiguration
 {
     private static readonly ValueComparer<BitArray> BitArrayComparer = new(

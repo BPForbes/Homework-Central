@@ -37,7 +37,7 @@ function Write-DevStackState([hashtable]$State) {
 }
 
 function Get-PostgresHostCheckDll {
-    return Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll'
+    return Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
 }
 
 function Build-PostgresHostCheckIfNeeded {

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace HomeworkCentral.Api.Authorization;
 
 /// <summary>
@@ -23,8 +25,8 @@ public static class SubjectExpertiseCatalog
         new(SubjectMaskNames.Education, GeneralSubjects.Education),
     ];
 
-    private static readonly IReadOnlyDictionary<string, short> GeneralSubjectBitByExpertiseCategory =
-        Categories.ToDictionary(c => c.ExpertiseMaskName, c => c.GeneralSubjectBit, StringComparer.Ordinal);
+    private static readonly FrozenDictionary<string, short> GeneralSubjectBitByExpertiseCategory =
+        Categories.ToFrozenDictionary(c => c.ExpertiseMaskName, c => c.GeneralSubjectBit, StringComparer.Ordinal);
 
     public static bool IsExpertiseCategory(string subjectMask) =>
         subjectMask != SubjectMaskNames.General &&

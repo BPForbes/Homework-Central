@@ -71,7 +71,7 @@ stop_dev_stack_postgres() {
 }
 
 postgres_host_check_dll() {
-  printf '%s' "$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net8.0/PostgresHostCheck.dll"
+  printf '%s' "$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
 }
 
 build_postgres_host_check_if_needed() {
