@@ -7,7 +7,7 @@ if (args.Length != 1 || !int.TryParse(args[0], out int port) || port <= 0 || por
 }
 
 string connectionString =
-    $"Host=localhost;Port={port};Database=homework_central;Username=postgres;Password=postgres;Timeout=5";
+    $"Host=localhost;Port={port};Database=homework_central_master;Username=postgres;Password=postgres;Timeout=5";
 
 try
 {

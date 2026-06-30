@@ -8,7 +8,7 @@ interface AuthContextValue {
   user: UserInfo | null
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
-  devLogin: (developerUserId: string, targetUserId: string | null) => Promise<void>
+  devLogin: (developerUserId: string, targetUserId: string | null, tenantDatabaseName: string | null) => Promise<void>
   register: (email: string, username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   hasPermission: (bit: number) => boolean
@@ -57,11 +57,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user)
   }, [])
 
-  /** Localhost dev bypass sign-in (see /devlogin). Empty targetUserId signs in as DevAdmin. */
-  const devLogin = useCallback(async (developerUserId: string, targetUserId: string | null) => {
+  /** Localhost dev bypass sign-in (see /devlogin). Empty targetUserId signs in as global DevAdmin. */
+  const devLogin = useCallback(async (
+    developerUserId: string,
+    targetUserId: string | null,
+    tenantDatabaseName: string | null,
+  ) => {
     const { data } = await authApi.devLogin({
       developerUserId,
       targetUserId: targetUserId || undefined,
+      tenantDatabaseName: tenantDatabaseName || undefined,
     })
     sessionStorage.setItem('accessToken', data.accessToken)
     setUser(data.user)

@@ -6,8 +6,11 @@ public class DevLoginRequest
     /// <summary>User id of the selected developer account (must have Developer role).</summary>
     public Guid DeveloperUserId { get; set; }
 
-    /// <summary>Optional persona to impersonate. When omitted, DevAdmin (Owner) is used.</summary>
+    /// <summary>Optional persona to impersonate. When omitted, global DevAdmin (Owner) on master is used.</summary>
     public Guid? TargetUserId { get; set; }
+
+    /// <summary>Registered persona database name. Required when impersonating a persona.</summary>
+    public string? TenantDatabaseName { get; set; }
 }
 
 /// <summary>Dropdown data for /devlogin.</summary>
@@ -29,4 +32,5 @@ public class DevUserOption
 {
     public Guid UserId { get; set; }
     public string Username { get; set; } = null!;
+    public string TenantDatabaseName { get; set; } = null!;
 }

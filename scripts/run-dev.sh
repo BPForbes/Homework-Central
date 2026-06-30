@@ -205,7 +205,7 @@ test_postgres_host_connection() {
     sleep 1
   done
 
-  log "Cannot connect to homework_central on localhost:${POSTGRES_HOST_PORT} from the host"
+  log "Cannot connect to homework_central_master on localhost:${POSTGRES_HOST_PORT} from the host"
   if [[ -n "$output" ]]; then
     printf '       %s\n' "$output"
   fi
@@ -223,13 +223,13 @@ repair_postgres_collation() {
   invoke_postgres_admin_sql "ALTER DATABASE template1 REFRESH COLLATION VERSION;" || return 1
   invoke_postgres_admin_sql "ALTER DATABASE postgres REFRESH COLLATION VERSION;" || return 1
   if [[ "$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central_master'\"" \
     | tr -d '\r\n')" == "1" ]]; then
-    invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;" || return 1
+    invoke_postgres_admin_sql "ALTER DATABASE homework_central_master REFRESH COLLATION VERSION;" || return 1
   fi
 }
 
-prepare_homework_central_database() {
+prepare_homework_central_master_database() {
   local exists
 
   if ! repair_postgres_collation; then
@@ -237,17 +237,17 @@ prepare_homework_central_database() {
   fi
 
   exists="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
-    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central'\"" \
+    sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -U $DEV_POSTGRES_USER -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'homework_central_master'\"" \
     2>/dev/null | tr -d '\r\n')"
   if [[ "$exists" != "1" ]]; then
-    log "Creating homework_central database"
-    if ! invoke_postgres_admin_sql "CREATE DATABASE homework_central;"; then
+    log "Creating homework_central_master database"
+    if ! invoke_postgres_admin_sql "CREATE DATABASE homework_central_master;"; then
       return 1
     fi
-    invoke_postgres_admin_sql "ALTER DATABASE homework_central REFRESH COLLATION VERSION;"
+    invoke_postgres_admin_sql "ALTER DATABASE homework_central_master REFRESH COLLATION VERSION;"
   fi
 
-  if ! test_postgres_auth homework_central; then
+  if ! test_postgres_auth homework_central_master; then
     return 1
   fi
 
@@ -289,20 +289,20 @@ ensure_postgres_ready() {
     fi
   fi
 
-  if ! prepare_homework_central_database; then
+  if ! prepare_homework_central_master_database; then
     log "Postgres volume is unhealthy (collation mismatch); recreating"
     reset_postgres_volume
     start_postgres_container
     log "Waiting for Postgres to accept connections"
     wait_for_postgres
 
-    if ! prepare_homework_central_database; then
-      fail "Failed to prepare homework_central inside the Docker Postgres container"
+    if ! prepare_homework_central_master_database; then
+      fail "Failed to prepare homework_central_master inside the Docker Postgres container"
     fi
   fi
 
   if ! test_postgres_host_connection; then
-    fail "Failed to reach homework_central on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh"
+    fail "Failed to reach homework_central_master on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh"
   fi
 }
 
@@ -406,7 +406,7 @@ wait_for_postgres() {
   local i
   for ((i = 1; i <= attempts; i++)); do
     if docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres \
-      pg_isready -U postgres -d homework_central >/dev/null 2>&1; then
+      pg_isready -U postgres -d postgres >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

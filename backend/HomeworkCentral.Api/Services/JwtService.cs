@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.IdentityModel.Tokens;
 
 namespace HomeworkCentral.Api.Services;
@@ -17,7 +18,7 @@ public class JwtService(IConfiguration config) : IJwtService
     private readonly int _accessTokenMinutes = int.Parse(config["Jwt:AccessTokenMinutes"] ?? "15");
     private readonly int _refreshTokenDays = int.Parse(config["Jwt:RefreshTokenDays"] ?? "7");
 
-    public string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks)
+    public string GenerateAccessToken(User user, IEnumerable<string> roles, EffectiveMaskDto masks, string? tenantDatabaseName = null)
     {
         List<Claim> claims = new()
         {
@@ -30,6 +31,9 @@ public class JwtService(IConfiguration config) : IJwtService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+
+        if (!string.IsNullOrEmpty(tenantDatabaseName))
+            claims.Add(new Claim(TenancyConstants.TenantDbClaimName, tenantDatabaseName));
 
         SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_secret));
         SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
