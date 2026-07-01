@@ -3,7 +3,17 @@ using HomeworkCentral.Api.Security;
 
 namespace HomeworkCentral.Api.Models;
 
-public class ChatMessage : IScopedResource, ISanitizableContent
+/// <summary>
+/// Chat rooms are shared community spaces gated by role/expertise bits (see
+/// <see cref="HomeworkCentral.Api.Chat.ChatRoomAccessService"/>), not per-tenant private data.
+/// Unlike homework/grades, a chat message is intentionally NOT an <c>IScopedResource</c>:
+/// each dev persona provisions its own isolated tenant database, so tenant-scoping messages
+/// would make it impossible for two different personas to ever see each other's chat messages.
+/// <see cref="OwnerAccountClass"/> and <see cref="TenantDatabaseName"/> are retained only as
+/// metadata (which persona/session sent the message) and to separate real production chat
+/// traffic from developer/test traffic.
+/// </summary>
+public class ChatMessage : ISanitizableContent
 {
     public Guid MessageId { get; set; }
     public string RoomId { get; set; } = null!;

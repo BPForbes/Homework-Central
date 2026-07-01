@@ -36,7 +36,6 @@ public sealed class ChatMessageService(
     AppDbContext masterDb,
     ITenantDbContextFactory tenantFactory,
     IHttpContextAccessor httpContextAccessor,
-    IAccessScopeAccessor accessScopeAccessor,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
     IContentSanitizer contentSanitizer,
@@ -68,13 +67,14 @@ public sealed class ChatMessageService(
 
         int pageSize = limit is > 0 and <= 100 ? limit : DefaultPageSize;
         AppDbContext db = await GetDbAsync(ct);
-        AccessScope scope = accessScopeAccessor.Resolve(
-            httpContextAccessor.HttpContext?.User ?? new ClaimsPrincipal());
+        bool viewerIsRealAccount = ResolveScope().AccountClass == AccountClass.RealAccount;
 
         IQueryable<ChatMessage> query = db.ChatMessages
             .AsNoTracking()
-            .ForCurrentViewer(scope)
-            .Where(message => message.RoomId == roomId);
+            .Where(message => message.RoomId == roomId)
+            .Where(message => viewerIsRealAccount
+                ? message.OwnerAccountClass == AccountClass.RealAccount
+                : message.OwnerAccountClass != AccountClass.RealAccount);
 
         if (beforeUtc is not null)
             query = query.Where(message => message.CreatedAtUtc < beforeUtc.Value);
@@ -126,7 +126,7 @@ public sealed class ChatMessageService(
         await db.SaveChangesAsync(ct);
 
         ChatMessageDto dto = ToDto(message, userId);
-        string groupKey = ChatRoomGroupKey.Build(roomId, accountClass, tenantDatabaseName);
+        string groupKey = ChatRoomGroupKey.Build(roomId, accountClass);
         await hubContext.Clients.Group(groupKey).SendAsync("ReceiveMessage", dto, ct);
         return dto;
     }

@@ -3,23 +3,33 @@ using HomeworkCentral.Api.Tenancy;
 
 namespace HomeworkCentral.Api.Chat;
 
-/// <summary>SignalR group names scoped by room, account class, and tenant database.</summary>
+/// <summary>
+/// SignalR group names scoped by room and a real-vs-developer traffic bucket.
+/// Chat rooms are shared community spaces (see <see cref="ChatRoomAccessService"/>), not
+/// per-tenant private data, so the group key intentionally ignores the caller's tenant
+/// database: each dev persona provisions its own isolated tenant, and grouping by exact
+/// tenant would mean no two personas could ever land in the same room together.
+/// </summary>
 public static class ChatRoomGroupKey
 {
-    public static string Build(string roomId, AccountClass accountClass, string? tenantDatabaseName) =>
-        $"chat:{roomId}:{accountClass}:{tenantDatabaseName ?? "master"}";
+    public static string Build(string roomId, AccountClass accountClass) =>
+        $"chat:{roomId}:{Bucket(accountClass)}";
 
-    public static string Build(System.Security.Claims.ClaimsPrincipal user, string roomId)
+    public static string Build(System.Security.Claims.ClaimsPrincipal user, string roomId) =>
+        Build(roomId, ResolveAccountClass(user));
+
+    private static AccountClass ResolveAccountClass(System.Security.Claims.ClaimsPrincipal user)
     {
-        AccountClass accountClass = AccountClass.RealAccount;
         string? accountClassClaim = user.FindFirst(TenancyConstants.AccountClassClaimName)?.Value;
         if (!string.IsNullOrWhiteSpace(accountClassClaim)
             && Enum.TryParse(accountClassClaim, ignoreCase: false, out AccountClass parsed))
         {
-            accountClass = parsed;
+            return parsed;
         }
 
-        string? tenantDatabaseName = user.FindFirst(TenancyConstants.TenantDbClaimName)?.Value;
-        return Build(roomId, accountClass, string.IsNullOrWhiteSpace(tenantDatabaseName) ? null : tenantDatabaseName);
+        return AccountClass.RealAccount;
     }
+
+    private static string Bucket(AccountClass accountClass) =>
+        accountClass == AccountClass.RealAccount ? "real" : "dev";
 }
