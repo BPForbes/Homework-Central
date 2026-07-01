@@ -3,6 +3,7 @@
  */
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { BackendGate } from './components/BackendGate'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
 import { Login } from './pages/Login'
@@ -16,9 +17,10 @@ const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
+    <BackendGate>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
           {/* Root redirects authenticated users to dashboard, others to login */}
           <Route
             path="/"
@@ -43,8 +45,9 @@ export default function App() {
             <Route path="/chat/:roomId" element={<ChatRoom />} />
           </Route>
           <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </BackendGate>
   )
 }

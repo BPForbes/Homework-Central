@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../api/authApi'
-import { ApiUnavailableBanner } from '../components/ApiUnavailableBanner'
 import type { DevDeveloperOption } from '../types/devAuth'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
@@ -19,7 +18,6 @@ export function DevLogin() {
   const [targetUserId, setTargetUserId] = useState('')
   const [tenantDatabaseName, setTenantDatabaseName] = useState('')
   const [error, setError] = useState('')
-  const [apiUnavailable, setApiUnavailable] = useState(false)
   const [isLoadingOptions, setIsLoadingOptions] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -38,53 +36,39 @@ export function DevLogin() {
 
     let cancelled = false
 
-    async function loadOptions(): Promise<boolean> {
+    async function loadOptions() {
       setIsLoadingOptions(true)
-      setApiUnavailable(false)
       setError('')
       try {
         const { data } = await authApi.devStatus()
         if (!data.available) {
-          if (!cancelled) {
+          if (!cancelled)
             setError('Developer bypass is not enabled on the API.')
-          }
-          return true
+          return
         }
         const options = await authApi.devOptions()
-        if (cancelled) return false
+        if (cancelled)
+          return
         setDevelopers(options.data.developers)
-        if (options.data.developers.length > 0) {
+        if (options.data.developers.length > 0)
           setDeveloperUserId(options.data.developers[0].userId)
-        }
-        return true
       } catch (err: unknown) {
-        if (cancelled) return false
+        if (cancelled)
+          return
         const response = (err as { response?: { status?: number; data?: { message?: string } } })
           ?.response
         if (response?.status === 404) {
           setError('Developer bypass is not enabled on the API.')
-          return true
+          return
         }
-        if (response?.data?.message) {
-          setError(response.data.message)
-          return true
-        }
-        setApiUnavailable(true)
-        return false
+        setError(response?.data?.message ?? 'Failed to load developer accounts.')
       } finally {
-        if (!cancelled) setIsLoadingOptions(false)
+        if (!cancelled)
+          setIsLoadingOptions(false)
       }
     }
 
-    async function pollUntilReady() {
-      while (!cancelled) {
-        const ready = await loadOptions()
-        if (ready || cancelled) break
-        await new Promise((resolve) => setTimeout(resolve, 3000))
-      }
-    }
-
-    void pollUntilReady()
+    void loadOptions()
     return () => {
       cancelled = true
     }
@@ -98,8 +82,6 @@ export function DevLogin() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-
-    if (apiUnavailable) return
 
     if (!developerUserId) {
       setError('Select a developer account.')
@@ -120,19 +102,16 @@ export function DevLogin() {
     }
   }
 
-  if (!DEV_BYPASS_ENABLED) {
+  if (!DEV_BYPASS_ENABLED)
     return null
-  }
 
-  const loginDisabled = apiUnavailable || isLoadingOptions || isSubmitting
+  const loginDisabled = isLoadingOptions || isSubmitting
 
   return (
     <div className="auth-page">
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Developer sign in</h2>
-
-        {apiUnavailable && <ApiUnavailableBanner />}
 
         <form onSubmit={handleSubmit}>
           <div className="field">

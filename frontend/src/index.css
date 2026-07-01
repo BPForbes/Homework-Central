@@ -260,6 +260,74 @@ body {
   animation: spin 0.7s linear infinite;
 }
 
+/* Full-screen backend connecting loader */
+.backend-connecting-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+}
+
+.backend-connecting-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.75rem;
+}
+
+.backend-connecting-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  height: 70px;
+}
+
+.backend-connecting-bars .bar {
+  width: 10px;
+  height: 70px;
+  background: #dbeafe;
+  display: inline-block;
+  transform-origin: bottom center;
+  border-top-right-radius: 20px;
+  border-top-left-radius: 20px;
+  animation: backend-bar-loader 1.2s linear infinite;
+}
+
+.backend-connecting-bars .bar1 { animation-delay: 0.1s; }
+.backend-connecting-bars .bar2 { animation-delay: 0.2s; }
+.backend-connecting-bars .bar3 { animation-delay: 0.3s; }
+.backend-connecting-bars .bar4 { animation-delay: 0.4s; }
+.backend-connecting-bars .bar5 { animation-delay: 0.5s; }
+.backend-connecting-bars .bar6 { animation-delay: 0.6s; }
+.backend-connecting-bars .bar7 { animation-delay: 0.7s; }
+.backend-connecting-bars .bar8 { animation-delay: 0.8s; }
+
+.backend-connecting-message {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #475569;
+  letter-spacing: 0.01em;
+}
+
+@keyframes backend-bar-loader {
+  0% {
+    transform: scaleY(0.1);
+    background: #dbeafe;
+  }
+  50% {
+    transform: scaleY(1);
+    background: #3b82f6;
+  }
+  100% {
+    transform: scaleY(0.1);
+    background: #dbeafe;
+  }
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
