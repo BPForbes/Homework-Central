@@ -27,6 +27,9 @@ public sealed class AccessScopeAccessor(IHttpContextAccessor httpContextAccessor
 
     public bool CanView(ClaimsPrincipal user, IScopedResource resource)
     {
+        if (user.Identity?.IsAuthenticated != true)
+            return false;
+
         AccessScope? scope = TryResolveScope(user);
         return scope is not null && ResourceVisibilityScope.CanView(scope, resource);
     }
