@@ -12,6 +12,13 @@ namespace HomeworkCentral.Api.Models;
 /// <see cref="OwnerAccountClass"/> and <see cref="TenantDatabaseName"/> are retained only as
 /// metadata (which persona/session sent the message) and to separate real production chat
 /// traffic from developer/test traffic.
+///
+/// <see cref="SenderId"/> intentionally has NO foreign key to <c>Users</c>: chat is always
+/// persisted in the master database, but a sender's User row often lives only in their own
+/// tenant database (dev personas are fully isolated per tenant), so a same-database FK
+/// constraint would reject every message from a persona account. <see cref="SenderUsername"/>
+/// is stored denormalized precisely so no cross-database join is ever needed to render a
+/// message.
 /// </summary>
 public class ChatMessage : ISanitizableContent
 {
@@ -24,6 +31,4 @@ public class ChatMessage : ISanitizableContent
     public DateTime CreatedAtUtc { get; set; }
     public AccountClass OwnerAccountClass { get; set; }
     public string? TenantDatabaseName { get; set; }
-
-    public User Sender { get; set; } = null!;
 }

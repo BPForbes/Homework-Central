@@ -184,10 +184,7 @@ public partial class AppDbContext(
                 .IsRequired();
             e.Property(m => m.TenantDatabaseName).HasMaxLength(128);
             e.HasIndex(m => new { m.RoomId, m.CreatedAtUtc });
-            e.HasOne(m => m.Sender)
-                .WithMany()
-                .HasForeignKey(m => m.SenderId)
-                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(m => m.SenderId);
         });
 
         mb.ApplyScopedResourceFilters(this);

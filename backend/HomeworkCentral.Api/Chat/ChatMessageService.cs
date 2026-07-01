@@ -32,19 +32,25 @@ public interface IChatMessageService
     Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Chat rooms are shared community spaces, not per-tenant private data (see
+/// <see cref="ChatMessage"/>), so every read/write against <see cref="AppDbContext.ChatMessages"/>
+/// in this service intentionally always targets <paramref name="masterDb"/> — never a
+/// per-persona tenant database. Each dev persona has its own isolated tenant database (used for
+/// homework/grades, which genuinely are tenant-private); if chat messages were persisted there
+/// instead, two personas (or a persona and DevAdmin) could never see each other's chat history,
+/// since they'd be reading and writing to entirely different physical databases.
+/// </summary>
 public sealed class ChatMessageService(
     AppDbContext masterDb,
-    ITenantDbContextFactory tenantFactory,
     IHttpContextAccessor httpContextAccessor,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
     IContentSanitizer contentSanitizer,
-    IHubContext<ChatHub> hubContext) : IChatMessageService, IDisposable
+    IHubContext<ChatHub> hubContext) : IChatMessageService
 {
     private const int MaxMessageLength = 4000;
     private const int DefaultPageSize = 50;
-
-    private AppDbContext? _tenantDb;
 
     public async Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default)
     {
@@ -66,10 +72,9 @@ public sealed class ChatMessageService(
             return [];
 
         int pageSize = limit is > 0 and <= 100 ? limit : DefaultPageSize;
-        AppDbContext db = await GetDbAsync(ct);
         bool viewerIsRealAccount = ResolveScope().AccountClass == AccountClass.RealAccount;
 
-        IQueryable<ChatMessage> query = db.ChatMessages
+        IQueryable<ChatMessage> query = masterDb.ChatMessages
             .AsNoTracking()
             .Where(message => message.RoomId == roomId)
             .Where(message => viewerIsRealAccount
@@ -101,11 +106,11 @@ public sealed class ChatMessageService(
         if (string.IsNullOrEmpty(trimmed) || trimmed.Length > MaxMessageLength)
             return null;
 
-        AppDbContext db = await GetDbAsync(ct);
-        User? sender = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.UserId == userId, ct);
-        if (sender is null)
-            return null;
-
+        // The sender's User row may only exist in their own tenant database (dev personas are
+        // fully isolated per tenant), so the username is read from the JWT claim already
+        // present on every authenticated request rather than looked up in a tenant-scoped
+        // Users table — keeping this service entirely master-db-only.
+        string senderUsername = ResolveUsername(userId);
         (AccountClass accountClass, string? tenantDatabaseName) = ResolveScope();
         string sanitized = contentSanitizer.Sanitize(trimmed);
 
@@ -114,7 +119,7 @@ public sealed class ChatMessageService(
             MessageId = Guid.NewGuid(),
             RoomId = roomId,
             SenderId = userId,
-            SenderUsername = sender.Username,
+            SenderUsername = senderUsername,
             RawContent = trimmed,
             SanitizedContent = sanitized,
             CreatedAtUtc = DateTime.UtcNow,
@@ -122,16 +127,14 @@ public sealed class ChatMessageService(
             TenantDatabaseName = tenantDatabaseName,
         };
 
-        db.ChatMessages.Add(message);
-        await db.SaveChangesAsync(ct);
+        masterDb.ChatMessages.Add(message);
+        await masterDb.SaveChangesAsync(ct);
 
         ChatMessageDto dto = ToDto(message);
         string groupKey = ChatRoomGroupKey.Build(roomId, accountClass);
         await hubContext.Clients.Group(groupKey).SendAsync("ReceiveMessage", dto, ct);
         return dto;
     }
-
-    public void Dispose() => _tenantDb?.Dispose();
 
     private async Task<EffectiveMaskDto> GetMasksAsync(Guid userId, CancellationToken ct)
     {
@@ -140,23 +143,11 @@ public sealed class ChatMessageService(
         return ToEffectiveMaskDto(mask);
     }
 
-    private async Task<AppDbContext> GetDbAsync(CancellationToken ct)
+    private string ResolveUsername(Guid userId)
     {
-        string? tenantDatabase = ResolveTenantDatabaseName();
-        if (string.IsNullOrEmpty(tenantDatabase))
-            return masterDb;
-
-        _tenantDb ??= await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabase, ct);
-        return _tenantDb;
-    }
-
-    private string? ResolveTenantDatabaseName()
-    {
-        HttpContext? httpContext = httpContextAccessor.HttpContext;
-        if (httpContext is null)
-            return null;
-
-        return httpContext.User.FindFirst(TenancyConstants.TenantDbClaimName)?.Value;
+        ClaimsPrincipal? user = httpContextAccessor.HttpContext?.User;
+        string? claimed = user?.FindFirst("username")?.Value;
+        return string.IsNullOrWhiteSpace(claimed) ? userId.ToString() : claimed;
     }
 
     private (AccountClass AccountClass, string? TenantDatabaseName) ResolveScope()
