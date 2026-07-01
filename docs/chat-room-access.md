@@ -7,7 +7,8 @@ Chat navigation uses **categories** (dropdown headers) and **rooms** (joinable c
 ```
 Chat
 ├── General ▾
-│   └── General (public)
+│   ├── General (public)
+│   └── Get Roles (public — not a chat room, buttons to self-claim general subjects)
 ├── Mathematics ▾
 │   ├── Calculus
 │   ├── Algebra
@@ -30,6 +31,7 @@ Chat
 | Rule | Implementation |
 |------|----------------|
 | **General (public)** | `general:lobby` — any authenticated user; `IsPrivate = false`, no key icon. |
+| **Get Roles (public)** | `general:get-roles` — any authenticated user; frontend routes it to `/get-roles` (a button grid, not chat) instead of the messaging UI. Backed by `GET/POST /api/subjects/*`, not `/api/chat/*`. |
 | Subject room | User has matching **expertise bit**; `IsPrivate = true`, key overlay on icon. |
 | Staff room | User has matching **role bit** (e.g. Moderators needs `PlatformRoles.Moderator`); private with key + role icon (shield for mods). |
 | Super viewers | `Owner` or `Administrator` → all subject and staff rooms. |

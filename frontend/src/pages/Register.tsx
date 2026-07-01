@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useCaptcha } from '../hooks/useCaptcha'
+import { Captcha } from '../components/Captcha'
 
 export function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const captcha = useCaptcha()
   const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -48,7 +51,12 @@ export function Register() {
 
     setIsSubmitting(true)
     try {
-      await register(email.trim().toLowerCase(), username.trim(), password)
+      await register(
+        email.trim().toLowerCase(),
+        username.trim(),
+        password,
+        captcha.challengeId ? { challengeId: captcha.challengeId, answer: captcha.answer } : undefined
+      )
       navigate('/dashboard')
     } catch (err: unknown) {
       const msg =
@@ -115,6 +123,18 @@ export function Register() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               required
+              disabled={isSubmitting}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="captcha-answer">Verify you're human (optional — get Verified status immediately)</label>
+            <Captcha
+              inputId="captcha-answer"
+              prompt={captcha.prompt}
+              answer={captcha.answer}
+              onAnswerChange={captcha.setAnswer}
+              onRefresh={captcha.refresh}
+              loading={captcha.loading}
               disabled={isSubmitting}
             />
           </div>

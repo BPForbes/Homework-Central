@@ -9,8 +9,15 @@ interface AuthContextValue {
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
   devLogin: (developerUserId: string, targetUserId: string | null, tenantDatabaseName: string | null) => Promise<void>
-  register: (email: string, username: string, password: string) => Promise<void>
+  register: (
+    email: string,
+    username: string,
+    password: string,
+    captcha?: { challengeId: string; answer: string }
+  ) => Promise<void>
   logout: () => Promise<void>
+  /** Re-fetches the current user — used after the dashboard "Verify" button changes roles. */
+  refreshUser: () => Promise<void>
   hasPermission: (bit: number) => boolean
   hasFeature: (bit: number) => boolean
   hasRole: (bit: number) => boolean
@@ -72,16 +79,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user)
   }, [])
 
-  const register = useCallback(async (email: string, username: string, password: string) => {
-    const { data } = await authApi.register({ email, username, password })
-    sessionStorage.setItem('accessToken', data.accessToken)
-    setUser(data.user)
-  }, [])
+  const register = useCallback(
+    async (
+      email: string,
+      username: string,
+      password: string,
+      captcha?: { challengeId: string; answer: string }
+    ) => {
+      const { data } = await authApi.register({
+        email,
+        username,
+        password,
+        captchaChallengeId: captcha?.challengeId,
+        captchaAnswer: captcha?.answer,
+      })
+      sessionStorage.setItem('accessToken', data.accessToken)
+      setUser(data.user)
+    },
+    []
+  )
 
   const logout = useCallback(async () => {
     await authApi.logout().catch(() => {})
     sessionStorage.removeItem('accessToken')
     setUser(null)
+  }, [])
+
+  const refreshUser = useCallback(async () => {
+    const { data } = await authApi.me()
+    setUser(data)
   }, [])
 
   const checkMaskBit = useCallback(
@@ -109,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         devLogin,
         register,
         logout,
+        refreshUser,
         hasPermission,
         hasFeature,
         hasRole,

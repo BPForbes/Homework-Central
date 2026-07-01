@@ -12,4 +12,9 @@ public class RegisterRequest
 
     [Required, MinLength(8), MaxLength(128)]
     public string Password { get; set; } = null!;
+
+    // Optional: registration succeeds either way (as Guest if omitted or incorrect), but a
+    // correct answer grants VerifiedUser immediately instead of Guest — see AuthService.RegisterAsync.
+    public string? CaptchaChallengeId { get; set; }
+    public string? CaptchaAnswer { get; set; }
 }

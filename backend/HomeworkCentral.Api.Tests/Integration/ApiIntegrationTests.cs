@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;
@@ -66,6 +67,57 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.False(string.IsNullOrWhiteSpace(loggedIn.AccessToken));
     Assert.Equal(registered.User.UserId, loggedIn.User.UserId);
     Assert.Equal(AccountClass.RealAccount.ToString(), loggedIn.User.AccountClass);
+    Assert.Contains("Guest", registered.User.Roles);
+    Assert.DoesNotContain("VerifiedUser", registered.User.Roles);
+  }
+
+  [SkippableFact]
+  public async Task Register_with_correct_captcha_grants_verified_user_instead_of_guest()
+  {
+    Skip.IfNot(fixture.IsDatabaseAvailable, fixture.SkipReason);
+    HttpClient client = fixture.RequireClient();
+    string suffix = Guid.NewGuid().ToString("N")[..8];
+
+    HttpResponseMessage challengeResponse = await client.GetAsync("/api/captcha/challenge");
+    Assert.Equal(HttpStatusCode.OK, challengeResponse.StatusCode);
+    CaptchaChallengeDto? challenge = await challengeResponse.Content.ReadFromJsonAsync<CaptchaChallengeDto>();
+    Assert.NotNull(challenge);
+
+    RegisterRequest register = new()
+    {
+      Email = $"ci-verified-{suffix}@example.com",
+      Username = $"civerified{suffix}",
+      Password = "Password123!",
+      CaptchaChallengeId = challenge!.ChallengeId,
+      CaptchaAnswer = SolveChallenge(challenge.Prompt),
+    };
+
+    HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
+    Assert.Equal(HttpStatusCode.OK, registerResponse.StatusCode);
+
+    AuthResponse? registered = await registerResponse.Content.ReadFromJsonAsync<AuthResponse>();
+    Assert.NotNull(registered);
+    Assert.Contains("VerifiedUser", registered!.User.Roles);
+    Assert.DoesNotContain("Guest", registered.User.Roles);
+  }
+
+  private static string SolveChallenge(string prompt)
+  {
+    System.Text.RegularExpressions.Match arithmetic =
+      System.Text.RegularExpressions.Regex.Match(prompt, @"what is (\d+) \+ (\d+)\?");
+    if (arithmetic.Success)
+    {
+      int a = int.Parse(arithmetic.Groups[1].Value);
+      int b = int.Parse(arithmetic.Groups[2].Value);
+      return (a + b).ToString();
+    }
+
+    System.Text.RegularExpressions.Match code =
+      System.Text.RegularExpressions.Regex.Match(prompt, @"exactly: (\w+)");
+    if (code.Success)
+      return code.Groups[1].Value;
+
+    throw new InvalidOperationException($"Unrecognized captcha prompt format: {prompt}");
   }
 
   private static string? ReadAccountClassClaim(string accessToken)

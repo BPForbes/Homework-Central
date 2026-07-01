@@ -12,6 +12,7 @@ import { Register } from './pages/Register'
 import { Dashboard } from './pages/Dashboard'
 import { ChatRoom } from './pages/ChatRoom'
 import { ChatIndex } from './pages/ChatIndex'
+import { GetRoles } from './pages/GetRoles'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/chat" element={<ChatIndex />} />
             <Route path="/chat/:roomId" element={<ChatRoom />} />
+            <Route path="/get-roles" element={<GetRoles />} />
           </Route>
           <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>

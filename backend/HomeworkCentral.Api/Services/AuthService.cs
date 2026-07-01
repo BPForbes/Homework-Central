@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
@@ -19,6 +20,7 @@ public class AuthService(
     IJwtService jwt,
     IHttpContextAccessor http,
     IEffectiveMaskService effectiveMaskService,
+    ICaptchaService captcha,
     IServiceProvider serviceProvider) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
@@ -29,6 +31,7 @@ public class AuthService(
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
         string normalizedEmail = req.Email.ToLowerInvariant();
+        bool captchaVerified = captcha.Validate(req.CaptchaChallengeId, req.CaptchaAnswer);
 
         DateTime now = DateTime.UtcNow;
         User user = new User
@@ -46,7 +49,7 @@ public class AuthService(
         {
             masterDb.Users.Add(user);
             await masterDb.SaveChangesAsync();
-            await masterDb.AssignDefaultRolesAsync(user, effectiveMaskService);
+            await masterDb.AssignDefaultRolesAsync(user, effectiveMaskService, captchaVerified);
             await transaction.CommitAsync();
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)

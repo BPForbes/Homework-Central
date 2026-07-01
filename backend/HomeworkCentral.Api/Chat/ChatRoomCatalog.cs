@@ -50,7 +50,9 @@ public static class ChatRoomCatalog
 
     public static readonly ChatRoomDefinition GeneralRoom = ChatRoomBlueprint.GeneralLobby();
 
-    public static readonly IReadOnlyList<ChatRoomDefinition> GeneralRooms = [GeneralRoom];
+    public static readonly ChatRoomDefinition GetRolesRoom = ChatRoomBlueprint.GetRolesLobby();
+
+    public static readonly IReadOnlyList<ChatRoomDefinition> GeneralRooms = [GeneralRoom, GetRolesRoom];
 
     public static readonly IReadOnlyList<ChatRoomDefinition> SubjectRooms = BuildSubjectRooms();
 

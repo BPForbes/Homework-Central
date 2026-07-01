@@ -20,10 +20,12 @@ public class ChatRoomAccessServiceTests
         ChatNavCategoryDto general = Assert.Single(nav.Categories);
         Assert.Equal(ChatRoomBlueprint.GeneralCategoryKey, general.Key);
         Assert.False(general.IsPrivateCategory);
-        Assert.Single(general.Rooms);
+        Assert.Equal(2, general.Rooms.Count);
         Assert.Equal("General", general.Rooms[0].Name);
         Assert.False(general.Rooms[0].IsPrivate);
+        Assert.Contains(general.Rooms, room => room.Name == "Get Roles" && !room.IsPrivate);
         Assert.True(_service.CanAccessRoom(masks, ChatRoomCatalog.GeneralRoom.Id));
+        Assert.True(_service.CanAccessRoom(masks, ChatRoomCatalog.GetRolesRoom.Id));
     }
 
     [Fact]
@@ -186,6 +188,17 @@ public class ChatRoomBlueprintTests
         Assert.Equal(ChatRoomKind.General, room.Kind);
         Assert.Equal(ChatCategoryKind.General, room.CategoryKind);
         Assert.Equal(ChatRoomBlueprint.GeneralRoomId, room.Id);
+    }
+
+    [Fact]
+    public void GetRolesLobby_is_public_general_category()
+    {
+        ChatRoomDefinition room = ChatRoomBlueprint.GetRolesLobby();
+
+        Assert.False(room.IsPrivate);
+        Assert.Equal(ChatRoomKind.General, room.Kind);
+        Assert.Equal(ChatCategoryKind.General, room.CategoryKind);
+        Assert.Equal(ChatRoomBlueprint.GetRolesRoomId, room.Id);
     }
 
     [Fact]

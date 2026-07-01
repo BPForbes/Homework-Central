@@ -37,9 +37,13 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
     {
         List<ChatNavCategoryDto> categories = new();
 
-        if (CanAccessRoom(masks, ChatRoomCatalog.GeneralRoom))
+        List<ChatRoomDefinition> accessibleGeneralRooms = ChatRoomCatalog.GeneralRooms
+            .Where(room => CanAccessRoom(masks, room))
+            .ToList();
+
+        if (accessibleGeneralRooms.Count > 0)
         {
-            categories.Add(BuildCategoryDto(ChatRoomCatalog.GeneralRoom, [ChatRoomCatalog.GeneralRoom]));
+            categories.Add(BuildCategoryDto(accessibleGeneralRooms[0], accessibleGeneralRooms));
         }
 
         foreach (IGrouping<string, ChatRoomDefinition> subjectGroup in ChatRoomCatalog.SubjectRooms

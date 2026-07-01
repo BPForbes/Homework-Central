@@ -7,6 +7,8 @@ export interface RegisterRequest {
   email: string
   username: string
   password: string
+  captchaChallengeId?: string
+  captchaAnswer?: string
 }
 
 export interface AuthResponse {

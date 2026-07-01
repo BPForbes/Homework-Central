@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faChevronDown, faChevronRight, faComments, faTimes } from '@fortawesome/free-solid-svg-icons'
+import { faChevronDown, faChevronRight, faComments, faIdBadge, faTimes } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../../api/chatApi'
+import { GET_ROLES_ROOM_ID } from '../../types/chat'
 import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
 import { ChatRoomIcon } from './ChatRoomIcon'
@@ -53,7 +54,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   onCloseRef.current = onClose
 
   useEffect(() => {
-    if (location.pathname.startsWith('/chat/'))
+    if (location.pathname.startsWith('/chat/') || location.pathname === '/get-roles')
       onCloseRef.current()
   }, [location.pathname])
 
@@ -145,16 +146,19 @@ function CategorySection({
       {expanded && (
         <ul className="chat-room-list">
           {category.rooms.map((room) => {
-            const baseIcon = isStaff
-              ? getStaffRoomIcon(room.name)
-              : isGeneral
-                ? getCategoryIcon('General')
-                : getRoomIcon(room.name, category.key)
+            const isGetRoles = room.id === GET_ROLES_ROOM_ID
+            const baseIcon = isGetRoles
+              ? faIdBadge
+              : isStaff
+                ? getStaffRoomIcon(room.name)
+                : isGeneral
+                  ? getCategoryIcon('General')
+                  : getRoomIcon(room.name, category.key)
 
             return (
             <li key={room.id}>
               <NavLink
-                to={`/chat/${encodeURIComponent(room.id)}`}
+                to={isGetRoles ? '/get-roles' : `/chat/${encodeURIComponent(room.id)}`}
                 className={({ isActive }) => `chat-room-link ${isActive ? 'active' : ''}`}
                 tabIndex={tabIndex}
               >
