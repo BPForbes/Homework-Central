@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBars, faComments } from '@fortawesome/free-solid-svg-icons'
@@ -9,6 +9,7 @@ export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
 
   async function handleLogout() {
     await logout()
@@ -17,7 +18,7 @@ export function AppLayout() {
 
   return (
     <div className="app-layout">
-      <ChatSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <ChatSidebar open={sidebarOpen} onClose={closeSidebar} />
 
       <header className="app-header">
         <div className="app-header-start">

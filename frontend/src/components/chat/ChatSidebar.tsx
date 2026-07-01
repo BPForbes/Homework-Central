@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faChevronDown, faChevronRight, faComments, faTimes } from '@fortawesome/free-solid-svg-icons'
@@ -48,10 +48,13 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
     }
   }, [])
 
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (location.pathname.startsWith('/chat/'))
-      onClose()
-  }, [location.pathname, onClose])
+      onCloseRef.current()
+  }, [location.pathname])
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
