@@ -55,8 +55,8 @@ jobs:
 
       - name: Reject unparameterized raw SQL
         run: |
-          if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(' backend/HomeworkCentral.Api --type cs; then
-            echo "Unparameterized raw SQL is not allowed. Use FromSqlInterpolated/ExecuteSqlInterpolated."
+          if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(|ExecuteSqlRawAsync\(|SqlQueryRaw\(' backend/HomeworkCentral.Api --type cs; then
+            echo "Unparameterized raw SQL is not allowed. Use FromSqlInterpolated/ExecuteSqlInterpolated/SqlQuery."
             exit 1
           fi
 
