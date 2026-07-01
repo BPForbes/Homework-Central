@@ -475,39 +475,99 @@ function Build-PostgresHostCheck {
     if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
 }
 
+function Test-PostgresHostCheckFresh {
+    $dll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
+    if (-not (Test-Path $dll)) {
+        return $false
+    }
+
+    $built = Get-Item $dll
+
+    # Compare against the project file *and* every .cs source under it, not just the .csproj —
+    # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
+    # this script keeps running the stale compiled checker.
+    $projectDir = Split-Path $PostgresHostCheckProject -Parent
+    $sourceFiles = @(Get-Item $PostgresHostCheckProject) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
+    $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+
+    return $built.LastWriteTimeUtc -ge $newestSource.LastWriteTimeUtc
+}
+
+function Build-PostgresHostCheckIfNeeded {
+    if (Test-PostgresHostCheckFresh) {
+        Write-Step 'Postgres host check already built'
+        return
+    }
+
+    Build-PostgresHostCheck
+}
+
 function Build-Projects {
     $script:ApiBuildFailed = $false
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
+    $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
+    $apiBuildJob = $null
+
+    Ensure-FrontendDependencies -FrontendDir $FrontendDir
+
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
     } else {
-        Write-Step 'Building API'
-        $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
-        dotnet build $ApiProject -c Debug 2>&1 | Tee-Object -FilePath $apiBuildLog
-        if ($LASTEXITCODE -ne 0) {
-            if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
-                & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
+        Write-Step 'Building API (parallel with frontend typecheck)'
+        $apiBuildJob = Start-Job -ScriptBlock {
+            param($Project, $Log)
+            dotnet build $Project -c Debug 2>&1 | Tee-Object -FilePath $Log
+            if ($LASTEXITCODE -ne 0) {
+                throw "API build failed with exit code $LASTEXITCODE"
             }
-            if ($BuildOnly) {
-                throw 'API build failed'
+        } -ArgumentList $ApiProject, $apiBuildLog
+    }
+
+    $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
+
+    # Capture host-check and frontend typecheck failures separately so a host-check throw still
+    # drains Wait-FrontendTypecheckJob before the API build job wait/cleanup below runs.
+    $hostCheckFailed = $false
+    $frontendTypecheckFailed = $false
+    try {
+        try {
+            Build-PostgresHostCheckIfNeeded
+        } catch {
+            $hostCheckFailed = $true
+        }
+
+        try {
+            Wait-FrontendTypecheckJob -Job $frontendTscJob
+        } catch {
+            $frontendTypecheckFailed = $true
+        }
+    } finally {
+        if ($null -ne $apiBuildJob) {
+            Wait-Job $apiBuildJob | Out-Null
+            try {
+                Receive-Job $apiBuildJob -ErrorAction Stop | Out-Null
+            } catch {
+                if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
+                    & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
+                }
+                if ($BuildOnly) {
+                    throw 'API build failed'
+                }
+                $script:ApiBuildFailed = $true
+                Write-Step 'API build failed; frontend will start and show unable to connect to API'
+            } finally {
+                Remove-Job $apiBuildJob -Force
             }
-            $script:ApiBuildFailed = $true
-            Write-Step 'API build failed; frontend will start and show unable to connect to API'
         }
     }
 
-    if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
-        Write-Step 'Installing frontend dependencies'
-        npm ci --prefix $FrontendDir
-        if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
-    } else {
-        Write-Step 'Frontend dependencies already installed'
+    if ($frontendTypecheckFailed) {
+        throw 'Frontend typecheck failed'
     }
 
-    Write-Step 'Type-checking frontend (parallel with Postgres host check build)'
-    $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
-    Build-PostgresHostCheck
-    Wait-FrontendTypecheckJob -Job $frontendTscJob
+    if ($hostCheckFailed) {
+        throw 'PostgresHostCheck build failed'
+    }
 }
 
 function Start-DevStack([hashtable]$EnvValues) {

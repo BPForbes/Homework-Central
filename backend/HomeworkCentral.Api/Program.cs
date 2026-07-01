@@ -2,13 +2,17 @@ using System.Net;
 using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
+using HomeworkCentral.Api.Hubs;
+using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -57,7 +61,16 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
+builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
+builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
+builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
+builder.Services.AddSingleton<ChatTypingTracker>();
+// HtmlContentSanitizer wraps a single immutable HtmlSanitizer whose Sanitize method is safe to
+// call concurrently (its allow-lists are configured once at construction and never mutated), so
+// one shared instance is sufficient — no need to allocate a new HtmlSanitizer per request.
+builder.Services.AddSingleton<IContentSanitizer, HtmlContentSanitizer>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, ResourceVisibilityHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
 
 // JWT authentication
@@ -77,9 +90,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero,
         };
+        opts.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                string? accessToken = context.Request.Query["access_token"];
+                PathString path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            },
+        };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(opts =>
+    opts.AddPolicy(AuthorizationPolicyNames.ResourceVisibility,
+        policy => policy.AddRequirements(new ResourceVisibilityRequirement())));
+builder.Services.AddSignalR();
 builder.Services.AddControllers();
 
 // Rate limiting
@@ -100,10 +127,16 @@ builder.Services.AddCors(opts =>
             .AllowAnyHeader()
             .AllowAnyMethod()));
 
+bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
+if (devBypassEnabled)
+{
+    builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
+    builder.Services.AddHostedService<DevPersonaProvisioningHostedService>();
+}
+
 WebApplication app = builder.Build();
 
 // Localhost-only developer bypass (HC_DEV_BYPASS=1 + Development + loopback).
-bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
 
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
@@ -124,9 +157,27 @@ app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
-// Health probe for Docker / load balancers
-app.MapGet("/healthz", () => TypedResults.Ok(new { status = "healthy" }));
+// Health probe for Docker / load balancers.
+// [FromServices] is required here: IDevPersonaProvisioner is only registered when the dev
+// bypass is enabled, so without an explicit binding source ASP.NET Core cannot decide
+// whether this optional parameter is a DI service or a request body at endpoint-metadata
+// build time, and throws for every endpoint (not just this one) the first time any request
+// is routed — e.g. in production or any environment where the dev bypass is off.
+app.MapGet("/healthz", ([FromServices] IDevPersonaProvisioner? personaProvisioner) =>
+{
+    if (personaProvisioner is null)
+        return Results.Ok(new { status = "healthy" });
+
+    return Results.Ok(new
+    {
+        status = "healthy",
+        personasProvisioned = personaProvisioner.ProvisionedCount,
+        personasTotal = personaProvisioner.TotalPersonaCount,
+        personasReady = personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
+    });
+});
 
 // Localhost-only dev landing routes and linked favicon (see DevAssets.CanonicalFaviconRepoPath).
 if (devBypassEnabled)
@@ -163,43 +214,21 @@ using (IServiceScope seedScope = app.Services.CreateScope())
     ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
-    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
     IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
     ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
+    await AuthorizationSeedData.SeedAsync(seedDb);
     if (devBypassEnabled)
     {
         await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
         await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
 
-        int personaCount = DevAccountCatalog.All.Sum(account => account.Personas.Length);
-        int provisioned = 0;
+        IDevPersonaProvisioner personaProvisioner =
+            seedScope.ServiceProvider.GetRequiredService<IDevPersonaProvisioner>();
+        await personaProvisioner.InitializeFromExistingDatabasesAsync();
+
         startupLogger.LogInformation(
-            "Provisioning {PersonaCount} persona tenant databases (first startup may take several minutes)...",
-            personaCount);
-
-        foreach (DevAccountDefinition account in DevAccountCatalog.All)
-        {
-            foreach (DevPersonaDefinition persona in account.Personas)
-            {
-                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
-                await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName);
-                await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(connectionResolver, account, persona);
-                provisioned++;
-
-                if (provisioned == 1 || provisioned == personaCount || provisioned % 10 == 0)
-                {
-                    startupLogger.LogInformation(
-                        "Provisioned persona database {Current}/{Total}: {DatabaseName}",
-                        provisioned,
-                        personaCount,
-                        databaseName);
-                }
-            }
-        }
-
-        startupLogger.LogInformation("Persona tenant database provisioning complete.");
+            "Essential dev seed complete. Persona databases continue provisioning in the background.");
     }
 }
 

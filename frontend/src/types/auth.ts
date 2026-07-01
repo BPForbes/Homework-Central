@@ -20,6 +20,7 @@ export interface UserInfo {
   email: string
   username: string
   roles: string[]
+  accountClass: string
   permissionMask: string
   roleMask: string
   featureMask: string

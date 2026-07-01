@@ -1,13 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ApiUnavailableBanner } from '../components/ApiUnavailableBanner'
-import { useApiAvailability } from '../hooks/useApiAvailability'
 
 export function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
-  const { apiUnavailable, isChecking } = useApiAvailability()
   const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -18,8 +15,6 @@ export function Register() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-
-    if (apiUnavailable) return
 
     if (!email.trim()) {
       setError('Email is required.')
@@ -71,8 +66,6 @@ export function Register() {
         <h1>Homework Central</h1>
         <h2>Create account</h2>
 
-        {apiUnavailable && <ApiUnavailableBanner />}
-
         <form onSubmit={handleSubmit}>
           <div className="field">
             <label htmlFor="email">Email</label>
@@ -83,7 +76,7 @@ export function Register() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              disabled={isSubmitting || apiUnavailable || isChecking}
+              disabled={isSubmitting}
             />
           </div>
           <div className="field">
@@ -97,7 +90,7 @@ export function Register() {
               required
               minLength={3}
               maxLength={64}
-              disabled={isSubmitting || apiUnavailable || isChecking}
+              disabled={isSubmitting}
             />
           </div>
           <div className="field">
@@ -110,7 +103,7 @@ export function Register() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={8}
-              disabled={isSubmitting || apiUnavailable || isChecking}
+              disabled={isSubmitting}
             />
           </div>
           <div className="field">
@@ -122,11 +115,11 @@ export function Register() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               required
-              disabled={isSubmitting || apiUnavailable || isChecking}
+              disabled={isSubmitting}
             />
           </div>
           {error && <p className="error">{error}</p>}
-          <button type="submit" className="btn-primary" disabled={isSubmitting || apiUnavailable || isChecking}>
+          <button type="submit" className="btn-primary" disabled={isSubmitting}>
             {isSubmitting ? 'Creating account…' : 'Create account'}
           </button>
         </form>

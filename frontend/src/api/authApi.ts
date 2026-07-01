@@ -53,7 +53,7 @@ export const authApi = {
   refresh: () => api.post<AuthResponse>('/auth/refresh'),
   me: () => api.get<AuthResponse['user']>('/auth/me'),
   /** Probe whether localhost dev bypass endpoints are enabled on the API. */
-  devStatus: () => api.get<{ available: boolean }>('/auth/dev/status'),
+  devStatus: () => api.get<import('../types/devAuth').DevStatus>('/auth/dev/status'),
   /** Fetch developer accounts and personas for the /devlogin dropdowns. */
   devOptions: () => api.get<DevLoginOptions>('/auth/dev/options'),
   /** Sign in via dev bypass; blank targetUserId signs in as DevAdmin on the server. */

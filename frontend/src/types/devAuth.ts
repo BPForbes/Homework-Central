@@ -22,3 +22,10 @@ export interface DevLoginRequest {
   targetUserId?: string | null
   tenantDatabaseName?: string | null
 }
+
+export interface DevStatus {
+  available: boolean
+  personasProvisioned?: number
+  personasTotal?: number
+  personasReady?: boolean
+}

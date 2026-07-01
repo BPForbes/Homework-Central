@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,9 +14,10 @@ internal static class DevSeedHelpers
         string usernameConflictScope,
         CancellationToken ct = default)
     {
+        string normalizedEmail = email.ToLowerInvariant();
         User? user = await db.Users
             .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Email == email, ct);
+            .FirstOrDefaultAsync(u => u.Email == normalizedEmail, ct);
 
         DateTime now = DateTime.UtcNow;
         if (user is null)
@@ -30,8 +32,8 @@ internal static class DevSeedHelpers
 
             user = new User
             {
-                UserId = Guid.NewGuid(),
-                Email = email,
+                UserId = AuthorizationGuids.DevUser(normalizedEmail),
+                Email = normalizedEmail,
                 Username = username,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString()),
                 CreatedAt = now,
