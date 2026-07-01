@@ -12,23 +12,83 @@ namespace HomeworkCentral.Api.Controllers;
 [ApiController]
 [Route("api/chat")]
 [Authorize]
-public class ChatController(IChatRoomAccessService chatRoomAccess, IEffectiveMaskService effectiveMaskService) : ControllerBase
+public class ChatController(
+    IChatRoomAccessService chatRoomAccess,
+    IEffectiveMaskService effectiveMaskService,
+    IChatMessageService chatMessageService) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
     [HttpGet("nav")]
     public async Task<ActionResult<ChatNavDto>> GetNav(CancellationToken ct)
     {
-        string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? User.FindFirst("sub")?.Value;
-
-        if (userIdClaim is null || !Guid.TryParse(userIdClaim, out Guid userId))
+        Guid? userId = GetUserId();
+        if (userId is null)
             return Unauthorized();
 
-        UserEffectiveMask? mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId, ct)
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+        UserEffectiveMask? mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId.Value, ct)
+            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId.Value, ct);
 
         EffectiveMaskDto masks = ToEffectiveMaskDto(mask);
         return Ok(chatRoomAccess.GetAccessibleNav(masks));
+    }
+
+    /// <summary>Returns recent messages for a chat room.</summary>
+    [HttpGet("rooms/{roomId}/messages")]
+    public async Task<ActionResult<IReadOnlyList<ChatMessageDto>>> GetMessages(
+        string roomId,
+        [FromQuery] DateTime? beforeUtc,
+        [FromQuery] int limit = 50,
+        CancellationToken ct = default)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        string decodedRoomId = Uri.UnescapeDataString(roomId);
+        if (!await chatMessageService.CanAccessRoomAsync(decodedRoomId, userId.Value, ct))
+            return Forbid();
+
+        IReadOnlyList<ChatMessageDto> messages = await chatMessageService.GetMessagesAsync(
+            decodedRoomId,
+            userId.Value,
+            beforeUtc,
+            limit,
+            ct);
+        return Ok(messages);
+    }
+
+    /// <summary>Sends a message to a chat room.</summary>
+    [HttpPost("rooms/{roomId}/messages")]
+    public async Task<ActionResult<ChatMessageDto>> SendMessage(
+        string roomId,
+        [FromBody] SendChatMessageRequest request,
+        CancellationToken ct = default)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        string decodedRoomId = Uri.UnescapeDataString(roomId);
+        ChatMessageDto? message = await chatMessageService.SendMessageAsync(
+            decodedRoomId,
+            userId.Value,
+            request.Content,
+            ct);
+
+        if (message is null)
+            return Forbid();
+
+        return Ok(message);
+    }
+
+    private Guid? GetUserId()
+    {
+        string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value;
+
+        return userIdClaim is not null && Guid.TryParse(userIdClaim, out Guid userId)
+            ? userId
+            : null;
     }
 
     private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)

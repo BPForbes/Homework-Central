@@ -20,6 +20,7 @@ public partial class AppDbContext(
     public DbSet<UserEffectiveMask> UserEffectiveMasks => Set<UserEffectiveMask>();
     public DbSet<UserSubjectExpertiseMask> UserSubjectExpertiseMasks => Set<UserSubjectExpertiseMask>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -166,6 +167,26 @@ public partial class AppDbContext(
             e.HasOne(rt => rt.User)
                 .WithMany(u => u.RefreshTokens)
                 .HasForeignKey(rt => rt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<ChatMessage>(e =>
+        {
+            e.HasKey(m => m.MessageId);
+            e.Property(m => m.MessageId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(m => m.RoomId).HasMaxLength(128).IsRequired();
+            e.Property(m => m.SenderUsername).HasMaxLength(64).IsRequired();
+            e.Property(m => m.RawContent).IsRequired();
+            e.Property(m => m.CreatedAtUtc).IsRequired();
+            e.Property(m => m.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(m => m.TenantDatabaseName).HasMaxLength(128);
+            e.HasIndex(m => new { m.RoomId, m.CreatedAtUtc });
+            e.HasOne(m => m.Sender)
+                .WithMany()
+                .HasForeignKey(m => m.SenderId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

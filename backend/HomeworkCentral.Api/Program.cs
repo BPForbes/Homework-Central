@@ -5,6 +5,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
+using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
@@ -61,6 +62,8 @@ builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
 builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
+builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
+builder.Services.AddSingleton<ChatTypingTracker>();
 builder.Services.AddScoped<IContentSanitizer, HtmlContentSanitizer>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, ResourceVisibilityHandler>();
@@ -83,11 +86,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero,
         };
+        opts.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                string? accessToken = context.Request.Query["access_token"];
+                PathString path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            },
+        };
     });
 
 builder.Services.AddAuthorization(opts =>
     opts.AddPolicy(AuthorizationPolicyNames.ResourceVisibility,
         policy => policy.AddRequirements(new ResourceVisibilityRequirement())));
+builder.Services.AddSignalR();
 builder.Services.AddControllers();
 
 // Rate limiting
@@ -138,6 +153,7 @@ app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
 // Health probe for Docker / load balancers
 app.MapGet("/healthz", (IDevPersonaProvisioner? personaProvisioner) =>
