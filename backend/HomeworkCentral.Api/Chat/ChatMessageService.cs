@@ -36,6 +36,7 @@ public sealed class ChatMessageService(
     AppDbContext masterDb,
     ITenantDbContextFactory tenantFactory,
     IHttpContextAccessor httpContextAccessor,
+    IAccessScopeAccessor accessScopeAccessor,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
     IContentSanitizer contentSanitizer,
@@ -67,9 +68,12 @@ public sealed class ChatMessageService(
 
         int pageSize = limit is > 0 and <= 100 ? limit : DefaultPageSize;
         AppDbContext db = await GetDbAsync(ct);
+        AccessScope scope = accessScopeAccessor.Resolve(
+            httpContextAccessor.HttpContext?.User ?? new ClaimsPrincipal());
 
         IQueryable<ChatMessage> query = db.ChatMessages
             .AsNoTracking()
+            .ForCurrentViewer(scope)
             .Where(message => message.RoomId == roomId);
 
         if (beforeUtc is not null)
