@@ -22,10 +22,9 @@ export interface ChatMessage {
   messageId: string
   roomId: string
   senderId: string
-  senderUsername: string | null
+  senderUsername: string
   content: string
   createdAtUtc: string
-  isOwn: boolean
 }
 
 export interface ChatTypingUser {

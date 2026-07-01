@@ -6,6 +6,7 @@ interface ChatMessageListProps {
   messages: ChatMessage[]
   typingUsers: ChatTypingUser[]
   loading: boolean
+  currentUserId: string | undefined
 }
 
 function formatUtcTimestamp(iso: string): string {
@@ -18,7 +19,7 @@ function formatUtcTimestamp(iso: string): string {
   return `${year}-${month}-${day} ${hours}:${minutes} UTC`
 }
 
-export function ChatMessageList({ messages, typingUsers, loading }: ChatMessageListProps) {
+export function ChatMessageList({ messages, typingUsers, loading, currentUserId }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -35,20 +36,23 @@ export function ChatMessageList({ messages, typingUsers, loading }: ChatMessageL
         <p className="chat-messages-empty">No messages yet. Say hello!</p>
       )}
 
-      {messages.map((message) => (
-        <article
-          key={message.messageId}
-          className={`chat-bubble ${message.isOwn ? 'chat-bubble--own' : 'chat-bubble--other'}`}
-        >
-          {!message.isOwn && message.senderUsername && (
-            <div className="chat-bubble-sender">{message.senderUsername}</div>
-          )}
-          <div className="chat-bubble-content">{message.content}</div>
-          <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
-            {formatUtcTimestamp(message.createdAtUtc)}
-          </time>
-        </article>
-      ))}
+      {messages.map((message) => {
+        const isOwn = message.senderId === currentUserId
+        return (
+          <article
+            key={message.messageId}
+            className={`chat-bubble ${isOwn ? 'chat-bubble--own' : 'chat-bubble--other'}`}
+          >
+            {!isOwn && message.senderUsername && (
+              <div className="chat-bubble-sender">{message.senderUsername}</div>
+            )}
+            <div className="chat-bubble-content">{message.content}</div>
+            <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
+              {formatUtcTimestamp(message.createdAtUtc)}
+            </time>
+          </article>
+        )
+      })}
 
       {typingUsers.length > 0 && <TypingIndicator />}
 

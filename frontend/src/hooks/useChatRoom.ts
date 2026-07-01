@@ -4,7 +4,6 @@ import { chatApi } from '../api/chatApi'
 import type { ChatMessage, ChatTypingUser } from '../types/chat'
 
 const TYPING_IDLE_MS = 2500
-const TYPING_DEBOUNCE_MS = 300
 
 export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -15,7 +14,6 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [connected, setConnected] = useState(false)
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
-  const typingTimerRef = useRef<number | null>(null)
   const idleTimerRef = useRef<number | null>(null)
   const isTypingRef = useRef(false)
 
@@ -105,10 +103,6 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   }, [roomId, currentUserId, addMessage])
 
   const stopTyping = useCallback(() => {
-    if (typingTimerRef.current !== null) {
-      window.clearTimeout(typingTimerRef.current)
-      typingTimerRef.current = null
-    }
     if (idleTimerRef.current !== null) {
       window.clearTimeout(idleTimerRef.current)
       idleTimerRef.current = null
@@ -119,23 +113,21 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     }
   }, [roomId])
 
+  // Notify immediately on the first keystroke of a burst, then keep pushing the idle
+  // timeout back on every subsequent keystroke. A pure debounce (send only once typing
+  // pauses) would mean continuous typing never fires the event at all.
   const notifyTyping = useCallback(() => {
-    if (typingTimerRef.current !== null)
-      window.clearTimeout(typingTimerRef.current)
+    if (!isTypingRef.current) {
+      isTypingRef.current = true
+      void connectionRef.current?.invoke('NotifyTyping', roomId).catch(() => undefined)
+    }
 
-    typingTimerRef.current = window.setTimeout(() => {
-      if (!isTypingRef.current) {
-        isTypingRef.current = true
-        void connectionRef.current?.invoke('NotifyTyping', roomId).catch(() => undefined)
-      }
+    if (idleTimerRef.current !== null)
+      window.clearTimeout(idleTimerRef.current)
 
-      if (idleTimerRef.current !== null)
-        window.clearTimeout(idleTimerRef.current)
-
-      idleTimerRef.current = window.setTimeout(() => {
-        stopTyping()
-      }, TYPING_IDLE_MS)
-    }, TYPING_DEBOUNCE_MS)
+    idleTimerRef.current = window.setTimeout(() => {
+      stopTyping()
+    }, TYPING_IDLE_MS)
   }, [roomId, stopTyping])
 
   const sendMessage = useCallback(async (content: string) => {

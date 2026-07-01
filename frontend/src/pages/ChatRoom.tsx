@@ -114,6 +114,7 @@ export function ChatRoom() {
           messages={messages}
           typingUsers={typingUsers}
           loading={messagesLoading}
+          currentUserId={user?.userId}
         />
         {room.isPrivate && (
           <div className="chat-key-badge" aria-hidden="true">

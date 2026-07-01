@@ -85,7 +85,7 @@ public sealed class ChatMessageService(
             .ToListAsync(ct);
 
         messages.Reverse();
-        return messages.Select(message => ToDto(message, userId)).ToArray();
+        return messages.Select(ToDto).ToArray();
     }
 
     public async Task<ChatMessageDto?> SendMessageAsync(
@@ -125,7 +125,7 @@ public sealed class ChatMessageService(
         db.ChatMessages.Add(message);
         await db.SaveChangesAsync(ct);
 
-        ChatMessageDto dto = ToDto(message, userId);
+        ChatMessageDto dto = ToDto(message);
         string groupKey = ChatRoomGroupKey.Build(roomId, accountClass);
         await hubContext.Clients.Group(groupKey).SendAsync("ReceiveMessage", dto, ct);
         return dto;
@@ -184,16 +184,15 @@ public sealed class ChatMessageService(
         return BitMask.HasBit(featureMask, PlatformFeatures.GroupMessages);
     }
 
-    private static ChatMessageDto ToDto(ChatMessage message, Guid currentUserId) =>
+    private static ChatMessageDto ToDto(ChatMessage message) =>
         new()
         {
             MessageId = message.MessageId,
             RoomId = message.RoomId,
             SenderId = message.SenderId,
-            SenderUsername = message.SenderId == currentUserId ? null : message.SenderUsername,
+            SenderUsername = message.SenderUsername,
             Content = message.SanitizedContent ?? message.RawContent,
             CreatedAtUtc = message.CreatedAtUtc,
-            IsOwn = message.SenderId == currentUserId,
         };
 
     private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
