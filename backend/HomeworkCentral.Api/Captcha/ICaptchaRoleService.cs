@@ -9,7 +9,6 @@ public interface ICaptchaRoleService
     /// </summary>
     Task<bool> TryVerifyAndPromoteAsync(
         Guid userId,
-        string? challengeId,
-        string? answer,
+        CaptchaSubmissionDto submission,
         CancellationToken ct = default);
 }

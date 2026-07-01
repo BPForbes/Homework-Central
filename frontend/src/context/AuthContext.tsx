@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { ReactNode } from 'react'
 import { authApi } from '../api/authApi'
 import type { CoreMaskField, UserInfo } from '../types/auth'
+import type { CaptchaSubmission } from '../types/captcha'
 import { hasMaskBit } from '../utils/bitmask'
 
 interface AuthContextValue {
@@ -13,7 +14,7 @@ interface AuthContextValue {
     email: string,
     username: string,
     password: string,
-    captcha?: { challengeId: string; answer: string }
+    captcha?: CaptchaSubmission
   ) => Promise<void>
   logout: () => Promise<void>
   /** Re-fetches the current user — used after the dashboard "Verify" button changes roles. */
@@ -80,19 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const register = useCallback(
-    async (
-      email: string,
-      username: string,
-      password: string,
-      captcha?: { challengeId: string; answer: string }
-    ) => {
-      const { data } = await authApi.register({
-        email,
-        username,
-        password,
-        captchaChallengeId: captcha?.challengeId,
-        captchaAnswer: captcha?.answer,
-      })
+    async (email: string, username: string, password: string, captcha?: CaptchaSubmission) => {
+      const { data } = await authApi.register({ email, username, password, captcha })
       sessionStorage.setItem('accessToken', data.accessToken)
       setUser(data.user)
     },

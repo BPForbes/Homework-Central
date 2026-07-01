@@ -18,15 +18,16 @@ export function Dashboard() {
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault()
-    if (!captcha.challengeId) return
+    const submission = captcha.buildSubmission()
+    if (!submission) return
 
     setVerifying(true)
     setVerifyError('')
     try {
-      await captchaApi.verifyRole(captcha.challengeId, captcha.answer)
+      await captchaApi.verifyRole(submission)
       await refreshUser()
     } catch {
-      setVerifyError("That wasn't correct. Try the new code below.")
+      setVerifyError("We couldn't verify you're human. Try the new challenge below.")
       void captcha.refresh()
     } finally {
       setVerifying(false)
@@ -57,19 +58,11 @@ export function Dashboard() {
           </div>
           <div className="verify-card-body">
             <h3>Verify your account</h3>
-            <p>Solve the captcha below to become a Verified User.</p>
+            <p>Solve the challenge below to become a Verified User.</p>
             <form onSubmit={handleVerify}>
-              <Captcha
-                label={captcha.label}
-                content={captcha.content}
-                answer={captcha.answer}
-                onAnswerChange={captcha.setAnswer}
-                onRefresh={captcha.refresh}
-                loading={captcha.loading}
-                disabled={verifying}
-              />
+              <Captcha captcha={captcha} disabled={verifying} />
               {verifyError && <p className="error">{verifyError}</p>}
-              <button type="submit" className="btn-primary" disabled={verifying || !captcha.challengeId}>
+              <button type="submit" className="btn-primary" disabled={verifying || !captcha.challenge}>
                 {verifying ? 'Verifying…' : 'Verify'}
               </button>
             </form>

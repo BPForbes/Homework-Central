@@ -63,6 +63,7 @@ builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
 builder.Services.AddScoped<ISubjectClaimService, SubjectClaimService>();
+builder.Services.AddSingleton<IBehaviorScoringService, BehaviorScoringService>();
 builder.Services.AddSingleton<ICaptchaService, CaptchaService>();
 builder.Services.AddScoped<ICaptchaRoleService, CaptchaRoleService>();
 builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();

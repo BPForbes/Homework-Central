@@ -1086,6 +1086,135 @@ body {
   cursor: not-allowed;
 }
 
+.captcha-puzzle-status {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-top: 0.5rem;
+}
+
+/* Maze puzzle */
+.maze-puzzle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.maze-grid {
+  display: grid;
+  gap: 0;
+  background: #fff;
+  border: 2px solid #1e293b;
+  width: 100%;
+  max-width: 260px;
+  aspect-ratio: 1 / 1;
+}
+
+.maze-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+
+.maze-cell.wall-n { border-top-color: #1e293b; border-top-width: 2px; }
+.maze-cell.wall-e { border-right-color: #1e293b; border-right-width: 2px; }
+.maze-cell.wall-s { border-bottom-color: #1e293b; border-bottom-width: 2px; }
+.maze-cell.wall-w { border-left-color: #1e293b; border-left-width: 2px; }
+
+.maze-cell.visited {
+  background: #eff6ff;
+}
+
+.maze-cell.current {
+  background: #dbeafe;
+}
+
+.maze-marker {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.maze-token {
+  width: 55%;
+  height: 55%;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.maze-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.maze-controls-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.maze-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.maze-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.maze-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Tile-rotate puzzle */
+.tile-rotate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(3rem, 1fr));
+  gap: 0.6rem;
+}
+
+.tile-rotate-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 3rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: #374151;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.tile-rotate-button:hover:not(:disabled) {
+  border-color: #93c5fd;
+}
+
+.tile-rotate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tile-rotate-button.aligned {
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #16a34a;
+}
+
 /* Dashboard verify-account card */
 .verify-card-body {
   width: 100%;

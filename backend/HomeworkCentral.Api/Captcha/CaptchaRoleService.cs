@@ -22,11 +22,10 @@ public sealed class CaptchaRoleService(
 {
     public async Task<bool> TryVerifyAndPromoteAsync(
         Guid userId,
-        string? challengeId,
-        string? answer,
+        CaptchaSubmissionDto submission,
         CancellationToken ct = default)
     {
-        if (!captcha.Validate(challengeId, answer))
+        if (!captcha.Validate(submission))
             return false;
 
         AppDbContext db = await ResolveDbContextAsync(ct);

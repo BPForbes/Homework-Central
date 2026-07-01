@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using HomeworkCentral.Api.Captcha;
 
 namespace HomeworkCentral.Api.DTOs;
 
@@ -13,8 +14,8 @@ public class RegisterRequest
     [Required, MinLength(8), MaxLength(128)]
     public string Password { get; set; } = null!;
 
-    // Optional: registration succeeds either way (as Guest if omitted or incorrect), but a
-    // correct answer grants VerifiedUser immediately instead of Guest — see AuthService.RegisterAsync.
-    public string? CaptchaChallengeId { get; set; }
-    public string? CaptchaAnswer { get; set; }
+    // Optional: registration succeeds either way (as Guest if omitted or the captcha doesn't
+    // pass), but a validated submission grants VerifiedUser immediately instead of Guest — see
+    // AuthService.RegisterAsync.
+    public CaptchaSubmissionDto? Captcha { get; set; }
 }

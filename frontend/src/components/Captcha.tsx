@@ -1,103 +1,78 @@
-import { useMemo } from 'react'
+import { useRef } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRotate } from '@fortawesome/free-solid-svg-icons'
+import type { CaptchaHookState } from '../hooks/useCaptcha'
+import { TextChallenge } from './captcha/TextChallenge'
+import { MazePuzzle } from './captcha/MazePuzzle'
+import { TileRotatePuzzle } from './captcha/TileRotatePuzzle'
 
 interface CaptchaProps {
-  label: string | null
-  content: string | null
-  answer: string
-  onAnswerChange: (value: string) => void
-  onRefresh: () => void
-  loading?: boolean
+  captcha: CaptchaHookState
   disabled?: boolean
   inputId?: string
 }
 
-const CHAR_COLORS = ['#1e3a8a', '#1d4ed8', '#2563eb', '#3730a3', '#312e81']
-
-/** Deterministic per-character jitter (not Math.random) so re-renders that don't change the
- * content — e.g. typing into the answer field — don't make the distorted characters visibly
- * shuffle around. */
-function buildCharStyle(content: string, index: number): React.CSSProperties {
-  const seed = content.length * 31 + index * 17 + content.charCodeAt(index)
-  const rotate = (seed % 25) - 12
-  const translateY = (seed % 7) - 3
-  const color = CHAR_COLORS[seed % CHAR_COLORS.length]
-  return { transform: `rotate(${rotate}deg) translateY(${translateY}px)`, color }
-}
-
-function blockEvent(e: React.SyntheticEvent) {
-  e.preventDefault()
-}
-
 /**
- * Reusable text captcha widget — same module backs signup and the dashboard verify button.
- * `label` is plain readable text; `content` (the code or expression to solve) is rendered as
- * per-character distorted, non-selectable spans, and copy/cut/right-click/drag are blocked on it,
- * with paste/drop blocked on the answer field — so it can't just be lifted with Ctrl+C/Ctrl+V.
+ * Reusable captcha widget — same module backs signup and the dashboard verify button. Dispatches
+ * to a text/maze/tile-rotate puzzle based on the issued challenge type, and tracks mouse movement
+ * across the whole widget for the server-side behavioral score (see useCaptcha).
  */
-export function Captcha({
-  label,
-  content,
-  answer,
-  onAnswerChange,
-  onRefresh,
-  loading,
-  disabled,
-  inputId,
-}: CaptchaProps) {
-  const charStyles = useMemo(
-    () => (content ?? '').split('').map((_, i) => buildCharStyle(content ?? '', i)),
-    [content]
-  )
+export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
+  const { challenge, loading, recordMouseMove } = captcha
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  function handleMouseMove(e: React.MouseEvent) {
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    recordMouseMove(Math.round(e.clientX - rect.left), Math.round(e.clientY - rect.top))
+  }
 
   return (
-    <div className="captcha">
+    <div className="captcha" ref={containerRef} onMouseMove={handleMouseMove}>
       <div className="captcha-label-row">
         <span className="captcha-label">
-          {loading ? 'Loading a verification question…' : label ?? 'Could not load a verification question.'}
+          {loading ? 'Loading a verification challenge…' : challenge?.label ?? 'Could not load a verification challenge.'}
         </span>
         <button
           type="button"
           className="captcha-refresh"
-          onClick={onRefresh}
+          onClick={() => void captcha.refresh()}
           disabled={disabled}
-          aria-label="Get a new question"
-          title="Get a new question"
+          aria-label="Get a new challenge"
+          title="Get a new challenge"
         >
           <FontAwesomeIcon icon={faRotate} />
         </button>
       </div>
 
-      {content && (
-        <div
-          className="captcha-content"
-          aria-label={content}
-          onCopy={blockEvent}
-          onCut={blockEvent}
-          onContextMenu={blockEvent}
-          onDragStart={blockEvent}
-        >
-          {content.split('').map((char, i) => (
-            <span key={i} className="captcha-char" style={charStyles[i]} aria-hidden="true">
-              {char}
-            </span>
-          ))}
-        </div>
+      {challenge?.type === 'text' && challenge.content && (
+        <TextChallenge
+          inputId={inputId}
+          content={challenge.content}
+          answer={captcha.answer}
+          onAnswerChange={captcha.setAnswer}
+          onKeydown={captcha.recordKeydown}
+          disabled={disabled || loading}
+        />
       )}
 
-      <input
-        id={inputId}
-        type="text"
-        className="captcha-input"
-        value={answer}
-        onChange={(e) => onAnswerChange(e.target.value)}
-        onPaste={blockEvent}
-        onDrop={blockEvent}
-        autoComplete="off"
-        disabled={disabled || loading}
-        placeholder="Your answer"
-      />
+      {challenge?.type === 'maze' && challenge.maze && (
+        <MazePuzzle
+          maze={challenge.maze}
+          path={captcha.mazePath}
+          onStep={captcha.addMazeStep}
+          disabled={disabled || loading}
+        />
+      )}
+
+      {challenge?.type === 'tileRotate' && challenge.tileRotate && (
+        <TileRotatePuzzle
+          tiles={challenge.tileRotate.tiles}
+          rotationClicks={captcha.tileRotationClicks}
+          onRotate={captcha.rotateTile}
+          disabled={disabled || loading}
+        />
+      )}
     </div>
   )
 }

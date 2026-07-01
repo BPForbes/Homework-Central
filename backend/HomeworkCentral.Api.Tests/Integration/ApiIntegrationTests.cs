@@ -72,7 +72,7 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
   }
 
   [SkippableFact]
-  public async Task Register_with_correct_captcha_grants_verified_user_instead_of_guest()
+  public async Task Register_with_correct_captcha_and_human_like_behavior_grants_verified_user_instead_of_guest()
   {
     Skip.IfNot(fixture.IsDatabaseAvailable, fixture.SkipReason);
     HttpClient client = fixture.RequireClient();
@@ -88,8 +88,7 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
       Email = $"ci-verified-{suffix}@example.com",
       Username = $"civerified{suffix}",
       Password = "Password123!",
-      CaptchaChallengeId = challenge!.ChallengeId,
-      CaptchaAnswer = SolveChallenge(challenge),
+      Captcha = BuildCorrectSubmission(challenge!),
     };
 
     HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
@@ -101,10 +100,78 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.DoesNotContain("Guest", registered.User.Roles);
   }
 
-  private static string SolveChallenge(CaptchaChallengeDto challenge)
+  [SkippableFact]
+  public async Task Register_with_correct_captcha_but_bot_like_behavior_still_only_grants_guest()
+  {
+    Skip.IfNot(fixture.IsDatabaseAvailable, fixture.SkipReason);
+    HttpClient client = fixture.RequireClient();
+    string suffix = Guid.NewGuid().ToString("N")[..8];
+
+    HttpResponseMessage challengeResponse = await client.GetAsync("/api/captcha/challenge");
+    Assert.Equal(HttpStatusCode.OK, challengeResponse.StatusCode);
+    CaptchaChallengeDto? challenge = await challengeResponse.Content.ReadFromJsonAsync<CaptchaChallengeDto>();
+    Assert.NotNull(challenge);
+
+    CaptchaSubmissionDto submission = BuildCorrectSubmission(challenge!);
+    submission.Behavior = new CaptchaBehaviorDto
+    {
+      MouseSamples = null,
+      KeyIntervalsMs = null,
+      TotalDurationMs = 150,
+      WebdriverFlag = true,
+      InteractionCount = 0,
+    };
+
+    RegisterRequest register = new()
+    {
+      Email = $"ci-botlike-{suffix}@example.com",
+      Username = $"cibotlike{suffix}",
+      Password = "Password123!",
+      Captcha = submission,
+    };
+
+    HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
+    Assert.Equal(HttpStatusCode.OK, registerResponse.StatusCode);
+
+    AuthResponse? registered = await registerResponse.Content.ReadFromJsonAsync<AuthResponse>();
+    Assert.NotNull(registered);
+    Assert.Contains("Guest", registered!.User.Roles);
+    Assert.DoesNotContain("VerifiedUser", registered.User.Roles);
+  }
+
+  /// <summary>Builds a submission that correctly solves whichever challenge type was issued, paired
+  /// with telemetry engineered to clear the 0.75 behavioral score threshold.</summary>
+  private static CaptchaSubmissionDto BuildCorrectSubmission(CaptchaChallengeDto challenge)
+  {
+    CaptchaSubmissionDto submission = new()
+    {
+      ChallengeId = challenge.ChallengeId,
+      Behavior = GoodBehavior(),
+    };
+
+    switch (challenge.Type)
+    {
+      case "maze":
+        submission.MazePath = SolveMaze(challenge.Maze!);
+        break;
+      case "tileRotate":
+        submission.TileRotationClicks = challenge.TileRotate!.Tiles
+          .Select(tile => (4 - tile.InitialRotationSteps) % 4)
+          .ToList();
+        break;
+      default:
+        submission.Answer = SolveText(challenge.Content!);
+        submission.Behavior!.KeyIntervalsMs = [120, 95, 180, 60, 140, 110, 200, 85];
+        break;
+    }
+
+    return submission;
+  }
+
+  private static string SolveText(string content)
   {
     System.Text.RegularExpressions.Match arithmetic =
-      System.Text.RegularExpressions.Regex.Match(challenge.Content, @"^(\d+) \+ (\d+)$");
+      System.Text.RegularExpressions.Regex.Match(content, @"^(\d+) \+ (\d+)$");
     if (arithmetic.Success)
     {
       int a = int.Parse(arithmetic.Groups[1].Value);
@@ -113,7 +180,78 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     }
 
     // Code challenges: the content is the answer itself.
-    return challenge.Content;
+    return content;
+  }
+
+  private static List<int> SolveMaze(MazeDto maze)
+  {
+    int cellCount = maze.Width * maze.Height;
+    int[] previous = new int[cellCount];
+    Array.Fill(previous, -1);
+    bool[] visited = new bool[cellCount];
+    Queue<int> queue = new();
+    queue.Enqueue(maze.StartIndex);
+    visited[maze.StartIndex] = true;
+
+    while (queue.Count > 0)
+    {
+      int current = queue.Dequeue();
+      if (current == maze.EndIndex)
+        break;
+
+      int walls = maze.CellWalls[current];
+      int x = current % maze.Width;
+      int y = current / maze.Width;
+      List<int> neighbors = new();
+      if ((walls & 1) != 0 && y > 0) neighbors.Add(current - maze.Width);
+      if ((walls & 2) != 0 && x < maze.Width - 1) neighbors.Add(current + 1);
+      if ((walls & 4) != 0 && y < maze.Height - 1) neighbors.Add(current + maze.Width);
+      if ((walls & 8) != 0 && x > 0) neighbors.Add(current - 1);
+
+      foreach (int neighbor in neighbors)
+      {
+        if (visited[neighbor]) continue;
+        visited[neighbor] = true;
+        previous[neighbor] = current;
+        queue.Enqueue(neighbor);
+      }
+    }
+
+    List<int> reversed = new();
+    int step = maze.EndIndex;
+    while (step != maze.StartIndex)
+    {
+      reversed.Add(step);
+      step = previous[step];
+    }
+    reversed.Add(maze.StartIndex);
+    reversed.Reverse();
+    return reversed;
+  }
+
+  private static CaptchaBehaviorDto GoodBehavior()
+  {
+    int[] dxs = [3, 15, -2, 20, -1, 18, 2, 16, -3, 14];
+    int[] dys = [2, -10, 3, -12, 2, 9, -1, -11, 4, 8];
+    int[] dts = [80, 20, 90, 15, 85, 18, 95, 16, 88, 22];
+
+    List<MouseSampleDto> mouseSamples = new();
+    int x = 10, y = 10, t = 0;
+    for (int i = 0; i < dxs.Length; i++)
+    {
+      x += dxs[i];
+      y += dys[i];
+      t += dts[i];
+      mouseSamples.Add(new MouseSampleDto { X = x, Y = y, TMs = t });
+    }
+
+    return new CaptchaBehaviorDto
+    {
+      MouseSamples = mouseSamples,
+      TotalDurationMs = 4000,
+      WebdriverFlag = false,
+      InteractionCount = 5,
+    };
   }
 
   private static string? ReadAccountClassClaim(string accessToken)

@@ -51,12 +51,7 @@ export function Register() {
 
     setIsSubmitting(true)
     try {
-      await register(
-        email.trim().toLowerCase(),
-        username.trim(),
-        password,
-        captcha.challengeId ? { challengeId: captcha.challengeId, answer: captcha.answer } : undefined
-      )
+      await register(email.trim().toLowerCase(), username.trim(), password, captcha.buildSubmission() ?? undefined)
       navigate('/dashboard')
     } catch (err: unknown) {
       const msg =
@@ -128,16 +123,7 @@ export function Register() {
           </div>
           <div className="field">
             <label htmlFor="captcha-answer">Verify you're human (optional — get Verified status immediately)</label>
-            <Captcha
-              inputId="captcha-answer"
-              label={captcha.label}
-              content={captcha.content}
-              answer={captcha.answer}
-              onAnswerChange={captcha.setAnswer}
-              onRefresh={captcha.refresh}
-              loading={captcha.loading}
-              disabled={isSubmitting}
-            />
+            <Captcha captcha={captcha} inputId="captcha-answer" disabled={isSubmitting} />
           </div>
           {error && <p className="error">{error}</p>}
           <button type="submit" className="btn-primary" disabled={isSubmitting}>
