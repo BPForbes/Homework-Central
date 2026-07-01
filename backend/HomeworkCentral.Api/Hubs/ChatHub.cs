@@ -35,7 +35,14 @@ public sealed class ChatHub(
         if (!await chatMessageService.CanAccessRoomAsync(roomId, userId))
             throw new HubException("You do not have access to this chat room.");
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, ChatRoomGroupKey.Build(Context.User!, roomId));
+        string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, groupKey);
+
+        // Live UserTyping events are broadcast only to OthersInGroup, so a user who joins (or
+        // reconnects and re-joins) after someone started typing would otherwise miss them until
+        // the next keystroke. Send a one-shot snapshot of current typers to the caller only.
+        IReadOnlyList<ChatTypingDto> activeTypers = typingTracker.GetActiveTypers(groupKey, excludeUserId: userId);
+        await Clients.Caller.SendAsync("TypingUsersSnapshot", activeTypers);
     }
 
     public async Task LeaveRoom(string roomId)

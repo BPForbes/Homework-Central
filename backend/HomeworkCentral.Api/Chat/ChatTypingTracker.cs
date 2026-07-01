@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using HomeworkCentral.Api.DTOs;
 
 namespace HomeworkCentral.Api.Chat;
 
@@ -46,6 +47,20 @@ public sealed class ChatTypingTracker
 
         bool wasLastConnection = RemoveConnectionFromRoom(entry.GroupKey, entry.UserId, connectionId);
         return wasLastConnection ? entry : null;
+    }
+
+    /// <summary>Returns every user currently marked as typing in <paramref name="groupKey"/>,
+    /// optionally omitting <paramref name="excludeUserId"/> (used when a new connection joins so
+    /// the caller never sees their own indicator echoed back).</summary>
+    public IReadOnlyList<ChatTypingDto> GetActiveTypers(string groupKey, Guid? excludeUserId = null)
+    {
+        if (!_rooms.TryGetValue(groupKey, out ConcurrentDictionary<Guid, TypingEntry>? room))
+            return [];
+
+        return room
+            .Where(kvp => excludeUserId is null || kvp.Key != excludeUserId.Value)
+            .Select(kvp => new ChatTypingDto { UserId = kvp.Key, Username = kvp.Value.Username })
+            .ToList();
     }
 
     private bool RemoveConnectionFromRoom(string groupKey, Guid userId, string connectionId)

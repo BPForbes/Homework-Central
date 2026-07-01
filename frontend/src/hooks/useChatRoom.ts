@@ -92,6 +92,12 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       setTypingUsers((prev) => prev.filter((user) => user.userId !== userId))
     })
 
+    // JoinRoom (and reconnect re-join) delivers the room's current typing state because live
+    // UserTyping events are only sent to others already in the group.
+    connection.on('TypingUsersSnapshot', (users: ChatTypingUser[]) => {
+      setTypingUsers(users.filter((user) => user.userId !== currentUserId))
+    })
+
     const start = async () => {
       try {
         await connection.start()
