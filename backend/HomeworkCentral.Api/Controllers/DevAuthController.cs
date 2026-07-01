@@ -14,8 +14,12 @@ namespace HomeworkCentral.Api.Controllers;
 public class DevAuthController(
     IAuthService auth,
     IConfiguration config,
-    IWebHostEnvironment env) : ControllerBase
+    IWebHostEnvironment env,
+    IServiceProvider serviceProvider) : ControllerBase
 {
+    private IDevPersonaProvisioner? PersonaProvisioner =>
+        serviceProvider.GetService<IDevPersonaProvisioner>();
+
     /// <summary>Returns developer accounts and personas for the /devlogin dropdowns.</summary>
     [HttpGet("options")]
     public async Task<IActionResult> Options()
@@ -56,7 +60,16 @@ public class DevAuthController(
         if (!CanUseDevBypass())
             return NotFound();
 
-        return Ok(new { available = true });
+        if (PersonaProvisioner is null)
+            return Ok(new { available = true });
+
+        return Ok(new
+        {
+            available = true,
+            personasProvisioned = PersonaProvisioner.ProvisionedCount,
+            personasTotal = PersonaProvisioner.TotalPersonaCount,
+            personasReady = PersonaProvisioner.ProvisionedCount >= PersonaProvisioner.TotalPersonaCount,
+        });
     }
 
     private bool CanUseDevBypass() =>

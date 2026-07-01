@@ -58,6 +58,8 @@ public class BitmaskAuthorizationHandler(
 
 public static class AuthorizationPolicyNames
 {
+    public const string ResourceVisibility = "ResourceVisibility";
+
     public static string For(MaskType maskType, short bit, string? subjectCategory = null) =>
         subjectCategory is null
             ? $"mask:{maskType}:{bit}"

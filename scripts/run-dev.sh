@@ -428,6 +428,31 @@ build_postgres_host_check() {
   dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
 
+build_postgres_host_check_if_needed() {
+  local dll="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
+  # Compare against the project file *and* every .cs source under it, not just the .csproj —
+  # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
+  # this script keeps running the stale compiled checker.
+  if [[ -f "$dll" ]]; then
+    local project_dir
+    project_dir="$(dirname "$POSTGRES_HOST_CHECK_PROJECT")"
+    local stale=false
+    while IFS= read -r -d '' source_file; do
+      if [[ "$source_file" -nt "$dll" ]]; then
+        stale=true
+        break
+      fi
+    done < <(find "$project_dir" -name '*.cs' -print0)
+
+    if [[ "$stale" == false && ! "$POSTGRES_HOST_CHECK_PROJECT" -nt "$dll" ]]; then
+      log "Postgres host check already built"
+      return
+    fi
+  fi
+
+  build_postgres_host_check
+}
+
 build_projects() {
   local skip_dotnet=false
   HC_API_BUILD_FAILED=0
@@ -436,11 +461,46 @@ build_projects() {
     skip_dotnet=true
   fi
 
+  require_cmd npm
+  if [[ ! -d "$FRONTEND_DIR/node_modules" ]] \
+    || [[ ! -f "$FRONTEND_DIR/node_modules/.package-lock.json" ]] \
+    || [[ "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_DIR/node_modules/.package-lock.json" ]]; then
+    log "Installing frontend dependencies"
+    npm ci --prefix "$FRONTEND_DIR"
+  else
+    log "Frontend dependencies already installed"
+  fi
+
+  local api_build_pid=""
+  local api_build_log=""
   if [[ "$skip_dotnet" == false ]]; then
     require_cmd dotnet
-    log "Building API"
+    log "Building API (parallel with frontend typecheck)"
     api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
-    if ! dotnet build "$API_PROJECT" -c Debug 2>&1 | tee "$api_build_log"; then
+    dotnet build "$API_PROJECT" -c Debug >"$api_build_log" 2>&1 &
+    api_build_pid=$!
+  fi
+
+  log "Type-checking frontend (parallel with Postgres host check build)"
+  (cd "$FRONTEND_DIR" && npx tsc -b --pretty) &
+  local frontend_tsc_pid=$!
+
+  local postgres_host_check_failed=false
+  if ! build_postgres_host_check_if_needed; then
+    postgres_host_check_failed=true
+  fi
+
+  # `fail` calls `exit`, which would terminate the whole script immediately — deliberately don't
+  # call it here yet, so the API build job below still gets waited on and its temp log cleaned
+  # up even when the frontend typecheck fails first.
+  local frontend_typecheck_failed=false
+  if ! wait "$frontend_tsc_pid"; then
+    frontend_typecheck_failed=true
+  fi
+
+  if [[ -n "$api_build_pid" ]]; then
+    if ! wait "$api_build_pid"; then
+      cat "$api_build_log" >&2 || true
       "$REPO_ROOT/scripts/open-api-error-page.sh" "API Build Errors" "$api_build_log" || true
       rm -f "$api_build_log"
       HC_API_BUILD_FAILED=1
@@ -450,20 +510,12 @@ build_projects() {
     fi
   fi
 
-  require_cmd npm
-  if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
-    log "Installing frontend dependencies"
-    npm ci --prefix "$FRONTEND_DIR"
-  else
-    log "Frontend dependencies already installed"
+  if [[ "$frontend_typecheck_failed" == true ]]; then
+    fail "frontend typecheck failed"
   fi
 
-  log "Type-checking frontend (parallel with Postgres host check build)"
-  (cd "$FRONTEND_DIR" && npx tsc -b) &
-  frontend_tsc_pid=$!
-  build_postgres_host_check
-  if ! wait "$frontend_tsc_pid"; then
-    fail "frontend typecheck failed"
+  if [[ "$postgres_host_check_failed" == true ]]; then
+    fail "Postgres host check build failed"
   fi
 }
 

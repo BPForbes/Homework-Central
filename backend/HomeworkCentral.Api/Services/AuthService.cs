@@ -18,9 +18,13 @@ public class AuthService(
     ITenantDbContextFactory tenantFactory,
     IJwtService jwt,
     IHttpContextAccessor http,
-    IEffectiveMaskService effectiveMaskService) : IAuthService
+    IEffectiveMaskService effectiveMaskService,
+    IServiceProvider serviceProvider) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
+
+    private IDevPersonaProvisioner? PersonaProvisioner =>
+        serviceProvider.GetService<IDevPersonaProvisioner>();
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
@@ -109,6 +113,20 @@ public class AuthService(
             foreach (DevPersonaDefinition persona in account.Personas)
             {
                 string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+                if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
+                    continue;
+
+                if (PersonaProvisioner?.TryGetPersonaIdentity(databaseName, out PersonaIdentity cachedIdentity) == true)
+                {
+                    personas.Add(new DevUserOption
+                    {
+                        UserId = cachedIdentity.UserId,
+                        Username = cachedIdentity.Username,
+                        TenantDatabaseName = databaseName,
+                    });
+                    continue;
+                }
+
                 AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName);
                 await using (tenantDb)
                 {
@@ -119,10 +137,13 @@ public class AuthService(
                     if (user is null)
                         continue;
 
+                    PersonaIdentity identity = new(user.UserId, user.Username);
+                    PersonaProvisioner?.RememberPersonaIdentity(databaseName, identity);
+
                     personas.Add(new DevUserOption
                     {
-                        UserId = user.UserId,
-                        Username = user.Username,
+                        UserId = identity.UserId,
+                        Username = identity.Username,
                         TenantDatabaseName = databaseName,
                     });
                 }
@@ -178,6 +199,13 @@ public class AuthService(
             || !string.Equals(personaMatch.Value.Account.DeveloperEmail, developer.Email, StringComparison.OrdinalIgnoreCase))
         {
             throw new UnauthorizedAccessException("Selected persona does not belong to this developer account.");
+        }
+
+        if (PersonaProvisioner is not null)
+        {
+            await PersonaProvisioner.EnsureProvisionedAsync(
+                personaMatch.Value.Account,
+                personaMatch.Value.Persona);
         }
 
         AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(req.TenantDatabaseName);
@@ -270,7 +298,7 @@ public class AuthService(
             UserEffectiveMask effectiveMask = user.EffectiveMask
                 ?? await RebuildMaskAsync(db, userId);
 
-            return BuildUserDto(user, effectiveMask);
+            return BuildUserDto(user, effectiveMask, ResolveAccountClass(user, tenantDatabaseName));
         }
         finally
         {
@@ -319,8 +347,10 @@ public class AuthService(
 
         SetRefreshCookie(rawToken, refreshExpires, tenantDatabaseName);
 
-        UserDto dto = BuildUserDto(user, effectiveMask);
-        string accessToken = jwt.GenerateAccessToken(user, dto.Roles, ToEffectiveMaskDto(effectiveMask), tenantDatabaseName);
+        AccountClass accountClass = ResolveAccountClass(user, tenantDatabaseName);
+        UserDto dto = BuildUserDto(user, effectiveMask, accountClass);
+        string accessToken = jwt.GenerateAccessToken(
+            user, dto.Roles, effectiveMask.ToEffectiveMaskDto(), accountClass, tenantDatabaseName);
 
         return new AuthResponse
         {
@@ -333,10 +363,10 @@ public class AuthService(
     private static async Task<UserEffectiveMask> RebuildMaskAsync(AppDbContext db, Guid userId) =>
         await EffectiveMaskService.RebuildOnContextAsync(db, userId);
 
-    private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask)
+    private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask, AccountClass accountClass)
     {
         List<string> roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-        EffectiveMaskDto masks = ToEffectiveMaskDto(effectiveMask);
+        EffectiveMaskDto masks = effectiveMask.ToEffectiveMaskDto();
 
         return new UserDto
         {
@@ -344,36 +374,13 @@ public class AuthService(
             Email = user.Email,
             Username = user.Username,
             Roles = roles,
+            AccountClass = accountClass.ToString(),
             PermissionMask = masks.ModerationMask,
             RoleMask = masks.RoleMask,
             FeatureMask = masks.FeatureMask,
             GeneralSubjectMask = masks.GeneralSubjectMask,
             SubjectExpertiseMasks = masks.SubjectExpertiseMasks,
             StatusMask = masks.StatusMask,
-        };
-    }
-
-    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
-    {
-        Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
-            .ToDictionary(
-                category => category,
-                category =>
-                {
-                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
-                        .FirstOrDefault(m => m.Category == category);
-                    return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
-                },
-                StringComparer.Ordinal);
-
-        return new EffectiveMaskDto
-        {
-            RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
-            ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
-            FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
-            GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
-            SubjectExpertiseMasks = subjectExpertiseMasks,
-            StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
         };
     }
 
@@ -407,4 +414,19 @@ public class AuthService(
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
+
+    private static AccountClass ResolveAccountClass(User user, string? tenantDatabaseName)
+    {
+        if (string.Equals(user.Username, DevBypass.DevAdminUsername, StringComparison.Ordinal)
+            && string.IsNullOrEmpty(tenantDatabaseName))
+        {
+            return AccountClass.DevAdmin;
+        }
+
+        if (!string.IsNullOrEmpty(tenantDatabaseName))
+            return AccountClass.DeveloperAccount;
+
+        return AccountClass.RealAccount;
+    }
+
 }

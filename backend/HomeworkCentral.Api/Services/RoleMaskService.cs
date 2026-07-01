@@ -32,9 +32,20 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
         if (role is null)
             return;
 
-        role.PermissionMask = BuildPermissionMask(role.RolePermissions);
-        role.RoleMask = BuildRoleIdentityMask(role.Name);
-        role.FeatureMask = BuildFeatureMask(role.Name);
+        if (AuthorizationCatalog.TryGetRole(role.Name, out AuthorizationCatalog.RoleDefinition roleDefinition))
+        {
+            RoleMaskBuilder.RoleMaskSet masks = AuthorizationCatalog.GetRoleMasks(roleDefinition.Name);
+            role.RoleMask = (BitArray)masks.RoleMask.Clone();
+            role.PermissionMask = (BitArray)masks.PermissionMask.Clone();
+            role.FeatureMask = (BitArray)masks.FeatureMask.Clone();
+        }
+        else
+        {
+            role.PermissionMask = RoleMaskBuilder.BuildPermissionMask(
+                role.RolePermissions.Select(rp => rp.PermissionId));
+            role.RoleMask = RoleMaskBuilder.BuildRoleIdentityMask(role.Name);
+            role.FeatureMask = RoleMaskBuilder.BuildFeatureMask(role.Name);
+        }
 
         await db.SaveChangesAsync(ct);
     }
@@ -55,166 +66,5 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
         }
 
         return expanded;
-    }
-
-    private static BitArray BuildPermissionMask(IEnumerable<RolePermission> rolePermissions)
-    {
-        BitArray mask = BitMask.Create(256);
-        foreach (RolePermission rp in rolePermissions)
-            BitMask.SetBit(mask, rp.PermissionId);
-        return mask;
-    }
-
-    private static BitArray BuildRoleIdentityMask(string roleName)
-    {
-        if (!PlatformRoleCatalog.TryGetRoleBit(roleName, out short bit))
-            throw new InvalidOperationException($"Role '{roleName}' is not defined in PlatformRoleCatalog.");
-
-        return SetSingleBit(64, bit);
-    }
-
-    private static BitArray BuildFeatureMask(string roleName)
-    {
-        BitArray mask = BitMask.Create(256);
-
-        switch (roleName)
-        {
-            case "Guest":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PublicProfile);
-                break;
-            case "VerifiedUser":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PrivateMessages,
-                    PlatformFeatures.PublicProfile,
-                    PlatformFeatures.FileUploads,
-                    PlatformFeatures.ImageUploads);
-                break;
-            case "Student":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PrivateMessages,
-                    PlatformFeatures.GroupMessages,
-                    PlatformFeatures.PublicProfile,
-                    PlatformFeatures.ProfileCustomization,
-                    PlatformFeatures.ResourceSharing,
-                    PlatformFeatures.FileUploads,
-                    PlatformFeatures.ImageUploads,
-                    PlatformFeatures.EventCalendar);
-                break;
-            case "Staff":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PrivateMessages,
-                    PlatformFeatures.GroupMessages,
-                    PlatformFeatures.PublicProfile,
-                    PlatformFeatures.ResourceSharing,
-                    PlatformFeatures.EventCalendar);
-                break;
-            case "Tutor":
-                SetFeatures(mask, TutorFeatures());
-                break;
-            case "SeniorTutor":
-            case "HeadTutor":
-                SetFeatures(mask, TutorFeatures());
-                SetFeatures(mask,
-                    PlatformFeatures.SeminarHosting,
-                    PlatformFeatures.SeminarUpload,
-                    PlatformFeatures.EventPosting,
-                    PlatformFeatures.EventCalendar,
-                    PlatformFeatures.CommunityPolls);
-                break;
-            case "SeminarHost":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PrivateMessages,
-                    PlatformFeatures.GroupMessages,
-                    PlatformFeatures.SeminarHosting,
-                    PlatformFeatures.SeminarUpload,
-                    PlatformFeatures.ScreenSharing,
-                    PlatformFeatures.PublicProfile);
-                break;
-            case "Moderator":
-            case "SeniorModerator":
-            case "CommunityManager":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PrivateMessages,
-                    PlatformFeatures.GroupMessages,
-                    PlatformFeatures.ResourceSharing,
-                    PlatformFeatures.WikiEditing,
-                    PlatformFeatures.CommunityAnnouncements,
-                    PlatformFeatures.EventCalendar,
-                    PlatformFeatures.AnalyticsDashboard);
-                break;
-            case "EventOrganizer":
-                SetFeatures(mask,
-                    PlatformFeatures.EventPosting,
-                    PlatformFeatures.EventCalendar,
-                    PlatformFeatures.CommunityPolls,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.GroupMessages);
-                break;
-            case "BetaTester":
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PrivateMessages,
-                    PlatformFeatures.PublicProfile,
-                    PlatformFeatures.FileUploads,
-                    PlatformFeatures.ImageUploads,
-                    PlatformFeatures.BetaFeatures);
-                break;
-            case "Administrator":
-            case "SystemAdministrator":
-            case "BoardMember":
-            case "Owner":
-            case "Founder":
-                EnableAllFeatures(mask);
-                break;
-            default:
-                SetFeatures(mask,
-                    PlatformFeatures.PublicMessages,
-                    PlatformFeatures.PublicProfile);
-                break;
-        }
-
-        return mask;
-    }
-
-    private static short[] TutorFeatures() =>
-    [
-        PlatformFeatures.PublicMessages,
-        PlatformFeatures.PrivateMessages,
-        PlatformFeatures.GroupMessages,
-        PlatformFeatures.VoiceRooms,
-        PlatformFeatures.VideoRooms,
-        PlatformFeatures.ScreenSharing,
-        PlatformFeatures.ResourceSharing,
-        PlatformFeatures.PublicProfile,
-        PlatformFeatures.ProfileCustomization,
-        PlatformFeatures.FileUploads,
-        PlatformFeatures.ImageUploads,
-        PlatformFeatures.EventCalendar,
-    ];
-
-    private static void EnableAllFeatures(BitArray mask)
-    {
-        for (int i = 0; i <= PlatformFeatures.BetaFeatures; i++)
-            BitMask.SetBit(mask, i);
-    }
-
-    private static void SetFeatures(BitArray mask, params short[] features)
-    {
-        foreach (short feature in features)
-            BitMask.SetBit(mask, feature);
-    }
-
-    private static BitArray SetSingleBit(int length, short bit)
-    {
-        BitArray mask = BitMask.Create(length);
-        BitMask.SetBit(mask, bit);
-        return mask;
     }
 }

@@ -6,8 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../api/authApi'
-import { ApiUnavailableBanner } from '../components/ApiUnavailableBanner'
-import type { DevDeveloperOption } from '../types/devAuth'
+import type { DevDeveloperOption, DevStatus } from '../types/devAuth'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
@@ -19,9 +18,10 @@ export function DevLogin() {
   const [targetUserId, setTargetUserId] = useState('')
   const [tenantDatabaseName, setTenantDatabaseName] = useState('')
   const [error, setError] = useState('')
-  const [apiUnavailable, setApiUnavailable] = useState(false)
+  const [setupError, setSetupError] = useState('')
   const [isLoadingOptions, setIsLoadingOptions] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [personaStatus, setPersonaStatus] = useState<DevStatus | null>(null)
 
   const selectedDeveloper = useMemo(
     () => developers.find((developer) => developer.userId === developerUserId) ?? null,
@@ -38,49 +38,63 @@ export function DevLogin() {
 
     let cancelled = false
 
+    // The readiness poll's own error state is kept separate from `error` (which also carries
+    // submit-attempt failures set by handleSubmit): loadOptions previously called setError('')
+    // on every tick, which would silently wipe out a "Developer login failed." message from a
+    // submit that happened while background persona provisioning was still in progress.
     async function loadOptions(): Promise<boolean> {
       setIsLoadingOptions(true)
-      setApiUnavailable(false)
-      setError('')
+      setSetupError('')
       try {
-        const { data } = await authApi.devStatus()
-        if (!data.available) {
-          if (!cancelled) {
-            setError('Developer bypass is not enabled on the API.')
-          }
+        const statusResponse = await authApi.devStatus()
+        if (cancelled)
+          return false
+
+        setPersonaStatus(statusResponse.data)
+
+        if (!statusResponse.data.available) {
+          setSetupError('Developer bypass is not enabled on the API.')
           return true
         }
+
         const options = await authApi.devOptions()
-        if (cancelled) return false
+        if (cancelled)
+          return false
+
         setDevelopers(options.data.developers)
-        if (options.data.developers.length > 0) {
-          setDeveloperUserId(options.data.developers[0].userId)
-        }
-        return true
+        // Only default-select when nothing is chosen yet, or the previous selection vanished
+        // from the list — otherwise every 2s poll tick (while personas are still provisioning
+        // in the background) would silently override a developer the user already picked.
+        setDeveloperUserId((current) => {
+          if (current && options.data.developers.some((developer) => developer.userId === current))
+            return current
+          return options.data.developers[0]?.userId ?? ''
+        })
+
+        return statusResponse.data.personasReady ?? true
       } catch (err: unknown) {
-        if (cancelled) return false
+        if (cancelled)
+          return false
         const response = (err as { response?: { status?: number; data?: { message?: string } } })
           ?.response
         if (response?.status === 404) {
-          setError('Developer bypass is not enabled on the API.')
+          setSetupError('Developer bypass is not enabled on the API.')
           return true
         }
-        if (response?.data?.message) {
-          setError(response.data.message)
-          return true
-        }
-        setApiUnavailable(true)
-        return false
+        setSetupError(response?.data?.message ?? 'Failed to load developer accounts.')
+        return true
       } finally {
-        if (!cancelled) setIsLoadingOptions(false)
+        if (!cancelled)
+          setIsLoadingOptions(false)
       }
     }
 
     async function pollUntilReady() {
       while (!cancelled) {
         const ready = await loadOptions()
-        if (ready || cancelled) break
-        await new Promise((resolve) => setTimeout(resolve, 3000))
+        if (ready || cancelled)
+          break
+        await new Promise((resolve) => setTimeout(resolve, 2000))
       }
     }
 
@@ -98,8 +112,6 @@ export function DevLogin() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-
-    if (apiUnavailable) return
 
     if (!developerUserId) {
       setError('Select a developer account.')
@@ -120,11 +132,14 @@ export function DevLogin() {
     }
   }
 
-  if (!DEV_BYPASS_ENABLED) {
+  if (!DEV_BYPASS_ENABLED)
     return null
-  }
 
-  const loginDisabled = apiUnavailable || isLoadingOptions || isSubmitting
+  // Keep the button disabled whenever setup itself is broken (dev bypass unavailable, or no
+  // developer accounts came back) — otherwise it re-enables the moment loading finishes, and
+  // clicking it just overwrites the real setup error with a generic "Select a developer
+  // account." from handleSubmit's own guard.
+  const loginDisabled = isLoadingOptions || isSubmitting || Boolean(setupError) || developers.length === 0
 
   return (
     <div className="auth-page">
@@ -132,7 +147,13 @@ export function DevLogin() {
         <h1>Homework Central</h1>
         <h2>Developer sign in</h2>
 
-        {apiUnavailable && <ApiUnavailableBanner />}
+        {personaStatus && personaStatus.personasReady === false && personaStatus.personasTotal && (
+          <p className="dev-persona-status">
+            Loading dev personas ({personaStatus.personasProvisioned ?? 0}/{personaStatus.personasTotal})…
+          </p>
+        )}
+
+        {setupError && <p className="error">{setupError}</p>}
 
         <form onSubmit={handleSubmit}>
           <div className="field">

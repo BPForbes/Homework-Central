@@ -1,5 +1,4 @@
 using HomeworkCentral.Api.Dev;
-using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -37,6 +36,45 @@ public static class TenantDatabaseProvisioner
         }
     }
 
+    public static async Task<bool> DatabaseExistsAsync(
+        ITenantConnectionResolver connectionResolver,
+        string databaseName,
+        CancellationToken ct = default)
+    {
+        HashSet<string> existing = await FindExistingDatabasesAsync(
+            connectionResolver,
+            [databaseName],
+            ct);
+        return existing.Contains(databaseName);
+    }
+
+    public static async Task<HashSet<string>> FindExistingDatabasesAsync(
+        ITenantConnectionResolver connectionResolver,
+        IReadOnlyList<string> databaseNames,
+        CancellationToken ct = default)
+    {
+        HashSet<string> existing = new(StringComparer.Ordinal);
+        if (databaseNames.Count == 0)
+            return existing;
+
+        await using NpgsqlConnection connection = new(connectionResolver.BuildAdminConnectionString());
+        await connection.OpenAsync(ct);
+
+        await using NpgsqlCommand command = new(
+            "SELECT datname FROM pg_database WHERE datname = ANY(@names)",
+            connection);
+        command.Parameters.Add(new NpgsqlParameter("names", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text)
+        {
+            Value = databaseNames.ToArray(),
+        });
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            existing.Add(reader.GetString(0));
+
+        return existing;
+    }
+
     public static async Task EnsureMasterDatabaseExistsAsync(
         ITenantConnectionResolver connectionResolver,
         CancellationToken ct = default)
@@ -44,7 +82,7 @@ public static class TenantDatabaseProvisioner
         await EnsureDatabaseExistsAsync(connectionResolver, connectionResolver.MasterDatabaseName, ct);
     }
 
-    public static async Task MigrateAndSeedPersonaAsync(
+    public static async Task<PersonaIdentity> MigrateAndSeedPersonaAsync(
         ITenantConnectionResolver connectionResolver,
         DevAccountDefinition account,
         DevPersonaDefinition persona,
@@ -57,8 +95,7 @@ public static class TenantDatabaseProvisioner
             databaseName);
         await tenantDb.Database.MigrateAsync(ct);
 
-        RoleMaskService tenantRoleMaskService = new(tenantDb);
-        await AuthorizationSeedData.SeedAsync(tenantDb, tenantRoleMaskService, ct);
-        await TenantBypassSeedData.SeedPersonaAsync(tenantDb, persona, ct);
+        await AuthorizationSeedData.SeedAsync(tenantDb, ct);
+        return await TenantBypassSeedData.SeedPersonaAsync(tenantDb, persona, ct);
     }
 }

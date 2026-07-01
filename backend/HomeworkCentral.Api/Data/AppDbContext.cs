@@ -4,8 +4,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Data;
 
-public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public partial class AppDbContext(
+    DbContextOptions<AppDbContext> options,
+    IAccessScopeAccessor? accessScopeAccessor = null) : DbContext(options)
 {
+    // Resolved once per DbContext instance (i.e. once per request scope) rather than inside the
+    // query filter itself: EF Core query filters must be plain, translatable LINQ expressions —
+    // they cannot call back into arbitrary C# methods like IAccessScopeAccessor.CanQuery. These
+    // scalar properties are safe to reference directly inside HasQueryFilter (see
+    // ScopedResourceQueryFilterExtensions), the same way a `TenantId` column-per-context property
+    // is a standard, fully translatable EF Core multi-tenancy pattern.
+    private readonly DbContextAccessScope _scopeState =
+        accessScopeAccessor?.ResolveDbContextScope() ?? DbContextAccessScope.Unrestricted();
+
+    internal bool ScopeBypassFilters => _scopeState.BypassFilters;
+    internal bool ScopeIsAuthenticated => _scopeState.IsAuthenticated;
+    internal AccountClass ScopeAccountClass => _scopeState.AccountClass;
+    internal string? ScopeTenantDatabaseName => _scopeState.TenantDatabaseName;
+
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
@@ -16,6 +32,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     public DbSet<UserEffectiveMask> UserEffectiveMasks => Set<UserEffectiveMask>();
     public DbSet<UserSubjectExpertiseMask> UserSubjectExpertiseMasks => Set<UserSubjectExpertiseMask>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -164,6 +181,25 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
                 .HasForeignKey(rt => rt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        mb.Entity<ChatMessage>(e =>
+        {
+            e.HasKey(m => m.MessageId);
+            e.Property(m => m.MessageId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(m => m.RoomId).HasMaxLength(128).IsRequired();
+            e.Property(m => m.SenderUsername).HasMaxLength(64).IsRequired();
+            e.Property(m => m.RawContent).IsRequired();
+            e.Property(m => m.CreatedAtUtc).IsRequired();
+            e.Property(m => m.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(m => m.TenantDatabaseName).HasMaxLength(128);
+            e.HasIndex(m => new { m.RoomId, m.CreatedAtUtc });
+            e.HasIndex(m => m.SenderId);
+        });
+
+        mb.ApplyScopedResourceFilters(this);
     }
 
     private static string SubjectMaskAllowedSql()

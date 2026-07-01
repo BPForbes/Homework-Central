@@ -1,7 +1,10 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Hosting;
@@ -46,6 +49,8 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.NotNull(registered);
     Assert.False(string.IsNullOrWhiteSpace(registered.AccessToken));
     Assert.Equal(register.Email, registered.User.Email);
+    Assert.Equal(AccountClass.RealAccount.ToString(), registered.User.AccountClass);
+    Assert.Equal(AccountClass.RealAccount.ToString(), ReadAccountClassClaim(registered.AccessToken));
 
     LoginRequest login = new()
     {
@@ -60,6 +65,14 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.NotNull(loggedIn);
     Assert.False(string.IsNullOrWhiteSpace(loggedIn.AccessToken));
     Assert.Equal(registered.User.UserId, loggedIn.User.UserId);
+    Assert.Equal(AccountClass.RealAccount.ToString(), loggedIn.User.AccountClass);
+  }
+
+  private static string? ReadAccountClassClaim(string accessToken)
+  {
+    JwtSecurityTokenHandler handler = new();
+    JwtSecurityToken jwt = handler.ReadJwtToken(accessToken);
+    return jwt.Claims.FirstOrDefault(c => c.Type == TenancyConstants.AccountClassClaimName)?.Value;
   }
 }
 
