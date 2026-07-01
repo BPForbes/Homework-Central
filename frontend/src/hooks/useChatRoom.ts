@@ -175,11 +175,12 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       return true
     } catch {
       setError('Failed to send message.')
+      notifyTyping()
       return false
     } finally {
       setSending(false)
     }
-  }, [roomId, sending, addMessage, stopTyping])
+  }, [roomId, sending, addMessage, stopTyping, notifyTyping])
 
   return {
     messages,

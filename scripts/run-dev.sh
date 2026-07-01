@@ -486,11 +486,7 @@ build_projects() {
   local frontend_tsc_pid=$!
 
   local postgres_host_check_failed=false
-  set +e
-  build_postgres_host_check_if_needed
-  local postgres_host_check_status=$?
-  set -e
-  if [[ $postgres_host_check_status -ne 0 ]]; then
+  if ! build_postgres_host_check_if_needed; then
     postgres_host_check_failed=true
   fi
 

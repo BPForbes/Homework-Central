@@ -525,12 +525,22 @@ function Build-Projects {
 
     $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
 
-    # Wait-FrontendTypecheckJob throws if the frontend typecheck failed. Without this outer
-    # try/finally, that throw would skip the API build job wait/cleanup below entirely, leaving
-    # $apiBuildJob running in the background and $apiBuildLog on disk.
+    # Capture host-check and frontend typecheck failures separately so a host-check throw still
+    # drains Wait-FrontendTypecheckJob before the API build job wait/cleanup below runs.
+    $hostCheckFailed = $false
+    $frontendTypecheckFailed = $false
     try {
-        Build-PostgresHostCheckIfNeeded
-        Wait-FrontendTypecheckJob -Job $frontendTscJob
+        try {
+            Build-PostgresHostCheckIfNeeded
+        } catch {
+            $hostCheckFailed = $true
+        }
+
+        try {
+            Wait-FrontendTypecheckJob -Job $frontendTscJob
+        } catch {
+            $frontendTypecheckFailed = $true
+        }
     } finally {
         if ($null -ne $apiBuildJob) {
             Wait-Job $apiBuildJob | Out-Null
@@ -549,6 +559,14 @@ function Build-Projects {
                 Remove-Job $apiBuildJob -Force
             }
         }
+    }
+
+    if ($frontendTypecheckFailed) {
+        throw 'Frontend typecheck failed'
+    }
+
+    if ($hostCheckFailed) {
+        throw 'PostgresHostCheck build failed'
     }
 }
 

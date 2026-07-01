@@ -106,6 +106,27 @@ public class AccessScopeAccessorTests
         Assert.False(scope.IsAuthenticated);
     }
 
+    [Fact]
+    public void CanView_denies_unauthenticated_principal_even_with_valid_claims()
+    {
+        ClaimsPrincipal user = new(new ClaimsIdentity(
+        [
+            new Claim(TenancyConstants.AccountClassClaimName, AccountClass.RealAccount.ToString()),
+            new Claim(TenancyConstants.TenantDbClaimName, "tenant_math"),
+        ]));
+
+        TestScopedResource resource = new(AccountClass.RealAccount, "tenant_math");
+
+        Assert.False(_accessor.CanView(user, resource));
+    }
+
+    private sealed class TestScopedResource(AccountClass ownerAccountClass, string? tenantDatabaseName)
+        : IScopedResource
+    {
+        public AccountClass OwnerAccountClass { get; } = ownerAccountClass;
+        public string? TenantDatabaseName { get; } = tenantDatabaseName;
+    }
+
     private void SetUser(AccountClass accountClass, string? tenantDatabaseName)
     {
         _httpContextAccessor.HttpContext = new DefaultHttpContext

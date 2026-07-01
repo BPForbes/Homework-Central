@@ -11,10 +11,8 @@ public static class AuthorizationSeedData
 
     // Guards the actual seeding work per cache key: without this, two concurrent callers for the
     // same (as-yet-unseeded) database could both see the cache miss and both run the upserts at
-    // the same time, racing on the same rows. Lazy<Task> makes the factory passed to GetOrAdd
-    // side-effect-free (it just allocates the Lazy) while Lazy<T> itself guarantees the actual
-    // seeding delegate only ever runs once per key, even under contention.
-    private static readonly ConcurrentDictionary<string, Lazy<Task>> SeedGates = new(StringComparer.Ordinal);
+    // the same time, racing on the same rows.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SeedGates = new(StringComparer.Ordinal);
 
     public static Task SeedAsync(AppDbContext db, CancellationToken ct = default)
     {
@@ -23,20 +21,26 @@ public static class AuthorizationSeedData
         if (SeededDatabases.ContainsKey(cacheKey))
             return Task.CompletedTask;
 
-        Lazy<Task> gate = SeedGates.GetOrAdd(cacheKey, _ => new Lazy<Task>(() => SeedCoreAsync(db, cacheKey, ct)));
-        return AwaitAndCleanupGateAsync(cacheKey, gate);
+        SemaphoreSlim gate = SeedGates.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        return AwaitAndCleanupGateAsync(cacheKey, gate, db, ct);
     }
 
-    private static async Task AwaitAndCleanupGateAsync(string cacheKey, Lazy<Task> gate)
+    private static async Task AwaitAndCleanupGateAsync(
+        string cacheKey,
+        SemaphoreSlim gate,
+        AppDbContext db,
+        CancellationToken ct)
     {
+        await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await gate.Value.ConfigureAwait(false);
+            await SeedCoreAsync(db, cacheKey, ct).ConfigureAwait(false);
         }
         finally
         {
-            ((ICollection<KeyValuePair<string, Lazy<Task>>>)SeedGates)
-                .Remove(new KeyValuePair<string, Lazy<Task>>(cacheKey, gate));
+            gate.Release();
+            ((ICollection<KeyValuePair<string, SemaphoreSlim>>)SeedGates)
+                .Remove(new KeyValuePair<string, SemaphoreSlim>(cacheKey, gate));
         }
     }
 
@@ -57,6 +61,12 @@ public static class AuthorizationSeedData
         await UpsertPermissionsAsync(db, ct);
         await UpsertRolesAsync(db, ct);
         await UpsertSubjectsAsync(db, ct);
+
+        if (!await IsCatalogCurrentAsync(db, ct))
+        {
+            throw new InvalidOperationException(
+                "Authorization catalog seeding completed but the database catalog is still not current.");
+        }
 
         SeededDatabases.TryAdd(cacheKey, 0);
     }
@@ -256,6 +266,13 @@ public static class AuthorizationSeedData
             role.FeatureMask = (System.Collections.BitArray)masks.FeatureMask.Clone();
         }
 
+        HashSet<Guid> validRoleIds = AuthorizationCatalog.Roles.Select(role => role.RoleId).ToHashSet();
+        List<Role> staleRoles = await db.Roles
+            .Where(role => !validRoleIds.Contains(role.RoleId))
+            .ToListAsync(ct);
+        if (staleRoles.Count > 0)
+            db.Roles.RemoveRange(staleRoles);
+
         await db.SaveChangesAsync(ct);
     }
 
@@ -269,6 +286,31 @@ public static class AuthorizationSeedData
         foreach (AuthorizationCatalog.SubjectDefinition subjectDefinition in AuthorizationCatalog.Subjects)
         {
             UpsertSubject(db, existing, subjectsByName, subjectDefinition);
+        }
+
+        HashSet<Guid> validSubjectIds = AuthorizationCatalog.Subjects.Select(subject => subject.SubjectId).ToHashSet();
+        List<Subject> staleSubjects = await db.Subjects
+            .Where(subject => !validSubjectIds.Contains(subject.SubjectId))
+            .ToListAsync(ct);
+
+        foreach (Subject staleSubject in staleSubjects)
+            staleSubject.ParentSubjectId = null;
+
+        while (staleSubjects.Count > 0)
+        {
+            List<Subject> leafStaleSubjects = staleSubjects
+                .Where(subject => !staleSubjects.Any(other => other.ParentSubjectId == subject.SubjectId))
+                .ToList();
+
+            if (leafStaleSubjects.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "Authorization catalog seeding cannot remove stale subjects due to a circular parent hierarchy.");
+            }
+
+            db.Subjects.RemoveRange(leafStaleSubjects);
+            foreach (Subject leafSubject in leafStaleSubjects)
+                staleSubjects.Remove(leafSubject);
         }
 
         await db.SaveChangesAsync(ct);
