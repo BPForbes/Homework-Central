@@ -692,10 +692,10 @@ body {
 
 /* Chat room page */
 .chat-room-page {
-  animation: fadeIn 0.25s ease;
+  animation: fade-in 0.25s ease;
 }
 
-@keyframes fadeIn {
+@keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
@@ -833,7 +833,7 @@ body {
   padding: 0.6rem 0.85rem;
   border-radius: 18px;
   line-height: 1.45;
-  word-break: break-word;
+  overflow-wrap: break-word;
   white-space: pre-wrap;
 }
 

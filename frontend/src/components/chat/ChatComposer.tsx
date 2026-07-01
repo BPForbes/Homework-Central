@@ -29,14 +29,21 @@ export function ChatComposer({
     const content = draft
     setDraft('')
     const sent = await onSend(content)
-    if (!sent)
+    if (!sent) {
+      // Restore the draft so the user doesn't lose what they typed, and re-notify typing so
+      // the indicator matches the composer being non-empty again — onSend's own stopTyping()
+      // call already cleared it optimistically before the send was known to fail.
       setDraft(content)
+      onTyping()
+    }
 
     textareaRef.current?.focus()
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    // Enter during IME composition (e.g. selecting a candidate while typing Japanese/Chinese/
+    // Korean) confirms the composition, it isn't the user asking to send the message.
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void handleSubmit()
     }

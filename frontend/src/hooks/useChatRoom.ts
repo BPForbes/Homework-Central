@@ -31,8 +31,22 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     const load = async () => {
       try {
         const { data } = await chatApi.getMessages(roomId)
-        if (!cancelled)
-          setMessages(data)
+        if (cancelled)
+          return
+        // The SignalR connection effect below can start receiving 'ReceiveMessage' broadcasts
+        // (or a locally-sent message can resolve) before this history fetch completes, since
+        // both run concurrently. Merge instead of replacing so a message that arrived first
+        // isn't dropped by this (possibly slower) history load overwriting the whole array.
+        setMessages((prev) => {
+          const byId = new Map(data.map((message) => [message.messageId, message]))
+          for (const message of prev) {
+            if (!byId.has(message.messageId))
+              byId.set(message.messageId, message)
+          }
+          return Array.from(byId.values()).sort(
+            (a, b) => new Date(a.createdAtUtc).getTime() - new Date(b.createdAtUtc).getTime()
+          )
+        })
       } catch {
         if (!cancelled)
           setError('Could not load messages for this room.')
@@ -89,6 +103,21 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     }
 
     void start()
+
+    // withAutomaticReconnect() gives the client a new underlying connection after a network
+    // blip, but SignalR group membership (JoinRoom's Groups.AddToGroupAsync) is tied to the
+    // old connection and doesn't carry over — without rejoining here, ReceiveMessage/typing
+    // broadcasts would silently stop arriving until the user navigated away and back.
+    connection.onreconnected(() => {
+      void connection.invoke('JoinRoom', roomId).then(
+        () => setConnected(true),
+        () => setConnected(false)
+      )
+    })
+
+    connection.onreconnecting(() => {
+      setConnected(false)
+    })
 
     return () => {
       // The indicator has no server-side timeout, so an unmount/room-switch while still

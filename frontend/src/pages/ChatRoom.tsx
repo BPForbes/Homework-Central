@@ -41,9 +41,13 @@ export function ChatRoom() {
 
   useEffect(() => {
     let cancelled = false
+    // useChatRoom below is already bound to the new decodedRoomId at this point, so the
+    // previous room's header (name/icon/private badge) must not keep showing while this fetch
+    // is in flight or if it fails — clear it immediately rather than only on success.
+    setRoom(null)
+    setRoomLoading(true)
 
     const load = async () => {
-      setRoomLoading(true)
       try {
         const { data } = await chatApi.getNav()
         if (cancelled)
@@ -58,7 +62,9 @@ export function ChatRoom() {
             return
           }
         }
-        setRoom(null)
+      } catch {
+        if (!cancelled)
+          setRoom(null)
       } finally {
         if (!cancelled)
           setRoomLoading(false)

@@ -75,6 +75,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
         className={`chat-sidebar-backdrop ${open ? 'open' : ''}`}
         aria-label="Close chat menu"
         onClick={onClose}
+        tabIndex={open ? undefined : -1}
       />
       <aside className={`chat-sidebar ${open ? 'open' : ''}`} aria-hidden={!open}>
         <div className="chat-sidebar-header">
@@ -82,7 +83,13 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
             <FontAwesomeIcon icon={faComments} className="chat-sidebar-title-icon" />
             Chats
           </h2>
-          <button type="button" className="chat-sidebar-close" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="chat-sidebar-close"
+            onClick={onClose}
+            aria-label="Close"
+            tabIndex={open ? undefined : -1}
+          >
             <FontAwesomeIcon icon={faTimes} />
           </button>
         </div>
@@ -99,6 +106,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
               category={category}
               expanded={expanded[category.key] ?? true}
               onToggle={() => toggleCategory(category.key)}
+              focusable={open}
             />
           ))}
         </div>
@@ -111,17 +119,23 @@ function CategorySection({
   category,
   expanded,
   onToggle,
+  focusable,
 }: {
   category: ChatNavCategory
   expanded: boolean
   onToggle: () => void
+  focusable: boolean
 }) {
   const isStaff = category.key === 'Staff'
   const isGeneral = category.key === 'General'
+  // The sidebar stays mounted while closed so its slide-in/out CSS transition can play, so its
+  // buttons and links must be explicitly pulled out of the tab order (aria-hidden alone doesn't
+  // do this in most browsers) rather than actually unmounted while off-screen.
+  const tabIndex = focusable ? undefined : -1
 
   return (
     <section className={`chat-category ${category.isPrivateCategory ? 'chat-category--private' : 'chat-category--public'}`}>
-      <button type="button" className="chat-category-toggle" onClick={onToggle}>
+      <button type="button" className="chat-category-toggle" onClick={onToggle} tabIndex={tabIndex}>
         <span className="chat-category-label">
           <FontAwesomeIcon icon={getCategoryIcon(category.key)} className="chat-category-icon" />
           {category.name}
@@ -142,6 +156,7 @@ function CategorySection({
               <NavLink
                 to={`/chat/${encodeURIComponent(room.id)}`}
                 className={({ isActive }) => `chat-room-link ${isActive ? 'active' : ''}`}
+                tabIndex={tabIndex}
               >
                 <ChatRoomIcon
                   icon={baseIcon}
