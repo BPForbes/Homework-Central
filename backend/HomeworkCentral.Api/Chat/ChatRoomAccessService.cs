@@ -62,7 +62,13 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
             categories.Add(BuildCategoryDto(accessibleStaffRooms[0], accessibleStaffRooms, preserveRoomOrder: true));
         }
 
-        categories.Sort((left, right) => CategorySortOrder(left.Key).CompareTo(CategorySortOrder(right.Key)));
+        categories.Sort((left, right) =>
+        {
+            int order = CategorySortOrder(left.Key).CompareTo(CategorySortOrder(right.Key));
+            return order != 0
+                ? order
+                : string.Compare(left.Key, right.Key, StringComparison.Ordinal);
+        });
 
         return new ChatNavDto { Categories = categories };
     }

@@ -484,7 +484,15 @@ build_projects() {
   log "Type-checking frontend (parallel with Postgres host check build)"
   (cd "$FRONTEND_DIR" && npx tsc -b --pretty) &
   local frontend_tsc_pid=$!
+
+  local postgres_host_check_failed=false
+  set +e
   build_postgres_host_check_if_needed
+  local postgres_host_check_status=$?
+  set -e
+  if [[ $postgres_host_check_status -ne 0 ]]; then
+    postgres_host_check_failed=true
+  fi
 
   # `fail` calls `exit`, which would terminate the whole script immediately — deliberately don't
   # call it here yet, so the API build job below still gets waited on and its temp log cleaned
@@ -508,6 +516,10 @@ build_projects() {
 
   if [[ "$frontend_typecheck_failed" == true ]]; then
     fail "frontend typecheck failed"
+  fi
+
+  if [[ "$postgres_host_check_failed" == true ]]; then
+    fail "Postgres host check build failed"
   fi
 }
 
