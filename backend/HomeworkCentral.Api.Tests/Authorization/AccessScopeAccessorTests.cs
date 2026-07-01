@@ -42,19 +42,68 @@ public class AccessScopeAccessorTests
     {
         ClaimsPrincipal user = CreatePrincipal(AccountClass.DeveloperAccount, "tenant_cs");
 
-        AccessScope scope = _accessor.Resolve(user);
+        AccessScope? scope = _accessor.Resolve(user);
 
+        Assert.NotNull(scope);
         Assert.Equal(AccountClass.DeveloperAccount, scope.AccountClass);
         Assert.Equal("tenant_cs", scope.TenantDatabaseName);
     }
 
     [Fact]
-    public void Resolve_defaults_to_real_account_when_claim_missing()
+    public void Resolve_returns_null_when_claim_missing()
     {
-        AccessScope scope = _accessor.Resolve(new ClaimsPrincipal(new ClaimsIdentity()));
+        AccessScope? scope = _accessor.Resolve(new ClaimsPrincipal(new ClaimsIdentity()));
 
-        Assert.Equal(AccountClass.RealAccount, scope.AccountClass);
-        Assert.Null(scope.TenantDatabaseName);
+        Assert.Null(scope);
+    }
+
+    [Fact]
+    public void CanQuery_denies_when_http_context_has_unauthenticated_user()
+    {
+        _httpContextAccessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity()),
+        };
+
+        Assert.False(_accessor.CanQuery(AccountClass.RealAccount, "tenant_math"));
+    }
+
+    [Fact]
+    public void CanQuery_denies_when_account_class_claim_is_invalid()
+    {
+        _httpContextAccessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(TenancyConstants.AccountClassClaimName, "NotARealClass"),
+            ],
+            authenticationType: "Test")),
+        };
+
+        Assert.False(_accessor.CanQuery(AccountClass.RealAccount, "tenant_math"));
+    }
+
+    [Fact]
+    public void ResolveDbContextScope_is_unrestricted_without_http_context()
+    {
+        DbContextAccessScope scope = _accessor.ResolveDbContextScope();
+
+        Assert.True(scope.BypassFilters);
+        Assert.False(scope.IsAuthenticated);
+    }
+
+    [Fact]
+    public void ResolveDbContextScope_denies_unauthenticated_request()
+    {
+        _httpContextAccessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity()),
+        };
+
+        DbContextAccessScope scope = _accessor.ResolveDbContextScope();
+
+        Assert.False(scope.BypassFilters);
+        Assert.False(scope.IsAuthenticated);
     }
 
     private void SetUser(AccountClass accountClass, string? tenantDatabaseName)

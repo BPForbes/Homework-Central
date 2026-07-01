@@ -40,18 +40,18 @@ public static class ScopedResourceQueryFilterExtensions
     {
         // Mirrors ResourceVisibilityScope.CanView's switch, but expressed as a flat boolean so
         // every operand is either a DbContext scalar, an entity column, or a constant — all
-        // translatable. Unauthenticated/background contexts (ScopeIsAuthenticated == false, e.g.
-        // migrations or seed jobs running outside a request) see everything unfiltered, matching
-        // AccessScopeAccessor.CanQuery's existing "no ambient user" behavior.
+        // translatable. ScopeBypassFilters is true only for non-request contexts (migrations, seed
+        // jobs with no IHttpContextAccessor). HTTP requests without a valid scope deny all rows.
         modelBuilder.Entity<TEntity>().HasQueryFilter(entity =>
-            !context.ScopeIsAuthenticated
-            || (context.ScopeAccountClass == AccountClass.RealAccount
-                && entity.OwnerAccountClass == AccountClass.RealAccount
-                && entity.TenantDatabaseName == context.ScopeTenantDatabaseName)
-            || (context.ScopeAccountClass == AccountClass.DevAdmin
-                && entity.OwnerAccountClass != AccountClass.RealAccount)
-            || (context.ScopeAccountClass == AccountClass.DeveloperAccount
-                && entity.OwnerAccountClass == AccountClass.DeveloperAccount
-                && entity.TenantDatabaseName == context.ScopeTenantDatabaseName));
+            context.ScopeBypassFilters
+            || (context.ScopeIsAuthenticated
+                && ((context.ScopeAccountClass == AccountClass.RealAccount
+                        && entity.OwnerAccountClass == AccountClass.RealAccount
+                        && entity.TenantDatabaseName == context.ScopeTenantDatabaseName)
+                    || (context.ScopeAccountClass == AccountClass.DevAdmin
+                        && entity.OwnerAccountClass != AccountClass.RealAccount)
+                    || (context.ScopeAccountClass == AccountClass.DeveloperAccount
+                        && entity.OwnerAccountClass == AccountClass.DeveloperAccount
+                        && entity.TenantDatabaseName == context.ScopeTenantDatabaseName))));
     }
 }

@@ -109,8 +109,18 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     // old connection and doesn't carry over — without rejoining here, ReceiveMessage/typing
     // broadcasts would silently stop arriving until the user navigated away and back.
     connection.onreconnected(() => {
+      const wasTyping = isTypingRef.current
+      if (wasTyping)
+        isTypingRef.current = false
+
       void connection.invoke('JoinRoom', roomId).then(
-        () => setConnected(true),
+        () => {
+          setConnected(true)
+          if (wasTyping) {
+            isTypingRef.current = true
+            void connection.invoke('NotifyTyping', roomId).catch(() => undefined)
+          }
+        },
         () => setConnected(false)
       )
     })

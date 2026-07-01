@@ -524,12 +524,12 @@ function Build-Projects {
     }
 
     $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
-    Build-PostgresHostCheckIfNeeded
 
     # Wait-FrontendTypecheckJob throws if the frontend typecheck failed. Without this outer
     # try/finally, that throw would skip the API build job wait/cleanup below entirely, leaving
     # $apiBuildJob running in the background and $apiBuildLog on disk.
     try {
+        Build-PostgresHostCheckIfNeeded
         Wait-FrontendTypecheckJob -Job $frontendTscJob
     } finally {
         if ($null -ne $apiBuildJob) {

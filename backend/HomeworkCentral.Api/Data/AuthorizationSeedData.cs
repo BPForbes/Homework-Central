@@ -75,6 +75,35 @@ public static class AuthorizationSeedData
         if (await db.Permissions.CountAsync(ct) != AuthorizationCatalog.Permissions.Count)
             return false;
 
+        List<Permission> permissions = await db.Permissions.AsNoTracking().ToListAsync(ct);
+        Dictionary<short, Permission> permissionsById = permissions.ToDictionary(permission => permission.PermissionId);
+
+        foreach (AuthorizationCatalog.PermissionDefinition permissionDefinition in AuthorizationCatalog.Permissions)
+        {
+            if (!permissionsById.TryGetValue(permissionDefinition.PermissionId, out Permission? permission)
+                || permission.Name != permissionDefinition.Name
+                || permission.DisplayName != permissionDefinition.Name
+                || permission.Description != permissionDefinition.Description
+                || permission.Category != "Moderation")
+            {
+                return false;
+            }
+        }
+
+        HashSet<(Guid RoleId, short PermissionId)> expectedRolePermissionTies =
+            AuthorizationCatalog.RolePermissionTies
+                .Select(tie => (tie.RoleId, tie.PermissionId))
+                .ToHashSet();
+        HashSet<(Guid RoleId, short PermissionId)> actualRolePermissionTies = (await db.RolePermissions
+                .AsNoTracking()
+                .Select(rolePermission => new { rolePermission.RoleId, rolePermission.PermissionId })
+                .ToListAsync(ct))
+            .Select(rolePermission => (rolePermission.RoleId, rolePermission.PermissionId))
+            .ToHashSet();
+
+        if (!expectedRolePermissionTies.SetEquals(actualRolePermissionTies))
+            return false;
+
         // Check every role's masks (not just Owner) so a RoleMaskBuilder regression affecting
         // any single role's PermissionMask/RoleMask/FeatureMask reliably forces a reseed instead
         // of silently persisting under a coincidentally-still-matching Owner check.
