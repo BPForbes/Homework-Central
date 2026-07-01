@@ -430,9 +430,24 @@ build_postgres_host_check() {
 
 build_postgres_host_check_if_needed() {
   local dll="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
-  if [[ -f "$dll" && "$dll" -nt "$POSTGRES_HOST_CHECK_PROJECT" ]]; then
-    log "Postgres host check already built"
-    return
+  # Compare against the project file *and* every .cs source under it, not just the .csproj —
+  # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
+  # this script keeps running the stale compiled checker.
+  if [[ -f "$dll" ]]; then
+    local project_dir
+    project_dir="$(dirname "$POSTGRES_HOST_CHECK_PROJECT")"
+    local stale=false
+    while IFS= read -r -d '' source_file; do
+      if [[ "$source_file" -nt "$dll" ]]; then
+        stale=true
+        break
+      fi
+    done < <(find "$project_dir" -name '*.cs' -print0)
+
+    if [[ "$stale" == false && ! "$POSTGRES_HOST_CHECK_PROJECT" -nt "$dll" ]]; then
+      log "Postgres host check already built"
+      return
+    fi
   fi
 
   build_postgres_host_check
@@ -471,8 +486,12 @@ build_projects() {
   local frontend_tsc_pid=$!
   build_postgres_host_check_if_needed
 
+  # `fail` calls `exit`, which would terminate the whole script immediately — deliberately don't
+  # call it here yet, so the API build job below still gets waited on and its temp log cleaned
+  # up even when the frontend typecheck fails first.
+  local frontend_typecheck_failed=false
   if ! wait "$frontend_tsc_pid"; then
-    fail "frontend typecheck failed"
+    frontend_typecheck_failed=true
   fi
 
   if [[ -n "$api_build_pid" ]]; then
@@ -485,6 +504,10 @@ build_projects() {
     else
       rm -f "$api_build_log"
     fi
+  fi
+
+  if [[ "$frontend_typecheck_failed" == true ]]; then
+    fail "frontend typecheck failed"
   fi
 }
 

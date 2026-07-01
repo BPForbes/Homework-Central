@@ -481,9 +481,16 @@ function Test-PostgresHostCheckFresh {
         return $false
     }
 
-    $project = Get-Item $PostgresHostCheckProject
     $built = Get-Item $dll
-    return $built.LastWriteTimeUtc -ge $project.LastWriteTimeUtc
+
+    # Compare against the project file *and* every .cs source under it, not just the .csproj —
+    # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
+    # this script keeps running the stale compiled checker.
+    $projectDir = Split-Path $PostgresHostCheckProject -Parent
+    $sourceFiles = @(Get-Item $PostgresHostCheckProject) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
+    $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+
+    return $built.LastWriteTimeUtc -ge $newestSource.LastWriteTimeUtc
 }
 
 function Build-PostgresHostCheckIfNeeded {
@@ -518,23 +525,29 @@ function Build-Projects {
 
     $frontendTscJob = Start-FrontendTypecheckJob -FrontendDir $FrontendDir
     Build-PostgresHostCheckIfNeeded
-    Wait-FrontendTypecheckJob -Job $frontendTscJob
 
-    if ($null -ne $apiBuildJob) {
-        Wait-Job $apiBuildJob | Out-Null
-        try {
-            Receive-Job $apiBuildJob -ErrorAction Stop | Out-Null
-        } catch {
-            if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
-                & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
+    # Wait-FrontendTypecheckJob throws if the frontend typecheck failed. Without this outer
+    # try/finally, that throw would skip the API build job wait/cleanup below entirely, leaving
+    # $apiBuildJob running in the background and $apiBuildLog on disk.
+    try {
+        Wait-FrontendTypecheckJob -Job $frontendTscJob
+    } finally {
+        if ($null -ne $apiBuildJob) {
+            Wait-Job $apiBuildJob | Out-Null
+            try {
+                Receive-Job $apiBuildJob -ErrorAction Stop | Out-Null
+            } catch {
+                if ((Test-Path $apiBuildLog) -and (Get-Item $apiBuildLog).Length -gt 0) {
+                    & (Join-Path $PSScriptRoot 'open-api-error-page.ps1') -Title 'API Build Errors' -ErrorLogFile $apiBuildLog
+                }
+                if ($BuildOnly) {
+                    throw 'API build failed'
+                }
+                $script:ApiBuildFailed = $true
+                Write-Step 'API build failed; frontend will start and show unable to connect to API'
+            } finally {
+                Remove-Job $apiBuildJob -Force
             }
-            if ($BuildOnly) {
-                throw 'API build failed'
-            }
-            $script:ApiBuildFailed = $true
-            Write-Step 'API build failed; frontend will start and show unable to connect to API'
-        } finally {
-            Remove-Job $apiBuildJob -Force
         }
     }
 }
