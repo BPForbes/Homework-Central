@@ -4,7 +4,10 @@ import { useBackendConnection } from '../hooks/useBackendConnection'
 
 /** Hides the app until /healthz succeeds (API listening after master DB seed). */
 export function BackendGate({ children }: { children: ReactNode }) {
-  const { isConnected } = useBackendConnection()
+  const { isConnected, error } = useBackendConnection()
+
+  if (error)
+    return <BackendConnectingLoader errorMessage={error} />
 
   if (!isConnected)
     return <BackendConnectingLoader />
