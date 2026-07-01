@@ -298,7 +298,7 @@ public class AuthService(
             UserEffectiveMask effectiveMask = user.EffectiveMask
                 ?? await RebuildMaskAsync(db, userId);
 
-            return BuildUserDto(user, effectiveMask, ResolveAccountClassFromClaim());
+            return BuildUserDto(user, effectiveMask, ResolveAccountClass(user, tenantDatabaseName));
         }
         finally
         {
@@ -350,7 +350,7 @@ public class AuthService(
         AccountClass accountClass = ResolveAccountClass(user, tenantDatabaseName);
         UserDto dto = BuildUserDto(user, effectiveMask, accountClass);
         string accessToken = jwt.GenerateAccessToken(
-            user, dto.Roles, ToEffectiveMaskDto(effectiveMask), accountClass, tenantDatabaseName);
+            user, dto.Roles, effectiveMask.ToEffectiveMaskDto(), accountClass, tenantDatabaseName);
 
         return new AuthResponse
         {
@@ -366,7 +366,7 @@ public class AuthService(
     private static UserDto BuildUserDto(User user, UserEffectiveMask effectiveMask, AccountClass accountClass)
     {
         List<string> roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-        EffectiveMaskDto masks = ToEffectiveMaskDto(effectiveMask);
+        EffectiveMaskDto masks = effectiveMask.ToEffectiveMaskDto();
 
         return new UserDto
         {
@@ -381,30 +381,6 @@ public class AuthService(
             GeneralSubjectMask = masks.GeneralSubjectMask,
             SubjectExpertiseMasks = masks.SubjectExpertiseMasks,
             StatusMask = masks.StatusMask,
-        };
-    }
-
-    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
-    {
-        Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
-            .ToDictionary(
-                category => category,
-                category =>
-                {
-                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
-                        .FirstOrDefault(m => m.Category == category);
-                    return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
-                },
-                StringComparer.Ordinal);
-
-        return new EffectiveMaskDto
-        {
-            RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
-            ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
-            FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
-            GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
-            SubjectExpertiseMasks = subjectExpertiseMasks,
-            StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
         };
     }
 
@@ -453,15 +429,4 @@ public class AuthService(
         return AccountClass.RealAccount;
     }
 
-    private AccountClass ResolveAccountClassFromClaim()
-    {
-        string? claim = http.HttpContext?.User.FindFirst(TenancyConstants.AccountClassClaimName)?.Value;
-        if (!string.IsNullOrWhiteSpace(claim)
-            && Enum.TryParse(claim, ignoreCase: false, out AccountClass accountClass))
-        {
-            return accountClass;
-        }
-
-        return AccountClass.RealAccount;
-    }
 }

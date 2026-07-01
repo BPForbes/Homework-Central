@@ -28,7 +28,7 @@ public class ChatController(
         UserEffectiveMask? mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId.Value, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId.Value, ct);
 
-        EffectiveMaskDto masks = ToEffectiveMaskDto(mask);
+        EffectiveMaskDto masks = mask.ToEffectiveMaskDto();
         return Ok(chatRoomAccess.GetAccessibleNav(masks));
     }
 
@@ -68,15 +68,28 @@ public class ChatController(
         if (userId is null)
             return Unauthorized();
 
+        // [Required]/[StringLength] on SendChatMessageRequest.Content already rejects null,
+        // empty, and oversized payloads before this action runs, but a whitespace-only string
+        // (e.g. "   ") passes those attributes, so it's still checked explicitly here — this
+        // way a bad-content rejection is always a 400, never conflated with the 403 below.
+        if (string.IsNullOrWhiteSpace(request.Content))
+            return BadRequest(new { message = "Message content cannot be empty." });
+
         string decodedRoomId = Uri.UnescapeDataString(roomId);
+        if (!await chatMessageService.CanAccessRoomAsync(decodedRoomId, userId.Value, ct))
+            return Forbid();
+
         ChatMessageDto? message = await chatMessageService.SendMessageAsync(
             decodedRoomId,
             userId.Value,
             request.Content,
             ct);
 
+        // Access was already confirmed above, so a null result here can only mean the
+        // (non-whitespace) content was rejected for another reason, e.g. exceeding the max
+        // length — a client input problem, not an authorization one.
         if (message is null)
-            return Forbid();
+            return BadRequest(new { message = "Message content is invalid." });
 
         return Ok(message);
     }
@@ -89,29 +102,5 @@ public class ChatController(
         return userIdClaim is not null && Guid.TryParse(userIdClaim, out Guid userId)
             ? userId
             : null;
-    }
-
-    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
-    {
-        Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
-            .ToDictionary(
-                category => category,
-                category =>
-                {
-                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
-                        .FirstOrDefault(m => m.Category == category);
-                    return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
-                },
-                StringComparer.Ordinal);
-
-        return new EffectiveMaskDto
-        {
-            RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
-            ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
-            FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
-            GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
-            SubjectExpertiseMasks = subjectExpertiseMasks,
-            StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
-        };
     }
 }

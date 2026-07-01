@@ -3,17 +3,34 @@ using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 
 namespace HomeworkCentral.Api.Hubs;
 
+/// <summary>
+/// <see cref="IChatMessageService.CanAccessRoomAsync"/> resolves the caller's effective mask via
+/// <c>IEffectiveMaskService</c>, which — like most services in this app — reads the acting user's
+/// tenant scope from an injected <see cref="IHttpContextAccessor"/> rather than taking a
+/// <see cref="ClaimsPrincipal"/> parameter directly. That accessor's AsyncLocal-based flow is
+/// reliable for the WebSocket transport in this single-server Kestrel deployment (verified via
+/// direct SignalR client testing against persona accounts whose masks live in a tenant
+/// database), but every hub method that calls into it explicitly re-binds
+/// <see cref="IHttpContextAccessor.HttpContext"/> to this connection's own
+/// <see cref="HubCallerContext.GetHttpContext"/> first, rather than trusting ambient
+/// propagation — this is what Microsoft's own SignalR guidance recommends, and it also makes the
+/// hub robust to any future move to a backplane/transport (e.g. Azure SignalR Service) where a
+/// per-request AsyncLocal HttpContext may not be available at all inside a hub method.
+/// </summary>
 [Authorize]
 public sealed class ChatHub(
     IChatMessageService chatMessageService,
-    ChatTypingTracker typingTracker) : Hub
+    ChatTypingTracker typingTracker,
+    IHttpContextAccessor httpContextAccessor) : Hub
 {
     public async Task JoinRoom(string roomId)
     {
+        BindAmbientHttpContext();
         Guid userId = GetUserId();
         if (!await chatMessageService.CanAccessRoomAsync(roomId, userId))
             throw new HubException("You do not have access to this chat room.");
@@ -33,6 +50,7 @@ public sealed class ChatHub(
 
     public async Task NotifyTyping(string roomId)
     {
+        BindAmbientHttpContext();
         Guid userId = GetUserId();
         if (!await chatMessageService.CanAccessRoomAsync(roomId, userId))
             return;
@@ -47,10 +65,14 @@ public sealed class ChatHub(
 
     public async Task NotifyStoppedTyping(string roomId)
     {
+        BindAmbientHttpContext();
         Guid userId = GetUserId();
+        if (!await chatMessageService.CanAccessRoomAsync(roomId, userId))
+            return;
+
         string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
-        typingTracker.ClearTyping(Context.ConnectionId, groupKey, userId);
-        await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", userId);
+        if (typingTracker.ClearTyping(Context.ConnectionId, groupKey, userId))
+            await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", userId);
     }
 
     // Typing state has no server-side timeout (the indicator is meant to persist for as long
@@ -64,6 +86,16 @@ public sealed class ChatHub(
             await Clients.OthersInGroup(cleared.Value.GroupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>See the class-level remarks: makes IHttpContextAccessor-dependent services
+    /// (reached via <see cref="chatMessageService"/>) resolve against this connection's own HTTP
+    /// context rather than relying on ambient AsyncLocal propagation into the hub dispatch.</summary>
+    private void BindAmbientHttpContext()
+    {
+        HttpContext? connectionHttpContext = Context.GetHttpContext();
+        if (connectionHttpContext is not null)
+            httpContextAccessor.HttpContext = connectionHttpContext;
     }
 
     private Guid GetUserId()

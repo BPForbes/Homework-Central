@@ -55,10 +55,21 @@ public sealed class ChatMessageService(
     public async Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default)
     {
         EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
-        if (!HasGroupMessagesFeature(masks))
+        if (!chatRoomAccess.CanAccessRoom(masks, roomId))
             return false;
 
-        return chatRoomAccess.CanAccessRoom(masks, roomId);
+        // The public General room is intentionally open to any authenticated user (see
+        // ChatRoomAccessService.CanAccessRoom's ChatRoomKind.General case, and
+        // GetAccessibleNav, which lists it for everyone with no feature check). The
+        // GroupMessages feature bit is meant to additionally gate the role/expertise-scoped
+        // "group" rooms (subject-expertise and staff rooms) on top of their role/expertise
+        // requirement — it must not also block General, or a role that lacks GroupMessages
+        // (e.g. Guest, VerifiedUser) would see General in their sidebar but get a 403 the
+        // moment they tried to actually read or send a message there.
+        if (string.Equals(roomId, ChatRoomCatalog.GeneralRoom.Id, StringComparison.Ordinal))
+            return true;
+
+        return HasGroupMessagesFeature(masks);
     }
 
     public async Task<IReadOnlyList<ChatMessageDto>> GetMessagesAsync(
@@ -140,7 +151,7 @@ public sealed class ChatMessageService(
     {
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
-        return ToEffectiveMaskDto(mask);
+        return mask.ToEffectiveMaskDto();
     }
 
     private string ResolveUsername(Guid userId)
@@ -185,28 +196,4 @@ public sealed class ChatMessageService(
             Content = message.SanitizedContent ?? message.RawContent,
             CreatedAtUtc = message.CreatedAtUtc,
         };
-
-    private static EffectiveMaskDto ToEffectiveMaskDto(UserEffectiveMask effectiveMask)
-    {
-        Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
-            .ToDictionary(
-                category => category,
-                category =>
-                {
-                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
-                        .FirstOrDefault(m => m.Category == category);
-                    return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
-                },
-                StringComparer.Ordinal);
-
-        return new EffectiveMaskDto
-        {
-            RoleMask = BitMask.ToBase64(effectiveMask.EffectiveRoleMask),
-            ModerationMask = BitMask.ToBase64(effectiveMask.EffectiveModerationMask),
-            FeatureMask = BitMask.ToBase64(effectiveMask.EffectiveFeatureMask),
-            GeneralSubjectMask = BitMask.ToBase64(effectiveMask.GeneralSubjectMask),
-            SubjectExpertiseMasks = subjectExpertiseMasks,
-            StatusMask = BitMask.ToBase64(effectiveMask.StatusMask),
-        };
-    }
 }

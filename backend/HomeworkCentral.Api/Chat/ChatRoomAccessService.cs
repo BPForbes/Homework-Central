@@ -50,14 +50,16 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
             categories.Add(BuildCategoryDto(first, subjectGroup));
         }
 
+        // ChatRoomCatalog.StaffRooms is deliberately ordered by seniority/authority (Staff,
+        // Tutor, Senior Tutor, ..., Admins, Community Managers), not alphabetically — .Where
+        // preserves that source order, so it must not be re-sorted here or in BuildCategoryDto.
         List<ChatRoomDefinition> accessibleStaffRooms = ChatRoomCatalog.StaffRooms
             .Where(room => CanAccessRoom(masks, room))
-            .OrderBy(room => room.RoomDisplayName, StringComparer.Ordinal)
             .ToList();
 
         if (accessibleStaffRooms.Count > 0)
         {
-            categories.Add(BuildCategoryDto(accessibleStaffRooms[0], accessibleStaffRooms));
+            categories.Add(BuildCategoryDto(accessibleStaffRooms[0], accessibleStaffRooms, preserveRoomOrder: true));
         }
 
         categories.Sort((left, right) => CategorySortOrder(left.Key).CompareTo(CategorySortOrder(right.Key)));
@@ -67,15 +69,15 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
 
     private static ChatNavCategoryDto BuildCategoryDto(
         ChatRoomDefinition categorySample,
-        IEnumerable<ChatRoomDefinition> rooms) =>
+        IEnumerable<ChatRoomDefinition> rooms,
+        bool preserveRoomOrder = false) =>
         new()
         {
             Key = categorySample.CategoryKey,
             Name = categorySample.CategoryDisplayName,
             CategoryKind = categorySample.CategoryKind.ToString(),
             IsPrivateCategory = ChatRoomCatalog.IsPrivateCategory(categorySample.CategoryKind),
-            Rooms = rooms
-                .OrderBy(room => room.RoomDisplayName, StringComparer.Ordinal)
+            Rooms = (preserveRoomOrder ? rooms : rooms.OrderBy(room => room.RoomDisplayName, StringComparer.Ordinal))
                 .Select(room => new ChatNavRoomDto
                 {
                     Id = room.Id,

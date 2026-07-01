@@ -81,10 +81,22 @@ public static class ChatRoomCatalog
 
         foreach (SubjectExpertiseCategory category in SubjectExpertiseCatalog.Categories)
         {
+            // Both lookups are hand-maintained alongside SubjectExpertiseCatalog.Categories; if
+            // that catalog ever gains a category without a matching entry here, fail loudly at
+            // startup instead of silently dropping chat rooms for it.
             if (!ExpertiseTypesByCategory.TryGetValue(category.ExpertiseMaskName, out Type? expertiseType))
-                continue;
+            {
+                throw new InvalidOperationException(
+                    $"ChatRoomCatalog.ExpertiseTypesByCategory has no entry for subject expertise category " +
+                    $"'{category.ExpertiseMaskName}'. Add one alongside SubjectExpertiseCatalog.Categories.");
+            }
 
-            string categoryDisplayName = CategoryDisplayNames[category.ExpertiseMaskName];
+            if (!CategoryDisplayNames.TryGetValue(category.ExpertiseMaskName, out string? categoryDisplayName))
+            {
+                throw new InvalidOperationException(
+                    $"ChatRoomCatalog.CategoryDisplayNames has no entry for subject expertise category " +
+                    $"'{category.ExpertiseMaskName}'. Add one alongside SubjectExpertiseCatalog.Categories.");
+            }
 
             foreach (FieldInfo field in expertiseType.GetFields(BindingFlags.Public | BindingFlags.Static))
             {
