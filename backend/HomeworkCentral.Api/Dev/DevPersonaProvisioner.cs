@@ -12,7 +12,7 @@ public sealed class DevPersonaProvisioner(
     private const int MaxParallel = 6;
 
     private readonly ConcurrentDictionary<string, byte> _provisioned = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Lazy<Task>> _inFlight = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, PersonaIdentity> _identities = new(StringComparer.OrdinalIgnoreCase);
 
     public int TotalPersonaCount { get; } = DevAccountCatalog.All.Sum(account => account.Personas.Length);
@@ -37,13 +37,30 @@ public sealed class DevPersonaProvisioner(
         if (_provisioned.ContainsKey(databaseName))
             return Task.CompletedTask;
 
-        Task task = _inFlight.GetOrAdd(
+        // ConcurrentDictionary.GetOrAdd's valueFactory can run more than once under contention
+        // (only one result gets stored, but a discarded invocation's side effects still ran) —
+        // if the factory here called ProvisionPersonaCoreAsync directly, two threads racing on
+        // the same database could both actually start migrating/seeding it concurrently.
+        // Wrapping in Lazy<Task> makes the factory itself side-effect-free (it just allocates
+        // the Lazy), and Lazy<T>'s own synchronization guarantees ProvisionPersonaCoreAsync is
+        // invoked exactly once regardless of how many callers race to create it.
+        Lazy<Task> lazy = _inFlight.GetOrAdd(
             databaseName,
-            _ => ProvisionPersonaCoreAsync(account, persona, databaseName, ct));
+            _ => new Lazy<Task>(() => ProvisionPersonaCoreAsync(account, persona, databaseName, ct)));
 
-        return AwaitAndCleanupAsync(databaseName, task);
+        return AwaitAndCleanupAsync(databaseName, lazy);
     }
 
+    /// <summary>
+    /// Logs how many persona databases already exist on disk. Deliberately does NOT mark them
+    /// as provisioned: a database existing tells us nothing about whether its schema/seed data
+    /// are actually up to date (e.g. after pulling new migrations or catalog changes), so every
+    /// persona — new or pre-existing — still goes through the real migrate/seed verification in
+    /// <see cref="ProvisionAllRemainingAsync"/>. That verification is fast when there's nothing
+    /// to do (EF's MigrateAsync and this app's own AuthorizationSeedData caching both no-op
+    /// quickly against an up-to-date database) and runs in the background, so this doesn't
+    /// reintroduce a blocking startup cost — it only fixes silently trusting a stale database.
+    /// </summary>
     public async Task InitializeFromExistingDatabasesAsync(CancellationToken ct = default)
     {
         List<string> databaseNames = new(TotalPersonaCount);
@@ -57,13 +74,10 @@ public sealed class DevPersonaProvisioner(
             .FindExistingDatabasesAsync(connectionResolver, databaseNames, ct)
             .ConfigureAwait(false);
 
-        foreach (string databaseName in existingDatabases)
-            _provisioned.TryAdd(databaseName, 0);
-
         if (existingDatabases.Count > 0)
         {
             logger.LogInformation(
-                "Detected {ExistingCount}/{TotalCount} existing persona databases; skipping re-provision.",
+                "Detected {ExistingCount}/{TotalCount} existing persona databases; verifying migrations/seed data in the background.",
                 existingDatabases.Count,
                 TotalPersonaCount);
         }
@@ -145,15 +159,20 @@ public sealed class DevPersonaProvisioner(
         }
     }
 
-    private async Task AwaitAndCleanupAsync(string databaseName, Task task)
+    private async Task AwaitAndCleanupAsync(string databaseName, Lazy<Task> lazy)
     {
         try
         {
-            await task.ConfigureAwait(false);
+            await lazy.Value.ConfigureAwait(false);
         }
         finally
         {
-            _inFlight.TryRemove(databaseName, out _);
+            // Only remove the entry we actually awaited: a naive TryRemove(databaseName, _)
+            // could delete a *different*, newer in-flight operation if another caller already
+            // re-entered EnsureProvisionedAsync for this database (e.g. immediately re-queued
+            // after a transient failure) between our await completing and this cleanup running.
+            ((ICollection<KeyValuePair<string, Lazy<Task>>>)_inFlight)
+                .Remove(new KeyValuePair<string, Lazy<Task>>(databaseName, lazy));
         }
     }
 }

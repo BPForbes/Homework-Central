@@ -30,4 +30,13 @@ public sealed class AccessScopeAccessor(IHttpContextAccessor httpContextAccessor
 
     public bool CanView(ClaimsPrincipal user, IScopedResource resource) =>
         ResourceVisibilityScope.CanView(Resolve(user), resource);
+
+    public AccessScope? ResolveCurrent()
+    {
+        ClaimsPrincipal? user = httpContextAccessor.HttpContext?.User;
+        if (user is null || user.Identity?.IsAuthenticated != true)
+            return null;
+
+        return Resolve(user);
+    }
 }

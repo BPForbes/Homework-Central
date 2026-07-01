@@ -8,7 +8,17 @@ public partial class AppDbContext(
     DbContextOptions<AppDbContext> options,
     IAccessScopeAccessor? accessScopeAccessor = null) : DbContext(options)
 {
-    internal IAccessScopeAccessor? AccessScopeAccessor => accessScopeAccessor;
+    // Resolved once per DbContext instance (i.e. once per request scope) rather than inside the
+    // query filter itself: EF Core query filters must be plain, translatable LINQ expressions —
+    // they cannot call back into arbitrary C# methods like IAccessScopeAccessor.CanQuery. These
+    // three scalar properties are safe to reference directly inside HasQueryFilter (see
+    // ScopedResourceQueryFilterExtensions), the same way a `TenantId` column-per-context property
+    // is a standard, fully translatable EF Core multi-tenancy pattern.
+    private readonly AccessScope? _resolvedScope = accessScopeAccessor?.ResolveCurrent();
+
+    internal bool ScopeIsAuthenticated => _resolvedScope is not null;
+    internal AccountClass ScopeAccountClass => _resolvedScope?.AccountClass ?? AccountClass.RealAccount;
+    internal string? ScopeTenantDatabaseName => _resolvedScope?.TenantDatabaseName;
 
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();

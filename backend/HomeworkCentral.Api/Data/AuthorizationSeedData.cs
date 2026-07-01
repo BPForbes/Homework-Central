@@ -9,10 +9,42 @@ public static class AuthorizationSeedData
 {
     private static readonly ConcurrentDictionary<string, byte> SeededDatabases = new(StringComparer.Ordinal);
 
-    public static async Task SeedAsync(AppDbContext db, CancellationToken ct = default)
+    // Guards the actual seeding work per cache key: without this, two concurrent callers for the
+    // same (as-yet-unseeded) database could both see the cache miss and both run the upserts at
+    // the same time, racing on the same rows. Lazy<Task> makes the factory passed to GetOrAdd
+    // side-effect-free (it just allocates the Lazy) while Lazy<T> itself guarantees the actual
+    // seeding delegate only ever runs once per key, even under contention.
+    private static readonly ConcurrentDictionary<string, Lazy<Task>> SeedGates = new(StringComparer.Ordinal);
+
+    public static Task SeedAsync(AppDbContext db, CancellationToken ct = default)
     {
         string databaseName = db.Database.GetDbConnection().Database;
         string cacheKey = $"{databaseName}:{AuthorizationCatalog.ContentHashHex}";
+        if (SeededDatabases.ContainsKey(cacheKey))
+            return Task.CompletedTask;
+
+        Lazy<Task> gate = SeedGates.GetOrAdd(cacheKey, _ => new Lazy<Task>(() => SeedCoreAsync(db, cacheKey, ct)));
+        return AwaitAndCleanupGateAsync(cacheKey, gate);
+    }
+
+    private static async Task AwaitAndCleanupGateAsync(string cacheKey, Lazy<Task> gate)
+    {
+        try
+        {
+            await gate.Value.ConfigureAwait(false);
+        }
+        finally
+        {
+            ((ICollection<KeyValuePair<string, Lazy<Task>>>)SeedGates)
+                .Remove(new KeyValuePair<string, Lazy<Task>>(cacheKey, gate));
+        }
+    }
+
+    private static async Task SeedCoreAsync(AppDbContext db, string cacheKey, CancellationToken ct)
+    {
+        // Re-check inside the gate: another caller may have already seeded this exact catalog
+        // content (a different cacheKey that happened to finish and populate SeededDatabases)
+        // while we were waiting to acquire the gate.
         if (SeededDatabases.ContainsKey(cacheKey))
             return;
 
@@ -40,17 +72,54 @@ public static class AuthorizationSeedData
         if (await db.RolePermissions.CountAsync(ct) != AuthorizationCatalog.TotalRolePermissionTieCount)
             return false;
 
-        Guid ownerId = AuthorizationGuids.Role("Owner");
-        Role? owner = await db.Roles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(role => role.RoleId == ownerId && role.Name == "Owner", ct);
-
-        if (owner is null)
+        if (await db.Permissions.CountAsync(ct) != AuthorizationCatalog.Permissions.Count)
             return false;
 
-        RoleMaskBuilder.RoleMaskSet expectedMasks = AuthorizationCatalog.GetRoleMasks("Owner");
-        return MasksMatch(owner.PermissionMask, expectedMasks.PermissionMask)
-            && MasksMatch(owner.RoleMask, expectedMasks.RoleMask);
+        // Check every role's masks (not just Owner) so a RoleMaskBuilder regression affecting
+        // any single role's PermissionMask/RoleMask/FeatureMask reliably forces a reseed instead
+        // of silently persisting under a coincidentally-still-matching Owner check.
+        List<Role> roles = await db.Roles.AsNoTracking().ToListAsync(ct);
+        Dictionary<Guid, Role> rolesById = roles.ToDictionary(role => role.RoleId);
+
+        foreach (AuthorizationCatalog.RoleDefinition roleDefinition in AuthorizationCatalog.Roles)
+        {
+            if (!rolesById.TryGetValue(roleDefinition.RoleId, out Role? role) || role.Name != roleDefinition.Name)
+                return false;
+
+            RoleMaskBuilder.RoleMaskSet expectedMasks = AuthorizationCatalog.GetRoleMasks(roleDefinition.Name);
+            if (!MasksMatch(role.PermissionMask, expectedMasks.PermissionMask)
+                || !MasksMatch(role.RoleMask, expectedMasks.RoleMask)
+                || !MasksMatch(role.FeatureMask, expectedMasks.FeatureMask))
+            {
+                return false;
+            }
+        }
+
+        // Check every subject's parent relationship matches the catalog's declared hierarchy.
+        List<Subject> subjects = await db.Subjects.AsNoTracking().ToListAsync(ct);
+        Dictionary<(string SubjectMask, short BitIndex), Subject> subjectsByKey = subjects
+            .ToDictionary(subject => (subject.SubjectMask, subject.BitIndex));
+        Dictionary<Guid, Subject> subjectsById = subjects.ToDictionary(subject => subject.SubjectId);
+
+        foreach (AuthorizationCatalog.SubjectDefinition subjectDefinition in AuthorizationCatalog.Subjects)
+        {
+            if (!subjectsByKey.TryGetValue((subjectDefinition.SubjectMask, subjectDefinition.BitIndex), out Subject? subject)
+                || subject.SubjectId != subjectDefinition.SubjectId
+                || subject.Name != subjectDefinition.Name)
+            {
+                return false;
+            }
+
+            Guid? expectedParentId = subjectDefinition.ParentName is null
+                ? null
+                : AuthorizationCatalog.Subjects
+                    .FirstOrDefault(s => s.Name == subjectDefinition.ParentName)?.SubjectId;
+
+            if (subject.ParentSubjectId != expectedParentId)
+                return false;
+        }
+
+        return true;
     }
 
     private static async Task UpsertPermissionsAsync(AppDbContext db, CancellationToken ct)
@@ -112,6 +181,21 @@ public static class AuthorizationSeedData
             }
             else
             {
+                // RoleId is deterministic from the role name (AuthorizationGuids.Role), so an
+                // existing row matched by name should always already have the catalog's ID. A
+                // mismatch means either the hashing scheme changed or the row predates it — the
+                // RolePermissions/UserRoles FKs below reference this row's *current* RoleId, so
+                // silently reassigning it here would orphan those associations. Fail loudly with
+                // a clear migration error instead of guessing how to reconcile it.
+                if (role.RoleId != roleDefinition.RoleId)
+                {
+                    throw new InvalidOperationException(
+                        $"Role '{roleDefinition.Name}' exists with RoleId {role.RoleId}, but the catalog now " +
+                        $"computes {roleDefinition.RoleId} for that name. This database's role IDs are stale " +
+                        "relative to AuthorizationGuids.Role and need an explicit data migration before seeding " +
+                        "can proceed safely.");
+                }
+
                 role.Description = roleDefinition.Description;
             }
 
@@ -177,6 +261,20 @@ public static class AuthorizationSeedData
         (string SubjectMask, short BitIndex) key = (subjectDefinition.SubjectMask, subjectDefinition.BitIndex);
         if (existing.TryGetValue(key, out Subject? subject))
         {
+            // SubjectId is deterministic from (SubjectMask, BitIndex) (AuthorizationGuids.Subject),
+            // so a row matched by that same natural key should already have the catalog's ID.
+            // UserSubjects rows reference this subject's *current* SubjectId, so silently
+            // reassigning it would orphan those associations — fail fast instead.
+            if (subject.SubjectId != subjectDefinition.SubjectId)
+            {
+                throw new InvalidOperationException(
+                    $"Subject '{subjectDefinition.SubjectMask}'/{subjectDefinition.BitIndex} exists with " +
+                    $"SubjectId {subject.SubjectId}, but the catalog now computes {subjectDefinition.SubjectId} " +
+                    "for that mask/bit. This database's subject IDs are stale relative to " +
+                    "AuthorizationGuids.Subject and need an explicit data migration before seeding can " +
+                    "proceed safely.");
+            }
+
             subject.Name = subjectDefinition.Name;
             subject.ParentSubjectId = parentSubjectId;
             subjectsByName[subjectDefinition.Name] = subject;

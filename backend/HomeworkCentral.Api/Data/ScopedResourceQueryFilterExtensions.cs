@@ -5,9 +5,15 @@ using Microsoft.EntityFrameworkCore;
 namespace HomeworkCentral.Api.Data;
 
 /// <summary>
-/// Applies global query filters for every entity implementing <see cref="IScopedResource"/>.
-/// Filters reference the scoped <see cref="AppDbContext"/> instance so
-/// <see cref="IAccessScopeAccessor"/> can evaluate per request (not translatable to SQL).
+/// Applies global query filters for every entity implementing <see cref="IScopedResource"/>,
+/// enforcing the same rules as <see cref="ResourceVisibilityScope.CanView"/>. The filter
+/// predicate is built entirely from <see cref="AppDbContext"/>'s own scalar properties
+/// (<see cref="AppDbContext.ScopeIsAuthenticated"/> etc., resolved once per DbContext instance)
+/// and the entity's own columns — it deliberately never calls back into
+/// <see cref="IAccessScopeAccessor"/>'s methods, because EF Core cannot translate an arbitrary
+/// C# method call inside a query filter to SQL. Calling <c>IAccessScopeAccessor.CanQuery(...)</c>
+/// directly here compiles fine but throws at query time ("could not be translated") the moment
+/// any <see cref="IScopedResource"/> entity is actually queried.
 /// </summary>
 public static class ScopedResourceQueryFilterExtensions
 {
@@ -32,8 +38,20 @@ public static class ScopedResourceQueryFilterExtensions
     private static void SetFilter<TEntity>(ModelBuilder modelBuilder, AppDbContext context)
         where TEntity : class, IScopedResource
     {
+        // Mirrors ResourceVisibilityScope.CanView's switch, but expressed as a flat boolean so
+        // every operand is either a DbContext scalar, an entity column, or a constant — all
+        // translatable. Unauthenticated/background contexts (ScopeIsAuthenticated == false, e.g.
+        // migrations or seed jobs running outside a request) see everything unfiltered, matching
+        // AccessScopeAccessor.CanQuery's existing "no ambient user" behavior.
         modelBuilder.Entity<TEntity>().HasQueryFilter(entity =>
-            context.AccessScopeAccessor == null
-            || context.AccessScopeAccessor.CanQuery(entity.OwnerAccountClass, entity.TenantDatabaseName));
+            !context.ScopeIsAuthenticated
+            || (context.ScopeAccountClass == AccountClass.RealAccount
+                && entity.OwnerAccountClass == AccountClass.RealAccount
+                && entity.TenantDatabaseName == context.ScopeTenantDatabaseName)
+            || (context.ScopeAccountClass == AccountClass.DevAdmin
+                && entity.OwnerAccountClass != AccountClass.RealAccount)
+            || (context.ScopeAccountClass == AccountClass.DeveloperAccount
+                && entity.OwnerAccountClass == AccountClass.DeveloperAccount
+                && entity.TenantDatabaseName == context.ScopeTenantDatabaseName));
     }
 }

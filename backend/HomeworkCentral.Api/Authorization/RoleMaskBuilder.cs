@@ -37,7 +37,15 @@ public static class RoleMaskBuilder
     {
         BitArray mask = BitMask.Create(256);
 
-        switch (roleName)
+        // BuildRoleIdentityMask resolves role names case-insensitively via PlatformRoleCatalog
+        // (backed by an OrdinalIgnoreCase dictionary); canonicalize here too so a differently
+        // cased but valid role name (e.g. "owner") gets the same feature set as "Owner" instead
+        // of silently falling through to the minimal default case below.
+        string canonicalRoleName = PlatformRoleCatalog.TryGetCanonicalRoleName(roleName, out string canonical, out _)
+            ? canonical
+            : roleName;
+
+        switch (canonicalRoleName)
         {
             case "Guest":
                 SetFeatures(mask,
