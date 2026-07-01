@@ -6,6 +6,8 @@ Chat navigation uses **categories** (dropdown headers) and **rooms** (joinable c
 
 ```
 Chat
+├── General ▾
+│   └── General (public)
 ├── Mathematics ▾
 │   ├── Calculus
 │   ├── Algebra
@@ -27,13 +29,25 @@ Chat
 
 | Rule | Implementation |
 |------|----------------|
-| Subject room | User has matching **expertise bit** in `subjectExpertiseMasks[category]` (e.g. `hasSubjectExpertise("Science", Biology)`). |
-| Staff room | User has matching **role bit** in `roleMask` (e.g. `hasRole(PlatformRoles.Moderator)`). |
+| **General (public)** | `general:lobby` — any authenticated user; `IsPrivate = false`, no key icon. |
+| Subject room | User has matching **expertise bit**; `IsPrivate = true`, key overlay on icon. |
+| Staff room | User has matching **role bit** (e.g. Moderators needs `PlatformRoles.Moderator`); private with key + role icon (shield for mods). |
 | Super viewers | `Owner` or `Administrator` → all subject and staff rooms. |
 | Category visibility | Dropdown shown only when ≥1 child room is accessible. |
-| General subject only | `generalSubjectMask` bit **alone** does not open a category or room. |
-| Feature gate | User must have `PlatformFeatures.GroupMessages` (or relevant feature) to use chat. |
-| Tenant isolation | Channels/messages implement `IScopedResource`; `"ResourceVisibility"` policy applies after room access. |
+| Category kind | `General`, `Subject`, or `Staff` — drives nav grouping and `IsPrivateCategory`. |
+| General subject only | `generalSubjectMask` bit **alone** does not open a subject category or room. |
+| Feature gate | User must have `PlatformFeatures.GroupMessages` to send messages. |
+| Tenant isolation | Messages implement `IScopedResource`; `"ResourceVisibility"` policy applies after room access. |
+
+## Room blueprint
+
+`ChatRoomBlueprint` constructs all rooms with explicit privacy:
+
+- `GeneralLobby()` — public `ChatCategoryKind.General`
+- `SubjectExpertise(...)` — private subject rooms (Mathematics, Science, …)
+- `StaffRole(...)` — private staff rooms (Moderators, Tutors, …)
+
+`ChatNavRoomDto` exposes `IsPrivate`, `CategoryKey`, and `CategoryKind` for the frontend icon layer.
 
 ## Examples
 

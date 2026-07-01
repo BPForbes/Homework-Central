@@ -11,6 +11,40 @@ public class ChatRoomAccessServiceTests
     private readonly ChatRoomAccessService _service = new();
 
     [Fact]
+    public void General_room_is_public_and_visible_without_role_or_expertise()
+    {
+        EffectiveMaskDto masks = CreateMasks();
+
+        ChatNavDto nav = _service.GetAccessibleNav(masks);
+
+        ChatNavCategoryDto general = Assert.Single(nav.Categories);
+        Assert.Equal(ChatRoomBlueprint.GeneralCategoryKey, general.Key);
+        Assert.False(general.IsPrivateCategory);
+        Assert.Single(general.Rooms);
+        Assert.Equal("General", general.Rooms[0].Name);
+        Assert.False(general.Rooms[0].IsPrivate);
+        Assert.True(_service.CanAccessRoom(masks, ChatRoomCatalog.GeneralRoom.Id));
+    }
+
+    [Fact]
+    public void Staff_rooms_are_private_and_require_matching_role()
+    {
+        ChatRoomDefinition moderatorsRoom = ChatRoomCatalog.StaffRooms
+            .Single(room => room.RoomDisplayName == "Moderators");
+
+        Assert.True(moderatorsRoom.IsPrivate);
+        Assert.Equal(ChatCategoryKind.Staff, moderatorsRoom.CategoryKind);
+
+        EffectiveMaskDto masks = CreateMasks(roles: [PlatformRoles.Moderator]);
+        ChatNavDto nav = _service.GetAccessibleNav(masks);
+
+        ChatNavCategoryDto staff = nav.Categories.Single(c => c.Key == ChatRoomCatalog.StaffCategoryKey);
+        Assert.True(staff.IsPrivateCategory);
+        Assert.All(staff.Rooms, room => Assert.True(room.IsPrivate));
+        Assert.Contains(staff.Rooms, room => room.Name == "Moderators");
+    }
+
+    [Fact]
     public void Science_and_biology_shows_science_category_with_biology_only()
     {
         EffectiveMaskDto masks = CreateMasks(
@@ -23,8 +57,11 @@ public class ChatRoomAccessServiceTests
 
         ChatNavCategoryDto? science = nav.Categories.SingleOrDefault(c => c.Key == SubjectMaskNames.Science);
         Assert.NotNull(science);
+        Assert.True(science.IsPrivateCategory);
         Assert.Single(science.Rooms);
         Assert.Equal("Biology", science.Rooms[0].Name);
+        Assert.True(science.Rooms[0].IsPrivate);
+        Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
     }
 
     [Fact]
@@ -38,17 +75,20 @@ public class ChatRoomAccessServiceTests
 
         ChatNavDto nav = _service.GetAccessibleNav(masks);
 
-        ChatNavCategoryDto mathematics = Assert.Single(nav.Categories);
+        ChatNavCategoryDto mathematics = nav.Categories.Single(c => c.Key == SubjectMaskNames.Mathematics);
         Assert.Equal("Mathematics", mathematics.Name);
         Assert.Equal("Calculus", mathematics.Rooms[0].Name);
+        Assert.True(mathematics.Rooms[0].IsPrivate);
     }
 
     [Fact]
-    public void No_expertise_bits_shows_no_subject_categories()
+    public void No_expertise_bits_shows_general_but_no_subject_categories()
     {
         ChatNavDto nav = _service.GetAccessibleNav(CreateMasks());
 
-        Assert.DoesNotContain(nav.Categories, c => c.Key != ChatRoomCatalog.StaffCategoryKey);
+        Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
+        Assert.DoesNotContain(nav.Categories, c =>
+            c.Key is not ChatRoomBlueprint.GeneralCategoryKey and not ChatRoomCatalog.StaffCategoryKey);
     }
 
     [Fact]
@@ -58,9 +98,9 @@ public class ChatRoomAccessServiceTests
 
         ChatNavDto nav = _service.GetAccessibleNav(masks);
 
-        ChatNavCategoryDto staff = Assert.Single(nav.Categories);
+        ChatNavCategoryDto staff = nav.Categories.Single(c => c.Key == ChatRoomCatalog.StaffCategoryKey);
         Assert.Equal("Staff", staff.Name);
-        Assert.Contains(staff.Rooms, room => room.Name == "Tutors");
+        Assert.Contains(staff.Rooms, room => room.Name == "Tutors" && room.IsPrivate);
     }
 
     [Fact]
@@ -74,6 +114,7 @@ public class ChatRoomAccessServiceTests
         Assert.True(nav.Categories.Count > ChatRoomCatalog.StaffRooms.Count);
         Assert.Contains(nav.Categories, c => c.Key == SubjectMaskNames.Mathematics);
         Assert.Contains(nav.Categories, c => c.Key == ChatRoomCatalog.StaffCategoryKey);
+        Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
     }
 
     [Fact]
@@ -93,6 +134,7 @@ public class ChatRoomAccessServiceTests
         ChatNavDto nav = _service.GetAccessibleNav(masks);
 
         Assert.DoesNotContain(nav.Categories, c => c.Key == SubjectMaskNames.Science);
+        Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
     }
 
     private static EffectiveMaskDto CreateMasks(
@@ -130,5 +172,43 @@ public class ChatRoomAccessServiceTests
             SubjectExpertiseMasks = expertiseMasks,
             StatusMask = BitMask.ToBase64(BitMask.Create(64)),
         };
+    }
+}
+
+public class ChatRoomBlueprintTests
+{
+    [Fact]
+    public void GeneralLobby_is_public_general_category()
+    {
+        ChatRoomDefinition room = ChatRoomBlueprint.GeneralLobby();
+
+        Assert.False(room.IsPrivate);
+        Assert.Equal(ChatRoomKind.General, room.Kind);
+        Assert.Equal(ChatCategoryKind.General, room.CategoryKind);
+        Assert.Equal(ChatRoomBlueprint.GeneralRoomId, room.Id);
+    }
+
+    [Fact]
+    public void StaffRole_is_private_staff_category()
+    {
+        ChatRoomDefinition room = ChatRoomBlueprint.StaffRole(PlatformRoles.Moderator, "Moderators");
+
+        Assert.True(room.IsPrivate);
+        Assert.Equal(ChatCategoryKind.Staff, room.CategoryKind);
+        Assert.Equal(PlatformRoles.Moderator, room.RequiredRoleBit);
+    }
+
+    [Fact]
+    public void SubjectExpertise_is_private_subject_category()
+    {
+        ChatRoomDefinition room = ChatRoomBlueprint.SubjectExpertise(
+            SubjectMaskNames.Science,
+            "Science",
+            "Biology",
+            ScienceExpertise.Biology);
+
+        Assert.True(room.IsPrivate);
+        Assert.Equal(ChatCategoryKind.Subject, room.CategoryKind);
+        Assert.Equal("subject:Science:0", room.Id);
     }
 }

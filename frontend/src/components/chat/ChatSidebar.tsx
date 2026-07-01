@@ -5,6 +5,7 @@ import { faChevronDown, faChevronRight, faComments, faTimes } from '@fortawesome
 import { chatApi } from '../../api/chatApi'
 import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
+import { ChatRoomIcon } from './ChatRoomIcon'
 
 interface ChatSidebarProps {
   open: boolean
@@ -116,9 +117,10 @@ function CategorySection({
   onToggle: () => void
 }) {
   const isStaff = category.key === 'Staff'
+  const isGeneral = category.key === 'General'
 
   return (
-    <section className="chat-category">
+    <section className={`chat-category ${category.isPrivateCategory ? 'chat-category--private' : 'chat-category--public'}`}>
       <button type="button" className="chat-category-toggle" onClick={onToggle}>
         <span className="chat-category-label">
           <FontAwesomeIcon icon={getCategoryIcon(category.key)} className="chat-category-icon" />
@@ -128,20 +130,29 @@ function CategorySection({
       </button>
       {expanded && (
         <ul className="chat-room-list">
-          {category.rooms.map((room) => (
+          {category.rooms.map((room) => {
+            const baseIcon = isStaff
+              ? getStaffRoomIcon(room.name)
+              : isGeneral
+                ? getCategoryIcon('General')
+                : getRoomIcon(room.name, category.key)
+
+            return (
             <li key={room.id}>
               <NavLink
                 to={`/chat/${encodeURIComponent(room.id)}`}
                 className={({ isActive }) => `chat-room-link ${isActive ? 'active' : ''}`}
               >
-                <FontAwesomeIcon
-                  icon={isStaff ? getStaffRoomIcon(room.name) : getRoomIcon(room.name, category.key)}
+                <ChatRoomIcon
+                  icon={baseIcon}
+                  isPrivate={room.isPrivate}
                   className="chat-room-icon"
                 />
                 <span className="chat-room-name">{room.name}</span>
               </NavLink>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
     </section>

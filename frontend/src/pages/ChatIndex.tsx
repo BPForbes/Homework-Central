@@ -16,7 +16,8 @@ export function ChatIndex() {
         if (cancelled)
           return
 
-        const firstRoom = data.categories.flatMap((c) => c.rooms)[0]
+        const generalRoom = data.categories.find((c) => c.key === 'General')?.rooms[0]
+        const firstRoom = generalRoom ?? data.categories.flatMap((c) => c.rooms)[0]
         setTarget(firstRoom ? `/chat/${encodeURIComponent(firstRoom.id)}` : '/dashboard')
       } catch {
         if (!cancelled)

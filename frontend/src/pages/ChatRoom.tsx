@@ -8,15 +8,24 @@ import { useAuth } from '../context/AuthContext'
 import { useChatRoom } from '../hooks/useChatRoom'
 import { ChatComposer } from '../components/chat/ChatComposer'
 import { ChatMessageList } from '../components/chat/ChatMessageList'
-import { ChatRoomKeyBadge } from '../components/chat/ChatRoomKeyBadge'
-import { getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
+import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
+import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
+
+function resolveRoomIcon(room: ChatNavRoom, categoryKey: string): ReturnType<typeof getCategoryIcon> {
+  if (categoryKey === 'Staff')
+    return getStaffRoomIcon(room.name)
+  if (categoryKey === 'General')
+    return getCategoryIcon('General')
+  return getRoomIcon(room.name, categoryKey)
+}
 
 export function ChatRoom() {
   const { roomId } = useParams<{ roomId: string }>()
   const decodedRoomId = roomId ? decodeURIComponent(roomId) : ''
   const { user } = useAuth()
   const [room, setRoom] = useState<ChatNavRoom | null>(null)
-  const [categoryKey, setCategoryKey] = useState<string>('Staff')
+  const [categoryKey, setCategoryKey] = useState<string>('General')
+  const [categoryName, setCategoryName] = useState<string>('General')
   const [roomLoading, setRoomLoading] = useState(true)
 
   const {
@@ -45,6 +54,7 @@ export function ChatRoom() {
           if (match) {
             setRoom(match)
             setCategoryKey(category.key)
+            setCategoryName(category.name)
             return
           }
         }
@@ -80,18 +90,20 @@ export function ChatRoom() {
     )
   }
 
-  const isStaff = categoryKey === 'Staff'
-  const icon = isStaff ? getStaffRoomIcon(room.name) : getRoomIcon(room.name, categoryKey)
+  const icon = resolveRoomIcon(room, categoryKey)
+  const subtitle = room.isPrivate
+    ? `${categoryName} · private`
+    : `${categoryName} · public`
 
   return (
     <div className="chat-room-page chat-room-page--active">
       <header className="chat-room-header">
         <div className="chat-room-hero-icon chat-room-hero-icon--compact">
-          <FontAwesomeIcon icon={icon} />
+          <ChatRoomIcon icon={icon} isPrivate={room.isPrivate} layeredClassName="chat-room-hero-layered" />
         </div>
         <div>
           <h2>{room.name}</h2>
-          <p className="chat-room-subtitle">{categoryKey === 'Staff' ? 'Staff channel' : categoryKey}</p>
+          <p className="chat-room-subtitle">{subtitle}</p>
         </div>
       </header>
 
@@ -103,7 +115,11 @@ export function ChatRoom() {
           typingUsers={typingUsers}
           loading={messagesLoading}
         />
-        <ChatRoomKeyBadge roomIcon={icon} />
+        {room.isPrivate && (
+          <div className="chat-key-badge" aria-hidden="true">
+            <ChatRoomIcon icon={icon} isPrivate layeredClassName="chat-key-badge-layered" />
+          </div>
+        )}
         <ChatComposer
           disabled={messagesLoading}
           sending={sending}

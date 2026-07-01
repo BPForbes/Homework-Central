@@ -586,7 +586,21 @@ body {
   flex-shrink: 0;
 }
 
-.chat-room-link.active .chat-room-icon {
+.chat-room-icon-layered {
+  width: 1.15rem;
+  font-size: 1rem;
+}
+
+.chat-room-hero-layered {
+  font-size: 1rem;
+}
+
+.chat-key-badge-layered {
+  font-size: 28px;
+}
+
+.chat-room-link.active .chat-room-icon,
+.chat-room-link.active .chat-room-icon-layered {
   color: #2563eb;
 }
 

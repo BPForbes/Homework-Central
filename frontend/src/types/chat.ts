@@ -1,11 +1,16 @@
 export interface ChatNavRoom {
   id: string
   name: string
+  isPrivate: boolean
+  categoryKey: string
+  categoryKind: string
 }
 
 export interface ChatNavCategory {
   key: string
   name: string
+  categoryKind: string
+  isPrivateCategory: boolean
   rooms: ChatNavRoom[]
 }
 

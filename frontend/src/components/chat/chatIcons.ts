@@ -6,6 +6,7 @@ import {
   faCalculator,
   faChartLine,
   faComments,
+  faGlobe,
   faFlask,
   faGraduationCap,
   faHeartPulse,
@@ -25,6 +26,7 @@ import {
 
 /** Category keys from SubjectExpertiseCatalog / ChatRoomCatalog. */
 const CATEGORY_ICONS: Record<string, IconDefinition> = {
+  General: faGlobe,
   Mathematics: faCalculator,
   Science: faFlask,
   ComputerScience: faLaptopCode,

@@ -48,25 +48,32 @@ public static class ChatRoomCatalog
             [SubjectMaskNames.Education] = "Education",
         };
 
+    public static readonly ChatRoomDefinition GeneralRoom = ChatRoomBlueprint.GeneralLobby();
+
+    public static readonly IReadOnlyList<ChatRoomDefinition> GeneralRooms = [GeneralRoom];
+
     public static readonly IReadOnlyList<ChatRoomDefinition> SubjectRooms = BuildSubjectRooms();
 
     public static readonly IReadOnlyList<ChatRoomDefinition> StaffRooms =
     [
-        CreateStaffRoom(PlatformRoles.Staff, "Staff"),
-        CreateStaffRoom(PlatformRoles.Tutor, "Tutors"),
-        CreateStaffRoom(PlatformRoles.SeniorTutor, "Senior Tutors"),
-        CreateStaffRoom(PlatformRoles.HeadTutor, "Head Tutors"),
-        CreateStaffRoom(PlatformRoles.Moderator, "Moderators"),
-        CreateStaffRoom(PlatformRoles.SeniorModerator, "Senior Moderators"),
-        CreateStaffRoom(PlatformRoles.Administrator, "Admins"),
-        CreateStaffRoom(PlatformRoles.CommunityManager, "Community Managers"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.Staff, "Staff"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.Tutor, "Tutors"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.SeniorTutor, "Senior Tutors"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.HeadTutor, "Head Tutors"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.Moderator, "Moderators"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.SeniorModerator, "Senior Moderators"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.Administrator, "Admins"),
+        ChatRoomBlueprint.StaffRole(PlatformRoles.CommunityManager, "Community Managers"),
     ];
 
     public static readonly IReadOnlyList<ChatRoomDefinition> AllRooms =
-        SubjectRooms.Concat(StaffRooms).ToList();
+        GeneralRooms.Concat(SubjectRooms).Concat(StaffRooms).ToList();
 
     public static ChatRoomDefinition? FindById(string roomId) =>
         AllRooms.FirstOrDefault(room => string.Equals(room.Id, roomId, StringComparison.Ordinal));
+
+    public static bool IsPrivateCategory(ChatCategoryKind categoryKind) =>
+        categoryKind is ChatCategoryKind.Subject or ChatCategoryKind.Staff;
 
     private static IReadOnlyList<ChatRoomDefinition> BuildSubjectRooms()
     {
@@ -86,33 +93,17 @@ public static class ChatRoomCatalog
 
                 short expertiseBit = (short)field.GetValue(null)!;
                 string roomName = ToDisplayName(field.Name);
-                string roomId = $"subject:{category.ExpertiseMaskName}:{expertiseBit}";
 
-                rooms.Add(new ChatRoomDefinition(
-                    roomId,
-                    ChatRoomKind.SubjectExpertise,
+                rooms.Add(ChatRoomBlueprint.SubjectExpertise(
                     category.ExpertiseMaskName,
                     categoryDisplayName,
                     roomName,
-                    category.ExpertiseMaskName,
-                    expertiseBit,
-                    null));
+                    expertiseBit));
             }
         }
 
         return rooms;
     }
-
-    private static ChatRoomDefinition CreateStaffRoom(short roleBit, string roomDisplayName) =>
-        new(
-            $"staff:{roleBit}",
-            ChatRoomKind.StaffRole,
-            StaffCategoryKey,
-            StaffCategoryDisplayName,
-            roomDisplayName,
-            null,
-            null,
-            roleBit);
 
     internal static string ToDisplayName(string pascalName) =>
         string.Concat(pascalName.Select((ch, index) =>
