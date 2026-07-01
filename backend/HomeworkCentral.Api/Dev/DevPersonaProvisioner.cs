@@ -13,6 +13,7 @@ public sealed class DevPersonaProvisioner(
 
     private readonly ConcurrentDictionary<string, byte> _provisioned = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PersonaIdentity> _identities = new(StringComparer.OrdinalIgnoreCase);
 
     public int TotalPersonaCount { get; } = DevAccountCatalog.All.Sum(account => account.Personas.Length);
 
@@ -20,6 +21,12 @@ public sealed class DevPersonaProvisioner(
 
     public bool IsProvisioned(string databaseName) =>
         _provisioned.ContainsKey(databaseName);
+
+    public bool TryGetPersonaIdentity(string databaseName, out PersonaIdentity identity) =>
+        _identities.TryGetValue(databaseName, out identity);
+
+    public void RememberPersonaIdentity(string databaseName, PersonaIdentity identity) =>
+        _identities[databaseName] = identity;
 
     public Task EnsureProvisionedAsync(
         DevAccountDefinition account,
@@ -39,26 +46,25 @@ public sealed class DevPersonaProvisioner(
 
     public async Task InitializeFromExistingDatabasesAsync(CancellationToken ct = default)
     {
-        int existing = 0;
+        List<string> databaseNames = new(TotalPersonaCount);
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
             foreach (DevPersonaDefinition persona in account.Personas)
-            {
-                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
-                if (await TenantDatabaseProvisioner.DatabaseExistsAsync(connectionResolver, databaseName, ct)
-                    .ConfigureAwait(false))
-                {
-                    _provisioned.TryAdd(databaseName, 0);
-                    existing++;
-                }
-            }
+                databaseNames.Add(DevAccountCatalog.GetPersonaDatabaseName(account, persona));
         }
 
-        if (existing > 0)
+        HashSet<string> existingDatabases = await TenantDatabaseProvisioner
+            .FindExistingDatabasesAsync(connectionResolver, databaseNames, ct)
+            .ConfigureAwait(false);
+
+        foreach (string databaseName in existingDatabases)
+            _provisioned.TryAdd(databaseName, 0);
+
+        if (existingDatabases.Count > 0)
         {
             logger.LogInformation(
                 "Detected {ExistingCount}/{TotalCount} existing persona databases; skipping re-provision.",
-                existing,
+                existingDatabases.Count,
                 TotalPersonaCount);
         }
     }
@@ -86,7 +92,6 @@ public sealed class DevPersonaProvisioner(
             TotalPersonaCount,
             MaxParallel);
 
-        int completed = ProvisionedCount;
         await Parallel.ForEachAsync(
             remaining,
             new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = ct },
@@ -120,8 +125,13 @@ public sealed class DevPersonaProvisioner(
         {
             await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName, ct)
                 .ConfigureAwait(false);
-            await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(connectionResolver, account, persona, ct)
+            PersonaIdentity identity = await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(
+                    connectionResolver,
+                    account,
+                    persona,
+                    ct)
                 .ConfigureAwait(false);
+            RememberPersonaIdentity(databaseName, identity);
             _provisioned.TryAdd(databaseName, 0);
         }
         catch (Exception ex)

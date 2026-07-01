@@ -189,11 +189,10 @@ using (IServiceScope seedScope = app.Services.CreateScope())
     ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
-    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
     IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
     ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    await AuthorizationSeedData.SeedAsync(seedDb, roleMaskService);
+    await AuthorizationSeedData.SeedAsync(seedDb);
     if (devBypassEnabled)
     {
         await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);

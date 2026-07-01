@@ -8,7 +8,7 @@ namespace HomeworkCentral.Api.Data;
 /// <summary>Seeds a single persona into an isolated tenant database.</summary>
 public static class TenantBypassSeedData
 {
-    public static async Task SeedPersonaAsync(
+    public static async Task<PersonaIdentity> SeedPersonaAsync(
         AppDbContext tenantDb,
         DevPersonaDefinition persona,
         CancellationToken ct = default)
@@ -29,5 +29,7 @@ public static class TenantBypassSeedData
 
         await tenantDb.SaveChangesAsync(ct);
         await EffectiveMaskService.RebuildOnContextAsync(tenantDb, personaUser.UserId, ct);
+
+        return new PersonaIdentity(personaUser.UserId, personaUser.Username);
     }
 }

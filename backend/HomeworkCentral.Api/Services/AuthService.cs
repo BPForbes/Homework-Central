@@ -116,6 +116,17 @@ public class AuthService(
                 if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
                     continue;
 
+                if (PersonaProvisioner?.TryGetPersonaIdentity(databaseName, out PersonaIdentity cachedIdentity) == true)
+                {
+                    personas.Add(new DevUserOption
+                    {
+                        UserId = cachedIdentity.UserId,
+                        Username = cachedIdentity.Username,
+                        TenantDatabaseName = databaseName,
+                    });
+                    continue;
+                }
+
                 AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName);
                 await using (tenantDb)
                 {
@@ -126,10 +137,13 @@ public class AuthService(
                     if (user is null)
                         continue;
 
+                    PersonaIdentity identity = new(user.UserId, user.Username);
+                    PersonaProvisioner?.RememberPersonaIdentity(databaseName, identity);
+
                     personas.Add(new DevUserOption
                     {
-                        UserId = user.UserId,
-                        Username = user.Username,
+                        UserId = identity.UserId,
+                        Username = identity.Username,
                         TenantDatabaseName = databaseName,
                     });
                 }

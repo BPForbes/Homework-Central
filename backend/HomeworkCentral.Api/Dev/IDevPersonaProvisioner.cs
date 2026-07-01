@@ -9,6 +9,10 @@ public interface IDevPersonaProvisioner
 
     bool IsProvisioned(string databaseName);
 
+    bool TryGetPersonaIdentity(string databaseName, out PersonaIdentity identity);
+
+    void RememberPersonaIdentity(string databaseName, PersonaIdentity identity);
+
     Task EnsureProvisionedAsync(
         DevAccountDefinition account,
         DevPersonaDefinition persona,
