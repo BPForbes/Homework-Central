@@ -428,26 +428,22 @@ build_postgres_host_check() {
   dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
 
+build_postgres_host_check_if_needed() {
+  local dll="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
+  if [[ -f "$dll" && "$dll" -nt "$POSTGRES_HOST_CHECK_PROJECT" ]]; then
+    log "Postgres host check already built"
+    return
+  fi
+
+  build_postgres_host_check
+}
+
 build_projects() {
   local skip_dotnet=false
   HC_API_BUILD_FAILED=0
   if [[ "${HC_SKIP_DOTNET_BUILD:-}" == "1" || "${HC_SKIP_BUILD:-}" == "1" ]]; then
     log "Skipping API build (HC_SKIP_DOTNET_BUILD=1)"
     skip_dotnet=true
-  fi
-
-  if [[ "$skip_dotnet" == false ]]; then
-    require_cmd dotnet
-    log "Building API"
-    api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
-    if ! dotnet build "$API_PROJECT" -c Debug 2>&1 | tee "$api_build_log"; then
-      "$REPO_ROOT/scripts/open-api-error-page.sh" "API Build Errors" "$api_build_log" || true
-      rm -f "$api_build_log"
-      HC_API_BUILD_FAILED=1
-      log "API build failed; frontend will start and show unable to connect to API"
-    else
-      rm -f "$api_build_log"
-    fi
   fi
 
   require_cmd npm
@@ -460,12 +456,35 @@ build_projects() {
     log "Frontend dependencies already installed"
   fi
 
+  local api_build_pid=""
+  local api_build_log=""
+  if [[ "$skip_dotnet" == false ]]; then
+    require_cmd dotnet
+    log "Building API (parallel with frontend typecheck)"
+    api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
+    dotnet build "$API_PROJECT" -c Debug >"$api_build_log" 2>&1 &
+    api_build_pid=$!
+  fi
+
   log "Type-checking frontend (parallel with Postgres host check build)"
   (cd "$FRONTEND_DIR" && npx tsc -b --pretty) &
-  frontend_tsc_pid=$!
-  build_postgres_host_check
+  local frontend_tsc_pid=$!
+  build_postgres_host_check_if_needed
+
   if ! wait "$frontend_tsc_pid"; then
     fail "frontend typecheck failed"
+  fi
+
+  if [[ -n "$api_build_pid" ]]; then
+    if ! wait "$api_build_pid"; then
+      cat "$api_build_log" >&2 || true
+      "$REPO_ROOT/scripts/open-api-error-page.sh" "API Build Errors" "$api_build_log" || true
+      rm -f "$api_build_log"
+      HC_API_BUILD_FAILED=1
+      log "API build failed; frontend will start and show unable to connect to API"
+    else
+      rm -f "$api_build_log"
+    fi
   fi
 }
 

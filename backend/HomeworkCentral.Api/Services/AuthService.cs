@@ -18,9 +18,13 @@ public class AuthService(
     ITenantDbContextFactory tenantFactory,
     IJwtService jwt,
     IHttpContextAccessor http,
-    IEffectiveMaskService effectiveMaskService) : IAuthService
+    IEffectiveMaskService effectiveMaskService,
+    IServiceProvider serviceProvider) : IAuthService
 {
     private const int AccessTokenMinutes = 15;
+
+    private IDevPersonaProvisioner? PersonaProvisioner =>
+        serviceProvider.GetService<IDevPersonaProvisioner>();
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
@@ -109,6 +113,9 @@ public class AuthService(
             foreach (DevPersonaDefinition persona in account.Personas)
             {
                 string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+                if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
+                    continue;
+
                 AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName);
                 await using (tenantDb)
                 {
@@ -178,6 +185,13 @@ public class AuthService(
             || !string.Equals(personaMatch.Value.Account.DeveloperEmail, developer.Email, StringComparison.OrdinalIgnoreCase))
         {
             throw new UnauthorizedAccessException("Selected persona does not belong to this developer account.");
+        }
+
+        if (PersonaProvisioner is not null)
+        {
+            await PersonaProvisioner.EnsureProvisionedAsync(
+                personaMatch.Value.Account,
+                personaMatch.Value.Persona);
         }
 
         AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(req.TenantDatabaseName);

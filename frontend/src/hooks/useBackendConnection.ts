@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
 import { checkBackendHealth } from '../utils/healthCheck'
 
-const DEFAULT_POLL_MS = 2000
+const DEFAULT_POLL_MS = 1000
 
-/**
- * Polls /healthz until the backend accepts connections.
- * The API may take several minutes on first dev startup while persona databases provision.
- */
+/** Polls /healthz until the backend accepts connections. */
 export function useBackendConnection(pollIntervalMs = DEFAULT_POLL_MS) {
   const [isConnected, setIsConnected] = useState(false)
 
@@ -15,10 +12,10 @@ export function useBackendConnection(pollIntervalMs = DEFAULT_POLL_MS) {
 
     async function pollUntilReady() {
       while (!cancelled) {
-        const ready = await checkBackendHealth()
+        const result = await checkBackendHealth()
         if (cancelled)
           return
-        if (ready) {
+        if (result) {
           setIsConnected(true)
           return
         }

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../api/authApi'
-import type { DevDeveloperOption } from '../types/devAuth'
+import type { DevDeveloperOption, DevStatus } from '../types/devAuth'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
@@ -20,6 +20,7 @@ export function DevLogin() {
   const [error, setError] = useState('')
   const [isLoadingOptions, setIsLoadingOptions] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [personaStatus, setPersonaStatus] = useState<DevStatus | null>(null)
 
   const selectedDeveloper = useMemo(
     () => developers.find((developer) => developer.userId === developerUserId) ?? null,
@@ -36,39 +37,57 @@ export function DevLogin() {
 
     let cancelled = false
 
-    async function loadOptions() {
+    async function loadOptions(): Promise<boolean> {
       setIsLoadingOptions(true)
       setError('')
       try {
-        const { data } = await authApi.devStatus()
-        if (!data.available) {
-          if (!cancelled)
-            setError('Developer bypass is not enabled on the API.')
-          return
+        const statusResponse = await authApi.devStatus()
+        if (cancelled)
+          return false
+
+        setPersonaStatus(statusResponse.data)
+
+        if (!statusResponse.data.available) {
+          setError('Developer bypass is not enabled on the API.')
+          return true
         }
+
         const options = await authApi.devOptions()
         if (cancelled)
-          return
+          return false
+
         setDevelopers(options.data.developers)
         if (options.data.developers.length > 0)
           setDeveloperUserId(options.data.developers[0].userId)
+
+        return statusResponse.data.personasReady ?? true
       } catch (err: unknown) {
         if (cancelled)
-          return
+          return false
         const response = (err as { response?: { status?: number; data?: { message?: string } } })
           ?.response
         if (response?.status === 404) {
           setError('Developer bypass is not enabled on the API.')
-          return
+          return true
         }
         setError(response?.data?.message ?? 'Failed to load developer accounts.')
+        return true
       } finally {
         if (!cancelled)
           setIsLoadingOptions(false)
       }
     }
 
-    void loadOptions()
+    async function pollUntilReady() {
+      while (!cancelled) {
+        const ready = await loadOptions()
+        if (ready || cancelled)
+          break
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+    }
+
+    void pollUntilReady()
     return () => {
       cancelled = true
     }
@@ -112,6 +131,12 @@ export function DevLogin() {
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Developer sign in</h2>
+
+        {personaStatus && !personaStatus.personasReady && personaStatus.personasTotal && (
+          <p className="dev-persona-status">
+            Loading dev personas ({personaStatus.personasProvisioned ?? 0}/{personaStatus.personasTotal})…
+          </p>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="field">

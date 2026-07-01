@@ -108,10 +108,16 @@ builder.Services.AddCors(opts =>
             .AllowAnyHeader()
             .AllowAnyMethod()));
 
+bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
+if (devBypassEnabled)
+{
+    builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
+    builder.Services.AddHostedService<DevPersonaProvisioningHostedService>();
+}
+
 WebApplication app = builder.Build();
 
 // Localhost-only developer bypass (HC_DEV_BYPASS=1 + Development + loopback).
-bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, app.Environment);
 
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
@@ -134,7 +140,19 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Health probe for Docker / load balancers
-app.MapGet("/healthz", () => TypedResults.Ok(new { status = "healthy" }));
+app.MapGet("/healthz", (IDevPersonaProvisioner? personaProvisioner) =>
+{
+    if (personaProvisioner is null)
+        return Results.Ok(new { status = "healthy" });
+
+    return Results.Ok(new
+    {
+        status = "healthy",
+        personasProvisioned = personaProvisioner.ProvisionedCount,
+        personasTotal = personaProvisioner.TotalPersonaCount,
+        personasReady = personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
+    });
+});
 
 // Localhost-only dev landing routes and linked favicon (see DevAssets.CanonicalFaviconRepoPath).
 if (devBypassEnabled)
@@ -181,33 +199,12 @@ using (IServiceScope seedScope = app.Services.CreateScope())
         await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
         await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
 
-        int personaCount = DevAccountCatalog.All.Sum(account => account.Personas.Length);
-        int provisioned = 0;
+        IDevPersonaProvisioner personaProvisioner =
+            seedScope.ServiceProvider.GetRequiredService<IDevPersonaProvisioner>();
+        await personaProvisioner.InitializeFromExistingDatabasesAsync();
+
         startupLogger.LogInformation(
-            "Provisioning {PersonaCount} persona tenant databases (first startup may take several minutes)...",
-            personaCount);
-
-        foreach (DevAccountDefinition account in DevAccountCatalog.All)
-        {
-            foreach (DevPersonaDefinition persona in account.Personas)
-            {
-                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
-                await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName);
-                await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(connectionResolver, account, persona);
-                provisioned++;
-
-                if (provisioned == 1 || provisioned == personaCount || provisioned % 10 == 0)
-                {
-                    startupLogger.LogInformation(
-                        "Provisioned persona database {Current}/{Total}: {DatabaseName}",
-                        provisioned,
-                        personaCount,
-                        databaseName);
-                }
-            }
-        }
-
-        startupLogger.LogInformation("Persona tenant database provisioning complete.");
+            "Essential dev seed complete. Persona databases continue provisioning in the background.");
     }
 }
 

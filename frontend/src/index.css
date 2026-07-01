@@ -313,6 +313,12 @@ body {
   letter-spacing: 0.01em;
 }
 
+.dev-persona-status {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
 @keyframes backend-bar-loader {
   0% {
     transform: scaleY(0.1);
