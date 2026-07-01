@@ -1,6 +1,12 @@
 namespace HomeworkCentral.Api.Captcha;
 
-public sealed record CaptchaChallengeDto(string ChallengeId, string Prompt);
+/// <summary>
+/// <paramref name="Label"/> is plain instructional text, safe to select/copy. <paramref name="Content"/>
+/// is the security-relevant part (the code to retype, or the expression to solve) — the frontend
+/// renders it distorted and blocks selection/copy so it can't just be lifted with a click-drag or
+/// Ctrl+C into the answer field.
+/// </summary>
+public sealed record CaptchaChallengeDto(string ChallengeId, string Label, string Content);
 
 /// <summary>
 /// Issues short-lived, single-use text captcha challenges and validates submitted answers.

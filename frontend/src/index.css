@@ -1014,7 +1014,7 @@ body {
   background: #f9fafb;
 }
 
-.captcha-prompt {
+.captcha-label-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1037,6 +1037,34 @@ body {
 .captcha-refresh:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* The security-relevant part of the challenge (code or expression) — distorted per character and
+ * locked down against selection/copy/drag so it can't be lifted straight into the answer field. */
+.captcha-content {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.65rem 0.5rem;
+  margin-bottom: 0.65rem;
+  background: repeating-linear-gradient(135deg, #eef2ff, #eef2ff 6px, #e0e7ff 6px, #e0e7ff 12px);
+  border: 1.5px dashed #c7d2fe;
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.captcha-char {
+  display: inline-block;
+  font-family: 'Courier New', Courier, monospace;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 1.4rem;
+  letter-spacing: 0.05em;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.08);
+  pointer-events: none;
 }
 
 .captcha-input {

@@ -13,7 +13,7 @@ public class CaptchaServiceTests
     public void Correct_answer_validates_once_then_the_challenge_is_consumed()
     {
         CaptchaChallengeDto challenge = _service.CreateChallenge();
-        string answer = SolveChallenge(challenge.Prompt);
+        string answer = SolveChallenge(challenge);
 
         Assert.True(_service.Validate(challenge.ChallengeId, answer));
         Assert.False(_service.Validate(challenge.ChallengeId, answer));
@@ -23,7 +23,7 @@ public class CaptchaServiceTests
     public void Wrong_answer_fails_and_also_consumes_the_challenge()
     {
         CaptchaChallengeDto challenge = _service.CreateChallenge();
-        string correctAnswer = SolveChallenge(challenge.Prompt);
+        string correctAnswer = SolveChallenge(challenge);
 
         Assert.False(_service.Validate(challenge.ChallengeId, "definitely-wrong"));
         Assert.False(_service.Validate(challenge.ChallengeId, correctAnswer));
@@ -49,37 +49,32 @@ public class CaptchaServiceTests
     public void Answer_comparison_trims_surrounding_whitespace()
     {
         CaptchaChallengeDto challenge = _service.CreateChallenge();
-        string answer = SolveChallenge(challenge.Prompt);
+        string answer = SolveChallenge(challenge);
 
         Assert.True(_service.Validate(challenge.ChallengeId, $"  {answer}  "));
     }
 
     [Fact]
-    public void Code_challenge_answer_comparison_is_case_insensitive()
+    public void Code_challenge_content_has_no_spaces_and_answer_comparison_is_case_insensitive()
     {
-        // Challenges alternate randomly between arithmetic and code templates; retry until a
-        // code-style challenge (which has letters, so case-insensitivity is actually exercised)
-        // comes up. 25 misses in a row has a ~1-in-33-million chance, so this isn't flaky.
+        // Challenges alternate randomly between arithmetic ("7 + 4") and code ("KP4R7X") content.
+        // Retry until a code-style challenge (which has letters, so case-insensitivity is actually
+        // exercised) comes up. 25 misses in a row has a ~1-in-33-million chance, so this isn't flaky.
         CaptchaChallengeDto? codeChallenge = null;
-        string? answer = null;
         for (int attempt = 0; attempt < 25 && codeChallenge is null; attempt++)
         {
             CaptchaChallengeDto candidate = _service.CreateChallenge();
-            Match code = Regex.Match(candidate.Prompt, @"exactly: (\w+)");
-            if (code.Success)
-            {
+            if (!candidate.Content.Contains(' '))
                 codeChallenge = candidate;
-                answer = code.Groups[1].Value;
-            }
         }
 
         Assert.NotNull(codeChallenge);
-        Assert.True(_service.Validate(codeChallenge!.ChallengeId, answer!.ToLowerInvariant()));
+        Assert.True(_service.Validate(codeChallenge!.ChallengeId, codeChallenge.Content.ToLowerInvariant()));
     }
 
-    private static string SolveChallenge(string prompt)
+    private static string SolveChallenge(CaptchaChallengeDto challenge)
     {
-        Match arithmetic = Regex.Match(prompt, @"what is (\d+) \+ (\d+)\?");
+        Match arithmetic = Regex.Match(challenge.Content, @"^(\d+) \+ (\d+)$");
         if (arithmetic.Success)
         {
             int a = int.Parse(arithmetic.Groups[1].Value);
@@ -87,10 +82,7 @@ public class CaptchaServiceTests
             return (a + b).ToString();
         }
 
-        Match code = Regex.Match(prompt, @"exactly: (\w+)");
-        if (code.Success)
-            return code.Groups[1].Value;
-
-        throw new InvalidOperationException($"Unrecognized captcha prompt format: {prompt}");
+        // Code challenges: the content is the answer itself.
+        return challenge.Content;
     }
 }

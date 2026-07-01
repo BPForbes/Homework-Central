@@ -17,12 +17,12 @@ public sealed class CaptchaService(IMemoryCache cache) : ICaptchaService
     public CaptchaChallengeDto CreateChallenge()
     {
         string challengeId = Guid.NewGuid().ToString("N");
-        (string prompt, string answer) = Random.Shared.Next(2) == 0
+        (string label, string content, string answer) = Random.Shared.Next(2) == 0
             ? BuildArithmeticChallenge()
             : BuildCodeChallenge();
 
         cache.Set(CacheKey(challengeId), answer, ChallengeLifetime);
-        return new CaptchaChallengeDto(challengeId, prompt);
+        return new CaptchaChallengeDto(challengeId, label, content);
     }
 
     public bool Validate(string? challengeId, string? answer)
@@ -38,21 +38,21 @@ public sealed class CaptchaService(IMemoryCache cache) : ICaptchaService
         return string.Equals(expected.Trim(), answer.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static (string Prompt, string Answer) BuildArithmeticChallenge()
+    private static (string Label, string Content, string Answer) BuildArithmeticChallenge()
     {
         int a = Random.Shared.Next(2, 10);
         int b = Random.Shared.Next(2, 10);
-        return ($"To prove you're human, what is {a} + {b}?", (a + b).ToString());
+        return ("To prove you're human, solve:", $"{a} + {b}", (a + b).ToString());
     }
 
-    private static (string Prompt, string Answer) BuildCodeChallenge()
+    private static (string Label, string Content, string Answer) BuildCodeChallenge()
     {
         char[] code = new char[6];
         for (int i = 0; i < code.Length; i++)
             code[i] = CodeAlphabet[Random.Shared.Next(CodeAlphabet.Length)];
 
         string codeText = new(code);
-        return ($"Type this verification code exactly: {codeText}", codeText);
+        return ("Retype this verification code exactly:", codeText, codeText);
     }
 
     private static string CacheKey(string challengeId) => $"captcha:{challengeId}";

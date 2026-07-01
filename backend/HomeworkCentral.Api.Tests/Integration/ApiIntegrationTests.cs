@@ -89,7 +89,7 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
       Username = $"civerified{suffix}",
       Password = "Password123!",
       CaptchaChallengeId = challenge!.ChallengeId,
-      CaptchaAnswer = SolveChallenge(challenge.Prompt),
+      CaptchaAnswer = SolveChallenge(challenge),
     };
 
     HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
@@ -101,10 +101,10 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.DoesNotContain("Guest", registered.User.Roles);
   }
 
-  private static string SolveChallenge(string prompt)
+  private static string SolveChallenge(CaptchaChallengeDto challenge)
   {
     System.Text.RegularExpressions.Match arithmetic =
-      System.Text.RegularExpressions.Regex.Match(prompt, @"what is (\d+) \+ (\d+)\?");
+      System.Text.RegularExpressions.Regex.Match(challenge.Content, @"^(\d+) \+ (\d+)$");
     if (arithmetic.Success)
     {
       int a = int.Parse(arithmetic.Groups[1].Value);
@@ -112,12 +112,8 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
       return (a + b).ToString();
     }
 
-    System.Text.RegularExpressions.Match code =
-      System.Text.RegularExpressions.Regex.Match(prompt, @"exactly: (\w+)");
-    if (code.Success)
-      return code.Groups[1].Value;
-
-    throw new InvalidOperationException($"Unrecognized captcha prompt format: {prompt}");
+    // Code challenges: the content is the answer itself.
+    return challenge.Content;
   }
 
   private static string? ReadAccountClassClaim(string accessToken)

@@ -130,7 +130,8 @@ export function Register() {
             <label htmlFor="captcha-answer">Verify you're human (optional — get Verified status immediately)</label>
             <Captcha
               inputId="captcha-answer"
-              prompt={captcha.prompt}
+              label={captcha.label}
+              content={captcha.content}
               answer={captcha.answer}
               onAnswerChange={captcha.setAnswer}
               onRefresh={captcha.refresh}

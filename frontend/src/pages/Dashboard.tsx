@@ -60,7 +60,8 @@ export function Dashboard() {
             <p>Solve the captcha below to become a Verified User.</p>
             <form onSubmit={handleVerify}>
               <Captcha
-                prompt={captcha.prompt}
+                label={captcha.label}
+                content={captcha.content}
                 answer={captcha.answer}
                 onAnswerChange={captcha.setAnswer}
                 onRefresh={captcha.refresh}
