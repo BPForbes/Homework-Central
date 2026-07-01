@@ -54,7 +54,7 @@ export function ChatMessageList({ messages, typingUsers, loading, currentUserId 
         )
       })}
 
-      {typingUsers.length > 0 && <TypingIndicator />}
+      {typingUsers.length > 0 && <TypingIndicator typingUsers={typingUsers} />}
 
       <div ref={bottomRef} />
     </div>

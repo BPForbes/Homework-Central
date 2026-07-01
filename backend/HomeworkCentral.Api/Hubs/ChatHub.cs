@@ -21,8 +21,15 @@ public sealed class ChatHub(
         await Groups.AddToGroupAsync(Context.ConnectionId, ChatRoomGroupKey.Build(Context.User!, roomId));
     }
 
-    public Task LeaveRoom(string roomId) =>
-        Groups.RemoveFromGroupAsync(Context.ConnectionId, ChatRoomGroupKey.Build(Context.User!, roomId));
+    public async Task LeaveRoom(string roomId)
+    {
+        string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
+        (string GroupKey, Guid UserId)? cleared = typingTracker.ClearTypingForConnection(Context.ConnectionId);
+        if (cleared is not null && cleared.Value.GroupKey == groupKey)
+            await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupKey);
+    }
 
     public async Task NotifyTyping(string roomId)
     {
@@ -32,7 +39,7 @@ public sealed class ChatHub(
 
         string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
         string username = Context.User?.FindFirst("username")?.Value ?? "User";
-        typingTracker.SetTyping(groupKey, userId, username);
+        typingTracker.SetTyping(Context.ConnectionId, groupKey, userId, username);
 
         ChatTypingDto payload = new() { UserId = userId, Username = username };
         await Clients.OthersInGroup(groupKey).SendAsync("UserTyping", payload);
@@ -42,12 +49,22 @@ public sealed class ChatHub(
     {
         Guid userId = GetUserId();
         string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
-        typingTracker.ClearTyping(groupKey, userId);
+        typingTracker.ClearTyping(Context.ConnectionId, groupKey, userId);
         await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", userId);
     }
 
-    public override Task OnDisconnectedAsync(Exception? exception) =>
-        base.OnDisconnectedAsync(exception);
+    // Typing state has no server-side timeout (the indicator is meant to persist for as long
+    // as the client reports text in the composer), so an abrupt disconnect must explicitly
+    // clear it — otherwise a dropped connection would leave a "stuck" typing indicator for
+    // everyone else in the room.
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        (string GroupKey, Guid UserId)? cleared = typingTracker.ClearTypingForConnection(Context.ConnectionId);
+        if (cleared is not null)
+            await Clients.OthersInGroup(cleared.Value.GroupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
+
+        await base.OnDisconnectedAsync(exception);
+    }
 
     private Guid GetUserId()
     {

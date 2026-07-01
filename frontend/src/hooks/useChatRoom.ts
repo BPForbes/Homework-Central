@@ -3,8 +3,6 @@ import * as signalR from '@microsoft/signalr'
 import { chatApi } from '../api/chatApi'
 import type { ChatMessage, ChatTypingUser } from '../types/chat'
 
-const TYPING_IDLE_MS = 2500
-
 export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -14,7 +12,6 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [connected, setConnected] = useState(false)
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
-  const idleTimerRef = useRef<number | null>(null)
   const isTypingRef = useRef(false)
 
   const addMessage = useCallback((message: ChatMessage) => {
@@ -94,6 +91,13 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     void start()
 
     return () => {
+      // The indicator has no server-side timeout, so an unmount/room-switch while still
+      // flagged as typing must explicitly notify — otherwise it would appear "stuck" for
+      // everyone else in the room (the hub also clears it on disconnect as a safety net).
+      if (isTypingRef.current) {
+        isTypingRef.current = false
+        void connection.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
+      }
       void connection.invoke('LeaveRoom', roomId).catch(() => undefined)
       void connection.stop()
       connectionRef.current = null
@@ -103,32 +107,21 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   }, [roomId, currentUserId, addMessage])
 
   const stopTyping = useCallback(() => {
-    if (idleTimerRef.current !== null) {
-      window.clearTimeout(idleTimerRef.current)
-      idleTimerRef.current = null
-    }
     if (isTypingRef.current) {
       isTypingRef.current = false
       void connectionRef.current?.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
     }
   }, [roomId])
 
-  // Notify immediately on the first keystroke of a burst, then keep pushing the idle
-  // timeout back on every subsequent keystroke. A pure debounce (send only once typing
-  // pauses) would mean continuous typing never fires the event at all.
+  // The indicator is meant to persist for as long as the composer has text in it, so this
+  // only needs to notify once per typing burst (no idle timeout) — stopTyping is called
+  // explicitly whenever the composer is cleared, blurred with no text, or the message is sent.
   const notifyTyping = useCallback(() => {
     if (!isTypingRef.current) {
       isTypingRef.current = true
       void connectionRef.current?.invoke('NotifyTyping', roomId).catch(() => undefined)
     }
-
-    if (idleTimerRef.current !== null)
-      window.clearTimeout(idleTimerRef.current)
-
-    idleTimerRef.current = window.setTimeout(() => {
-      stopTyping()
-    }, TYPING_IDLE_MS)
-  }, [roomId, stopTyping])
+  }, [roomId])
 
   const sendMessage = useCallback(async (content: string) => {
     const trimmed = content.trim()

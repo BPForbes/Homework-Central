@@ -50,6 +50,14 @@ export function ChatComposer({
       onStopTyping()
   }
 
+  // The typing indicator should persist for as long as there's text in the composer, even if
+  // it loses focus (e.g. the user switches tabs to check something else), so blur only clears
+  // it when the composer is actually empty.
+  function handleBlur() {
+    if (!draft.trim())
+      onStopTyping()
+  }
+
   return (
     <form className="chat-composer" onSubmit={handleSubmit}>
       <textarea
@@ -58,7 +66,7 @@ export function ChatComposer({
         value={draft}
         onChange={(event) => handleChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        onBlur={onStopTyping}
+        onBlur={handleBlur}
         placeholder="Message"
         rows={1}
         disabled={disabled || sending}
