@@ -12,6 +12,7 @@ using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -155,8 +156,13 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
 
-// Health probe for Docker / load balancers
-app.MapGet("/healthz", (IDevPersonaProvisioner? personaProvisioner) =>
+// Health probe for Docker / load balancers.
+// [FromServices] is required here: IDevPersonaProvisioner is only registered when the dev
+// bypass is enabled, so without an explicit binding source ASP.NET Core cannot decide
+// whether this optional parameter is a DI service or a request body at endpoint-metadata
+// build time, and throws for every endpoint (not just this one) the first time any request
+// is routed — e.g. in production or any environment where the dev bypass is off.
+app.MapGet("/healthz", ([FromServices] IDevPersonaProvisioner? personaProvisioner) =>
 {
     if (personaProvisioner is null)
         return Results.Ok(new { status = "healthy" });
