@@ -1,8 +1,8 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faLocationArrow } from '@fortawesome/free-solid-svg-icons'
-import type { TileChallenge } from '../../types/captcha'
+import type { TileChallenge } from '../../../types/captcha'
 
-interface TileRotatePuzzleProps {
+interface ArrowMatchPuzzleProps {
   tiles: TileChallenge[]
   rotationClicks: number[]
   onRotate: (index: number, clicks: number) => void
@@ -15,7 +15,7 @@ const DEGREES_PER_STEP = 360 / ROTATION_POSITIONS
 /** Each tile shows a faint, non-interactive "target" arrow at a fixed orientation behind a solid
  * arrow the player rotates by clicking. The target varies per tile and per challenge, so the
  * puzzle can't be solved by pattern-memorizing a single fixed direction. */
-export function TileRotatePuzzle({ tiles, rotationClicks, onRotate, disabled }: TileRotatePuzzleProps) {
+export function ArrowMatchPuzzle({ tiles, rotationClicks, onRotate, disabled }: ArrowMatchPuzzleProps) {
   const steps = tiles.map((tile, i) => (tile.initialRotationSteps + (rotationClicks[i] ?? 0)) % ROTATION_POSITIONS)
   const allAligned = tiles.every((tile, i) => steps[i] === tile.targetRotationSteps)
 

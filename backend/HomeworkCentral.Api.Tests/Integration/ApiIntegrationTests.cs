@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
+using HomeworkCentral.Api.Captcha.Maze;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;

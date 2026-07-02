@@ -1,4 +1,4 @@
-namespace HomeworkCentral.Api.Captcha;
+namespace HomeworkCentral.Api.Captcha.Maze;
 
 /// <summary>Bit values in <see cref="MazeDto.CellWalls"/>: which side of a cell has an open passage.</summary>
 internal static class MazeDirections
@@ -10,16 +10,19 @@ internal static class MazeDirections
 }
 
 /// <summary>
-/// Builds maze challenges on a <c>width</c> x <c>height</c> grid. Most of the time this produces a
-/// genuinely solvable maze: a pool of independently generated candidates, each with a randomized
-/// start/end cell pair, scored by how many nodes an A* search has to expand to solve it, keeping
-/// the most complex candidate. The rest of the time it deliberately produces two maze regions with
-/// no passage between them at all — start and end land in different regions, so there is no path,
-/// and correctly recognizing that (rather than hunting forever for a route that doesn't exist) is
-/// itself the intended solve; see <see cref="CaptchaSubmissionDto.MazeUnsolvableClaim"/>.
+/// The maze puzzle module: builds maze challenges on a <c>width</c> x <c>height</c> grid and
+/// validates submissions against them. Most of the time this produces a genuinely solvable maze: a
+/// pool of independently generated candidates, each with a randomized start/end cell pair, scored
+/// by how many nodes an A* search has to expand to solve it, keeping the most complex candidate.
+/// The rest of the time it deliberately produces two maze regions with no passage between them at
+/// all — start and end land in different regions, so there is no path, and correctly recognizing
+/// that (rather than hunting forever for a route that doesn't exist) is itself the intended solve;
+/// see <see cref="HomeworkCentral.Api.Captcha.CaptchaSubmissionDto.MazeUnsolvableClaim"/>.
 /// </summary>
 internal static class MazeGenerator
 {
+    public const string TypeName = "maze";
+
     private const int PoolSize = 5;
     private const double UnsolvableProbability = 0.3;
 
@@ -30,6 +33,33 @@ internal static class MazeGenerator
         return Random.Shared.NextDouble() < UnsolvableProbability
             ? GenerateUnsolvable(width, height, minDistance)
             : GenerateMostComplexSolvable(width, height, minDistance);
+    }
+
+    /// <summary>Requires the puzzle-correctness gate for a maze submission: either a traced path
+    /// that actually connects start to end, or (when <paramref name="unsolvableClaim"/> is set) a
+    /// correct assertion that no such path exists — see <see cref="HasPath"/>.</summary>
+    public static bool Validate(MazeDto maze, List<int>? path, bool unsolvableClaim)
+    {
+        // A maze can be deliberately built as two disconnected regions; the player correctly
+        // recognizing that — instead of tracing a path that can't exist — is itself a valid solve.
+        // This takes precedence over any path also present in the submission.
+        if (unsolvableClaim)
+            return !HasPath(maze);
+
+        int maxPathLength = maze.Width * maze.Height * 4;
+        if (path is null || path.Count < 2 || path.Count > maxPathLength)
+            return false;
+
+        if (path[0] != maze.StartIndex || path[^1] != maze.EndIndex)
+            return false;
+
+        for (int i = 1; i < path.Count; i++)
+        {
+            if (!AreConnected(maze, path[i - 1], path[i]))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>True if any path connects <see cref="MazeDto.StartIndex"/> to
@@ -62,6 +92,28 @@ internal static class MazeGenerator
         }
 
         return false;
+    }
+
+    private static bool AreConnected(MazeDto maze, int from, int to)
+    {
+        if (from < 0 || from >= maze.CellWalls.Length || to < 0 || to >= maze.CellWalls.Length)
+            return false;
+
+        int fromX = from % maze.Width;
+        int fromY = from / maze.Width;
+        int toX = to % maze.Width;
+        int toY = to / maze.Width;
+        int dx = toX - fromX;
+        int dy = toY - fromY;
+
+        return (dx, dy) switch
+        {
+            (0, -1) => (maze.CellWalls[from] & MazeDirections.North) != 0,
+            (1, 0) => (maze.CellWalls[from] & MazeDirections.East) != 0,
+            (0, 1) => (maze.CellWalls[from] & MazeDirections.South) != 0,
+            (-1, 0) => (maze.CellWalls[from] & MazeDirections.West) != 0,
+            _ => false,
+        };
     }
 
     /// <summary>Builds <see cref="PoolSize"/> independent perfect mazes, each with its own

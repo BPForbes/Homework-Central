@@ -1,3 +1,6 @@
+using HomeworkCentral.Api.Captcha.ArrowMatch;
+using HomeworkCentral.Api.Captcha.Maze;
+using HomeworkCentral.Api.Captcha.Text;
 using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.Security;
 using Microsoft.AspNetCore.Http;
@@ -7,15 +10,13 @@ using Microsoft.Extensions.Logging;
 namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>
-/// Randomly issues one of three challenge kinds — retype-a-code / solve-an-expression (text), a
-/// generated maze (a random size, most often solvable but sometimes deliberately not — see
-/// <see cref="MazeGenerator"/>), or a tile-rotation puzzle — and validates submissions against two
-/// gates: the puzzle must actually be solved correctly (a hard requirement — there is no score high
-/// enough to substitute for it), AND <see cref="IRiskEngine"/> must judge the submission's
-/// behavioral telemetry, IP consistency, and identity track record as clearing a dynamically
-/// computed threshold. Unlike puzzle correctness, the risk gate is not a single fixed cutoff for
-/// everyone — see <see cref="IRiskEngine"/> for how the required score moves per identity and per
-/// attempt.
+/// Thin coordinator over three independent puzzle modules — <see cref="TextChallenge"/>,
+/// <see cref="MazeGenerator"/>, and <see cref="TileRotatePuzzleGenerator"/>, each in its own
+/// namespace and owning its own generation and validation logic. This class only picks a random
+/// puzzle type, caches/looks up the server-side answer, and (once the puzzle module confirms the
+/// answer itself is correct — a hard requirement, no score substitutes for it) asks
+/// <see cref="IRiskEngine"/> to judge the submission's behavioral telemetry, IP consistency, and
+/// identity track record against a dynamically computed threshold.
 /// </summary>
 public sealed class CaptchaService(
     IMemoryCache cache,
@@ -24,10 +25,6 @@ public sealed class CaptchaService(
     ILogger<CaptchaService> logger) : ICaptchaService
 {
     private static readonly TimeSpan ChallengeLifetime = TimeSpan.FromMinutes(10);
-
-    // Excludes visually ambiguous characters (0/O, 1/I/L) since the code is typed back by hand.
-    private const string CodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
     private static readonly int[] MazeSizes = [7, 9, 11];
 
     public CaptchaChallengeDto CreateChallenge()
@@ -39,7 +36,7 @@ public sealed class CaptchaService(
         {
             0 => CreateTextChallenge(challengeId, issuerIp),
             1 => CreateMazeChallenge(challengeId, issuerIp),
-            _ => CreateTileRotateChallenge(challengeId, issuerIp),
+            _ => CreateArrowMatchChallenge(challengeId, issuerIp),
         };
     }
 
@@ -62,9 +59,9 @@ public sealed class CaptchaService(
 
         bool solved = record.Type switch
         {
-            CaptchaChallengeTypes.Text => ValidateText(record.TextAnswer, submission.Answer),
-            CaptchaChallengeTypes.Maze => ValidateMaze(record.Maze!, submission.MazePath, submission.MazeUnsolvableClaim),
-            CaptchaChallengeTypes.TileRotate => ValidateTileRotate(record.TileRotate!, submission.TileRotationClicks),
+            TextChallenge.TypeName => TextChallenge.Validate(record.TextAnswer, submission.Answer),
+            MazeGenerator.TypeName => MazeGenerator.Validate(record.Maze!, submission.MazePath, submission.MazeUnsolvableClaim),
+            TileRotatePuzzleGenerator.TypeName => TileRotatePuzzleGenerator.Validate(record.TileRotate!, submission.TileRotationClicks),
             _ => false,
         };
 
@@ -94,35 +91,35 @@ public sealed class CaptchaService(
 
     private CaptchaChallengeDto CreateTextChallenge(string challengeId, string? issuerIp)
     {
-        (string label, string content, string answer) = Random.Shared.Next(2) == 0
-            ? BuildArithmeticChallenge()
-            : BuildCodeChallenge();
+        (string label, string content, string answer) = TextChallenge.Generate();
 
         Store(challengeId, ChallengeRecord.ForText(answer, issuerIp));
-        return new CaptchaChallengeDto(challengeId, CaptchaChallengeTypes.Text, label, content, null, null);
+        return new CaptchaChallengeDto(challengeId, TextChallenge.TypeName, label, content, null, null);
     }
 
     private CaptchaChallengeDto CreateMazeChallenge(string challengeId, string? issuerIp)
     {
         int size = MazeSizes[Random.Shared.Next(MazeSizes.Length)];
         MazeDto maze = MazeGenerator.Generate(size, size);
+
         Store(challengeId, ChallengeRecord.ForMaze(maze, issuerIp));
         return new CaptchaChallengeDto(
             challengeId,
-            CaptchaChallengeTypes.Maze,
+            MazeGenerator.TypeName,
             "Guide the marker from A to B — or, if there's truly no way through, say so.",
             null,
             maze,
             null);
     }
 
-    private CaptchaChallengeDto CreateTileRotateChallenge(string challengeId, string? issuerIp)
+    private CaptchaChallengeDto CreateArrowMatchChallenge(string challengeId, string? issuerIp)
     {
         TileRotateDto tileRotate = TileRotatePuzzleGenerator.Generate();
+
         Store(challengeId, ChallengeRecord.ForTileRotate(tileRotate, issuerIp));
         return new CaptchaChallengeDto(
             challengeId,
-            CaptchaChallengeTypes.TileRotate,
+            TileRotatePuzzleGenerator.TypeName,
             "Rotate each arrow to match its faint target.",
             null,
             null,
@@ -134,107 +131,16 @@ public sealed class CaptchaService(
 
     private string? ResolveClientIp() => httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
-    private static bool ValidateText(string? expected, string? answer)
-    {
-        if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(answer))
-            return false;
-
-        return string.Equals(expected.Trim(), answer.Trim(), StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool ValidateMaze(MazeDto maze, List<int>? path, bool unsolvableClaim)
-    {
-        // A maze can be deliberately built as two disconnected regions (see MazeGenerator); the
-        // player correctly recognizing that — instead of tracing a path that can't exist — is
-        // itself a valid solve. This takes precedence over any path also present in the submission.
-        if (unsolvableClaim)
-            return !MazeGenerator.HasPath(maze);
-
-        int maxPathLength = maze.Width * maze.Height * 4;
-        if (path is null || path.Count < 2 || path.Count > maxPathLength)
-            return false;
-
-        if (path[0] != maze.StartIndex || path[^1] != maze.EndIndex)
-            return false;
-
-        for (int i = 1; i < path.Count; i++)
-        {
-            if (!AreConnected(maze, path[i - 1], path[i]))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool AreConnected(MazeDto maze, int from, int to)
-    {
-        if (from < 0 || from >= maze.CellWalls.Length || to < 0 || to >= maze.CellWalls.Length)
-            return false;
-
-        int fromX = from % maze.Width;
-        int fromY = from / maze.Width;
-        int toX = to % maze.Width;
-        int toY = to / maze.Width;
-        int dx = toX - fromX;
-        int dy = toY - fromY;
-
-        return (dx, dy) switch
-        {
-            (0, -1) => (maze.CellWalls[from] & MazeDirections.North) != 0,
-            (1, 0) => (maze.CellWalls[from] & MazeDirections.East) != 0,
-            (0, 1) => (maze.CellWalls[from] & MazeDirections.South) != 0,
-            (-1, 0) => (maze.CellWalls[from] & MazeDirections.West) != 0,
-            _ => false,
-        };
-    }
-
-    private static bool ValidateTileRotate(TileRotateDto tileRotate, List<int>? clicks)
-    {
-        if (clicks is null || clicks.Count != tileRotate.Tiles.Length)
-            return false;
-
-        for (int i = 0; i < clicks.Count; i++)
-        {
-            // Sanity cap: no legitimate solve needs more than a couple of full laps around the
-            // 8-position wheel per tile.
-            if (clicks[i] < 0 || clicks[i] > 24)
-                return false;
-
-            int finalSteps = (tileRotate.Tiles[i].InitialRotationSteps + clicks[i]) % 8;
-            if (finalSteps != tileRotate.Tiles[i].TargetRotationSteps)
-                return false;
-        }
-
-        return true;
-    }
-
-    private static (string Label, string Content, string Answer) BuildArithmeticChallenge()
-    {
-        int a = Random.Shared.Next(2, 10);
-        int b = Random.Shared.Next(2, 10);
-        return ("To prove you're human, solve:", $"{a} + {b}", (a + b).ToString());
-    }
-
-    private static (string Label, string Content, string Answer) BuildCodeChallenge()
-    {
-        char[] code = new char[6];
-        for (int i = 0; i < code.Length; i++)
-            code[i] = CodeAlphabet[Random.Shared.Next(CodeAlphabet.Length)];
-
-        string codeText = new(code);
-        return ("Retype this verification code exactly:", codeText, codeText);
-    }
-
     private static string CacheKey(string challengeId) => $"captcha:{challengeId}";
 
     /// <summary>Server-side-only validation context cached per challenge; never sent to the client.</summary>
     private sealed record ChallengeRecord(string Type, string? TextAnswer, MazeDto? Maze, TileRotateDto? TileRotate, string? IssuerIp)
     {
         public static ChallengeRecord ForText(string answer, string? issuerIp) =>
-            new(CaptchaChallengeTypes.Text, answer, null, null, issuerIp);
+            new(TextChallenge.TypeName, answer, null, null, issuerIp);
         public static ChallengeRecord ForMaze(MazeDto maze, string? issuerIp) =>
-            new(CaptchaChallengeTypes.Maze, null, maze, null, issuerIp);
+            new(MazeGenerator.TypeName, null, maze, null, issuerIp);
         public static ChallengeRecord ForTileRotate(TileRotateDto tileRotate, string? issuerIp) =>
-            new(CaptchaChallengeTypes.TileRotate, null, null, tileRotate, issuerIp);
+            new(TileRotatePuzzleGenerator.TypeName, null, null, tileRotate, issuerIp);
     }
 }

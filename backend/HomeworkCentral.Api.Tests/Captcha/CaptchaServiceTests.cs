@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using HomeworkCentral.Api.Captcha;
+using HomeworkCentral.Api.Captcha.ArrowMatch;
+using HomeworkCentral.Api.Captcha.Maze;
 using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.ScrapingDetection;
 using Microsoft.AspNetCore.Http;

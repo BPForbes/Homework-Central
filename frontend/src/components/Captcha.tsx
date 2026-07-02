@@ -2,9 +2,9 @@ import { useRef } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRotate } from '@fortawesome/free-solid-svg-icons'
 import type { CaptchaHookState } from '../hooks/useCaptcha'
-import { TextChallenge } from './captcha/TextChallenge'
-import { MazePuzzle } from './captcha/MazePuzzle'
-import { TileRotatePuzzle } from './captcha/TileRotatePuzzle'
+import { TextChallenge } from './captcha/text/TextChallenge'
+import { MazePuzzle } from './captcha/maze/MazePuzzle'
+import { ArrowMatchPuzzle } from './captcha/arrowMatch/ArrowMatchPuzzle'
 
 interface CaptchaProps {
   captcha: CaptchaHookState
@@ -13,9 +13,10 @@ interface CaptchaProps {
 }
 
 /**
- * Reusable captcha widget — same module backs signup and the dashboard verify button. Dispatches
- * to a text/maze/tile-rotate puzzle based on the issued challenge type, and tracks mouse movement
- * across the whole widget for the server-side behavioral score (see useCaptcha).
+ * Reusable captcha widget — same component backs signup and the dashboard verify button.
+ * Dispatches to the text, maze, or arrow-match puzzle module based on the issued challenge type
+ * (each under its own folder in captcha/), and tracks mouse movement across the whole widget for
+ * the server-side behavioral score (see useCaptcha).
  */
 export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
   const { challenge, loading, recordMouseMove } = captcha
@@ -68,7 +69,7 @@ export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
       )}
 
       {challenge?.type === 'tileRotate' && challenge.tileRotate && (
-        <TileRotatePuzzle
+        <ArrowMatchPuzzle
           tiles={challenge.tileRotate.tiles}
           rotationClicks={captcha.tileRotationClicks}
           onRotate={captcha.rotateTile}

@@ -1,115 +1,54 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { captchaApi } from '../api/captchaApi'
-import type { CaptchaChallenge, CaptchaSubmission, MouseSample } from '../types/captcha'
-
-const MAX_MOUSE_SAMPLES = 400
-const MOUSE_SAMPLE_INTERVAL_MS = 60
+import { useArrowMatchAnswer } from './captcha/useArrowMatchAnswer'
+import { useCaptchaTelemetry } from './captcha/useCaptchaTelemetry'
+import { useMazeAnswer } from './captcha/useMazeAnswer'
+import { useTextAnswer } from './captcha/useTextAnswer'
+import type { CaptchaChallenge, CaptchaSubmission } from '../types/captcha'
 
 /**
- * Owns a captcha challenge's full lifecycle: fetching, puzzle-specific answer state (text/maze/
- * tile-rotate), and the raw behavioral telemetry (mouse movement, keystroke timing, interaction
- * count, duration, navigator.webdriver) collected while it's being solved. The score itself is
- * never computed here — only collected and sent for the server to score, since a client-computed
- * score could simply be fabricated by a bot.
+ * Owns a captcha challenge's full lifecycle (fetching, refreshing) and composes the shared
+ * telemetry hook with each puzzle module's own answer-state hook — text, maze, and arrow-match —
+ * so no single hook owns all three puzzle types' state directly. The puzzle modules live under
+ * captcha/ and components/captcha/*; this hook only wires them together and knows how to build
+ * the final submission for whichever challenge type is currently active.
  */
 export function useCaptcha() {
   const [challenge, setChallenge] = useState<CaptchaChallenge | null>(null)
   const [loading, setLoading] = useState(true)
-  const [answer, setAnswer] = useState('')
-  const [mazePath, setMazePath] = useState<number[]>([])
-  const [mazeUnsolvableClaim, setMazeUnsolvableClaim] = useState(false)
-  const [tileRotationClicks, setTileRotationClicks] = useState<number[]>([])
 
-  const startedAtRef = useRef(0)
-  const mouseSamplesRef = useRef<MouseSample[]>([])
-  const lastSampleAtRef = useRef(0)
-  const keyTimestampsRef = useRef<number[]>([])
-  const interactionCountRef = useRef(0)
-  const webdriverFlagRef = useRef(false)
-
-  const resetTelemetry = useCallback(() => {
-    startedAtRef.current = performance.now()
-    mouseSamplesRef.current = []
-    lastSampleAtRef.current = 0
-    keyTimestampsRef.current = []
-    interactionCountRef.current = 0
-    webdriverFlagRef.current =
-      typeof navigator !== 'undefined' && Boolean((navigator as { webdriver?: boolean }).webdriver)
-  }, [])
+  const { reset: resetTelemetry, recordMouseMove, recordKeydown, recordInteraction, buildBehavior } = useCaptchaTelemetry()
+  const { answer, setAnswer, reset: resetText } = useTextAnswer()
+  const { mazePath, mazeUnsolvableClaim, addMazeStep, toggleMazeUnsolvableClaim, reset: resetMaze } = useMazeAnswer(recordInteraction)
+  const { tileRotationClicks, rotateTile, reset: resetArrowMatch } = useArrowMatchAnswer(recordInteraction)
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    setAnswer('')
-    setMazePath([])
-    setMazeUnsolvableClaim(false)
-    setTileRotationClicks([])
+    resetText()
+    resetMaze()
+    resetArrowMatch()
     resetTelemetry()
     try {
       const { data } = await captchaApi.getChallenge()
       setChallenge(data)
       if (data.type === 'maze' && data.maze) {
-        setMazePath([data.maze.startIndex])
+        resetMaze(data.maze.startIndex)
       } else if (data.type === 'tileRotate' && data.tileRotate) {
-        setTileRotationClicks(new Array(data.tileRotate.tiles.length).fill(0))
+        resetArrowMatch(data.tileRotate.tiles.length)
       }
     } catch {
       setChallenge(null)
     } finally {
       setLoading(false)
     }
-  }, [resetTelemetry])
+  }, [resetText, resetMaze, resetArrowMatch, resetTelemetry])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  const recordMouseMove = useCallback((x: number, y: number) => {
-    const now = performance.now()
-    if (now - lastSampleAtRef.current < MOUSE_SAMPLE_INTERVAL_MS) return
-    lastSampleAtRef.current = now
-    if (mouseSamplesRef.current.length >= MAX_MOUSE_SAMPLES) return
-    mouseSamplesRef.current.push({ x, y, tMs: Math.round(now - startedAtRef.current) })
-  }, [])
-
-  const recordKeydown = useCallback(() => {
-    keyTimestampsRef.current.push(performance.now())
-  }, [])
-
-  const recordInteraction = useCallback(() => {
-    interactionCountRef.current += 1
-  }, [])
-
-  const addMazeStep = useCallback(
-    (cellIndex: number) => {
-      setMazePath((prev) => [...prev, cellIndex])
-      setMazeUnsolvableClaim(false)
-      recordInteraction()
-    },
-    [recordInteraction]
-  )
-
-  const toggleMazeUnsolvableClaim = useCallback(() => {
-    setMazeUnsolvableClaim((prev) => !prev)
-    recordInteraction()
-  }, [recordInteraction])
-
-  const rotateTile = useCallback(
-    (index: number, clicks: number) => {
-      setTileRotationClicks((prev) => {
-        const next = [...prev]
-        next[index] = clicks
-        return next
-      })
-      recordInteraction()
-    },
-    [recordInteraction]
-  )
-
   const buildSubmission = useCallback((): CaptchaSubmission | null => {
     if (!challenge) return null
-
-    const timestamps = keyTimestampsRef.current
-    const keyIntervalsMs = timestamps.slice(1).map((t, i) => Math.round(t - timestamps[i]))
 
     return {
       challengeId: challenge.challengeId,
@@ -117,15 +56,9 @@ export function useCaptcha() {
       mazePath: challenge.type === 'maze' && !mazeUnsolvableClaim ? mazePath : undefined,
       mazeUnsolvableClaim: challenge.type === 'maze' ? mazeUnsolvableClaim : undefined,
       tileRotationClicks: challenge.type === 'tileRotate' ? tileRotationClicks : undefined,
-      behavior: {
-        mouseSamples: mouseSamplesRef.current,
-        keyIntervalsMs,
-        totalDurationMs: Math.round(performance.now() - startedAtRef.current),
-        webdriverFlag: webdriverFlagRef.current,
-        interactionCount: interactionCountRef.current,
-      },
+      behavior: buildBehavior(),
     }
-  }, [challenge, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks])
+  }, [challenge, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks, buildBehavior])
 
   return {
     challenge,

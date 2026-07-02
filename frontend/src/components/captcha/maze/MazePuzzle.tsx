@@ -1,4 +1,4 @@
-import type { MazeChallenge } from '../../types/captcha'
+import type { MazeChallenge } from '../../../types/captcha'
 
 interface MazePuzzleProps {
   maze: MazeChallenge

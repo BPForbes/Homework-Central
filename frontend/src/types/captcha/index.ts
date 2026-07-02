@@ -1,25 +1,10 @@
+import type { MazeChallenge } from './maze'
+import type { TileRotateChallenge } from './arrowMatch'
+
+export type { MazeChallenge } from './maze'
+export type { TileChallenge, TileRotateChallenge } from './arrowMatch'
+
 export type CaptchaChallengeType = 'text' | 'maze' | 'tileRotate'
-
-export interface MazeChallenge {
-  width: number
-  height: number
-  /** Bitmask per cell: 1=North, 2=East, 4=South, 8=West open passage. Row-major indices. */
-  cellWalls: number[]
-  startIndex: number
-  endIndex: number
-}
-
-export interface TileChallenge {
-  /** 0–7 — 45° steps, the tile's starting orientation. */
-  initialRotationSteps: number
-  /** 0–7 — 45° steps, the orientation this tile must be rotated to match. Not fixed to any one
-   * direction — varies per tile and per challenge. */
-  targetRotationSteps: number
-}
-
-export interface TileRotateChallenge {
-  tiles: TileChallenge[]
-}
 
 export interface CaptchaChallenge {
   challengeId: string
