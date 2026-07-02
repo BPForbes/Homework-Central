@@ -1,15 +1,21 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>
 /// Randomly issues one of three challenge kinds — retype-a-code / solve-an-expression (text), a
-/// generated maze, or a tile-rotation puzzle — and validates submissions against two independent
-/// gates: the puzzle must actually be solved correctly, AND the behavioral telemetry submitted
-/// alongside it must score at or above <see cref="PassingScore"/> from <see cref="IBehaviorScoringService"/>.
-/// Both gates are required; solving the puzzle alone is not enough.
+/// generated maze, or a tile-rotation puzzle — and validates submissions against three independent
+/// gates: the puzzle must actually be solved correctly, the submission must come from the same IP
+/// the challenge was issued to (so a challenge can't be farmed out to a separate solver), AND the
+/// behavioral telemetry submitted alongside it must score at or above <see cref="PassingScore"/>
+/// from <see cref="IBehaviorScoringService"/>. All three are required; solving the puzzle alone is
+/// not enough.
 /// </summary>
-public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService behaviorScoring) : ICaptchaService
+public sealed class CaptchaService(
+    IMemoryCache cache,
+    IBehaviorScoringService behaviorScoring,
+    IHttpContextAccessor httpContextAccessor) : ICaptchaService
 {
     private const double PassingScore = 0.75;
     private static readonly TimeSpan ChallengeLifetime = TimeSpan.FromMinutes(10);
@@ -24,12 +30,13 @@ public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService b
     public CaptchaChallengeDto CreateChallenge()
     {
         string challengeId = Guid.NewGuid().ToString("N");
+        string? issuerIp = ResolveClientIp();
 
         return Random.Shared.Next(3) switch
         {
-            0 => CreateTextChallenge(challengeId),
-            1 => CreateMazeChallenge(challengeId),
-            _ => CreateTileRotateChallenge(challengeId),
+            0 => CreateTextChallenge(challengeId, issuerIp),
+            1 => CreateMazeChallenge(challengeId, issuerIp),
+            _ => CreateTileRotateChallenge(challengeId, issuerIp),
         };
     }
 
@@ -43,6 +50,14 @@ public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService b
             return false;
 
         cache.Remove(cacheKey);
+
+        // A challenge solved from a different IP than the one it was issued to is a strong signal
+        // it was farmed out to a separate solver (human click-farm or automated), rather than
+        // solved by the same visitor who requested it. Only enforced when both IPs were actually
+        // captured, so this degrades gracefully instead of breaking whenever a client IP can't be
+        // resolved at all.
+        if (record.IssuerIp is not null && !string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal))
+            return false;
 
         bool solved = record.Type switch
         {
@@ -59,20 +74,20 @@ public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService b
         return score >= PassingScore;
     }
 
-    private CaptchaChallengeDto CreateTextChallenge(string challengeId)
+    private CaptchaChallengeDto CreateTextChallenge(string challengeId, string? issuerIp)
     {
         (string label, string content, string answer) = Random.Shared.Next(2) == 0
             ? BuildArithmeticChallenge()
             : BuildCodeChallenge();
 
-        Store(challengeId, ChallengeRecord.ForText(answer));
+        Store(challengeId, ChallengeRecord.ForText(answer, issuerIp));
         return new CaptchaChallengeDto(challengeId, CaptchaChallengeTypes.Text, label, content, null, null);
     }
 
-    private CaptchaChallengeDto CreateMazeChallenge(string challengeId)
+    private CaptchaChallengeDto CreateMazeChallenge(string challengeId, string? issuerIp)
     {
         MazeDto maze = MazeGenerator.Generate(MazeWidth, MazeHeight);
-        Store(challengeId, ChallengeRecord.ForMaze(maze));
+        Store(challengeId, ChallengeRecord.ForMaze(maze, issuerIp));
         return new CaptchaChallengeDto(
             challengeId,
             CaptchaChallengeTypes.Maze,
@@ -82,10 +97,10 @@ public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService b
             null);
     }
 
-    private CaptchaChallengeDto CreateTileRotateChallenge(string challengeId)
+    private CaptchaChallengeDto CreateTileRotateChallenge(string challengeId, string? issuerIp)
     {
         TileRotateDto tileRotate = TileRotatePuzzleGenerator.Generate();
-        Store(challengeId, ChallengeRecord.ForTileRotate(tileRotate));
+        Store(challengeId, ChallengeRecord.ForTileRotate(tileRotate, issuerIp));
         return new CaptchaChallengeDto(
             challengeId,
             CaptchaChallengeTypes.TileRotate,
@@ -97,6 +112,8 @@ public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService b
 
     private void Store(string challengeId, ChallengeRecord record) =>
         cache.Set(CacheKey(challengeId), record, ChallengeLifetime);
+
+    private string? ResolveClientIp() => httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
     private static bool ValidateText(string? expected, string? answer)
     {
@@ -184,10 +201,13 @@ public sealed class CaptchaService(IMemoryCache cache, IBehaviorScoringService b
     private static string CacheKey(string challengeId) => $"captcha:{challengeId}";
 
     /// <summary>Server-side-only validation context cached per challenge; never sent to the client.</summary>
-    private sealed record ChallengeRecord(string Type, string? TextAnswer, MazeDto? Maze, TileRotateDto? TileRotate)
+    private sealed record ChallengeRecord(string Type, string? TextAnswer, MazeDto? Maze, TileRotateDto? TileRotate, string? IssuerIp)
     {
-        public static ChallengeRecord ForText(string answer) => new(CaptchaChallengeTypes.Text, answer, null, null);
-        public static ChallengeRecord ForMaze(MazeDto maze) => new(CaptchaChallengeTypes.Maze, null, maze, null);
-        public static ChallengeRecord ForTileRotate(TileRotateDto tileRotate) => new(CaptchaChallengeTypes.TileRotate, null, null, tileRotate);
+        public static ChallengeRecord ForText(string answer, string? issuerIp) =>
+            new(CaptchaChallengeTypes.Text, answer, null, null, issuerIp);
+        public static ChallengeRecord ForMaze(MazeDto maze, string? issuerIp) =>
+            new(CaptchaChallengeTypes.Maze, null, maze, null, issuerIp);
+        public static ChallengeRecord ForTileRotate(TileRotateDto tileRotate, string? issuerIp) =>
+            new(CaptchaChallengeTypes.TileRotate, null, null, tileRotate, issuerIp);
     }
 }

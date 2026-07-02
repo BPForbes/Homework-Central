@@ -1,5 +1,7 @@
+using System.Net;
 using System.Text.RegularExpressions;
 using HomeworkCentral.Api.Captcha;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
@@ -7,7 +9,10 @@ namespace HomeworkCentral.Api.Tests.Captcha;
 
 public class CaptchaServiceTests
 {
-    private readonly CaptchaService _service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService());
+    // No HttpContext -> ResolveClientIp() returns null -> IP binding never triggers for these
+    // tests, matching pre-IP-binding behavior. IP binding itself is covered by its own tests below.
+    private readonly CaptchaService _service = new(
+        new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), new FakeHttpContextAccessor());
 
     [Fact]
     public void Text_challenge_with_correct_answer_and_human_like_behavior_passes()
@@ -191,6 +196,84 @@ public class CaptchaServiceTests
         };
 
         Assert.False(_service.Validate(submission));
+    }
+
+    [Fact]
+    public void Challenge_solved_from_the_same_ip_it_was_issued_to_passes()
+    {
+        FakeHttpContextAccessor accessor = new() { HttpContext = ContextWithIp("203.0.113.10") };
+        CaptchaService service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), accessor);
+
+        CaptchaChallengeDto challenge = service.CreateChallenge();
+        // Same accessor/context still assigned -> same resolved IP at verify time.
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
+
+        Assert.True(service.Validate(submission));
+    }
+
+    [Fact]
+    public void Challenge_solved_from_a_different_ip_than_it_was_issued_to_fails()
+    {
+        // A challenge fetched from one IP but solved/submitted from another looks like it was
+        // farmed out to a separate solver rather than answered by the same visitor who requested it.
+        FakeHttpContextAccessor accessor = new() { HttpContext = ContextWithIp("203.0.113.10") };
+        CaptchaService service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), accessor);
+
+        CaptchaChallengeDto challenge = service.CreateChallenge();
+        accessor.HttpContext = ContextWithIp("198.51.100.20");
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
+
+        Assert.False(service.Validate(submission));
+    }
+
+    [Fact]
+    public void Ip_binding_is_not_enforced_when_the_client_ip_cannot_be_resolved()
+    {
+        // No HttpContext at all (e.g. some hosting setups, or a test double) means no IP was
+        // captured at issue time, so the check degrades gracefully instead of blocking everyone.
+        FakeHttpContextAccessor accessor = new() { HttpContext = null };
+        CaptchaService service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), accessor);
+
+        CaptchaChallengeDto challenge = service.CreateChallenge();
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
+
+        Assert.True(service.Validate(submission));
+    }
+
+    private static HomeworkCentral.Api.Captcha.CaptchaSubmissionDto CorrectSubmissionFor(CaptchaChallengeDto challenge)
+    {
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
+        {
+            ChallengeId = challenge.ChallengeId,
+            Behavior = GoodBehavior(includeKeystrokes: challenge.Type == "text"),
+        };
+
+        switch (challenge.Type)
+        {
+            case "maze":
+                submission.MazePath = SolveMaze(challenge.Maze!);
+                break;
+            case "tileRotate":
+                submission.TileRotationClicks = SolveTileRotate(challenge.TileRotate!);
+                break;
+            default:
+                submission.Answer = SolveText(challenge.Content!);
+                break;
+        }
+
+        return submission;
+    }
+
+    private static HttpContext ContextWithIp(string ip)
+    {
+        DefaultHttpContext context = new();
+        context.Connection.RemoteIpAddress = IPAddress.Parse(ip);
+        return context;
+    }
+
+    private sealed class FakeHttpContextAccessor : IHttpContextAccessor
+    {
+        public HttpContext? HttpContext { get; set; }
     }
 
     private enum CaptchaTypeOf
