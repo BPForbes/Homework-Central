@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { captchaApi } from '../api/captchaApi'
 import { useArrowMatchAnswer } from './captcha/useArrowMatchAnswer'
 import { useCaptchaTelemetry } from './captcha/useCaptchaTelemetry'
@@ -60,22 +60,44 @@ export function useCaptcha() {
     }
   }, [challenge, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks, buildBehavior])
 
-  return {
-    challenge,
-    loading,
-    answer,
-    setAnswer,
-    mazePath,
-    addMazeStep,
-    mazeUnsolvableClaim,
-    toggleMazeUnsolvableClaim,
-    tileRotationClicks,
-    rotateTile,
-    recordMouseMove,
-    recordKeydown,
-    buildSubmission,
-    refresh,
-  }
+  // Cached (via useMemo) so the object identity itself only changes when one of these values
+  // actually does — any consumer that depends on the whole `captcha` object (a useEffect, a
+  // memoized child component, ...) sees a stable reference across renders where nothing relevant
+  // changed, rather than treating every render as a change.
+  return useMemo(
+    () => ({
+      challenge,
+      loading,
+      answer,
+      setAnswer,
+      mazePath,
+      addMazeStep,
+      mazeUnsolvableClaim,
+      toggleMazeUnsolvableClaim,
+      tileRotationClicks,
+      rotateTile,
+      recordMouseMove,
+      recordKeydown,
+      buildSubmission,
+      refresh,
+    }),
+    [
+      challenge,
+      loading,
+      answer,
+      setAnswer,
+      mazePath,
+      addMazeStep,
+      mazeUnsolvableClaim,
+      toggleMazeUnsolvableClaim,
+      tileRotationClicks,
+      rotateTile,
+      recordMouseMove,
+      recordKeydown,
+      buildSubmission,
+      refresh,
+    ]
+  )
 }
 
 export type CaptchaHookState = ReturnType<typeof useCaptcha>

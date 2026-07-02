@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { CaptchaBehavior, MouseSample } from '../../types/captcha'
 
 const MAX_MOUSE_SAMPLES = 400
@@ -57,5 +57,12 @@ export function useCaptchaTelemetry() {
     }
   }, [])
 
-  return { reset, recordMouseMove, recordKeydown, recordInteraction, buildBehavior }
+  // All five members are themselves referentially stable (each useCallback above has an empty
+  // dependency array), so this object's identity is stable for the component's entire lifetime —
+  // any consumer that depends on the whole returned object (a useEffect, a memoized child, ...)
+  // sees it as unchanged rather than "new every render."
+  return useMemo(
+    () => ({ reset, recordMouseMove, recordKeydown, recordInteraction, buildBehavior }),
+    [reset, recordMouseMove, recordKeydown, recordInteraction, buildBehavior]
+  )
 }

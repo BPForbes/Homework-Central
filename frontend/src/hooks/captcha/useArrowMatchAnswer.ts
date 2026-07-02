@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 /** Answer state for the arrow-match puzzle module: rotation click counts per tile.
  * `recordInteraction` is the shared telemetry hook's counter. */
@@ -21,5 +21,6 @@ export function useArrowMatchAnswer(recordInteraction: () => void) {
     [recordInteraction]
   )
 
-  return { tileRotationClicks, rotateTile, reset }
+  // Identity only changes when tileRotationClicks itself changes.
+  return useMemo(() => ({ tileRotationClicks, rotateTile, reset }), [tileRotationClicks, rotateTile, reset])
 }
