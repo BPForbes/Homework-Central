@@ -1039,6 +1039,15 @@ body {
   cursor: not-allowed;
 }
 
+/* Mandatory "I'm not a robot" widget shown above every puzzle */
+.fcaptcha-widget {
+  margin-bottom: 0.75rem;
+}
+
+.fcaptcha-container {
+  min-height: 2.5rem;
+}
+
 /* The security-relevant part of the challenge (code or expression) — distorted per character and
  * locked down against selection/copy/drag so it can't be lifted straight into the answer field. */
 .captcha-content {

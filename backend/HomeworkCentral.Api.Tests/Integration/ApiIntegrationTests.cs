@@ -3,12 +3,17 @@ using System.Net;
 using System.Net.Http.Json;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
+using HomeworkCentral.Api.Captcha.FCaptcha;
 using HomeworkCentral.Api.Captcha.Maze;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tests.Captcha;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Xunit;
@@ -73,11 +78,14 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
   }
 
   [SkippableFact]
-  public async Task Register_with_correct_captcha_and_human_like_behavior_grants_verified_user_instead_of_guest()
+  public async Task Register_with_a_confident_fcaptcha_verdict_grants_verified_user_instead_of_guest()
   {
     Skip.IfNot(fixture.IsDatabaseAvailable, fixture.SkipReason);
     HttpClient client = fixture.RequireClient();
     string suffix = Guid.NewGuid().ToString("N")[..8];
+
+    // A confident FCaptcha verdict is sufficient on its own — no in-house puzzle needs solving.
+    fixture.FCaptchaVerifier.NextResult = new FCaptchaVerification(true, 0.9);
 
     HttpResponseMessage challengeResponse = await client.GetAsync("/api/captcha/challenge");
     Assert.Equal(HttpStatusCode.OK, challengeResponse.StatusCode);
@@ -88,6 +96,40 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     {
       Email = $"ci-verified-{suffix}@example.com",
       Username = $"civerified{suffix}",
+      Password = "Password123!",
+      Captcha = new CaptchaSubmissionDto { ChallengeId = challenge!.ChallengeId, FCaptchaToken = "token" },
+    };
+
+    HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
+    Assert.Equal(HttpStatusCode.OK, registerResponse.StatusCode);
+
+    AuthResponse? registered = await registerResponse.Content.ReadFromJsonAsync<AuthResponse>();
+    Assert.NotNull(registered);
+    Assert.Contains("VerifiedUser", registered!.User.Roles);
+    Assert.DoesNotContain("Guest", registered.User.Roles);
+  }
+
+  [SkippableFact]
+  public async Task Register_with_uncertain_verdict_and_correctly_solved_puzzle_grants_verified_user()
+  {
+    Skip.IfNot(fixture.IsDatabaseAvailable, fixture.SkipReason);
+    HttpClient client = fixture.RequireClient();
+    string suffix = Guid.NewGuid().ToString("N")[..8];
+
+    // Below AllowTrustScore -> falls back to requiring the puzzle too; 0.6 comfortably clears the
+    // dynamic risk threshold for a first-time, IP-matched signup attempt (base 0.40 + a small
+    // new-identity adjustment).
+    fixture.FCaptchaVerifier.NextResult = new FCaptchaVerification(true, 0.6);
+
+    HttpResponseMessage challengeResponse = await client.GetAsync("/api/captcha/challenge");
+    Assert.Equal(HttpStatusCode.OK, challengeResponse.StatusCode);
+    CaptchaChallengeDto? challenge = await challengeResponse.Content.ReadFromJsonAsync<CaptchaChallengeDto>();
+    Assert.NotNull(challenge);
+
+    RegisterRequest register = new()
+    {
+      Email = $"ci-puzzle-verified-{suffix}@example.com",
+      Username = $"cipuzzleverified{suffix}",
       Password = "Password123!",
       Captcha = BuildCorrectSubmission(challenge!),
     };
@@ -102,33 +144,25 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
   }
 
   [SkippableFact]
-  public async Task Register_with_correct_captcha_but_bot_like_behavior_still_only_grants_guest()
+  public async Task Register_with_an_invalid_fcaptcha_token_only_grants_guest_even_with_a_correct_puzzle_answer()
   {
     Skip.IfNot(fixture.IsDatabaseAvailable, fixture.SkipReason);
     HttpClient client = fixture.RequireClient();
     string suffix = Guid.NewGuid().ToString("N")[..8];
+
+    fixture.FCaptchaVerifier.NextResult = new FCaptchaVerification(false, 0.0);
 
     HttpResponseMessage challengeResponse = await client.GetAsync("/api/captcha/challenge");
     Assert.Equal(HttpStatusCode.OK, challengeResponse.StatusCode);
     CaptchaChallengeDto? challenge = await challengeResponse.Content.ReadFromJsonAsync<CaptchaChallengeDto>();
     Assert.NotNull(challenge);
 
-    CaptchaSubmissionDto submission = BuildCorrectSubmission(challenge!);
-    submission.Behavior = new CaptchaBehaviorDto
-    {
-      MouseSamples = null,
-      KeyIntervalsMs = null,
-      TotalDurationMs = 150,
-      WebdriverFlag = true,
-      InteractionCount = 0,
-    };
-
     RegisterRequest register = new()
     {
       Email = $"ci-botlike-{suffix}@example.com",
       Username = $"cibotlike{suffix}",
       Password = "Password123!",
-      Captcha = submission,
+      Captcha = BuildCorrectSubmission(challenge!),
     };
 
     HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
@@ -140,15 +174,15 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.DoesNotContain("VerifiedUser", registered.User.Roles);
   }
 
-  /// <summary>Builds a submission that correctly solves whichever challenge type was issued, paired
-  /// with telemetry engineered to comfortably clear the dynamic risk threshold for a first-time,
-  /// IP-matched signup attempt (base 0.65 + at most a small new-identity/failure adjustment).</summary>
+  /// <summary>Builds a submission that correctly solves whichever challenge type was issued,
+  /// tagged with a placeholder FCaptcha token — the caller is responsible for setting
+  /// <see cref="IntegrationTestFixture.FCaptchaVerifier"/>'s verdict before submitting.</summary>
   private static CaptchaSubmissionDto BuildCorrectSubmission(CaptchaChallengeDto challenge)
   {
     CaptchaSubmissionDto submission = new()
     {
       ChallengeId = challenge.ChallengeId,
-      Behavior = GoodBehavior(),
+      FCaptchaToken = "token",
     };
 
     switch (challenge.Type)
@@ -168,7 +202,6 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
         break;
       default:
         submission.Answer = SolveText(challenge.Content!);
-        submission.Behavior!.KeyIntervalsMs = [120, 95, 180, 60, 140, 110, 200, 85];
         break;
     }
 
@@ -264,31 +297,6 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     return reversed;
   }
 
-  private static CaptchaBehaviorDto GoodBehavior()
-  {
-    int[] dxs = [3, 15, -2, 20, -1, 18, 2, 16, -3, 14];
-    int[] dys = [2, -10, 3, -12, 2, 9, -1, -11, 4, 8];
-    int[] dts = [80, 20, 90, 15, 85, 18, 95, 16, 88, 22];
-
-    List<MouseSampleDto> mouseSamples = new();
-    int x = 10, y = 10, t = 0;
-    for (int i = 0; i < dxs.Length; i++)
-    {
-      x += dxs[i];
-      y += dys[i];
-      t += dts[i];
-      mouseSamples.Add(new MouseSampleDto { X = x, Y = y, TMs = t });
-    }
-
-    return new CaptchaBehaviorDto
-    {
-      MouseSamples = mouseSamples,
-      TotalDurationMs = 4000,
-      WebdriverFlag = false,
-      InteractionCount = 5,
-    };
-  }
-
   private static string? ReadAccountClassClaim(string accessToken)
   {
     JwtSecurityTokenHandler handler = new();
@@ -308,6 +316,11 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
 
   public bool IsDatabaseAvailable { get; }
   public string SkipReason { get; }
+
+  /// <summary>Replaces the real (self-hosted, HTTP-calling) FCaptchaVerifier for the whole test
+  /// host, so these tests never need a live FCaptcha instance reachable in CI — each test scripts
+  /// the verdict it wants via <see cref="FakeFCaptchaVerifier.NextResult"/>.</summary>
+  public FakeFCaptchaVerifier FCaptchaVerifier { get; } = new();
 
   public IntegrationTestFixture()
   {
@@ -330,6 +343,12 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
     builder.UseSetting("Tenancy:ClusterEnvironment", "dev");
     builder.UseSetting("Jwt:Secret", "integration-test-jwt-secret-key-32chars!");
     builder.UseSetting(DevBypass.EnvVarName, "0");
+
+    builder.ConfigureTestServices(services =>
+    {
+      services.RemoveAll<IFCaptchaVerifier>();
+      services.AddSingleton<IFCaptchaVerifier>(FCaptchaVerifier);
+    });
   }
 
   private static bool CanConnectToDatabase(string connectionString)

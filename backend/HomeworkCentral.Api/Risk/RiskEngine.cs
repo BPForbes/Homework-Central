@@ -5,15 +5,13 @@ using Microsoft.Extensions.Options;
 namespace HomeworkCentral.Api.Risk;
 
 public sealed class RiskEngine(
-    IBehaviorScoringService behaviorScoring,
     IIdentityRiskProfileService profiles,
     IScrapingDetectionService scrapingDetection,
     IOptions<RiskOptions> options) : IRiskEngine
 {
-    public RiskAssessment Evaluate(CaptchaAction action, string identity, bool ipMatched, CaptchaBehaviorDto? behavior)
+    public RiskAssessment Evaluate(CaptchaAction action, string identity, bool ipMatched, double score)
     {
         RiskOptions opts = options.Value;
-        double score = behaviorScoring.ComputeScore(behavior);
         IdentityRiskProfile profile = profiles.GetProfile(identity);
         ScrapingAssessment scraping = scrapingDetection.PeekAssessment(identity);
 

@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 
-/** Answer state for the text puzzle module — no telemetry interaction beyond keydown timing,
- * which the caller records directly via useCaptchaTelemetry's recordKeydown. */
+/** Answer state for the text puzzle module. */
 export function useTextAnswer() {
   const [answer, setAnswer] = useState('')
 

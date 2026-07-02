@@ -3,6 +3,7 @@ using System.Text;
 using AspNetCoreRateLimit;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
+using HomeworkCentral.Api.Captcha.FCaptcha;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
@@ -65,7 +66,8 @@ builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
 builder.Services.AddScoped<ISubjectClaimService, SubjectClaimService>();
-builder.Services.AddSingleton<IBehaviorScoringService, BehaviorScoringService>();
+builder.Services.Configure<FCaptchaOptions>(builder.Configuration.GetSection("FCaptcha"));
+builder.Services.AddHttpClient<IFCaptchaVerifier, FCaptchaVerifier>(client => client.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<ICaptchaService, CaptchaService>();
 builder.Services.AddScoped<ICaptchaRoleService, CaptchaRoleService>();
 builder.Services.AddSingleton<IScrapingDetectionService, ScrapingDetectionService>();
@@ -145,6 +147,11 @@ if (devBypassEnabled)
     builder.Services.AddHostedService<DevPersonaProvisioningHostedService>();
 }
 
+// The FCaptcha widget script, its challenge iframe, and its background requests all come from
+// this origin — self-hosted, so it's whatever docker-compose.yml's fcaptcha service (or a real
+// deployment) is reachable at, not a fixed third-party domain.
+string fCaptchaOrigin = builder.Configuration["FCaptcha:PublicUrl"] ?? "http://localhost:3010";
+
 WebApplication app = builder.Build();
 
 // Localhost-only developer bypass (HC_DEV_BYPASS=1 + Development + loopback).
@@ -158,8 +165,8 @@ app.Use(async (ctx, next) =>
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
     ctx.Response.Headers["X-Frame-Options"] = "DENY";
     ctx.Response.Headers["Content-Security-Policy"] = devBypassEnabled
-        ? "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors 'none';"
-        : "default-src 'self'; frame-ancestors 'none';";
+        ? $"default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com {fCaptchaOrigin}; font-src 'self' https://fonts.gstatic.com; script-src 'self' {fCaptchaOrigin}; frame-src {fCaptchaOrigin}; connect-src 'self' {fCaptchaOrigin}; frame-ancestors 'none';"
+        : $"default-src 'self'; script-src 'self' {fCaptchaOrigin}; frame-src {fCaptchaOrigin}; connect-src 'self' {fCaptchaOrigin}; style-src 'self' {fCaptchaOrigin}; frame-ancestors 'none';";
     await next();
 });
 

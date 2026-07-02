@@ -4,7 +4,6 @@ interface TextChallengeProps {
   content: string
   answer: string
   onAnswerChange: (value: string) => void
-  onKeydown: () => void
   disabled?: boolean
   inputId?: string
 }
@@ -150,7 +149,7 @@ function blockEvent(e: React.SyntheticEvent) {
  * copy/cut/right-click/drag blocked on it, and paste/drop blocked on the answer field, so it can't
  * just be lifted with Ctrl+C/Ctrl+V.
  */
-export function TextChallenge({ content, answer, onAnswerChange, onKeydown, disabled, inputId }: TextChallengeProps) {
+export function TextChallenge({ content, answer, onAnswerChange, disabled, inputId }: TextChallengeProps) {
   const decorations = useMemo(() => content.split('').map((_, i) => buildCharDecoration(content, i)), [content])
 
   return (
@@ -187,7 +186,6 @@ export function TextChallenge({ content, answer, onAnswerChange, onKeydown, disa
         className="captcha-input"
         value={answer}
         onChange={(e) => onAnswerChange(e.target.value)}
-        onKeyDown={onKeydown}
         onPaste={blockEvent}
         onDrop={blockEvent}
         autoComplete="off"

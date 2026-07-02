@@ -18,6 +18,17 @@ services:
       retries: 5
       start_period: 10s
 
+  # Self-hosted "I'm not a robot" check (https://github.com/WebDecoy/FCaptcha) — replaces the old
+  # in-house mouse/keyboard behavioral scoring as the first-tier verification on every captcha
+  # attempt. FCAPTCHA_SECRET must match backend's FCaptcha__Secret below.
+  fcaptcha:
+    image: ghcr.io/webdecoy/fcaptcha
+    restart: unless-stopped
+    environment:
+      FCAPTCHA_SECRET: "${FCAPTCHA_SECRET:-dev-fcaptcha-secret-change-in-production}"
+    ports:
+      - "${FCAPTCHA_HOST_PORT:-3010}:3000"
+
   backend:
     build:
       context: ./backend/HomeworkCentral.Api
@@ -31,11 +42,18 @@ services:
         Host=postgres;Database=postgres;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}
       Tenancy__ClusterEnvironment: dev
       Jwt__Secret: "${JWT_SECRET:?JWT_SECRET must be set}"
+      # Backend talks to fcaptcha over the internal Docker network; the browser needs a
+      # separately-published, host-reachable address, hence the two different URLs/ports.
+      FCaptcha__ServerUrl: "http://fcaptcha:3000"
+      FCaptcha__PublicUrl: "http://localhost:${FCAPTCHA_HOST_PORT:-3010}"
+      FCaptcha__Secret: "${FCAPTCHA_SECRET:-dev-fcaptcha-secret-change-in-production}"
     ports:
       - "5000:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      fcaptcha:
+        condition: service_started
 
   frontend:
     build:

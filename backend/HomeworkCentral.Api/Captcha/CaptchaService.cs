@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Captcha.ArrowMatch;
+using HomeworkCentral.Api.Captcha.FCaptcha;
 using HomeworkCentral.Api.Captcha.Maze;
 using HomeworkCentral.Api.Captcha.Text;
 using HomeworkCentral.Api.Risk;
@@ -10,16 +11,18 @@ using Microsoft.Extensions.Logging;
 namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>
-/// Thin coordinator over three independent puzzle modules — <see cref="TextChallenge"/>,
-/// <see cref="MazeGenerator"/>, and <see cref="TileRotatePuzzleGenerator"/>, each in its own
-/// namespace and owning its own generation and validation logic. This class only picks a random
-/// puzzle type, caches/looks up the server-side answer, and (once the puzzle module confirms the
-/// answer itself is correct — a hard requirement, no score substitutes for it) asks
-/// <see cref="IRiskEngine"/> to judge the submission's behavioral telemetry, IP consistency, and
-/// identity track record against a dynamically computed threshold.
+/// Coordinates a mandatory FCaptcha "I'm not a robot" check (see <see cref="IFCaptchaVerifier"/>)
+/// with one randomly-picked in-house puzzle module — <see cref="TextChallenge"/>,
+/// <see cref="MazeGenerator"/>, or <see cref="TileRotatePuzzleGenerator"/>, each in its own
+/// namespace and owning its own generation and validation logic. FCaptcha is checked first on
+/// every attempt; a confidently-human verdict is accepted on its own, and anything less confident
+/// falls back to also requiring the puzzle to be solved correctly, with FCaptcha's trust score fed
+/// into <see cref="IRiskEngine"/>'s dynamic threshold in place of the raw-telemetry heuristic this
+/// class used to compute itself.
 /// </summary>
 public sealed class CaptchaService(
     IMemoryCache cache,
+    IFCaptchaVerifier fCaptchaVerifier,
     IRiskEngine riskEngine,
     IHttpContextAccessor httpContextAccessor,
     ILogger<CaptchaService> logger) : ICaptchaService
@@ -40,7 +43,7 @@ public sealed class CaptchaService(
         };
     }
 
-    public bool Validate(CaptchaSubmissionDto? submission, CaptchaAction action)
+    public async Task<bool> ValidateAsync(CaptchaSubmissionDto? submission, CaptchaAction action)
     {
         if (submission is null || string.IsNullOrWhiteSpace(submission.ChallengeId))
             return false;
@@ -51,10 +54,24 @@ public sealed class CaptchaService(
 
         cache.Remove(cacheKey);
 
-        // A challenge solved from a different IP than the one it was issued to is a signal it may
-        // have been farmed out to a separate solver — but not, on its own, proof of that (mobile
-        // networks reassign IPs mid-session). It feeds into the risk engine as a threshold
-        // adjustment rather than an automatic reject; see IRiskEngine.
+        // The "I'm not a robot" check is mandatory on every attempt, regardless of which in-house
+        // puzzle was issued alongside it.
+        FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(submission.FCaptchaToken);
+        if (!verification.Valid)
+        {
+            logger.LogInformation("Captcha {ChallengeId} rejected: FCaptcha token did not verify.", submission.ChallengeId);
+            return false;
+        }
+
+        if (verification.TrustScore >= fCaptchaVerifier.AllowTrustScore)
+        {
+            // Confident enough on its own — the in-house puzzle isn't needed for this attempt.
+            return true;
+        }
+
+        // FCaptcha's verdict wasn't confident enough by itself: fall back to also requiring the
+        // in-house puzzle, and feed FCaptcha's (now lower) trust score into the same dynamic
+        // risk-threshold logic used everywhere else, rather than trusting it as a lone signal.
         bool ipMatched = record.IssuerIp is null || string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal);
 
         bool solved = record.Type switch
@@ -67,12 +84,15 @@ public sealed class CaptchaService(
 
         if (!solved)
         {
-            logger.LogInformation("Captcha {ChallengeId} rejected: puzzle not solved correctly.", submission.ChallengeId);
+            logger.LogInformation(
+                "Captcha {ChallengeId} rejected: FCaptcha trust score {TrustScore:F2} was not confident enough and the fallback puzzle was not solved correctly.",
+                submission.ChallengeId,
+                verification.TrustScore);
             return false;
         }
 
         string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
-        RiskAssessment assessment = riskEngine.Evaluate(action, identity, ipMatched, submission.Behavior);
+        RiskAssessment assessment = riskEngine.Evaluate(action, identity, ipMatched, verification.TrustScore);
         riskEngine.RecordOutcome(identity, assessment);
 
         if (!assessment.Passed)
@@ -94,7 +114,9 @@ public sealed class CaptchaService(
         (string label, string content, string answer) = TextChallenge.Generate();
 
         Store(challengeId, ChallengeRecord.ForText(answer, issuerIp));
-        return new CaptchaChallengeDto(challengeId, TextChallenge.TypeName, label, content, null, null);
+        return new CaptchaChallengeDto(
+            challengeId, TextChallenge.TypeName, label, content, null, null,
+            fCaptchaVerifier.SiteKey, fCaptchaVerifier.PublicUrl);
     }
 
     private CaptchaChallengeDto CreateMazeChallenge(string challengeId, string? issuerIp)
@@ -109,7 +131,9 @@ public sealed class CaptchaService(
             "Guide the marker from A to B — or, if there's truly no way through, say so.",
             null,
             maze,
-            null);
+            null,
+            fCaptchaVerifier.SiteKey,
+            fCaptchaVerifier.PublicUrl);
     }
 
     private CaptchaChallengeDto CreateArrowMatchChallenge(string challengeId, string? issuerIp)
@@ -123,7 +147,9 @@ public sealed class CaptchaService(
             "Rotate each arrow to match its faint target.",
             null,
             null,
-            tileRotate);
+            tileRotate,
+            fCaptchaVerifier.SiteKey,
+            fCaptchaVerifier.PublicUrl);
     }
 
     private void Store(string challengeId, ChallengeRecord record) =>

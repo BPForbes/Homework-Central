@@ -5,9 +5,8 @@ namespace HomeworkCentral.Api.ScrapingDetection;
 /// <summary>
 /// Keeps a rolling <see cref="Window"/> of recent request samples per identity (in-memory, evicted
 /// after <see cref="IdleExpiration"/> of inactivity) and scores each new request against four
-/// additive, explainable heuristics — same weighted-delta design as
-/// <c>HomeworkCentral.Api.Captcha.BehaviorScoringService</c>, applied to request patterns instead
-/// of mouse/keyboard telemetry.
+/// additive, explainable heuristics, applied to request patterns rather than a single captcha
+/// attempt (see <c>HomeworkCentral.Api.Captcha.FCaptcha.IFCaptchaVerifier</c> for that).
 /// </summary>
 public sealed class ScrapingDetectionService(IMemoryCache cache) : IScrapingDetectionService
 {

@@ -1,11 +1,19 @@
 namespace HomeworkCentral.Api.Captcha;
 
-/// <summary>Client's answer to a challenge plus the behavioral telemetry collected while solving
-/// it. Exactly one of <see cref="Answer"/>, <see cref="MazePath"/>/<see cref="MazeUnsolvableClaim"/>,
-/// or <see cref="TileRotationClicks"/> is relevant, matching the challenge's <c>Type</c>.</summary>
+/// <summary>Client's answer to a challenge. Exactly one of <see cref="Answer"/>,
+/// <see cref="MazePath"/>/<see cref="MazeUnsolvableClaim"/>, or <see cref="TileRotationClicks"/> is
+/// relevant, matching the challenge's <c>Type</c> — except <see cref="FCaptchaToken"/>, which is
+/// required on every submission regardless of puzzle type; see <c>HomeworkCentral.Api.Captcha.CaptchaService</c>
+/// for how the two combine.</summary>
 public sealed class CaptchaSubmissionDto
 {
     public string ChallengeId { get; set; } = null!;
+
+    /// <summary>The hCaptcha-style "I'm not a robot" token from the FCaptcha widget (see
+    /// <c>HomeworkCentral.Api.Captcha.FCaptcha</c>). Mandatory on every submission — this is the
+    /// baseline check; the puzzle-specific fields below are only consulted when FCaptcha's own
+    /// verdict isn't confident enough on its own.</summary>
+    public string? FCaptchaToken { get; set; }
 
     /// <summary>Text challenges: the retyped code or solved expression.</summary>
     public string? Answer { get; set; }
@@ -22,36 +30,4 @@ public sealed class CaptchaSubmissionDto
 
     /// <summary>Tile-rotate challenges: number of clicks applied to each tile, same order as issued.</summary>
     public List<int>? TileRotationClicks { get; set; }
-
-    public CaptchaBehaviorDto? Behavior { get; set; }
-}
-
-/// <summary>Raw behavioral telemetry collected client-side while a challenge was on screen. Scored
-/// server-side by <see cref="IBehaviorScoringService"/> — the client never computes or reports a
-/// score itself, since a client-computed score could simply be fabricated by a bot.</summary>
-public sealed class CaptchaBehaviorDto
-{
-    public List<MouseSampleDto>? MouseSamples { get; set; }
-
-    /// <summary>Milliseconds between consecutive keydown events on the answer field, if any.</summary>
-    public List<int>? KeyIntervalsMs { get; set; }
-
-    /// <summary>Total time in milliseconds from when the challenge was shown to when it was submitted.</summary>
-    public int TotalDurationMs { get; set; }
-
-    /// <summary>Client-reported <c>navigator.webdriver</c> — a cheap but easily-spoofed signal, so
-    /// it's only one weighted factor among several, never a sole pass/fail gate.</summary>
-    public bool WebdriverFlag { get; set; }
-
-    /// <summary>Count of discrete interactions (clicks/drags/rotations) with the puzzle itself.</summary>
-    public int InteractionCount { get; set; }
-}
-
-public sealed class MouseSampleDto
-{
-    public int X { get; set; }
-    public int Y { get; set; }
-
-    /// <summary>Milliseconds since the challenge was shown.</summary>
-    public int TMs { get; set; }
 }

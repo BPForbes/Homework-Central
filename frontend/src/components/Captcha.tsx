@@ -1,7 +1,7 @@
-import { useRef } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRotate } from '@fortawesome/free-solid-svg-icons'
 import type { CaptchaHookState } from '../hooks/useCaptcha'
+import { FCaptchaWidget } from './captcha/fcaptcha/FCaptchaWidget'
 import { TextChallenge } from './captcha/text/TextChallenge'
 import { MazePuzzle } from './captcha/maze/MazePuzzle'
 import { ArrowMatchPuzzle } from './captcha/arrowMatch/ArrowMatchPuzzle'
@@ -13,23 +13,17 @@ interface CaptchaProps {
 }
 
 /**
- * Reusable captcha widget — same component backs signup and the dashboard verify button.
- * Dispatches to the text, maze, or arrow-match puzzle module based on the issued challenge type
- * (each under its own folder in captcha/), and tracks mouse movement across the whole widget for
- * the server-side behavioral score (see useCaptcha).
+ * Reusable captcha widget — same component backs signup and the dashboard verify button. The
+ * FCaptcha "I'm not a robot" checkbox is always shown first and is mandatory; the text, maze, or
+ * arrow-match puzzle module underneath is only actually required server-side if FCaptcha's own
+ * verdict isn't confident enough on its own (see CaptchaService.ValidateAsync), but is always
+ * rendered so solving it up front never hurts.
  */
 export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
-  const { challenge, loading, recordMouseMove } = captcha
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  function handleMouseMove(e: React.MouseEvent) {
-    const rect = containerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    recordMouseMove(Math.round(e.clientX - rect.left), Math.round(e.clientY - rect.top))
-  }
+  const { challenge, loading } = captcha
 
   return (
-    <div className="captcha" ref={containerRef} onMouseMove={handleMouseMove}>
+    <div className="captcha">
       <div className="captcha-label-row">
         <span className="captcha-label">
           {loading ? 'Loading a verification challenge…' : challenge?.label ?? 'Could not load a verification challenge.'}
@@ -46,13 +40,22 @@ export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
         </button>
       </div>
 
+      {challenge && (
+        <FCaptchaWidget
+          key={challenge.challengeId}
+          siteKey={challenge.fCaptchaSiteKey}
+          publicUrl={challenge.fCaptchaPublicUrl}
+          onToken={captcha.setFCaptchaToken}
+          disabled={disabled || loading}
+        />
+      )}
+
       {challenge?.type === 'text' && challenge.content && (
         <TextChallenge
           inputId={inputId}
           content={challenge.content}
           answer={captcha.answer}
           onAnswerChange={captcha.setAnswer}
-          onKeydown={captcha.recordKeydown}
           disabled={disabled || loading}
         />
       )}

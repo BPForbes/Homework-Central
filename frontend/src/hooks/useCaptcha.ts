@@ -1,33 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { captchaApi } from '../api/captchaApi'
 import { useArrowMatchAnswer } from './captcha/useArrowMatchAnswer'
-import { useCaptchaTelemetry } from './captcha/useCaptchaTelemetry'
+import { useFCaptchaAnswer } from './captcha/useFCaptchaAnswer'
 import { useMazeAnswer } from './captcha/useMazeAnswer'
 import { useTextAnswer } from './captcha/useTextAnswer'
 import type { CaptchaChallenge, CaptchaSubmission } from '../types/captcha'
 
 /**
- * Owns a captcha challenge's full lifecycle (fetching, refreshing) and composes the shared
- * telemetry hook with each puzzle module's own answer-state hook — text, maze, and arrow-match —
- * so no single hook owns all three puzzle types' state directly. The puzzle modules live under
- * captcha/ and components/captcha/*; this hook only wires them together and knows how to build
- * the final submission for whichever challenge type is currently active.
+ * Owns a captcha challenge's full lifecycle (fetching, refreshing) and composes the mandatory
+ * FCaptcha "I'm not a robot" check with each puzzle module's own answer-state hook — text, maze,
+ * and arrow-match — so no single hook owns all four pieces of state directly. This hook only wires
+ * them together and knows how to build the final submission for whichever challenge is active.
  */
 export function useCaptcha() {
   const [challenge, setChallenge] = useState<CaptchaChallenge | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const { reset: resetTelemetry, recordMouseMove, recordKeydown, recordInteraction, buildBehavior } = useCaptchaTelemetry()
+  const { fCaptchaToken, setFCaptchaToken, reset: resetFCaptcha } = useFCaptchaAnswer()
   const { answer, setAnswer, reset: resetText } = useTextAnswer()
-  const { mazePath, mazeUnsolvableClaim, addMazeStep, toggleMazeUnsolvableClaim, reset: resetMaze } = useMazeAnswer(recordInteraction)
-  const { tileRotationClicks, rotateTile, reset: resetArrowMatch } = useArrowMatchAnswer(recordInteraction)
+  const { mazePath, mazeUnsolvableClaim, addMazeStep, toggleMazeUnsolvableClaim, reset: resetMaze } = useMazeAnswer()
+  const { tileRotationClicks, rotateTile, reset: resetArrowMatch } = useArrowMatchAnswer()
 
   const refresh = useCallback(async () => {
     setLoading(true)
+    resetFCaptcha()
     resetText()
     resetMaze()
     resetArrowMatch()
-    resetTelemetry()
     try {
       const { data } = await captchaApi.getChallenge()
       setChallenge(data)
@@ -41,7 +40,7 @@ export function useCaptcha() {
     } finally {
       setLoading(false)
     }
-  }, [resetText, resetMaze, resetArrowMatch, resetTelemetry])
+  }, [resetFCaptcha, resetText, resetMaze, resetArrowMatch])
 
   useEffect(() => {
     void refresh()
@@ -52,13 +51,13 @@ export function useCaptcha() {
 
     return {
       challengeId: challenge.challengeId,
+      fCaptchaToken,
       answer: challenge.type === 'text' ? answer : undefined,
       mazePath: challenge.type === 'maze' && !mazeUnsolvableClaim ? mazePath : undefined,
       mazeUnsolvableClaim: challenge.type === 'maze' ? mazeUnsolvableClaim : undefined,
       tileRotationClicks: challenge.type === 'tileRotate' ? tileRotationClicks : undefined,
-      behavior: buildBehavior(),
     }
-  }, [challenge, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks, buildBehavior])
+  }, [challenge, fCaptchaToken, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks])
 
   // Cached (via useMemo) so the object identity itself only changes when one of these values
   // actually does — any consumer that depends on the whole `captcha` object (a useEffect, a
@@ -68,6 +67,8 @@ export function useCaptcha() {
     () => ({
       challenge,
       loading,
+      fCaptchaToken,
+      setFCaptchaToken,
       answer,
       setAnswer,
       mazePath,
@@ -76,14 +77,14 @@ export function useCaptcha() {
       toggleMazeUnsolvableClaim,
       tileRotationClicks,
       rotateTile,
-      recordMouseMove,
-      recordKeydown,
       buildSubmission,
       refresh,
     }),
     [
       challenge,
       loading,
+      fCaptchaToken,
+      setFCaptchaToken,
       answer,
       setAnswer,
       mazePath,
@@ -92,8 +93,6 @@ export function useCaptcha() {
       toggleMazeUnsolvableClaim,
       tileRotationClicks,
       rotateTile,
-      recordMouseMove,
-      recordKeydown,
       buildSubmission,
       refresh,
     ]

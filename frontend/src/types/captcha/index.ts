@@ -16,27 +16,17 @@ export interface CaptchaChallenge {
   content?: string
   maze?: MazeChallenge
   tileRotate?: TileRotateChallenge
-}
-
-export interface MouseSample {
-  x: number
-  y: number
-  /** Milliseconds since the challenge was shown. */
-  tMs: number
-}
-
-/** Raw behavioral telemetry — the client never computes a score itself (a bot could just fabricate
- * a client-computed score), only collects and reports the raw signals for the server to score. */
-export interface CaptchaBehavior {
-  mouseSamples: MouseSample[]
-  keyIntervalsMs: number[]
-  totalDurationMs: number
-  webdriverFlag: boolean
-  interactionCount: number
+  /** Always present — the FCaptcha "I'm not a robot" check is a mandatory baseline on every
+   * challenge, not one of several alternatives (see useFCaptchaAnswer / FCaptchaWidget). */
+  fCaptchaSiteKey: string
+  /** Browser-reachable URL to load the FCaptcha widget script from and configure it against. */
+  fCaptchaPublicUrl: string
 }
 
 export interface CaptchaSubmission {
   challengeId: string
+  /** The FCaptcha widget token. Required on every submission. */
+  fCaptchaToken?: string
   answer?: string
   mazePath?: number[]
   /** True when the player asserts there's no path from A to B instead of tracing one — some maze
@@ -44,5 +34,4 @@ export interface CaptchaSubmission {
    * mazePath when set. */
   mazeUnsolvableClaim?: boolean
   tileRotationClicks?: number[]
-  behavior: CaptchaBehavior
 }

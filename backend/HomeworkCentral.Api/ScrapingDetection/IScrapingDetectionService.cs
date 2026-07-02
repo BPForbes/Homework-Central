@@ -12,9 +12,8 @@ public sealed record ScrapingAssessment(double SuspicionScore, bool ShouldBlock,
 /// ...) regardless of endpoint, looking for request-pattern signatures of automated data scraping
 /// rather than normal browsing: sustained high request rate, enumerating many distinct resources,
 /// an almost entirely read-only request mix, and suspiciously uniform request timing. This is a
-/// separate, broader concern from <c>IBehaviorScoringService</c>, which only scores a single
-/// captcha attempt's mouse/keyboard telemetry — this one watches the whole session/identity over
-/// time across every route.
+/// separate, broader concern from <c>IFCaptchaVerifier</c>, which only scores a single captcha
+/// attempt — this one watches the whole session/identity over time across every route.
 /// </summary>
 public interface IScrapingDetectionService
 {
