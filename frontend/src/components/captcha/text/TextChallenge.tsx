@@ -24,7 +24,7 @@ const FONT_STACKS = [
 
 const FONT_WEIGHTS = [400, 500, 700, 900]
 const CHAR_COLORS = ['#1e3a8a', '#1d4ed8', '#2563eb', '#3730a3', '#312e81', '#4c1d95', '#0f172a']
-const HOLE_VARIANTS = ['blob', 'jagged'] as const
+const HOLE_VARIANTS = ['round', 'ragged'] as const
 
 interface StrikeDecoration {
   top: number
@@ -41,7 +41,6 @@ interface HoleDecoration {
 interface CharDecoration {
   style: React.CSSProperties
   strike: StrikeDecoration | null
-  hole: HoleDecoration | null
 }
 
 /** FNV-1a-style hash of the content string, mixed with the character's own index, so adjacent
@@ -78,11 +77,27 @@ function range(rand: () => number, min: number, max: number): number {
   return min + rand() * (max - min)
 }
 
+/**
+ * A CSS mask applied directly to the character glyph — as opposed to painting a copy of the
+ * background pattern on top of it — so the "hole" is a genuine transparency and whatever is
+ * actually behind the glyph (the panel's striped background) shows through with pixel-perfect
+ * alignment. A painted-on copy can never line up, since it starts tiling its own pattern from its
+ * own box origin rather than the real background's.
+ */
+function buildHoleMask(hole: HoleDecoration): string {
+  const rx = hole.size
+  const ry = hole.variant === 'ragged' ? hole.size * 0.55 : hole.size * 0.85
+  const stops =
+    hole.variant === 'ragged'
+      ? 'transparent 0%, transparent 50%, rgba(0, 0, 0, 0.4) 65%, black 88%'
+      : 'transparent 0%, transparent 72%, black 100%'
+  return `radial-gradient(ellipse ${rx}% ${ry}% at ${hole.left}% ${hole.top}%, ${stops})`
+}
+
 /** Builds one character's full decoration independently of every other character: its own font,
- * weight, italic/normal, color, and a combined rotate/translate/skew/scale transform, plus — on
- * some characters — a strikethrough OR a torn-looking "hole" that reveals the panel's background
- * through the glyph (never both on the same character, so distortion never stacks to the point of
- * being unreadable). Whitespace never gets a strikethrough or hole (there's no stroke to tear). */
+ * weight, italic/normal, color, rotate/translate/skew/scale transform, and independently-rolled
+ * chances of a strikethrough and/or a torn-looking "hole" — the two can stack on the same
+ * character. Whitespace never gets either (there's no stroke to tear). */
 function buildCharDecoration(content: string, index: number): CharDecoration {
   const char = content[index]
   const rand = mulberry32(seedFor(content, index))
@@ -106,22 +121,22 @@ function buildCharDecoration(content: string, index: number): CharDecoration {
   }
 
   const isBlank = char === ' '
-  const hasDefect = !isBlank && rand() < 0.4
-  const defectIsHole = hasDefect && rand() < 0.45
 
   const strike: StrikeDecoration | null =
-    hasDefect && !defectIsHole ? { top: range(rand, 35, 65), angle: range(rand, -20, 20) } : null
+    !isBlank && rand() < 0.25 ? { top: range(rand, 35, 65), angle: range(rand, -20, 20) } : null
 
-  const hole: HoleDecoration | null = defectIsHole
-    ? {
-        variant: pick(rand, HOLE_VARIANTS),
-        left: range(rand, 20, 65),
-        top: range(rand, 15, 60),
-        size: range(rand, 26, 40),
-      }
-    : null
+  const hole: HoleDecoration | null =
+    !isBlank && rand() < 0.25
+      ? { variant: pick(rand, HOLE_VARIANTS), left: range(rand, 20, 65), top: range(rand, 15, 60), size: range(rand, 26, 40) }
+      : null
 
-  return { style, strike, hole }
+  if (hole) {
+    const mask = buildHoleMask(hole)
+    style.maskImage = mask
+    style.WebkitMaskImage = mask
+  }
+
+  return { style, strike }
 }
 
 function blockEvent(e: React.SyntheticEvent) {
@@ -131,9 +146,9 @@ function blockEvent(e: React.SyntheticEvent) {
 /**
  * The code or expression is rendered as per-character distorted, non-selectable spans — each
  * character independently gets its own font, weight, italic/normal, color, and rotate/skew/scale
- * transform, and some characters additionally get a strikethrough or a "hole"/tear revealing the
- * background — with copy/cut/right-click/drag blocked on it, and paste/drop blocked on the answer
- * field, so it can't just be lifted with Ctrl+C/Ctrl+V.
+ * transform, and independently rolls a strikethrough and a "hole"/tear (the two can stack) — with
+ * copy/cut/right-click/drag blocked on it, and paste/drop blocked on the answer field, so it can't
+ * just be lifted with Ctrl+C/Ctrl+V.
  */
 export function TextChallenge({ content, answer, onAnswerChange, onKeydown, disabled, inputId }: TextChallengeProps) {
   const decorations = useMemo(() => content.split('').map((_, i) => buildCharDecoration(content, i)), [content])
@@ -149,7 +164,7 @@ export function TextChallenge({ content, answer, onAnswerChange, onKeydown, disa
         onDragStart={blockEvent}
       >
         {content.split('').map((char, i) => {
-          const { style, strike, hole } = decorations[i]
+          const { style, strike } = decorations[i]
           return (
             <span key={i} className="captcha-char-wrap" aria-hidden="true">
               <span className="captcha-char" style={style}>
@@ -159,12 +174,6 @@ export function TextChallenge({ content, answer, onAnswerChange, onKeydown, disa
                 <span
                   className="captcha-char-strike"
                   style={{ top: `${strike.top}%`, transform: `rotate(${strike.angle}deg)` }}
-                />
-              )}
-              {hole && (
-                <span
-                  className={`captcha-char-hole captcha-char-hole-${hole.variant}`}
-                  style={{ left: `${hole.left}%`, top: `${hole.top}%`, width: `${hole.size}%`, height: `${hole.size}%` }}
                 />
               )}
             </span>
