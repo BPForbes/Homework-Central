@@ -26,6 +26,9 @@ DEV_POSTGRES_PASSWORD="postgres"
 DEV_POSTGRES_HOST_PORT="5434"
 DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
+# Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
+# FCaptcha:ServerUrl override — if you change this, update both of those too.
+FCAPTCHA_HOST_PORT="3010"
 BUILD_ONLY=false
 SKIP_DOCKER=false
 HC_API_BUILD_FAILED=0
@@ -424,6 +427,13 @@ start_postgres() {
   ensure_postgres_ready
 }
 
+start_fcaptcha() {
+  require_cmd docker
+  log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
+  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" \
+    || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
+}
+
 build_postgres_host_check() {
   dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
@@ -620,6 +630,7 @@ run_stack() {
   fi
   if [[ "$SKIP_DOCKER" == false ]]; then
     log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
+    log "  FCaptcha: localhost:${FCAPTCHA_HOST_PORT} (Docker; stops on exit)"
   fi
   log "Press Ctrl+C to stop servers and free the Postgres port"
   log "Or run: scripts/stop-dev.sh"
@@ -652,8 +663,9 @@ main() {
 
   if [[ "$SKIP_DOCKER" == false ]]; then
     start_postgres
+    start_fcaptcha
   else
-    log "Skipping Docker Postgres (HC_SKIP_DOCKER / --skip-docker)"
+    log "Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / --skip-docker)"
   fi
 
   run_stack

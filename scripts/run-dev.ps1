@@ -33,6 +33,9 @@ $DevPostgresPassword = 'postgres'
 $DevPostgresHostPort = '5434'
 $DevPostgresHostPortMin = 5434
 $DevPostgresHostPortMax = 5450
+# Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
+# FCaptcha:ServerUrl override — if you change this, update both of those too.
+$DevFCaptchaHostPort = '3010'
 $script:ApiBuildFailed = $false
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
@@ -470,6 +473,21 @@ function Start-Postgres([hashtable]$EnvValues) {
     Ensure-PostgresReady $EnvValues
 }
 
+function Start-FCaptcha {
+    Write-Step "Starting FCaptcha (Docker) on localhost:$DevFCaptchaHostPort"
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop and ensure docker is on PATH.'
+    }
+
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker is not running. Start Docker Desktop and retry.'
+    }
+
+    Ensure-DevFCaptchaRunning -Port $DevFCaptchaHostPort
+}
+
 function Build-PostgresHostCheck {
     dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
@@ -629,6 +647,7 @@ function Start-DevStack([hashtable]$EnvValues) {
         Write-Host '  Postgres: localhost:' -NoNewline
         Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline
         Write-Host ' (Docker; stops when both terminals are closed)'
+        Write-Host "  FCaptcha: localhost:$DevFCaptchaHostPort (Docker; stops when both terminals are closed)"
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'
@@ -648,8 +667,9 @@ function Start-RunPhase([hashtable]$EnvValues) {
 
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
+        Start-FCaptcha
     } else {
-        Write-Step 'Skipping Docker Postgres (HC_SKIP_DOCKER / -SkipDocker)'
+        Write-Step 'Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / -SkipDocker)'
     }
 
     Start-DevStack -EnvValues $EnvValues

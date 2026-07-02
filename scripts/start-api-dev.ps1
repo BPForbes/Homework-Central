@@ -84,6 +84,9 @@ $browserProcess = $null
 try {
     if (-not $skipDocker) {
         Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+        # Matches docker-compose.yml's `fcaptcha` service default and
+        # appsettings.Development.json's FCaptcha:ServerUrl override.
+        Ensure-DevFCaptchaRunning -Port '3010'
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {

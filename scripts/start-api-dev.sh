@@ -81,6 +81,9 @@ trap cleanup_api EXIT
 
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  # Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
+  # FCaptcha:ServerUrl override.
+  ensure_dev_fcaptcha_running "3010" || fail "Could not start the FCaptcha Docker container on localhost:3010. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
 if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then

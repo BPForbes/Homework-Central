@@ -152,6 +152,67 @@ function Stop-DevStackPostgres([string]$Port) {
     docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop postgres *> $null
 }
 
+# FCaptcha (see docker-compose.yml's `fcaptcha` service) is stateless — no volume, no credentials
+# to reset — so unlike Postgres above it doesn't need refcounted start/stop bookkeeping in
+# .hc-dev-stack.state; it's simply started alongside Postgres and stopped whenever Postgres is.
+function Start-DevStackFCaptchaContainer([string]$Port) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop or run scripts/run-dev.ps1 first.'
+    }
+
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker is not running. Start Docker Desktop and retry.'
+    }
+
+    $env:FCAPTCHA_HOST_PORT = $Port
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile up -d fcaptcha
+    if ($LASTEXITCODE -ne 0) {
+        throw 'docker compose up fcaptcha failed'
+    }
+}
+
+function Test-DevFCaptchaConnection([string]$Port) {
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $async = $client.BeginConnect('127.0.0.1', [int]$Port, $null, $null)
+        $connected = $async.AsyncWaitHandle.WaitOne(500) -and $client.Connected
+        $client.Close()
+        return $connected
+    } catch {
+        return $false
+    }
+}
+
+function Wait-DevFCaptchaReady([string]$Port) {
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        if (Test-DevFCaptchaConnection $Port) {
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    throw "FCaptcha did not become ready on localhost:$Port within 30s"
+}
+
+function Ensure-DevFCaptchaRunning([string]$Port) {
+    if (Test-DevFCaptchaConnection $Port) {
+        return
+    }
+
+    Write-Host "==> Starting Docker FCaptcha on localhost:$Port" -ForegroundColor DarkGray
+    Start-DevStackFCaptchaContainer $Port
+    Wait-DevFCaptchaReady $Port
+}
+
+function Stop-DevStackFCaptcha {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop fcaptcha *> $null
+}
+
 function Initialize-DevStackState {
     param(
         [Parameter(Mandatory = $true)]
@@ -165,6 +226,7 @@ function Initialize-DevStackState {
         if ($null -ne $existing -and $existing['managed_postgres'] -eq '1') {
             Write-Host '==> Stopping previous dev stack Postgres session' -ForegroundColor DarkGray
             Stop-DevStackPostgres -Port $existing['postgres_port']
+            Stop-DevStackFCaptcha
         }
 
         Write-DevStackState @{
@@ -215,6 +277,7 @@ function Unregister-DevStackServer {
         $port = $state['postgres_port']
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
         Stop-DevStackPostgres -Port $port
+        Stop-DevStackFCaptcha
         Write-Host '==> Stopped Docker Postgres and freed localhost port' -ForegroundColor DarkGray
     }
 
@@ -226,6 +289,7 @@ function Stop-DevStack {
         $state = Read-DevStackState
         if ($null -ne $state -and $state['managed_postgres'] -eq '1') {
             Stop-DevStackPostgres -Port $state['postgres_port']
+            Stop-DevStackFCaptcha
         }
 
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue

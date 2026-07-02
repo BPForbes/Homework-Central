@@ -116,6 +116,51 @@ wait_dev_postgres_ready() {
   return 1
 }
 
+# FCaptcha (see docker-compose.yml's `fcaptcha` service) is stateless — no volume, no credentials
+# to reset — so unlike Postgres above it doesn't need refcounted start/stop bookkeeping in
+# .hc-dev-stack.state; it's simply started alongside Postgres and stopped whenever Postgres is.
+start_dev_stack_fcaptcha_container() {
+  local port="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 || return 1
+
+  export FCAPTCHA_HOST_PORT="$port"
+  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d fcaptcha
+}
+
+test_dev_fcaptcha_connection() {
+  local port="$1"
+  (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+}
+
+wait_dev_fcaptcha_ready() {
+  local port="$1"
+  local attempt
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    if test_dev_fcaptcha_connection "$port"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+ensure_dev_fcaptcha_running() {
+  local port="$1"
+  if test_dev_fcaptcha_connection "$port"; then
+    return 0
+  fi
+
+  printf '==> Starting Docker FCaptcha on localhost:%s\n' "$port"
+  start_dev_stack_fcaptcha_container "$port" || return 1
+  wait_dev_fcaptcha_ready "$port" || return 1
+}
+
+stop_dev_stack_fcaptcha() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" stop fcaptcha >/dev/null 2>&1 || true
+}
+
 _join_dev_stack_if_managed() {
   local port="$1"
   if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
@@ -176,6 +221,7 @@ _init_dev_stack_state_impl() {
     if [[ -n "$state_port" ]]; then
       printf '==> Stopping previous dev stack Postgres session\n'
       stop_dev_stack_postgres "$state_port"
+      stop_dev_stack_fcaptcha
     fi
   fi
 
@@ -191,6 +237,7 @@ _stop_dev_stack_impl() {
     local state_port="${DEV_STACK_STATE_postgres_port:-}"
     if [[ -n "$state_port" ]]; then
       stop_dev_stack_postgres "$state_port"
+      stop_dev_stack_fcaptcha
     fi
   fi
 
@@ -228,6 +275,7 @@ _unregister_dev_stack_server_impl() {
 
   rm -f "$DEV_STACK_STATE_FILE"
   stop_dev_stack_postgres "$state_port"
+  stop_dev_stack_fcaptcha
   DEV_STACK_SERVER_REGISTERED=0
   printf '==> Stopped Docker Postgres and freed localhost port\n'
 }
