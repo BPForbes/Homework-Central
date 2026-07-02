@@ -1047,7 +1047,8 @@ body {
   gap: 0.15rem;
   padding: 0.65rem 0.5rem;
   margin-bottom: 0.65rem;
-  background: repeating-linear-gradient(135deg, #eef2ff, #eef2ff 6px, #e0e7ff 6px, #e0e7ff 12px);
+  --captcha-bg: repeating-linear-gradient(135deg, #eef2ff, #eef2ff 6px, #e0e7ff 6px, #e0e7ff 12px);
+  background: var(--captcha-bg);
   border: 1.5px dashed #c7d2fe;
   border-radius: 8px;
   overflow-x: auto;
@@ -1056,15 +1057,45 @@ body {
   cursor: default;
 }
 
+/* Positioning context for a character's strikethrough/hole overlays — font-family, weight, style,
+ * color, and transform are all set per character via inline style (see TextChallenge.tsx). */
+.captcha-char-wrap {
+  position: relative;
+  display: inline-block;
+}
+
 .captcha-char {
   display: inline-block;
-  font-family: 'Courier New', Courier, monospace;
-  font-style: italic;
-  font-weight: 700;
   font-size: 1.4rem;
   letter-spacing: 0.05em;
   text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.08);
   pointer-events: none;
+}
+
+.captcha-char-strike {
+  position: absolute;
+  left: -12%;
+  width: 124%;
+  height: 2px;
+  background: rgba(15, 23, 42, 0.6);
+  pointer-events: none;
+}
+
+/* A "hole"/tear in the glyph: painted in the same pattern as the panel background so it reads as
+ * a gap revealing what's behind the character, rather than an opaque patch sitting on top of it. */
+.captcha-char-hole {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: var(--captcha-bg);
+  pointer-events: none;
+}
+
+.captcha-char-hole-blob {
+  border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%;
+}
+
+.captcha-char-hole-jagged {
+  clip-path: polygon(50% 0%, 78% 12%, 100% 42%, 88% 78%, 55% 100%, 22% 86%, 0% 48%, 14% 14%);
 }
 
 .captcha-input {
