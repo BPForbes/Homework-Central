@@ -152,8 +152,13 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
 
     switch (challenge.Type)
     {
-      case "maze":
+      case "maze" when HasPath(challenge.Maze!):
         submission.MazePath = SolveMaze(challenge.Maze!);
+        break;
+      case "maze":
+        // Some maze challenges are deliberately generated with no path from A to B at all;
+        // correctly recognizing that is itself the correct answer.
+        submission.MazeUnsolvableClaim = true;
         break;
       case "tileRotate":
         submission.TileRotationClicks = challenge.TileRotate!.Tiles
@@ -182,6 +187,34 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
 
     // Code challenges: the content is the answer itself.
     return content;
+  }
+
+  private static bool HasPath(MazeDto maze)
+  {
+    if (maze.StartIndex == maze.EndIndex)
+      return true;
+
+    bool[] visited = new bool[maze.CellWalls.Length];
+    Queue<int> queue = new();
+    queue.Enqueue(maze.StartIndex);
+    visited[maze.StartIndex] = true;
+
+    while (queue.Count > 0)
+    {
+      int current = queue.Dequeue();
+      if (current == maze.EndIndex)
+        return true;
+
+      int walls = maze.CellWalls[current];
+      int x = current % maze.Width;
+      int y = current / maze.Width;
+      if ((walls & 1) != 0 && y > 0 && !visited[current - maze.Width]) { visited[current - maze.Width] = true; queue.Enqueue(current - maze.Width); }
+      if ((walls & 2) != 0 && x < maze.Width - 1 && !visited[current + 1]) { visited[current + 1] = true; queue.Enqueue(current + 1); }
+      if ((walls & 4) != 0 && y < maze.Height - 1 && !visited[current + maze.Width]) { visited[current + maze.Width] = true; queue.Enqueue(current + maze.Width); }
+      if ((walls & 8) != 0 && x > 0 && !visited[current - 1]) { visited[current - 1] = true; queue.Enqueue(current - 1); }
+    }
+
+    return false;
   }
 
   private static List<int> SolveMaze(MazeDto maze)

@@ -1,8 +1,8 @@
 namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>Client's answer to a challenge plus the behavioral telemetry collected while solving
-/// it. Exactly one of <see cref="Answer"/>, <see cref="MazePath"/>, or
-/// <see cref="TileRotationClicks"/> is relevant, matching the challenge's <c>Type</c>.</summary>
+/// it. Exactly one of <see cref="Answer"/>, <see cref="MazePath"/>/<see cref="MazeUnsolvableClaim"/>,
+/// or <see cref="TileRotationClicks"/> is relevant, matching the challenge's <c>Type</c>.</summary>
 public sealed class CaptchaSubmissionDto
 {
     public string ChallengeId { get; set; } = null!;
@@ -10,8 +10,15 @@ public sealed class CaptchaSubmissionDto
     /// <summary>Text challenges: the retyped code or solved expression.</summary>
     public string? Answer { get; set; }
 
-    /// <summary>Maze challenges: cell indices visited in order, starting at the maze's start cell.</summary>
+    /// <summary>Maze challenges: cell indices visited in order, starting at the maze's start cell.
+    /// Ignored when <see cref="MazeUnsolvableClaim"/> is set.</summary>
     public List<int>? MazePath { get; set; }
+
+    /// <summary>Maze challenges: true when the player asserts there is no path from A to B instead
+    /// of tracing one — some maze challenges are deliberately built as two disconnected regions,
+    /// and correctly recognizing that is itself the solve. Takes precedence over
+    /// <see cref="MazePath"/> when set.</summary>
+    public bool MazeUnsolvableClaim { get; set; }
 
     /// <summary>Tile-rotate challenges: number of clicks applied to each tile, same order as issued.</summary>
     public List<int>? TileRotationClicks { get; set; }

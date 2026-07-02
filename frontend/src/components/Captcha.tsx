@@ -61,6 +61,8 @@ export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
           maze={challenge.maze}
           path={captcha.mazePath}
           onStep={captcha.addMazeStep}
+          unsolvableClaim={captcha.mazeUnsolvableClaim}
+          onToggleUnsolvableClaim={captcha.toggleMazeUnsolvableClaim}
           disabled={disabled || loading}
         />
       )}

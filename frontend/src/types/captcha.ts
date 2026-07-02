@@ -51,6 +51,10 @@ export interface CaptchaSubmission {
   challengeId: string
   answer?: string
   mazePath?: number[]
+  /** True when the player asserts there's no path from A to B instead of tracing one — some maze
+   * challenges are deliberately built as two disconnected regions. Takes precedence over
+   * mazePath when set. */
+  mazeUnsolvableClaim?: boolean
   tileRotationClicks?: number[]
   behavior: CaptchaBehavior
 }

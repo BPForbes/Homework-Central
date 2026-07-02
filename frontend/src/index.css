@@ -1179,6 +1179,35 @@ body {
   cursor: not-allowed;
 }
 
+.maze-unsolvable-btn {
+  margin-top: 0.65rem;
+  padding: 0.5rem 0.9rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.maze-unsolvable-btn:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.maze-unsolvable-btn.active {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.maze-unsolvable-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Tile-rotate puzzle */
 .tile-rotate-grid {
   display: grid;

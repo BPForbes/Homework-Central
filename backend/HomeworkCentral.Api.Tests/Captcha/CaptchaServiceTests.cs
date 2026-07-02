@@ -109,11 +109,11 @@ public class CaptchaServiceTests
     }
 
     [Fact]
-    public void Maze_challenges_are_always_solvable_and_a_correct_path_with_good_behavior_passes()
+    public void Solvable_maze_challenges_have_a_correct_path_that_passes_when_traced_with_good_behavior()
     {
         for (int attempt = 0; attempt < 15; attempt++)
         {
-            CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Maze);
+            CaptchaChallengeDto challenge = GetMazeChallengeWithSolvability(_service, wantSolvable: true);
             MazeDto maze = challenge.Maze!;
             List<int> path = SolveMaze(maze);
 
@@ -124,7 +124,11 @@ public class CaptchaServiceTests
             {
                 ChallengeId = challenge.ChallengeId,
                 MazePath = path,
-                Behavior = GoodBehavior(interactionCount: path.Count),
+                // Mazes up to 11x11 can have solution paths long enough that a fixed 4s duration
+                // would look like an implausibly fast interaction rate (BehaviorScoringService
+                // penalizes >20 interactions/sec); scale duration with path length so a long,
+                // legitimately-solved path doesn't fail the behavioral gate on that basis alone.
+                Behavior = GoodBehavior(interactionCount: path.Count, totalDurationMs: Math.Max(4000, path.Count * 150)),
             };
 
             Assert.True(_service.Validate(submission, CaptchaAction.VerifyRole));
@@ -137,16 +141,68 @@ public class CaptchaServiceTests
         CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Maze);
         MazeDto maze = challenge.Maze!;
 
-        // A naive path that ignores walls entirely (straight row-major walk) is not a valid route
-        // unless every wall between consecutive cells happens to be open, which a freshly
-        // generated maze essentially never satisfies end-to-end.
-        List<int> bogusPath = Enumerable.Range(maze.StartIndex, maze.EndIndex - maze.StartIndex + 1).ToList();
+        // A naive path that ignores walls entirely (straight row-major walk between A and B,
+        // whichever comes first) is not a valid route unless every wall along the way happens to
+        // be open, which a freshly generated maze essentially never satisfies end-to-end.
+        int lo = Math.Min(maze.StartIndex, maze.EndIndex);
+        int hi = Math.Max(maze.StartIndex, maze.EndIndex);
+        List<int> bogusPath = Enumerable.Range(lo, hi - lo + 1).ToList();
+        if (maze.StartIndex > maze.EndIndex)
+            bogusPath.Reverse();
 
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
             ChallengeId = challenge.ChallengeId,
             MazePath = bogusPath,
             Behavior = GoodBehavior(interactionCount: bogusPath.Count),
+        };
+
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
+    }
+
+    [Fact]
+    public void Unsolvable_maze_challenges_are_correctly_solved_by_claiming_no_path_exists()
+    {
+        CaptchaChallengeDto challenge = GetMazeChallengeWithSolvability(_service, wantSolvable: false);
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
+        {
+            ChallengeId = challenge.ChallengeId,
+            MazeUnsolvableClaim = true,
+            Behavior = GoodBehavior(interactionCount: 1),
+        };
+
+        Assert.True(_service.Validate(submission, CaptchaAction.VerifyRole));
+    }
+
+    [Fact]
+    public void Claiming_a_solvable_maze_is_unsolvable_fails()
+    {
+        CaptchaChallengeDto challenge = GetMazeChallengeWithSolvability(_service, wantSolvable: true);
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
+        {
+            ChallengeId = challenge.ChallengeId,
+            MazeUnsolvableClaim = true,
+            Behavior = GoodBehavior(interactionCount: 1),
+        };
+
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
+    }
+
+    [Fact]
+    public void Tracing_a_path_on_an_unsolvable_maze_fails()
+    {
+        CaptchaChallengeDto challenge = GetMazeChallengeWithSolvability(_service, wantSolvable: false);
+        MazeDto maze = challenge.Maze!;
+
+        // There is no path from A to B in this maze, so a "path" that merely starts and ends at
+        // the right cells without ever actually reaching B by open passages must still fail.
+        List<int> bogusPath = [maze.StartIndex, maze.EndIndex];
+
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
+        {
+            ChallengeId = challenge.ChallengeId,
+            MazePath = bogusPath,
+            Behavior = GoodBehavior(interactionCount: 1),
         };
 
         Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
@@ -325,8 +381,13 @@ public class CaptchaServiceTests
 
         switch (challenge.Type)
         {
-            case "maze":
+            case "maze" when HasPath(challenge.Maze!):
                 submission.MazePath = SolveMaze(challenge.Maze!);
+                break;
+            case "maze":
+                // Some maze challenges are deliberately generated with no path from A to B at
+                // all; correctly recognizing that is itself the correct answer.
+                submission.MazeUnsolvableClaim = true;
                 break;
             case "tileRotate":
                 submission.TileRotationClicks = SolveTileRotate(challenge.TileRotate!);
@@ -379,6 +440,51 @@ public class CaptchaServiceTests
         }
 
         throw new InvalidOperationException($"Could not obtain a '{expected}' challenge after 60 attempts.");
+    }
+
+    /// <summary>Maze challenges are randomly solvable (~70%) or deliberately not (~30%); retry
+    /// until one matching <paramref name="wantSolvable"/> comes up. Comfortably bounded — the
+    /// combined odds of drawing a maze of the wanted solvability are around 1 in 5 per attempt.</summary>
+    private static CaptchaChallengeDto GetMazeChallengeWithSolvability(CaptchaService service, bool wantSolvable)
+    {
+        for (int attempt = 0; attempt < 400; attempt++)
+        {
+            CaptchaChallengeDto candidate = service.CreateChallenge();
+            if (candidate.Type == "maze" && HasPath(candidate.Maze!) == wantSolvable)
+                return candidate;
+        }
+
+        throw new InvalidOperationException(
+            $"Could not obtain a maze challenge with solvable={wantSolvable} after 400 attempts.");
+    }
+
+    private static bool HasPath(MazeDto maze)
+    {
+        if (maze.StartIndex == maze.EndIndex)
+            return true;
+
+        bool[] visited = new bool[maze.CellWalls.Length];
+        Queue<int> queue = new();
+        queue.Enqueue(maze.StartIndex);
+        visited[maze.StartIndex] = true;
+
+        while (queue.Count > 0)
+        {
+            int current = queue.Dequeue();
+            if (current == maze.EndIndex)
+                return true;
+
+            foreach (int neighbor in MazeNeighbors(maze, current))
+            {
+                if (visited[neighbor])
+                    continue;
+
+                visited[neighbor] = true;
+                queue.Enqueue(neighbor);
+            }
+        }
+
+        return false;
     }
 
     private static string SolveText(string content)
@@ -453,7 +559,8 @@ public class CaptchaServiceTests
     /// 4s duration worth +0.1, and (with default interaction counts) an interaction rate worth
     /// +0.05, for exactly 0.85 on top of the 0.5 baseline. Adding keystrokes worth +0.15 (stddev
     /// ~44ms, inside the human-rhythm band) brings a text-challenge submission to exactly 1.00.</summary>
-    private static HomeworkCentral.Api.Captcha.CaptchaBehaviorDto GoodBehavior(int interactionCount = 3, bool includeKeystrokes = false)
+    private static HomeworkCentral.Api.Captcha.CaptchaBehaviorDto GoodBehavior(
+        int interactionCount = 3, bool includeKeystrokes = false, int totalDurationMs = 4000)
     {
         int[] dxs = [3, 15, -2, 20, -1, 18, 2, 16, -3, 14];
         int[] dys = [2, -10, 3, -12, 2, 9, -1, -11, 4, 8];
@@ -472,7 +579,7 @@ public class CaptchaServiceTests
         HomeworkCentral.Api.Captcha.CaptchaBehaviorDto behavior = new()
         {
             MouseSamples = mouseSamples,
-            TotalDurationMs = 4000,
+            TotalDurationMs = totalDurationMs,
             WebdriverFlag = false,
             InteractionCount = interactionCount,
         };

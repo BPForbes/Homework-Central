@@ -8,12 +8,14 @@ namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>
 /// Randomly issues one of three challenge kinds — retype-a-code / solve-an-expression (text), a
-/// generated maze, or a tile-rotation puzzle — and validates submissions against two gates: the
-/// puzzle must actually be solved correctly (a hard requirement — there is no score high enough to
-/// substitute for it), AND <see cref="IRiskEngine"/> must judge the submission's behavioral
-/// telemetry, IP consistency, and identity track record as clearing a dynamically computed
-/// threshold. Unlike puzzle correctness, the risk gate is not a single fixed cutoff for everyone —
-/// see <see cref="IRiskEngine"/> for how the required score moves per identity and per attempt.
+/// generated maze (a random size, most often solvable but sometimes deliberately not — see
+/// <see cref="MazeGenerator"/>), or a tile-rotation puzzle — and validates submissions against two
+/// gates: the puzzle must actually be solved correctly (a hard requirement — there is no score high
+/// enough to substitute for it), AND <see cref="IRiskEngine"/> must judge the submission's
+/// behavioral telemetry, IP consistency, and identity track record as clearing a dynamically
+/// computed threshold. Unlike puzzle correctness, the risk gate is not a single fixed cutoff for
+/// everyone — see <see cref="IRiskEngine"/> for how the required score moves per identity and per
+/// attempt.
 /// </summary>
 public sealed class CaptchaService(
     IMemoryCache cache,
@@ -26,9 +28,7 @@ public sealed class CaptchaService(
     // Excludes visually ambiguous characters (0/O, 1/I/L) since the code is typed back by hand.
     private const string CodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-    private const int MazeWidth = 6;
-    private const int MazeHeight = 6;
-    private const int MaxMazePathLength = MazeWidth * MazeHeight * 4;
+    private static readonly int[] MazeSizes = [7, 9, 11];
 
     public CaptchaChallengeDto CreateChallenge()
     {
@@ -63,7 +63,7 @@ public sealed class CaptchaService(
         bool solved = record.Type switch
         {
             CaptchaChallengeTypes.Text => ValidateText(record.TextAnswer, submission.Answer),
-            CaptchaChallengeTypes.Maze => ValidateMaze(record.Maze!, submission.MazePath),
+            CaptchaChallengeTypes.Maze => ValidateMaze(record.Maze!, submission.MazePath, submission.MazeUnsolvableClaim),
             CaptchaChallengeTypes.TileRotate => ValidateTileRotate(record.TileRotate!, submission.TileRotationClicks),
             _ => false,
         };
@@ -104,12 +104,13 @@ public sealed class CaptchaService(
 
     private CaptchaChallengeDto CreateMazeChallenge(string challengeId, string? issuerIp)
     {
-        MazeDto maze = MazeGenerator.Generate(MazeWidth, MazeHeight);
+        int size = MazeSizes[Random.Shared.Next(MazeSizes.Length)];
+        MazeDto maze = MazeGenerator.Generate(size, size);
         Store(challengeId, ChallengeRecord.ForMaze(maze, issuerIp));
         return new CaptchaChallengeDto(
             challengeId,
             CaptchaChallengeTypes.Maze,
-            "Guide the marker from A to B.",
+            "Guide the marker from A to B — or, if there's truly no way through, say so.",
             null,
             maze,
             null);
@@ -141,9 +142,16 @@ public sealed class CaptchaService(
         return string.Equals(expected.Trim(), answer.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool ValidateMaze(MazeDto maze, List<int>? path)
+    private static bool ValidateMaze(MazeDto maze, List<int>? path, bool unsolvableClaim)
     {
-        if (path is null || path.Count < 2 || path.Count > MaxMazePathLength)
+        // A maze can be deliberately built as two disconnected regions (see MazeGenerator); the
+        // player correctly recognizing that — instead of tracing a path that can't exist — is
+        // itself a valid solve. This takes precedence over any path also present in the submission.
+        if (unsolvableClaim)
+            return !MazeGenerator.HasPath(maze);
+
+        int maxPathLength = maze.Width * maze.Height * 4;
+        if (path is null || path.Count < 2 || path.Count > maxPathLength)
             return false;
 
         if (path[0] != maze.StartIndex || path[^1] != maze.EndIndex)

@@ -17,6 +17,7 @@ export function useCaptcha() {
   const [loading, setLoading] = useState(true)
   const [answer, setAnswer] = useState('')
   const [mazePath, setMazePath] = useState<number[]>([])
+  const [mazeUnsolvableClaim, setMazeUnsolvableClaim] = useState(false)
   const [tileRotationClicks, setTileRotationClicks] = useState<number[]>([])
 
   const startedAtRef = useRef(0)
@@ -40,6 +41,7 @@ export function useCaptcha() {
     setLoading(true)
     setAnswer('')
     setMazePath([])
+    setMazeUnsolvableClaim(false)
     setTileRotationClicks([])
     resetTelemetry()
     try {
@@ -80,10 +82,16 @@ export function useCaptcha() {
   const addMazeStep = useCallback(
     (cellIndex: number) => {
       setMazePath((prev) => [...prev, cellIndex])
+      setMazeUnsolvableClaim(false)
       recordInteraction()
     },
     [recordInteraction]
   )
+
+  const toggleMazeUnsolvableClaim = useCallback(() => {
+    setMazeUnsolvableClaim((prev) => !prev)
+    recordInteraction()
+  }, [recordInteraction])
 
   const rotateTile = useCallback(
     (index: number, clicks: number) => {
@@ -106,7 +114,8 @@ export function useCaptcha() {
     return {
       challengeId: challenge.challengeId,
       answer: challenge.type === 'text' ? answer : undefined,
-      mazePath: challenge.type === 'maze' ? mazePath : undefined,
+      mazePath: challenge.type === 'maze' && !mazeUnsolvableClaim ? mazePath : undefined,
+      mazeUnsolvableClaim: challenge.type === 'maze' ? mazeUnsolvableClaim : undefined,
       tileRotationClicks: challenge.type === 'tileRotate' ? tileRotationClicks : undefined,
       behavior: {
         mouseSamples: mouseSamplesRef.current,
@@ -116,7 +125,7 @@ export function useCaptcha() {
         interactionCount: interactionCountRef.current,
       },
     }
-  }, [challenge, answer, mazePath, tileRotationClicks])
+  }, [challenge, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks])
 
   return {
     challenge,
@@ -125,6 +134,8 @@ export function useCaptcha() {
     setAnswer,
     mazePath,
     addMazeStep,
+    mazeUnsolvableClaim,
+    toggleMazeUnsolvableClaim,
     tileRotationClicks,
     rotateTile,
     recordMouseMove,
