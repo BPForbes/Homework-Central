@@ -31,7 +31,7 @@ public class AuthService(
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
         string normalizedEmail = req.Email.ToLowerInvariant();
-        bool captchaVerified = captcha.Validate(req.Captcha);
+        bool captchaVerified = captcha.Validate(req.Captcha, CaptchaAction.Register);
 
         DateTime now = DateTime.UtcNow;
         User user = new User

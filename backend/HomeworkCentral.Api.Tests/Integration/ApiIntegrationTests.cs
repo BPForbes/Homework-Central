@@ -140,7 +140,8 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
   }
 
   /// <summary>Builds a submission that correctly solves whichever challenge type was issued, paired
-  /// with telemetry engineered to clear the 0.75 behavioral score threshold.</summary>
+  /// with telemetry engineered to comfortably clear the dynamic risk threshold for a first-time,
+  /// IP-matched signup attempt (base 0.65 + at most a small new-identity/failure adjustment).</summary>
   private static CaptchaSubmissionDto BuildCorrectSubmission(CaptchaChallengeDto challenge)
   {
     CaptchaSubmissionDto submission = new()

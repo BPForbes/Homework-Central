@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using HomeworkCentral.Api.Security;
 using Microsoft.AspNetCore.Http;
 
 namespace HomeworkCentral.Api.ScrapingDetection;
@@ -20,7 +20,7 @@ public sealed class ScrapingDetectionMiddleware(RequestDelegate next, IScrapingD
             return;
         }
 
-        string identity = ResolveIdentity(context);
+        string identity = RequestIdentity.Resolve(context);
         ScrapingRequestSample sample = new(identity, context.Request.Path.Value ?? "/", context.Request.Method, DateTime.UtcNow);
         ScrapingAssessment assessment = detector.RecordRequest(sample);
 
@@ -39,17 +39,5 @@ public sealed class ScrapingDetectionMiddleware(RequestDelegate next, IScrapingD
         }
 
         await next(context);
-    }
-
-    private static string ResolveIdentity(HttpContext context)
-    {
-        string? userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? context.User.FindFirst("sub")?.Value;
-
-        if (!string.IsNullOrEmpty(userId))
-            return $"user:{userId}";
-
-        string ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        return $"ip:{ip}";
     }
 }

@@ -95,6 +95,35 @@ public class ScrapingDetectionServiceTests
     }
 
     [Fact]
+    public void PeekAssessment_reflects_recorded_history_without_recording_a_new_sample()
+    {
+        DateTime start = DateTime.UtcNow;
+        for (int i = 0; i < 150; i++)
+        {
+            _service.RecordRequest(new ScrapingRequestSample(
+                "ip:203.0.113.99", $"/api/chat/rooms/room{i}/messages", "GET", start.AddMilliseconds(i * 300)));
+        }
+
+        ScrapingAssessment first = _service.PeekAssessment("ip:203.0.113.99");
+        ScrapingAssessment second = _service.PeekAssessment("ip:203.0.113.99");
+
+        Assert.True(first.ShouldBlock);
+        // Two peeks in a row see the same underlying window (peeking doesn't append samples), so
+        // they agree — unlike RecordRequest, which would push the suspicion score around by
+        // adding another sample each call.
+        Assert.Equal(first.SuspicionScore, second.SuspicionScore);
+    }
+
+    [Fact]
+    public void PeekAssessment_for_an_identity_with_no_history_is_neutral()
+    {
+        ScrapingAssessment assessment = _service.PeekAssessment("ip:never-seen");
+
+        Assert.Equal(0, assessment.SuspicionScore);
+        Assert.False(assessment.ShouldBlock);
+    }
+
+    [Fact]
     public void Different_identities_are_tracked_independently()
     {
         DateTime start = DateTime.UtcNow;

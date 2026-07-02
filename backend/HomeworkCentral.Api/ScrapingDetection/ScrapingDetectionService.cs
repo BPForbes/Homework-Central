@@ -43,6 +43,18 @@ public sealed class ScrapingDetectionService(IMemoryCache cache) : IScrapingDete
         return Assess(snapshot, sample.TimestampUtc);
     }
 
+    public ScrapingAssessment PeekAssessment(string identity)
+    {
+        if (!cache.TryGetValue(CacheKey(identity), out IdentityWindow? window) || window is null)
+            return new ScrapingAssessment(0, false, null);
+
+        List<RequestRecord> snapshot;
+        lock (window.Lock)
+            snapshot = [.. window.Samples];
+
+        return Assess(snapshot, DateTime.UtcNow);
+    }
+
     private static ScrapingAssessment Assess(List<RequestRecord> samples, DateTime nowUtc)
     {
         if (samples.Count < MinSamplesBeforeAssessing)

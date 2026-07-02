@@ -1,8 +1,12 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using HomeworkCentral.Api.Captcha;
+using HomeworkCentral.Api.Risk;
+using HomeworkCentral.Api.ScrapingDetection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace HomeworkCentral.Api.Tests.Captcha;
@@ -11,13 +15,12 @@ public class CaptchaServiceTests
 {
     // No HttpContext -> ResolveClientIp() returns null -> IP binding never triggers for these
     // tests, matching pre-IP-binding behavior. IP binding itself is covered by its own tests below.
-    private readonly CaptchaService _service = new(
-        new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), new FakeHttpContextAccessor());
+    private readonly CaptchaService _service = CreateService();
 
     [Fact]
     public void Text_challenge_with_correct_answer_and_human_like_behavior_passes()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.Text);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Text);
 
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
@@ -26,13 +29,13 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(includeKeystrokes: true),
         };
 
-        Assert.True(_service.Validate(submission));
+        Assert.True(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void Text_challenge_is_single_use()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.Text);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Text);
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
             ChallengeId = challenge.ChallengeId,
@@ -40,14 +43,14 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(includeKeystrokes: true),
         };
 
-        Assert.True(_service.Validate(submission));
-        Assert.False(_service.Validate(submission));
+        Assert.True(_service.Validate(submission, CaptchaAction.VerifyRole));
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void Text_challenge_with_wrong_answer_fails_even_with_human_like_behavior()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.Text);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Text);
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
             ChallengeId = challenge.ChallengeId,
@@ -55,7 +58,7 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(includeKeystrokes: true),
         };
 
-        Assert.False(_service.Validate(submission));
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
@@ -63,8 +66,10 @@ public class CaptchaServiceTests
     {
         // The puzzle answer alone is not sufficient — this is the core of "the input is another
         // item to pass": a correct answer submitted with bot-like telemetry (no mouse movement, no
-        // interaction, webdriver flagged, implausibly fast) must still be rejected.
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.Text);
+        // interaction, webdriver flagged, implausibly fast) must still be rejected. Its computed
+        // score clamps to 0.0, far below any realistic dynamic threshold (which is clamped to a
+        // minimum of RiskOptions.MinRequiredScore, 0.35 by default).
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Text);
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
             ChallengeId = challenge.ChallengeId,
@@ -72,13 +77,13 @@ public class CaptchaServiceTests
             Behavior = BotLikeBehavior(),
         };
 
-        Assert.False(_service.Validate(submission));
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void Null_submission_fails()
     {
-        Assert.False(_service.Validate(null));
+        Assert.False(_service.Validate(null, CaptchaAction.VerifyRole));
     }
 
     [Fact]
@@ -89,7 +94,7 @@ public class CaptchaServiceTests
             ChallengeId = "",
             Answer = "anything",
             Behavior = GoodBehavior(),
-        }));
+        }, CaptchaAction.VerifyRole));
     }
 
     [Fact]
@@ -100,7 +105,7 @@ public class CaptchaServiceTests
             ChallengeId = Guid.NewGuid().ToString("N"),
             Answer = "anything",
             Behavior = GoodBehavior(),
-        }));
+        }, CaptchaAction.VerifyRole));
     }
 
     [Fact]
@@ -108,7 +113,7 @@ public class CaptchaServiceTests
     {
         for (int attempt = 0; attempt < 15; attempt++)
         {
-            CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.Maze);
+            CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Maze);
             MazeDto maze = challenge.Maze!;
             List<int> path = SolveMaze(maze);
 
@@ -122,14 +127,14 @@ public class CaptchaServiceTests
                 Behavior = GoodBehavior(interactionCount: path.Count),
             };
 
-            Assert.True(_service.Validate(submission));
+            Assert.True(_service.Validate(submission, CaptchaAction.VerifyRole));
         }
     }
 
     [Fact]
     public void Maze_challenge_with_wall_crossing_path_fails()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.Maze);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.Maze);
         MazeDto maze = challenge.Maze!;
 
         // A naive path that ignores walls entirely (straight row-major walk) is not a valid route
@@ -144,13 +149,13 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(interactionCount: bogusPath.Count),
         };
 
-        Assert.False(_service.Validate(submission));
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void TileRotate_challenge_with_correct_rotations_and_good_behavior_passes()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.TileRotate);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.TileRotate);
         TileRotateDto tileRotate = challenge.TileRotate!;
         List<int> clicks = SolveTileRotate(tileRotate);
 
@@ -161,13 +166,13 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(interactionCount: clicks.Count),
         };
 
-        Assert.True(_service.Validate(submission));
+        Assert.True(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void TileRotate_challenge_with_unaligned_rotations_fails()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.TileRotate);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.TileRotate);
         TileRotateDto tileRotate = challenge.TileRotate!;
         List<int> noClicks = tileRotate.Tiles.Select(_ => 0).ToList();
 
@@ -178,13 +183,13 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(interactionCount: 1),
         };
 
-        Assert.False(_service.Validate(submission));
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void TileRotate_challenge_with_wrong_tile_count_fails()
     {
-        CaptchaChallengeDto challenge = GetChallengeOfType(CaptchaTypeOf.TileRotate);
+        CaptchaChallengeDto challenge = GetChallengeOfType(_service, CaptchaTypeOf.TileRotate);
         TileRotateDto tileRotate = challenge.TileRotate!;
         List<int> tooFew = SolveTileRotate(tileRotate).Take(tileRotate.Tiles.Length - 1).ToList();
 
@@ -195,35 +200,63 @@ public class CaptchaServiceTests
             Behavior = GoodBehavior(interactionCount: 1),
         };
 
-        Assert.False(_service.Validate(submission));
+        Assert.False(_service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void Challenge_solved_from_the_same_ip_it_was_issued_to_passes()
     {
         FakeHttpContextAccessor accessor = new() { HttpContext = ContextWithIp("203.0.113.10") };
-        CaptchaService service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), accessor);
+        CaptchaService service = CreateService(accessor);
 
         CaptchaChallengeDto challenge = service.CreateChallenge();
-        // Same accessor/context still assigned -> same resolved IP at verify time.
+        // Same accessor/context still assigned -> same resolved IP at verify time -> no IP-mismatch
+        // penalty. Required score for this first-ever attempt from this identity is the base 0.75
+        // plus the small new-identity penalty (0.05) = 0.80; CorrectSubmissionFor's telemetry
+        // scores exactly 0.85 regardless of challenge type, clearing it.
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
 
-        Assert.True(service.Validate(submission));
+        Assert.True(service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
     public void Challenge_solved_from_a_different_ip_than_it_was_issued_to_fails()
     {
-        // A challenge fetched from one IP but solved/submitted from another looks like it was
-        // farmed out to a separate solver rather than answered by the same visitor who requested it.
+        // A challenge fetched from one IP but solved/submitted from another is a signal, not a
+        // hard rule (see IRiskEngine): it raises the required score by 0.20 instead of an
+        // automatic reject. Combined with the first-attempt new-identity penalty, the required
+        // score becomes 0.75 + 0.20 + 0.05 = 1.00, clamped to the 0.95 ceiling — well above the
+        // 0.85 that CorrectSubmissionFor's telemetry scores, so this still fails today. The next
+        // test shows the same mismatch can be outweighed by a stronger signal.
         FakeHttpContextAccessor accessor = new() { HttpContext = ContextWithIp("203.0.113.10") };
-        CaptchaService service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), accessor);
+        CaptchaService service = CreateService(accessor);
 
         CaptchaChallengeDto challenge = service.CreateChallenge();
         accessor.HttpContext = ContextWithIp("198.51.100.20");
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
 
-        Assert.False(service.Validate(submission));
+        Assert.False(service.Validate(submission, CaptchaAction.VerifyRole));
+    }
+
+    [Fact]
+    public void A_sufficiently_strong_signal_still_passes_despite_an_ip_mismatch()
+    {
+        // Demonstrates the "don't block on one signal alone" design: the same IP mismatch as
+        // above (raising the bar to 0.95) doesn't fail this attempt, because a text challenge
+        // solved with keystroke telemetry included scores a full 1.00.
+        FakeHttpContextAccessor accessor = new() { HttpContext = ContextWithIp("203.0.113.10") };
+        CaptchaService service = CreateService(accessor);
+
+        CaptchaChallengeDto challenge = GetChallengeOfType(service, CaptchaTypeOf.Text);
+        accessor.HttpContext = ContextWithIp("198.51.100.20");
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
+        {
+            ChallengeId = challenge.ChallengeId,
+            Answer = SolveText(challenge.Content!),
+            Behavior = GoodBehavior(includeKeystrokes: true),
+        };
+
+        Assert.True(service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
     [Fact]
@@ -232,20 +265,62 @@ public class CaptchaServiceTests
         // No HttpContext at all (e.g. some hosting setups, or a test double) means no IP was
         // captured at issue time, so the check degrades gracefully instead of blocking everyone.
         FakeHttpContextAccessor accessor = new() { HttpContext = null };
-        CaptchaService service = new(new MemoryCache(new MemoryCacheOptions()), new BehaviorScoringService(), accessor);
+        CaptchaService service = CreateService(accessor);
 
         CaptchaChallengeDto challenge = service.CreateChallenge();
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
 
-        Assert.True(service.Validate(submission));
+        Assert.True(service.Validate(submission, CaptchaAction.VerifyRole));
     }
 
+    [Fact]
+    public void Repeated_risk_denied_attempts_raise_the_required_score_for_the_same_identity()
+    {
+        // Escalating friction: each risk-denied attempt from an identity raises the required
+        // score for its next attempt by 0.05, up to a 0.20 cap. After three consecutive denials,
+        // the required score is 0.75 + 0.15 = 0.90 — high enough that telemetry which would have
+        // comfortably passed a brand-new identity (0.85, against a first-attempt bar of 0.80) no
+        // longer clears it.
+        CaptchaService service = CreateService();
+
+        for (int i = 0; i < 3; i++)
+        {
+            CaptchaChallengeDto challenge = service.CreateChallenge();
+            HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = CorrectSubmissionFor(challenge);
+            submission.Behavior = BotLikeBehavior();
+            Assert.False(service.Validate(submission, CaptchaAction.VerifyRole));
+        }
+
+        CaptchaChallengeDto finalChallenge = service.CreateChallenge();
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto finalSubmission = CorrectSubmissionFor(finalChallenge);
+        Assert.False(service.Validate(finalSubmission, CaptchaAction.VerifyRole));
+    }
+
+    private static CaptchaService CreateService(IHttpContextAccessor? accessor = null)
+    {
+        IMemoryCache cache = new MemoryCache(new MemoryCacheOptions());
+        IOptions<RiskOptions> options = Options.Create(new RiskOptions());
+        IRiskEngine riskEngine = new RiskEngine(
+            new BehaviorScoringService(),
+            new IdentityRiskProfileService(cache, options),
+            new ScrapingDetectionService(cache),
+            options);
+
+        return new CaptchaService(cache, riskEngine, accessor ?? new FakeHttpContextAccessor(), NullLogger<CaptchaService>.Instance);
+    }
+
+    /// <summary>Solves whichever challenge type was issued with telemetry that scores exactly 0.85
+    /// regardless of type (baseline 0.5 + mouse-movement 0.2 + duration 0.1 + interaction 0.05,
+    /// keystrokes deliberately omitted so text challenges don't score any higher than maze/tile —
+    /// see <see cref="GoodBehavior"/>). Deterministic and type-independent, so tests using it don't
+    /// depend on which of the three challenge types <see cref="CaptchaService.CreateChallenge"/>
+    /// happened to draw.</summary>
     private static HomeworkCentral.Api.Captcha.CaptchaSubmissionDto CorrectSubmissionFor(CaptchaChallengeDto challenge)
     {
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
             ChallengeId = challenge.ChallengeId,
-            Behavior = GoodBehavior(includeKeystrokes: challenge.Type == "text"),
+            Behavior = GoodBehavior(),
         };
 
         switch (challenge.Type)
@@ -286,7 +361,7 @@ public class CaptchaServiceTests
     /// <summary>CreateChallenge() picks one of three types at random; retry until the requested
     /// type comes up. 60 misses in a row for a 1-in-3 type is astronomically unlikely, so this
     /// isn't flaky.</summary>
-    private CaptchaChallengeDto GetChallengeOfType(CaptchaTypeOf type)
+    private static CaptchaChallengeDto GetChallengeOfType(CaptchaService service, CaptchaTypeOf type)
     {
         string expected = type switch
         {
@@ -298,7 +373,7 @@ public class CaptchaServiceTests
 
         for (int attempt = 0; attempt < 60; attempt++)
         {
-            CaptchaChallengeDto candidate = _service.CreateChallenge();
+            CaptchaChallengeDto candidate = service.CreateChallenge();
             if (candidate.Type == expected)
                 return candidate;
         }
@@ -373,8 +448,11 @@ public class CaptchaServiceTests
     private static List<int> SolveTileRotate(TileRotateDto tileRotate) =>
         tileRotate.Tiles.Select(tile => (4 - tile.InitialRotationSteps) % 4).ToList();
 
-    /// <summary>Telemetry engineered to clear the 0.75 passing score: a wandering, variable-speed
-    /// mouse path, plausible total duration, and (optionally) human-rhythm keystroke timing.</summary>
+    /// <summary>Telemetry engineered around a fixed, hand-verified mouse path: a wandering,
+    /// variable-speed motion (directness ratio ~0.72, speed stddev ~0.57) worth +0.2, a plausible
+    /// 4s duration worth +0.1, and (with default interaction counts) an interaction rate worth
+    /// +0.05, for exactly 0.85 on top of the 0.5 baseline. Adding keystrokes worth +0.15 (stddev
+    /// ~44ms, inside the human-rhythm band) brings a text-challenge submission to exactly 1.00.</summary>
     private static HomeworkCentral.Api.Captcha.CaptchaBehaviorDto GoodBehavior(int interactionCount = 3, bool includeKeystrokes = false)
     {
         int[] dxs = [3, 15, -2, 20, -1, 18, 2, 16, -3, 14];

@@ -1,23 +1,26 @@
+using HomeworkCentral.Api.Risk;
+using HomeworkCentral.Api.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>
 /// Randomly issues one of three challenge kinds — retype-a-code / solve-an-expression (text), a
-/// generated maze, or a tile-rotation puzzle — and validates submissions against three independent
-/// gates: the puzzle must actually be solved correctly, the submission must come from the same IP
-/// the challenge was issued to (so a challenge can't be farmed out to a separate solver), AND the
-/// behavioral telemetry submitted alongside it must score at or above <see cref="PassingScore"/>
-/// from <see cref="IBehaviorScoringService"/>. All three are required; solving the puzzle alone is
-/// not enough.
+/// generated maze, or a tile-rotation puzzle — and validates submissions against two gates: the
+/// puzzle must actually be solved correctly (a hard requirement — there is no score high enough to
+/// substitute for it), AND <see cref="IRiskEngine"/> must judge the submission's behavioral
+/// telemetry, IP consistency, and identity track record as clearing a dynamically computed
+/// threshold. Unlike puzzle correctness, the risk gate is not a single fixed cutoff for everyone —
+/// see <see cref="IRiskEngine"/> for how the required score moves per identity and per attempt.
 /// </summary>
 public sealed class CaptchaService(
     IMemoryCache cache,
-    IBehaviorScoringService behaviorScoring,
-    IHttpContextAccessor httpContextAccessor) : ICaptchaService
+    IRiskEngine riskEngine,
+    IHttpContextAccessor httpContextAccessor,
+    ILogger<CaptchaService> logger) : ICaptchaService
 {
-    private const double PassingScore = 0.75;
     private static readonly TimeSpan ChallengeLifetime = TimeSpan.FromMinutes(10);
 
     // Excludes visually ambiguous characters (0/O, 1/I/L) since the code is typed back by hand.
@@ -40,7 +43,7 @@ public sealed class CaptchaService(
         };
     }
 
-    public bool Validate(CaptchaSubmissionDto? submission)
+    public bool Validate(CaptchaSubmissionDto? submission, CaptchaAction action)
     {
         if (submission is null || string.IsNullOrWhiteSpace(submission.ChallengeId))
             return false;
@@ -51,13 +54,11 @@ public sealed class CaptchaService(
 
         cache.Remove(cacheKey);
 
-        // A challenge solved from a different IP than the one it was issued to is a strong signal
-        // it was farmed out to a separate solver (human click-farm or automated), rather than
-        // solved by the same visitor who requested it. Only enforced when both IPs were actually
-        // captured, so this degrades gracefully instead of breaking whenever a client IP can't be
-        // resolved at all.
-        if (record.IssuerIp is not null && !string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal))
-            return false;
+        // A challenge solved from a different IP than the one it was issued to is a signal it may
+        // have been farmed out to a separate solver — but not, on its own, proof of that (mobile
+        // networks reassign IPs mid-session). It feeds into the risk engine as a threshold
+        // adjustment rather than an automatic reject; see IRiskEngine.
+        bool ipMatched = record.IssuerIp is null || string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal);
 
         bool solved = record.Type switch
         {
@@ -68,10 +69,27 @@ public sealed class CaptchaService(
         };
 
         if (!solved)
+        {
+            logger.LogInformation("Captcha {ChallengeId} rejected: puzzle not solved correctly.", submission.ChallengeId);
             return false;
+        }
 
-        double score = behaviorScoring.ComputeScore(submission.Behavior);
-        return score >= PassingScore;
+        string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
+        RiskAssessment assessment = riskEngine.Evaluate(action, identity, ipMatched, submission.Behavior);
+        riskEngine.RecordOutcome(identity, assessment);
+
+        if (!assessment.Passed)
+        {
+            logger.LogInformation(
+                "Captcha {ChallengeId} risk-denied for {Identity}: score {Score:F2} < required {Required:F2} ({Reasons})",
+                submission.ChallengeId,
+                identity,
+                assessment.Score,
+                assessment.RequiredScore,
+                string.Join("; ", assessment.Reasons));
+        }
+
+        return assessment.Passed;
     }
 
     private CaptchaChallengeDto CreateTextChallenge(string challengeId, string? issuerIp)

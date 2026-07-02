@@ -19,4 +19,10 @@ public sealed record ScrapingAssessment(double SuspicionScore, bool ShouldBlock,
 public interface IScrapingDetectionService
 {
     ScrapingAssessment RecordRequest(ScrapingRequestSample sample);
+
+    /// <summary>Reads an identity's current suspicion score from its existing request-history
+    /// window without recording a new sample — used by the captcha risk engine to fold "how does
+    /// this session's request pattern look so far" into the required captcha threshold without
+    /// double-counting the captcha request itself (already recorded via the middleware).</summary>
+    ScrapingAssessment PeekAssessment(string identity);
 }

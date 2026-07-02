@@ -25,7 +25,7 @@ public sealed class CaptchaRoleService(
         CaptchaSubmissionDto submission,
         CancellationToken ct = default)
     {
-        if (!captcha.Validate(submission))
+        if (!captcha.Validate(submission, CaptchaAction.VerifyRole))
             return false;
 
         AppDbContext db = await ResolveDbContextAsync(ct);
