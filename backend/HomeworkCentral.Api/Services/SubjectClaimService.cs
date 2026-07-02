@@ -2,6 +2,8 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tenancy;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Services;
@@ -20,68 +22,122 @@ public interface ISubjectClaimService
     Task UnclaimSubjectAsync(Guid userId, string subjectName, CancellationToken ct = default);
 }
 
-public sealed class SubjectClaimService(AppDbContext db, IEffectiveMaskService effectiveMaskService) : ISubjectClaimService
+/// <summary>
+/// Tenant-aware, mirroring <see cref="AuthService"/>/<see cref="HomeworkCentral.Api.Captcha.CaptchaRoleService"/>'s
+/// DB resolution: a dev persona's <c>Users</c> row lives only in its own tenant database, so
+/// writing a <c>UserSubjects</c> row (or even just reading the caller's own claimed subjects)
+/// against the injected master <see cref="AppDbContext"/> would either find nothing or, on write,
+/// violate the <c>UserId</c>/<c>AssignedBy</c> foreign keys against <c>master.Users</c>.
+/// </summary>
+public sealed class SubjectClaimService(
+    AppDbContext masterDb,
+    ITenantDbContextFactory tenantFactory,
+    IHttpContextAccessor httpContextAccessor,
+    IEffectiveMaskService effectiveMaskService) : ISubjectClaimService
 {
     public async Task<IReadOnlyList<ClaimableSubjectDto>> GetClaimableSubjectsAsync(Guid userId, CancellationToken ct = default)
     {
-        List<Subject> generalSubjects = await GeneralSubjectsQuery().ToListAsync(ct);
+        AppDbContext db = await ResolveDbContextAsync(ct);
+        bool disposeDb = !ReferenceEquals(db, masterDb);
 
-        HashSet<Guid> claimedSubjectIds = await db.UserSubjects
-            .AsNoTracking()
-            .Where(us => us.UserId == userId)
-            .Select(us => us.SubjectId)
-            .ToHashSetAsync(ct);
+        try
+        {
+            List<Subject> generalSubjects = await GeneralSubjectsQuery(db).ToListAsync(ct);
 
-        return generalSubjects
-            .OrderBy(subject => subject.Name, StringComparer.Ordinal)
-            .Select(subject => new ClaimableSubjectDto
-            {
-                Name = subject.Name,
-                Claimed = claimedSubjectIds.Contains(subject.SubjectId),
-            })
-            .ToList();
+            HashSet<Guid> claimedSubjectIds = await db.UserSubjects
+                .AsNoTracking()
+                .Where(us => us.UserId == userId)
+                .Select(us => us.SubjectId)
+                .ToHashSetAsync(ct);
+
+            return generalSubjects
+                .OrderBy(subject => subject.Name, StringComparer.Ordinal)
+                .Select(subject => new ClaimableSubjectDto
+                {
+                    Name = subject.Name,
+                    Claimed = claimedSubjectIds.Contains(subject.SubjectId),
+                })
+                .ToList();
+        }
+        finally
+        {
+            if (disposeDb)
+                await db.DisposeAsync();
+        }
     }
 
     public async Task ClaimSubjectAsync(Guid userId, string subjectName, CancellationToken ct = default)
     {
-        Subject subject = await GetGeneralSubjectAsync(subjectName, ct);
+        AppDbContext db = await ResolveDbContextAsync(ct);
+        bool disposeDb = !ReferenceEquals(db, masterDb);
 
-        bool alreadyClaimed = await db.UserSubjects
-            .AnyAsync(us => us.UserId == userId && us.SubjectId == subject.SubjectId, ct);
-        if (alreadyClaimed)
-            return;
-
-        db.UserSubjects.Add(new UserSubject
+        try
         {
-            UserId = userId,
-            SubjectId = subject.SubjectId,
-            AssignedAt = DateTime.UtcNow,
-            AssignedBy = userId,
-        });
+            Subject subject = await GetGeneralSubjectAsync(db, subjectName, ct);
 
-        await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+            bool alreadyClaimed = await db.UserSubjects
+                .AnyAsync(us => us.UserId == userId && us.SubjectId == subject.SubjectId, ct);
+            if (alreadyClaimed)
+                return;
+
+            db.UserSubjects.Add(new UserSubject
+            {
+                UserId = userId,
+                SubjectId = subject.SubjectId,
+                AssignedAt = DateTime.UtcNow,
+                AssignedBy = userId,
+            });
+
+            await db.SaveChangesAsync(ct);
+            await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+        }
+        finally
+        {
+            if (disposeDb)
+                await db.DisposeAsync();
+        }
     }
 
     public async Task UnclaimSubjectAsync(Guid userId, string subjectName, CancellationToken ct = default)
     {
-        Subject subject = await GetGeneralSubjectAsync(subjectName, ct);
+        AppDbContext db = await ResolveDbContextAsync(ct);
+        bool disposeDb = !ReferenceEquals(db, masterDb);
 
-        UserSubject? assignment = await db.UserSubjects
-            .FirstOrDefaultAsync(us => us.UserId == userId && us.SubjectId == subject.SubjectId, ct);
-        if (assignment is null)
-            return;
+        try
+        {
+            Subject subject = await GetGeneralSubjectAsync(db, subjectName, ct);
 
-        db.UserSubjects.Remove(assignment);
-        await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+            UserSubject? assignment = await db.UserSubjects
+                .FirstOrDefaultAsync(us => us.UserId == userId && us.SubjectId == subject.SubjectId, ct);
+            if (assignment is null)
+                return;
+
+            db.UserSubjects.Remove(assignment);
+            await db.SaveChangesAsync(ct);
+            await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+        }
+        finally
+        {
+            if (disposeDb)
+                await db.DisposeAsync();
+        }
     }
 
-    private async Task<Subject> GetGeneralSubjectAsync(string subjectName, CancellationToken ct) =>
-        await GeneralSubjectsQuery().FirstOrDefaultAsync(subject => subject.Name == subjectName, ct)
+    private async Task<AppDbContext> ResolveDbContextAsync(CancellationToken ct)
+    {
+        string? tenantDatabaseName = httpContextAccessor.HttpContext?.User
+            .FindFirst(TenancyConstants.TenantDbClaimName)?.Value;
+
+        return string.IsNullOrEmpty(tenantDatabaseName)
+            ? masterDb
+            : await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabaseName, ct);
+    }
+
+    private static async Task<Subject> GetGeneralSubjectAsync(AppDbContext db, string subjectName, CancellationToken ct) =>
+        await GeneralSubjectsQuery(db).FirstOrDefaultAsync(subject => subject.Name == subjectName, ct)
             ?? throw new InvalidOperationException($"'{subjectName}' is not a claimable general subject.");
 
-    private IQueryable<Subject> GeneralSubjectsQuery() =>
+    private static IQueryable<Subject> GeneralSubjectsQuery(AppDbContext db) =>
         db.Subjects
             .AsNoTracking()
             .Where(subject => subject.SubjectMask == SubjectMaskNames.General && subject.ParentSubjectId == null);
