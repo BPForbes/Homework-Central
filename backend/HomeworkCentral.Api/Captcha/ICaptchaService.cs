@@ -35,11 +35,16 @@ public sealed record CaptchaChallengeDto(
 /// </summary>
 public sealed record MazeDto(int Width, int Height, int[] CellWalls, int StartIndex, int EndIndex);
 
-/// <summary>A row of tiles, each rotated a random non-zero number of 90° steps out of alignment;
-/// solving means rotating every tile back to 0 (a multiple of 4 steps).</summary>
+/// <summary>A 3x3 grid of arrow tiles. Each tile has its own random target orientation — solving
+/// isn't "rotate back to a fixed direction," it's rotating every tile to match its own
+/// <see cref="TileDto.TargetRotationSteps"/>.</summary>
 public sealed record TileRotateDto(TileDto[] Tiles);
 
-public sealed record TileDto(int InitialRotationSteps);
+/// <summary>One arrow tile. Both fields are steps of 45° (0–7, one of 8 compass positions).
+/// <paramref name="InitialRotationSteps"/> is where it starts; <paramref name="TargetRotationSteps"/>
+/// is where the player must rotate it to — never equal to the initial position, and not fixed to
+/// any one direction across tiles or challenges.</summary>
+public sealed record TileDto(int InitialRotationSteps, int TargetRotationSteps);
 
 /// <summary>
 /// Issues short-lived, single-use captcha challenges (text, maze, or tile-rotate puzzles) and

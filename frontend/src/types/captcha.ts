@@ -10,8 +10,11 @@ export interface MazeChallenge {
 }
 
 export interface TileChallenge {
-  /** 1, 2, or 3 — number of 90° steps out of alignment; solved when total steps ≡ 0 (mod 4). */
+  /** 0–7 — 45° steps, the tile's starting orientation. */
   initialRotationSteps: number
+  /** 0–7 — 45° steps, the orientation this tile must be rotated to match. Not fixed to any one
+   * direction — varies per tile and per challenge. */
+  targetRotationSteps: number
 }
 
 export interface TileRotateChallenge {

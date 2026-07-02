@@ -552,7 +552,7 @@ public class CaptchaServiceTests
     }
 
     private static List<int> SolveTileRotate(TileRotateDto tileRotate) =>
-        tileRotate.Tiles.Select(tile => (4 - tile.InitialRotationSteps) % 4).ToList();
+        tileRotate.Tiles.Select(tile => (tile.TargetRotationSteps - tile.InitialRotationSteps + 8) % 8).ToList();
 
     /// <summary>Telemetry engineered around a fixed, hand-verified mouse path: a wandering,
     /// variable-speed motion (directness ratio ~0.72, speed stddev ~0.57) worth +0.2, a plausible

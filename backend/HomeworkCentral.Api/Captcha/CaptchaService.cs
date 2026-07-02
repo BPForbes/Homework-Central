@@ -123,7 +123,7 @@ public sealed class CaptchaService(
         return new CaptchaChallengeDto(
             challengeId,
             CaptchaChallengeTypes.TileRotate,
-            "Rotate every tile until it's aligned.",
+            "Rotate each arrow to match its faint target.",
             null,
             null,
             tileRotate);
@@ -195,12 +195,13 @@ public sealed class CaptchaService(
 
         for (int i = 0; i < clicks.Count; i++)
         {
-            // Sanity cap: no legitimate solve needs more than a handful of clicks per tile.
-            if (clicks[i] < 0 || clicks[i] > 12)
+            // Sanity cap: no legitimate solve needs more than a couple of full laps around the
+            // 8-position wheel per tile.
+            if (clicks[i] < 0 || clicks[i] > 24)
                 return false;
 
-            int finalSteps = (tileRotate.Tiles[i].InitialRotationSteps + clicks[i]) % 4;
-            if (finalSteps != 0)
+            int finalSteps = (tileRotate.Tiles[i].InitialRotationSteps + clicks[i]) % 8;
+            if (finalSteps != tileRotate.Tiles[i].TargetRotationSteps)
                 return false;
         }
 

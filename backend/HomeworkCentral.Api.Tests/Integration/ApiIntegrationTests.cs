@@ -162,7 +162,7 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
         break;
       case "tileRotate":
         submission.TileRotationClicks = challenge.TileRotate!.Tiles
-          .Select(tile => (4 - tile.InitialRotationSteps) % 4)
+          .Select(tile => (tile.TargetRotationSteps - tile.InitialRotationSteps + 8) % 8)
           .ToList();
         break;
       default:
