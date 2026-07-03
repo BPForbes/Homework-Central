@@ -96,7 +96,7 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
       Email = $"ci-verified-{suffix}@example.com",
       Username = $"civerified{suffix}",
       Password = "Password123!",
-      Captcha = new CaptchaSubmissionDto { ChallengeId = challenge!.ChallengeId, FCaptchaToken = "token" },
+      Captcha = new CaptchaSubmissionDto { ChallengeId = challenge!.ChallengeId, FCaptchaToken = "confident-token" },
     };
 
     HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
@@ -125,12 +125,15 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     CaptchaChallengeDto? challenge = await challengeResponse.Content.ReadFromJsonAsync<CaptchaChallengeDto>();
     Assert.NotNull(challenge);
 
+    CaptchaSubmissionDto submission = BuildCorrectSubmission(challenge!);
+    submission.FCaptchaToken = "uncertain-token";
+
     RegisterRequest register = new()
     {
       Email = $"ci-puzzle-verified-{suffix}@example.com",
       Username = $"cipuzzleverified{suffix}",
       Password = "Password123!",
-      Captcha = BuildCorrectSubmission(challenge!),
+      Captcha = submission,
     };
 
     HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
@@ -156,12 +159,15 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     CaptchaChallengeDto? challenge = await challengeResponse.Content.ReadFromJsonAsync<CaptchaChallengeDto>();
     Assert.NotNull(challenge);
 
+    CaptchaSubmissionDto submission = BuildCorrectSubmission(challenge!);
+    submission.FCaptchaToken = "invalid-token";
+
     RegisterRequest register = new()
     {
       Email = $"ci-botlike-{suffix}@example.com",
       Username = $"cibotlike{suffix}",
       Password = "Password123!",
-      Captcha = BuildCorrectSubmission(challenge!),
+      Captcha = submission,
     };
 
     HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", register);
