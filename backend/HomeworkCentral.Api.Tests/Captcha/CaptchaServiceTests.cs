@@ -80,6 +80,29 @@ public class CaptchaServiceTests
     }
 
     [Fact]
+    public async Task Assess_then_validate_reuses_the_same_fcaptcha_verification()
+    {
+        (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
+        verifier.NextResult = new FCaptchaVerification(true, 0.9);
+
+        CaptchaChallengeDto challenge = service.CreateChallenge();
+
+        FCaptchaAssessmentDto assessment = await service.AssessFCaptchaAsync("token");
+        Assert.True(assessment.Valid);
+        Assert.False(assessment.PuzzleRequired);
+        Assert.Equal(1, verifier.VerifyCallCount);
+
+        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
+        {
+            ChallengeId = challenge.ChallengeId,
+            FCaptchaToken = "token",
+        };
+
+        Assert.True(await service.ValidateAsync(submission, CaptchaAction.VerifyRole));
+        Assert.Equal(1, verifier.VerifyCallCount);
+    }
+
+    [Fact]
     public async Task Invalid_fcaptcha_token_fails_even_with_a_correct_puzzle_answer()
     {
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();

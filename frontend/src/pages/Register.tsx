@@ -123,7 +123,7 @@ export function Register() {
             />
           </div>
           <div className="field">
-            <label htmlFor="captcha-answer">Verify you're human (optional — get Verified status immediately)</label>
+            <label>Verify you're human (optional — get Verified status immediately)</label>
             <Captcha captcha={captcha} inputId="captcha-answer" disabled={isSubmitting} />
           </div>
           {error && <p className="error">{error}</p>}

@@ -53,10 +53,12 @@ export function useCaptcha() {
 
   const handleFCaptchaToken = useCallback(
     async (token: string) => {
+      const requestId = ++requestIdRef.current
       setFCaptchaToken(token)
       setAssessing(true)
       try {
         const { data } = await captchaApi.assessFCaptcha(token)
+        if (requestId !== requestIdRef.current) return
         if (data.valid && !data.puzzleRequired) {
           setPhase('fcaptcha-only-ready')
         } else if (data.valid && data.puzzleRequired) {
@@ -66,10 +68,11 @@ export function useCaptcha() {
           setPhase('fcaptcha')
         }
       } catch {
+        if (requestId !== requestIdRef.current) return
         resetFCaptcha()
         setPhase('fcaptcha')
       } finally {
-        setAssessing(false)
+        if (requestId === requestIdRef.current) setAssessing(false)
       }
     },
     [setFCaptchaToken, resetFCaptcha]
@@ -81,7 +84,7 @@ export function useCaptcha() {
 
   const buildSubmission = useCallback((): CaptchaSubmission | null => {
     if (!challenge || !fCaptchaToken) return null
-    if (phase === 'fcaptcha') return null
+    if (phase === 'fcaptcha' || assessing) return null
 
     return {
       challengeId: challenge.challengeId,
@@ -91,7 +94,9 @@ export function useCaptcha() {
       mazeUnsolvableClaim: challenge.type === 'maze' ? mazeUnsolvableClaim : undefined,
       tileRotationClicks: challenge.type === 'tileRotate' ? tileRotationClicks : undefined,
     }
-  }, [challenge, fCaptchaToken, phase, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks])
+  }, [challenge, fCaptchaToken, phase, assessing, answer, mazePath, mazeUnsolvableClaim, tileRotationClicks])
+
+  const canSubmit = useMemo(() => buildSubmission() !== null, [buildSubmission])
 
   return useMemo(
     () => ({
@@ -99,6 +104,7 @@ export function useCaptcha() {
       loading,
       phase,
       assessing,
+      canSubmit,
       fCaptchaToken,
       setFCaptchaToken: handleFCaptchaToken,
       answer,
@@ -117,6 +123,7 @@ export function useCaptcha() {
       loading,
       phase,
       assessing,
+      canSubmit,
       fCaptchaToken,
       handleFCaptchaToken,
       answer,

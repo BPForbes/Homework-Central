@@ -18,8 +18,16 @@ export function Dashboard() {
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault()
+    if (!captcha.canSubmit) {
+      setVerifyError('Complete the verification check before submitting.')
+      return
+    }
+
     const submission = captcha.buildSubmission()
-    if (!submission) return
+    if (!submission) {
+      setVerifyError('Complete the verification check before submitting.')
+      return
+    }
 
     setVerifying(true)
     setVerifyError('')
@@ -66,7 +74,7 @@ export function Dashboard() {
             <form onSubmit={handleVerify}>
               <Captcha captcha={captcha} disabled={verifying} />
               {verifyError && <p className="error">{verifyError}</p>}
-              <button type="submit" className="btn-primary" disabled={verifying || !captcha.challenge}>
+              <button type="submit" className="btn-primary" disabled={verifying || !captcha.canSubmit}>
                 {verifying ? 'Verifying…' : 'Verify'}
               </button>
             </form>

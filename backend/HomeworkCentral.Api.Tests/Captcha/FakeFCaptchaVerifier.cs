@@ -11,7 +11,11 @@ public sealed class FakeFCaptchaVerifier : IFCaptchaVerifier
     public string PublicUrl { get; set; } = "http://localhost:3010";
     public double AllowTrustScore { get; set; } = 0.7;
     public FCaptchaVerification NextResult { get; set; } = new(true, 0.0);
+    public int VerifyCallCount { get; private set; }
 
-    public Task<FCaptchaVerification> VerifyAsync(string? token, CancellationToken ct = default) =>
-        Task.FromResult(NextResult);
+    public Task<FCaptchaVerification> VerifyAsync(string? token, CancellationToken ct = default)
+    {
+        VerifyCallCount++;
+        return Task.FromResult(NextResult);
+    }
 }

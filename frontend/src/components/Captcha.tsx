@@ -15,6 +15,7 @@ interface CaptchaProps {
 function phaseLabel(captcha: CaptchaHookState): string {
   if (captcha.loading) return 'Loading a verification challenge…'
   if (!captcha.challenge) return 'Could not load a verification challenge.'
+  if (captcha.assessing) return 'Checking your verification…'
   if (captcha.phase === 'fcaptcha-only-ready') return 'Verification check passed — you can submit.'
   if (captcha.phase === 'puzzle') return captcha.challenge.label
   return 'Complete the "I\'m not a robot" check below.'

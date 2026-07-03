@@ -30,6 +30,7 @@ public sealed class CaptchaService(
     ILogger<CaptchaService> logger) : ICaptchaService
 {
     private static readonly TimeSpan ChallengeLifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan TokenVerificationLifetime = TimeSpan.FromMinutes(10);
     private static readonly int[] MazeSizes = [7, 9, 11];
 
     public CaptchaChallengeDto CreateChallenge()
@@ -47,9 +48,13 @@ public sealed class CaptchaService(
 
     public async Task<FCaptchaAssessmentDto> AssessFCaptchaAsync(string? token)
     {
-        FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(token);
+        string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
+        FCaptchaVerification verification = await VerifyFCaptchaOnceAsync(token);
         if (!verification.Valid)
+        {
+            RecordFailure(identity, verification.TrustScore);
             return new FCaptchaAssessmentDto(false, false);
+        }
 
         bool puzzleRequired = verification.TrustScore < fCaptchaVerifier.AllowTrustScore;
         return new FCaptchaAssessmentDto(true, puzzleRequired);
@@ -72,7 +77,7 @@ public sealed class CaptchaService(
         string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
         bool ipMatched = record.IssuerIp is null || string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal);
 
-        FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(submission.FCaptchaToken);
+        FCaptchaVerification verification = await VerifyFCaptchaOnceAsync(submission.FCaptchaToken);
         if (!verification.Valid)
         {
             logger.LogInformation("Captcha {ChallengeId} rejected: FCaptcha token did not verify.", submission.ChallengeId);
@@ -120,6 +125,20 @@ public sealed class CaptchaService(
         }
 
         return puzzleAssessment.Passed;
+    }
+
+    private async Task<FCaptchaVerification> VerifyFCaptchaOnceAsync(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return new FCaptchaVerification(false, 0.0);
+
+        string cacheKey = TokenCacheKey(token);
+        if (cache.TryGetValue(cacheKey, out FCaptchaVerification? cached) && cached is not null)
+            return cached;
+
+        FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(token);
+        cache.Set(cacheKey, verification, TokenVerificationLifetime);
+        return verification;
     }
 
     private void RecordFailure(string identity, double trustScore) =>
@@ -177,6 +196,9 @@ public sealed class CaptchaService(
     private string? ResolveClientIp() => httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
     private static string CacheKey(string challengeId) => $"captcha:{challengeId}";
+
+    private static string TokenCacheKey(string token) =>
+        $"fcaptcha-verification:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)))}";
 
     /// <summary>Server-side-only validation context cached per challenge; never sent to the client.</summary>
     private sealed class ChallengeRecord
