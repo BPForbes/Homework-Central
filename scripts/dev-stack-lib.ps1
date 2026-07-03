@@ -322,9 +322,9 @@ function Start-DevStackFCaptchaContainer([string]$Port) {
     }
 
     $env:FCAPTCHA_HOST_PORT = $Port
-    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile up -d fcaptcha
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile up -d --build fcaptcha
     if ($LASTEXITCODE -ne 0) {
-        throw 'docker compose up fcaptcha failed'
+        throw 'docker compose up fcaptcha failed (first run builds from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)'
     }
 }
 

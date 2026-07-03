@@ -269,7 +269,10 @@ start_dev_stack_fcaptcha_container() {
   docker info >/dev/null 2>&1 || return 1
 
   export FCAPTCHA_HOST_PORT="$port"
-  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d fcaptcha
+  if ! docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d --build fcaptcha; then
+    printf 'error: docker compose up fcaptcha failed (first run builds from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)\n' >&2
+    return 1
+  fi
 }
 
 test_dev_fcaptcha_connection() {

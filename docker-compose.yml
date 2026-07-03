@@ -21,8 +21,12 @@ services:
   # Self-hosted "I'm not a robot" check (https://github.com/WebDecoy/FCaptcha) — replaces the old
   # in-house mouse/keyboard behavioral scoring as the first-tier verification on every captcha
   # attempt. FCAPTCHA_SECRET must match backend's FCaptcha__Secret below.
+  # Built from the upstream v1.12.0 tag (GHCR anonymous pulls are unreliable); local tag only.
   fcaptcha:
-    image: ghcr.io/webdecoy/fcaptcha:1.12.0
+    image: homework-central-fcaptcha:1.12.0
+    build:
+      context: https://github.com/WebDecoy/FCaptcha.git#v1.12.0
+      dockerfile: docker/Dockerfile
     restart: unless-stopped
     environment:
       FCAPTCHA_SECRET: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
