@@ -7,8 +7,151 @@ DEV_STACK_STATE_FILE="$DEV_STACK_REPO_ROOT/.hc-dev-stack.state"
 DEV_STACK_COMPOSE_FILE="$DEV_STACK_REPO_ROOT/docker-compose.yml"
 DEV_STACK_ENV_FILE="$DEV_STACK_REPO_ROOT/.env"
 DEV_STACK_POSTGRES_PASSWORD="postgres"
+DEV_STACK_POSTGRES_HOST_PORT="5434"
 DEV_STACK_FCAPTCHA_HOST_PORT="3010"
 DEV_STACK_SERVER_REGISTERED=0
+
+trim_dev_env_whitespace() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+generate_dev_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n'
+  else
+    printf 'error: openssl is required to generate secrets for a new .env file\n' >&2
+    return 1
+  fi
+}
+
+read_dev_env_file() {
+  DEV_ENV_JWT_SECRET=""
+  DEV_ENV_FCAPTCHA_SECRET=""
+  DEV_ENV_POSTGRES_PASSWORD=""
+  DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
+  DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+
+  if [[ ! -f "$DEV_STACK_ENV_FILE" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="$(trim_dev_env_whitespace "$key")"
+
+    case "$key" in
+      JWT_SECRET) DEV_ENV_JWT_SECRET="$value" ;;
+      FCAPTCHA_SECRET) DEV_ENV_FCAPTCHA_SECRET="$value" ;;
+      POSTGRES_PASSWORD) DEV_ENV_POSTGRES_PASSWORD="$value" ;;
+      POSTGRES_HOST_PORT) DEV_ENV_POSTGRES_HOST_PORT="$value" ;;
+      FCAPTCHA_HOST_PORT) DEV_ENV_FCAPTCHA_HOST_PORT="$value" ;;
+    esac
+  done <"$DEV_STACK_ENV_FILE"
+
+  DEV_ENV_POSTGRES_HOST_PORT="$(trim_dev_env_whitespace "$DEV_ENV_POSTGRES_HOST_PORT")"
+  [[ -n "$DEV_ENV_POSTGRES_HOST_PORT" ]] || DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
+  DEV_ENV_FCAPTCHA_HOST_PORT="$(trim_dev_env_whitespace "$DEV_ENV_FCAPTCHA_HOST_PORT")"
+  [[ -n "$DEV_ENV_FCAPTCHA_HOST_PORT" ]] || DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+}
+
+set_dev_env_var() {
+  local key="$1"
+  local value="$2"
+  local tmp replaced=false
+  tmp="$(mktemp)"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${key}="* ]]; then
+      printf '%s=%s\n' "$key" "$value" >>"$tmp"
+      replaced=true
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$DEV_STACK_ENV_FILE"
+
+  if [[ "$replaced" == false ]]; then
+    printf '%s=%s\n' "$key" "$value" >>"$tmp"
+  fi
+
+  mv "$tmp" "$DEV_STACK_ENV_FILE"
+}
+
+ensure_dev_env_file() {
+  local roll_fcaptcha_secret="${1:-0}"
+
+  if [[ ! -f "$DEV_STACK_ENV_FILE" ]]; then
+    printf '==> Creating %s from .env.example\n' "$DEV_STACK_ENV_FILE"
+    cp "$DEV_STACK_REPO_ROOT/.env.example" "$DEV_STACK_ENV_FILE"
+  fi
+
+  read_dev_env_file
+
+  local updated=false
+
+  if [[ "$DEV_ENV_JWT_SECRET" == "replace-with-a-long-random-secret" || -z "$DEV_ENV_JWT_SECRET" ]]; then
+    DEV_ENV_JWT_SECRET="$(generate_dev_secret)" || return 1
+    set_dev_env_var "JWT_SECRET" "$DEV_ENV_JWT_SECRET"
+    updated=true
+  fi
+
+  if [[ "$roll_fcaptcha_secret" == "1" ]]; then
+    DEV_ENV_FCAPTCHA_SECRET="$(generate_dev_secret)" || return 1
+    set_dev_env_var "FCAPTCHA_SECRET" "$DEV_ENV_FCAPTCHA_SECRET"
+    updated=true
+  elif [[ "$DEV_ENV_FCAPTCHA_SECRET" == "replace-with-a-long-random-secret" || -z "$DEV_ENV_FCAPTCHA_SECRET" ]]; then
+    DEV_ENV_FCAPTCHA_SECRET="$(generate_dev_secret)" || return 1
+    set_dev_env_var "FCAPTCHA_SECRET" "$DEV_ENV_FCAPTCHA_SECRET"
+    updated=true
+  fi
+
+  if [[ "$DEV_ENV_FCAPTCHA_HOST_PORT" != "$DEV_STACK_FCAPTCHA_HOST_PORT" && -z "$(grep -E '^FCAPTCHA_HOST_PORT=' "$DEV_STACK_ENV_FILE" || true)" ]]; then
+    DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+    set_dev_env_var "FCAPTCHA_HOST_PORT" "$DEV_ENV_FCAPTCHA_HOST_PORT"
+    updated=true
+  fi
+
+  if [[ "$DEV_ENV_POSTGRES_PASSWORD" != "$DEV_STACK_POSTGRES_PASSWORD" ]]; then
+    DEV_ENV_POSTGRES_PASSWORD="$DEV_STACK_POSTGRES_PASSWORD"
+    set_dev_env_var "POSTGRES_PASSWORD" "$DEV_ENV_POSTGRES_PASSWORD"
+    updated=true
+  fi
+
+  if [[ "$DEV_ENV_POSTGRES_HOST_PORT" == "5432" || "$DEV_ENV_POSTGRES_HOST_PORT" == "5433" ]]; then
+    printf '==> Using POSTGRES_HOST_PORT=%s (avoids local PostgreSQL on 5432/5433)\n' "$DEV_STACK_POSTGRES_HOST_PORT"
+    DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
+    set_dev_env_var "POSTGRES_HOST_PORT" "$DEV_ENV_POSTGRES_HOST_PORT"
+    updated=true
+  fi
+
+  if [[ "$updated" == true ]]; then
+    read_dev_env_file
+    if [[ "$roll_fcaptcha_secret" == "1" ]]; then
+      printf '==> Rolled FCAPTCHA_SECRET in .env (local only, not committed)\n'
+    else
+      printf '==> Generated secrets in .env (local only, not committed)\n'
+    fi
+  fi
+
+  [[ -n "$DEV_ENV_JWT_SECRET" ]] || { printf 'error: JWT_SECRET is not set in .env\n' >&2; return 1; }
+  [[ ${#DEV_ENV_JWT_SECRET} -ge 32 ]] || { printf 'error: JWT_SECRET must be at least 32 characters\n' >&2; return 1; }
+  [[ -n "$DEV_ENV_FCAPTCHA_SECRET" ]] || { printf 'error: FCAPTCHA_SECRET is not set in .env\n' >&2; return 1; }
+  [[ -n "$DEV_ENV_POSTGRES_PASSWORD" ]] || { printf 'error: POSTGRES_PASSWORD is not set in .env\n' >&2; return 1; }
+
+  export JWT_SECRET="$DEV_ENV_JWT_SECRET"
+  export FCAPTCHA_SECRET="$DEV_ENV_FCAPTCHA_SECRET"
+  export POSTGRES_PASSWORD="$DEV_ENV_POSTGRES_PASSWORD"
+  export POSTGRES_HOST_PORT="$DEV_ENV_POSTGRES_HOST_PORT"
+  export FCAPTCHA_HOST_PORT="$DEV_ENV_FCAPTCHA_HOST_PORT"
+}
 
 read_dev_stack_state() {
   local key value

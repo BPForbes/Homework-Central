@@ -12,8 +12,163 @@ $script:DevStackMutexName = 'Global\HomeworkCentralDevStack'
 $script:DevStackComposeFile = Join-Path $script:RepoRoot 'docker-compose.yml'
 $script:DevStackEnvFile = Join-Path $script:RepoRoot '.env'
 $script:DevPostgresPassword = 'postgres'
+$script:DevPostgresHostPort = '5434'
 $script:DevFCaptchaHostPort = '3010'
 $script:DevStackServerRegistered = $false
+
+function New-DevRandomSecret {
+    $bytes = New-Object byte[] 48
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Read-DevEnvFile {
+    $values = @{
+        JWT_SECRET = ''
+        FCAPTCHA_SECRET = ''
+        POSTGRES_PASSWORD = ''
+        POSTGRES_HOST_PORT = $script:DevPostgresHostPort
+        FCAPTCHA_HOST_PORT = $script:DevFCaptchaHostPort
+    }
+
+    if (-not (Test-Path $script:DevStackEnvFile)) {
+        return $values
+    }
+
+    foreach ($line in Get-Content $script:DevStackEnvFile) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+        $name, $value = $line -split '=', 2
+        $name = $name.Trim()
+        if ($values.ContainsKey($name)) {
+            $values[$name] = $value.Trim()
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_HOST_PORT'])) {
+        $values['POSTGRES_HOST_PORT'] = $script:DevPostgresHostPort
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_HOST_PORT'])) {
+        $values['FCAPTCHA_HOST_PORT'] = $script:DevFCaptchaHostPort
+    }
+
+    return $values
+}
+
+function Update-DevEnvFileValues([hashtable]$Values) {
+    $lines = Get-Content $script:DevStackEnvFile
+    $newLines = @()
+    $seen = @{}
+
+    foreach ($line in $lines) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') {
+            $newLines += $line
+            continue
+        }
+
+        $name = ($line -split '=', 2)[0].Trim()
+        if ($Values.ContainsKey($name)) {
+            $newLines += "$name=$($Values[$name])"
+            $seen[$name] = $true
+        } else {
+            $newLines += $line
+        }
+    }
+
+    foreach ($key in $Values.Keys) {
+        if (-not $seen.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($Values[$key])) {
+            $newLines += "$key=$($Values[$key])"
+        }
+    }
+
+    Set-Content -Path $script:DevStackEnvFile -Value $newLines
+}
+
+function Ensure-DevEnvFile {
+    param(
+        [switch]$RollFCaptchaSecret
+    )
+
+    $exampleFile = Join-Path $script:RepoRoot '.env.example'
+    if (-not (Test-Path $script:DevStackEnvFile)) {
+        Write-Host '==> Creating .env from .env.example' -ForegroundColor DarkGray
+        Copy-Item $exampleFile $script:DevStackEnvFile
+    }
+
+    $lines = Get-Content $script:DevStackEnvFile
+    $values = Read-DevEnvFile
+    $updated = $false
+
+    if ([string]::IsNullOrWhiteSpace($values['JWT_SECRET']) -or $values['JWT_SECRET'] -eq 'replace-with-a-long-random-secret') {
+        $values['JWT_SECRET'] = New-DevRandomSecret
+        $updated = $true
+    }
+
+    if ($RollFCaptchaSecret) {
+        $values['FCAPTCHA_SECRET'] = New-DevRandomSecret
+        $updated = $true
+    } elseif ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_SECRET']) -or $values['FCAPTCHA_SECRET'] -eq 'replace-with-a-long-random-secret') {
+        $values['FCAPTCHA_SECRET'] = New-DevRandomSecret
+        $updated = $true
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD']) -or $values['POSTGRES_PASSWORD'] -ne $script:DevPostgresPassword) {
+        $values['POSTGRES_PASSWORD'] = $script:DevPostgresPassword
+        $updated = $true
+    }
+
+    if ($values['POSTGRES_HOST_PORT'] -eq '5432' -or $values['POSTGRES_HOST_PORT'] -eq '5433') {
+        Write-Host "==> Using POSTGRES_HOST_PORT=$($script:DevPostgresHostPort) (avoids local PostgreSQL on 5432/5433)" -ForegroundColor DarkGray
+        $values['POSTGRES_HOST_PORT'] = $script:DevPostgresHostPort
+        $updated = $true
+    }
+
+    if ($updated) {
+        $newLines = @()
+        $seen = @{}
+        foreach ($line in $lines) {
+            if ($line -match '^\s*#' -or $line -notmatch '=') {
+                $newLines += $line
+                continue
+            }
+            $name = ($line -split '=', 2)[0].Trim()
+            if ($values.ContainsKey($name)) {
+                $newLines += "$name=$($values[$name])"
+                $seen[$name] = $true
+            } else {
+                $newLines += $line
+            }
+        }
+        foreach ($key in @('JWT_SECRET', 'FCAPTCHA_SECRET', 'POSTGRES_PASSWORD', 'POSTGRES_HOST_PORT', 'FCAPTCHA_HOST_PORT')) {
+            if (-not $seen.ContainsKey($key) -and $values.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($values[$key])) {
+                $newLines += "$key=$($values[$key])"
+            }
+        }
+        Set-Content -Path $script:DevStackEnvFile -Value $newLines
+        if ($RollFCaptchaSecret) {
+            Write-Host '==> Rolled FCAPTCHA_SECRET in .env (local only, not committed)' -ForegroundColor DarkGray
+        } else {
+            Write-Host '==> Generated secrets in .env (local only, not committed)' -ForegroundColor DarkGray
+        }
+        $values = Read-DevEnvFile
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['JWT_SECRET'])) {
+        throw 'JWT_SECRET is not set in .env'
+    }
+    if ($values['JWT_SECRET'].Length -lt 32) {
+        throw 'JWT_SECRET must be at least 32 characters'
+    }
+    if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD'])) {
+        throw 'POSTGRES_PASSWORD is not set in .env'
+    }
+    if ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_SECRET'])) {
+        throw 'FCAPTCHA_SECRET is not set in .env'
+    }
+
+    return $values
+}
 
 function Read-DevStackState {
     if (-not (Test-Path $script:DevStackStateFile)) {
