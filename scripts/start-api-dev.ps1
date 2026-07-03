@@ -79,6 +79,8 @@ $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
 $env:Jwt__Secret = $envValues['JWT_SECRET']
 $env:FCaptcha__Secret = $envValues['FCAPTCHA_SECRET']
+$env:FCaptcha__ServerUrl = "http://localhost:$($envValues['FCAPTCHA_HOST_PORT'])"
+$env:FCaptcha__PublicUrl = "http://localhost:$($envValues['FCAPTCHA_HOST_PORT'])"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 $env:HC_DEV_BYPASS = '1'
 $env:ConnectionStrings__MasterConnection = $connectionString

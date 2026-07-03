@@ -330,11 +330,8 @@ function Start-DevStackFCaptchaContainer([string]$Port) {
 
 function Test-DevFCaptchaConnection([string]$Port) {
     try {
-        $client = New-Object System.Net.Sockets.TcpClient
-        $async = $client.BeginConnect('127.0.0.1', [int]$Port, $null, $null)
-        $connected = $async.AsyncWaitHandle.WaitOne(500) -and $client.Connected
-        $client.Close()
-        return $connected
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/fcaptcha.js" -UseBasicParsing -TimeoutSec 2
+        return $response.StatusCode -eq 200 -and $response.Content.Length -gt 0
     } catch {
         return $false
     }

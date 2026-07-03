@@ -58,7 +58,11 @@ export function FCaptchaWidget({ siteKey, publicUrl, onToken, disabled }: FCaptc
 
     loadScript(`${publicUrl.replace(/\/$/, '')}/fcaptcha.js`)
       .then(() => {
-        if (cancelled || !window.FCaptcha || !containerRef.current) return
+        if (cancelled) return
+        if (!window.FCaptcha || !containerRef.current) {
+          setStatus('error')
+          return
+        }
         window.FCaptcha.configure({ serverUrl: publicUrl })
         window.FCaptcha.render(containerId, {
           siteKey,
@@ -79,7 +83,12 @@ export function FCaptchaWidget({ siteKey, publicUrl, onToken, disabled }: FCaptc
     <div className="fcaptcha-widget" style={disabled ? { pointerEvents: 'none', opacity: 0.6 } : undefined}>
       <div id={containerId} ref={containerRef} className="fcaptcha-container" aria-busy={status === 'loading'} />
       {status === 'loading' && <p className="captcha-puzzle-status">Loading the &ldquo;I&apos;m not a robot&rdquo; check…</p>}
-      {status === 'error' && <p className="error">Couldn&apos;t load the verification check. Please refresh and try again.</p>}
+      {status === 'error' && (
+        <p className="error">
+          Couldn&apos;t load the verification check from {publicUrl}. Make sure the FCaptcha Docker
+          container is running, then refresh.
+        </p>
+      )}
     </div>
   )
 }

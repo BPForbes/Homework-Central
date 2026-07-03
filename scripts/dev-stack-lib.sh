@@ -277,6 +277,11 @@ start_dev_stack_fcaptcha_container() {
 
 test_dev_fcaptcha_connection() {
   local port="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sf --max-time 2 "http://127.0.0.1:${port}/fcaptcha.js" >/dev/null 2>&1
+    return $?
+  fi
+
   (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
 }
 

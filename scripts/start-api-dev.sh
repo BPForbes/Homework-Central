@@ -71,6 +71,8 @@ export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5000
 export Jwt__Secret="$JWT_SECRET"
 export FCaptcha__Secret="$FCAPTCHA_SECRET"
+export FCaptcha__ServerUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
+export FCaptcha__PublicUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 export HC_DEV_BYPASS=1
 export ConnectionStrings__MasterConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"

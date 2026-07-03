@@ -367,11 +367,18 @@ function Start-Postgres([hashtable]$EnvValues) {
 }
 
 function Start-FCaptcha {
-    Write-Step "Starting FCaptcha (Docker) on localhost:$($script:DevFCaptchaHostPort)"
+    param([hashtable]$EnvValues)
+
+    $port = $EnvValues['FCAPTCHA_HOST_PORT']
+    if ([string]::IsNullOrWhiteSpace($port)) {
+        $port = $script:DevFCaptchaHostPort
+    }
+
+    Write-Step "Starting FCaptcha (Docker) on localhost:$port"
 
     Assert-DockerRunning
 
-    Ensure-DevFCaptchaRunning -Port $script:DevFCaptchaHostPort
+    Ensure-DevFCaptchaRunning -Port $port
 }
 
 function Build-PostgresHostCheck {
@@ -549,7 +556,7 @@ function Start-RunPhase([hashtable]$EnvValues) {
 
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
-        Start-FCaptcha
+        Start-FCaptcha -EnvValues $EnvValues
     } else {
         Write-Step 'Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / -SkipDocker)'
     }
