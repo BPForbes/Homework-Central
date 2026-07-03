@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -66,7 +67,10 @@ builder.Services.AddScoped<IRoleMaskService, RoleMaskService>();
 builder.Services.AddScoped<IEffectiveMaskService, EffectiveMaskService>();
 builder.Services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
 builder.Services.AddScoped<ISubjectClaimService, SubjectClaimService>();
-builder.Services.Configure<FCaptchaOptions>(builder.Configuration.GetSection("FCaptcha"));
+builder.Services.AddOptions<FCaptchaOptions>()
+    .Bind(builder.Configuration.GetSection("FCaptcha"))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<FCaptchaOptions>, FCaptchaOptionsValidator>();
 builder.Services.AddHttpClient<IFCaptchaVerifier, FCaptchaVerifier>(client => client.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddScoped<ICaptchaService, CaptchaService>();
 builder.Services.AddScoped<ICaptchaRoleService, CaptchaRoleService>();
@@ -89,21 +93,6 @@ builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorization
 // JWT authentication
 string jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret must be set via environment variable or user-secrets.");
-
-string fcaptchaSecret = builder.Configuration["FCaptcha:Secret"]
-    ?? throw new InvalidOperationException("FCaptcha:Secret must be set via environment variable or user-secrets.");
-
-if (!builder.Environment.IsDevelopment())
-{
-    FCaptchaOptions fcaptchaDefaults = new();
-    string fcaptchaSiteKey = builder.Configuration["FCaptcha:SiteKey"] ?? fcaptchaDefaults.SiteKey;
-    if (string.Equals(fcaptchaSecret, FCaptchaOptions.DefaultDevSecret, StringComparison.Ordinal)
-        || string.Equals(fcaptchaSiteKey, FCaptchaOptions.DefaultDevSiteKey, StringComparison.Ordinal))
-    {
-        throw new InvalidOperationException(
-            "FCaptcha:Secret and FCaptcha:SiteKey must be explicitly configured outside Development.");
-    }
-}
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opts =>

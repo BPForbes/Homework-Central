@@ -73,6 +73,9 @@ public sealed class IdentityRiskProfileService(IMemoryCache cache, IOptions<Risk
         object creationLock = CreationLocks.GetOrAdd(identity, _ => new object());
         lock (creationLock)
         {
+            if (cache.TryGetValue(cacheKey, out ProfileState? created) && created is not null)
+                return created;
+
             return cache.GetOrCreate(cacheKey, entry =>
             {
                 entry.SlidingExpiration = IdleExpiration;

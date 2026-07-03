@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+
 namespace HomeworkCentral.Api.Captcha.FCaptcha;
 
 /// <summary>
@@ -36,4 +39,26 @@ public sealed class FCaptchaOptions
     /// on its own, with no further in-house puzzle required. Mirrors FCaptcha's documented
     /// "&lt; 0.3 raw score = Allow" band, inverted (1 - 0.3 = 0.7).</summary>
     public double AllowTrustScore { get; set; } = 0.7;
+}
+
+/// <summary>Fails fast when FCaptcha is misconfigured — especially shipping dev defaults to
+/// production.</summary>
+public sealed class FCaptchaOptionsValidator(IHostEnvironment environment) : IValidateOptions<FCaptchaOptions>
+{
+    public ValidateOptionsResult Validate(string? name, FCaptchaOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.Secret))
+            return ValidateOptionsResult.Fail("FCaptcha:Secret must be set via environment variable or user-secrets.");
+
+        if (environment.IsDevelopment())
+            return ValidateOptionsResult.Success;
+
+        if (string.Equals(options.Secret, FCaptchaOptions.DefaultDevSecret, StringComparison.Ordinal))
+            return ValidateOptionsResult.Fail("FCaptcha:Secret must not use the built-in dev default outside Development.");
+
+        if (string.Equals(options.SiteKey, FCaptchaOptions.DefaultDevSiteKey, StringComparison.Ordinal))
+            return ValidateOptionsResult.Fail("FCaptcha:SiteKey must not use the built-in dev default outside Development.");
+
+        return ValidateOptionsResult.Success;
+    }
 }
