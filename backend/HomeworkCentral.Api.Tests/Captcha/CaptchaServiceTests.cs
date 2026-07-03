@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.RegularExpressions;
 using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Captcha.ArrowMatch;
 using HomeworkCentral.Api.Captcha.FCaptcha;
@@ -91,7 +90,7 @@ public class CaptchaServiceTests
         {
             ChallengeId = challenge.ChallengeId,
             FCaptchaToken = "token",
-            Answer = SolveText(challenge.Content!),
+            Answer = CaptchaTestSolvers.SolveText(challenge.Content!),
         };
 
         Assert.False(await service.ValidateAsync(submission, CaptchaAction.VerifyRole));
@@ -110,7 +109,7 @@ public class CaptchaServiceTests
         {
             ChallengeId = challenge.ChallengeId,
             FCaptchaToken = "token",
-            Answer = SolveText(challenge.Content!),
+            Answer = CaptchaTestSolvers.SolveText(challenge.Content!),
         };
 
         Assert.True(await service.ValidateAsync(submission, CaptchaAction.VerifyRole));
@@ -147,7 +146,7 @@ public class CaptchaServiceTests
         {
             ChallengeId = challenge.ChallengeId,
             FCaptchaToken = "token",
-            Answer = SolveText(challenge.Content!),
+            Answer = CaptchaTestSolvers.SolveText(challenge.Content!),
         };
 
         Assert.False(await service.ValidateAsync(submission, CaptchaAction.VerifyRole));
@@ -211,7 +210,7 @@ public class CaptchaServiceTests
             (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
             CaptchaChallengeDto challenge = GetMazeChallengeWithSolvability(service, wantSolvable: true);
             MazeDto maze = challenge.Maze!;
-            List<int> path = SolveMaze(maze);
+            List<int> path = CaptchaTestSolvers.SolveMaze(maze);
 
             Assert.Equal(maze.StartIndex, path[0]);
             Assert.Equal(maze.EndIndex, path[^1]);
@@ -317,7 +316,7 @@ public class CaptchaServiceTests
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
         CaptchaChallengeDto challenge = GetChallengeOfType(service, CaptchaTypeOf.TileRotate);
         TileRotateDto tileRotate = challenge.TileRotate!;
-        List<int> clicks = SolveTileRotate(tileRotate);
+        List<int> clicks = CaptchaTestSolvers.SolveTileRotate(tileRotate);
         verifier.NextResult = new FCaptchaVerification(true, 0.6);
 
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
@@ -355,7 +354,7 @@ public class CaptchaServiceTests
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
         CaptchaChallengeDto challenge = GetChallengeOfType(service, CaptchaTypeOf.TileRotate);
         TileRotateDto tileRotate = challenge.TileRotate!;
-        List<int> tooFew = SolveTileRotate(tileRotate).Take(tileRotate.Tiles.Length - 1).ToList();
+        List<int> tooFew = CaptchaTestSolvers.SolveTileRotate(tileRotate).Take(tileRotate.Tiles.Length - 1).ToList();
         verifier.NextResult = new FCaptchaVerification(true, 0.6);
 
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
@@ -420,7 +419,7 @@ public class CaptchaServiceTests
         {
             ChallengeId = challenge.ChallengeId,
             FCaptchaToken = "token",
-            Answer = SolveText(challenge.Content!),
+            Answer = CaptchaTestSolvers.SolveText(challenge.Content!),
         };
 
         Assert.True(await service.ValidateAsync(submission, CaptchaAction.VerifyRole));
@@ -479,39 +478,8 @@ public class CaptchaServiceTests
         return (service, verifier);
     }
 
-    /// <summary>Solves whichever challenge type was issued, tagging the submission with a
-    /// placeholder FCaptcha token — the caller is responsible for setting the paired
-    /// <see cref="FakeFCaptchaVerifier.NextResult"/> before validating. Deterministic and
-    /// type-independent, so tests using it don't depend on which of the three challenge types
-    /// <see cref="CaptchaService.CreateChallenge"/> happened to draw.</summary>
-    private static HomeworkCentral.Api.Captcha.CaptchaSubmissionDto CorrectSubmissionFor(CaptchaChallengeDto challenge)
-    {
-        HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
-        {
-            ChallengeId = challenge.ChallengeId,
-            FCaptchaToken = "token",
-        };
-
-        switch (challenge.Type)
-        {
-            case "maze" when HasPath(challenge.Maze!):
-                submission.MazePath = SolveMaze(challenge.Maze!);
-                break;
-            case "maze":
-                // Some maze challenges are deliberately generated with no path from A to B at
-                // all; correctly recognizing that is itself the correct answer.
-                submission.MazeUnsolvableClaim = true;
-                break;
-            case "tileRotate":
-                submission.TileRotationClicks = SolveTileRotate(challenge.TileRotate!);
-                break;
-            default:
-                submission.Answer = SolveText(challenge.Content!);
-                break;
-        }
-
-        return submission;
-    }
+    private static HomeworkCentral.Api.Captcha.CaptchaSubmissionDto CorrectSubmissionFor(CaptchaChallengeDto challenge) =>
+        CaptchaTestSolvers.BuildCorrectSubmission(challenge);
 
     private static HttpContext ContextWithIp(string ip)
     {
@@ -563,107 +531,11 @@ public class CaptchaServiceTests
         for (int attempt = 0; attempt < 400; attempt++)
         {
             CaptchaChallengeDto candidate = service.CreateChallenge();
-            if (candidate.Type == "maze" && HasPath(candidate.Maze!) == wantSolvable)
+            if (candidate.Type == "maze" && CaptchaTestSolvers.HasPath(candidate.Maze!) == wantSolvable)
                 return candidate;
         }
 
         throw new InvalidOperationException(
             $"Could not obtain a maze challenge with solvable={wantSolvable} after 400 attempts.");
     }
-
-    private static bool HasPath(MazeDto maze)
-    {
-        if (maze.StartIndex == maze.EndIndex)
-            return true;
-
-        bool[] visited = new bool[maze.CellWalls.Length];
-        Queue<int> queue = new();
-        queue.Enqueue(maze.StartIndex);
-        visited[maze.StartIndex] = true;
-
-        while (queue.Count > 0)
-        {
-            int current = queue.Dequeue();
-            if (current == maze.EndIndex)
-                return true;
-
-            foreach (int neighbor in MazeNeighbors(maze, current))
-            {
-                if (visited[neighbor])
-                    continue;
-
-                visited[neighbor] = true;
-                queue.Enqueue(neighbor);
-            }
-        }
-
-        return false;
-    }
-
-    private static string SolveText(string content)
-    {
-        Match arithmetic = Regex.Match(content, @"^(\d+) \+ (\d+)$");
-        if (arithmetic.Success)
-        {
-            int a = int.Parse(arithmetic.Groups[1].Value);
-            int b = int.Parse(arithmetic.Groups[2].Value);
-            return (a + b).ToString();
-        }
-
-        return content;
-    }
-
-    private static List<int> SolveMaze(MazeDto maze)
-    {
-        int cellCount = maze.Width * maze.Height;
-        int[] previous = new int[cellCount];
-        Array.Fill(previous, -1);
-        bool[] visited = new bool[cellCount];
-        Queue<int> queue = new();
-        queue.Enqueue(maze.StartIndex);
-        visited[maze.StartIndex] = true;
-
-        while (queue.Count > 0)
-        {
-            int current = queue.Dequeue();
-            if (current == maze.EndIndex)
-                break;
-
-            foreach (int neighbor in MazeNeighbors(maze, current))
-            {
-                if (visited[neighbor])
-                    continue;
-
-                visited[neighbor] = true;
-                previous[neighbor] = current;
-                queue.Enqueue(neighbor);
-            }
-        }
-
-        List<int> reversed = new();
-        int step = maze.EndIndex;
-        while (step != maze.StartIndex)
-        {
-            reversed.Add(step);
-            step = previous[step];
-        }
-        reversed.Add(maze.StartIndex);
-        reversed.Reverse();
-        return reversed;
-    }
-
-    private static IEnumerable<int> MazeNeighbors(MazeDto maze, int cell)
-    {
-        int walls = maze.CellWalls[cell];
-        int x = cell % maze.Width;
-        int y = cell / maze.Width;
-
-        if ((walls & 1) != 0 && y > 0) yield return cell - maze.Width; // North
-        if ((walls & 2) != 0 && x < maze.Width - 1) yield return cell + 1; // East
-        if ((walls & 4) != 0 && y < maze.Height - 1) yield return cell + maze.Width; // South
-        if ((walls & 8) != 0 && x > 0) yield return cell - 1; // West
-    }
-
-    private static List<int> SolveTileRotate(TileRotateDto tileRotate) =>
-        tileRotate.Tiles.Select(tile => (tile.TargetRotationSteps - tile.InitialRotationSteps + 8) % 8).ToList();
 }

@@ -26,43 +26,59 @@ $DevPostgresPassword = 'postgres'
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
-function Read-JwtSecret {
+function Read-DevSecrets {
     if (-not (Test-Path $EnvFile)) {
         throw ".env not found at $EnvFile. Run scripts/run-dev.ps1 first."
     }
 
     $jwtSecret = ''
+    $fcaptchaSecret = ''
     $pgPort = '5434'
+    $fcaptchaPort = $script:DevFCaptchaHostPort
 
     foreach ($line in Get-Content $EnvFile) {
         if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
         $name, $value = $line -split '=', 2
         $name = $name.Trim()
-        if ($name -eq 'JWT_SECRET') {
-            $jwtSecret = $value.Trim()
-        }
-        if ($name -eq 'POSTGRES_HOST_PORT' -and -not [string]::IsNullOrWhiteSpace($value)) {
-            $pgPort = $value.Trim()
+        switch ($name) {
+            'JWT_SECRET' { $jwtSecret = $value.Trim() }
+            'FCAPTCHA_SECRET' { $fcaptchaSecret = $value.Trim() }
+            'POSTGRES_HOST_PORT' {
+                if (-not [string]::IsNullOrWhiteSpace($value)) {
+                    $pgPort = $value.Trim()
+                }
+            }
+            'FCAPTCHA_HOST_PORT' {
+                if (-not [string]::IsNullOrWhiteSpace($value)) {
+                    $fcaptchaPort = $value.Trim()
+                }
+            }
         }
     }
 
     if ([string]::IsNullOrWhiteSpace($jwtSecret)) {
         throw 'JWT_SECRET is not set in .env'
     }
+    if ([string]::IsNullOrWhiteSpace($fcaptchaSecret)) {
+        throw 'FCAPTCHA_SECRET is not set in .env'
+    }
 
     return @{
         JWT_SECRET = $jwtSecret
+        FCAPTCHA_SECRET = $fcaptchaSecret
         POSTGRES_HOST_PORT = $pgPort
+        FCAPTCHA_HOST_PORT = $fcaptchaPort
     }
 }
 
-$envValues = Read-JwtSecret
+$envValues = Read-DevSecrets
 $connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 $adminConnectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
 $env:Jwt__Secret = $envValues['JWT_SECRET']
+$env:FCaptcha__Secret = $envValues['FCAPTCHA_SECRET']
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 $env:HC_DEV_BYPASS = '1'
 $env:ConnectionStrings__MasterConnection = $connectionString
@@ -84,9 +100,7 @@ $browserProcess = $null
 try {
     if (-not $skipDocker) {
         Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
-        # Matches docker-compose.yml's `fcaptcha` service default and
-        # appsettings.Development.json's FCaptcha:ServerUrl override.
-        Ensure-DevFCaptchaRunning -Port '3010'
+        Ensure-DevFCaptchaRunning -Port $envValues['FCAPTCHA_HOST_PORT']
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {

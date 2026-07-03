@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HomeworkCentral.Api.Captcha;
 
 /// <summary>Client's answer to a challenge. Exactly one of <see cref="Answer"/>,
@@ -16,10 +18,12 @@ public sealed class CaptchaSubmissionDto
     public string? FCaptchaToken { get; set; }
 
     /// <summary>Text challenges: the retyped code or solved expression.</summary>
+    [MaxLength(64)]
     public string? Answer { get; set; }
 
     /// <summary>Maze challenges: cell indices visited in order, starting at the maze's start cell.
     /// Ignored when <see cref="MazeUnsolvableClaim"/> is set.</summary>
+    [MaxLength(121)]
     public List<int>? MazePath { get; set; }
 
     /// <summary>Maze challenges: true when the player asserts there is no path from A to B instead
@@ -29,5 +33,6 @@ public sealed class CaptchaSubmissionDto
     public bool MazeUnsolvableClaim { get; set; }
 
     /// <summary>Tile-rotate challenges: number of clicks applied to each tile, same order as issued.</summary>
+    [MaxLength(9)]
     public List<int>? TileRotationClicks { get; set; }
 }

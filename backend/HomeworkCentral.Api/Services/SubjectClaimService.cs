@@ -5,6 +5,7 @@ using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HomeworkCentral.Api.Services;
 
@@ -88,7 +89,15 @@ public sealed class SubjectClaimService(
                 AssignedBy = userId,
             });
 
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsDuplicateUserSubject(ex))
+            {
+                return;
+            }
+
             await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
         }
         finally
@@ -141,4 +150,7 @@ public sealed class SubjectClaimService(
         db.Subjects
             .AsNoTracking()
             .Where(subject => subject.SubjectMask == SubjectMaskNames.General && subject.ParentSubjectId == null);
+
+    private static bool IsDuplicateUserSubject(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 }

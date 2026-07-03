@@ -27,12 +27,13 @@ DEV_POSTGRES_HOST_PORT="5434"
 DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
 # Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
-# FCaptcha:ServerUrl override — if you change this, update both of those too.
-FCAPTCHA_HOST_PORT="3010"
+# FCaptcha:ServerUrl override.
+FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 BUILD_ONLY=false
 SKIP_DOCKER=false
 HC_API_BUILD_FAILED=0
 JWT_SECRET=""
+FCAPTCHA_SECRET=""
 POSTGRES_PASSWORD=""
 POSTGRES_HOST_PORT="5434"
 
@@ -318,8 +319,10 @@ trim_whitespace() {
 
 read_env_file() {
   JWT_SECRET=""
+  FCAPTCHA_SECRET=""
   POSTGRES_PASSWORD=""
   POSTGRES_HOST_PORT="5434"
+  FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -332,13 +335,17 @@ read_env_file() {
 
     case "$key" in
       JWT_SECRET) JWT_SECRET="$value" ;;
+      FCAPTCHA_SECRET) FCAPTCHA_SECRET="$value" ;;
       POSTGRES_PASSWORD) POSTGRES_PASSWORD="$value" ;;
       POSTGRES_HOST_PORT) POSTGRES_HOST_PORT="$value" ;;
+      FCAPTCHA_HOST_PORT) FCAPTCHA_HOST_PORT="$value" ;;
     esac
   done <"$ENV_FILE"
 
   POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
   [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
+  FCAPTCHA_HOST_PORT="$(trim_whitespace "$FCAPTCHA_HOST_PORT")"
+  [[ -n "$FCAPTCHA_HOST_PORT" ]] || FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 }
 
 set_env_var() {
@@ -379,6 +386,18 @@ ensure_env_file() {
     updated=true
   fi
 
+  if [[ "$FCAPTCHA_SECRET" == "replace-with-a-long-random-secret" || -z "$FCAPTCHA_SECRET" ]]; then
+    FCAPTCHA_SECRET="$(generate_secret)"
+    set_env_var "FCAPTCHA_SECRET" "$FCAPTCHA_SECRET"
+    updated=true
+  fi
+
+  if [[ "$FCAPTCHA_HOST_PORT" != "$DEV_STACK_FCAPTCHA_HOST_PORT" && -z "$(grep -E '^FCAPTCHA_HOST_PORT=' "$ENV_FILE" || true)" ]]; then
+    FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+    set_env_var "FCAPTCHA_HOST_PORT" "$FCAPTCHA_HOST_PORT"
+    updated=true
+  fi
+
   if [[ "$POSTGRES_PASSWORD" != "$DEV_POSTGRES_PASSWORD" ]]; then
     POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
     set_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
@@ -401,6 +420,7 @@ ensure_env_file() {
 
   [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
   [[ ${#JWT_SECRET} -ge 32 ]] || fail "JWT_SECRET must be at least 32 characters"
+  [[ -n "$FCAPTCHA_SECRET" ]] || fail "FCAPTCHA_SECRET is not set in .env"
   [[ -n "$POSTGRES_PASSWORD" ]] || fail "POSTGRES_PASSWORD is not set in .env"
 }
 
@@ -429,6 +449,10 @@ start_postgres() {
 
 start_fcaptcha() {
   require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
+  fi
+
   log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
   ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" \
     || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"

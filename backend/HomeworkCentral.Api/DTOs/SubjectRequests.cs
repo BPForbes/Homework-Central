@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HomeworkCentral.Api.DTOs;
 
 public class ClaimableSubjectDto
@@ -8,5 +10,6 @@ public class ClaimableSubjectDto
 
 public class ClaimSubjectRequest
 {
+    [Required, MinLength(1), MaxLength(128)]
     public string SubjectName { get; set; } = null!;
 }

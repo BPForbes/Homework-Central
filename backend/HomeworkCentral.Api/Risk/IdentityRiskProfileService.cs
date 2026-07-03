@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
@@ -14,6 +15,7 @@ public sealed class IdentityRiskProfileService(IMemoryCache cache, IOptions<Risk
 {
     private const double NeutralTrust = 0.5;
     private static readonly TimeSpan IdleExpiration = TimeSpan.FromDays(30);
+    private static readonly ConcurrentDictionary<string, object> CreationLocks = new();
 
     public IdentityRiskProfile GetProfile(string identity)
     {
@@ -62,12 +64,22 @@ public sealed class IdentityRiskProfileService(IMemoryCache cache, IOptions<Risk
         return NeutralTrust + ((trust - NeutralTrust) * decayFactor);
     }
 
-    private ProfileState GetOrCreate(string identity) =>
-        cache.GetOrCreate(CacheKey(identity), entry =>
+    private ProfileState GetOrCreate(string identity)
+    {
+        string cacheKey = CacheKey(identity);
+        if (cache.TryGetValue(cacheKey, out ProfileState? existing) && existing is not null)
+            return existing;
+
+        object creationLock = CreationLocks.GetOrAdd(identity, _ => new object());
+        lock (creationLock)
         {
-            entry.SlidingExpiration = IdleExpiration;
-            return new ProfileState();
-        })!;
+            return cache.GetOrCreate(cacheKey, entry =>
+            {
+                entry.SlidingExpiration = IdleExpiration;
+                return new ProfileState();
+            })!;
+        }
+    }
 
     private static IdentityRiskProfile Snapshot(ProfileState state) =>
         new(state.TrustScore, state.TotalScans, state.SuccessfulScans, state.ConsecutiveFailures, state.LastTrustUpdateUtc);

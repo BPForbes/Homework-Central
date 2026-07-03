@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using HomeworkCentral.Api.Captcha.ArrowMatch;
 using HomeworkCentral.Api.Captcha.FCaptcha;
 using HomeworkCentral.Api.Captcha.Maze;
@@ -62,27 +64,28 @@ public sealed class CaptchaService(
         if (!cache.TryGetValue(cacheKey, out ChallengeRecord? record) || record is null)
             return false;
 
+        if (!record.TryConsume())
+            return false;
+
         cache.Remove(cacheKey);
 
-        // The "I'm not a robot" check is mandatory on every attempt, regardless of which in-house
-        // puzzle was issued alongside it.
+        string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
+        bool ipMatched = record.IssuerIp is null || string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal);
+
         FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(submission.FCaptchaToken);
         if (!verification.Valid)
         {
             logger.LogInformation("Captcha {ChallengeId} rejected: FCaptcha token did not verify.", submission.ChallengeId);
+            RecordFailure(identity, verification.TrustScore);
             return false;
         }
 
         if (verification.TrustScore >= fCaptchaVerifier.AllowTrustScore)
         {
-            // Confident enough on its own — the in-house puzzle isn't needed for this attempt.
+            RiskAssessment assessment = riskEngine.Evaluate(action, identity, ipMatched, verification.TrustScore);
+            riskEngine.RecordOutcome(identity, assessment with { Passed = true, Score = verification.TrustScore });
             return true;
         }
-
-        // FCaptcha's verdict wasn't confident enough by itself: fall back to also requiring the
-        // in-house puzzle, and feed FCaptcha's (now lower) trust score into the same dynamic
-        // risk-threshold logic used everywhere else, rather than trusting it as a lone signal.
-        bool ipMatched = record.IssuerIp is null || string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal);
 
         bool solved = record.Type switch
         {
@@ -98,26 +101,32 @@ public sealed class CaptchaService(
                 "Captcha {ChallengeId} rejected: FCaptcha trust score {TrustScore:F2} was not confident enough and the fallback puzzle was not solved correctly.",
                 submission.ChallengeId,
                 verification.TrustScore);
+            RecordFailure(identity, verification.TrustScore);
             return false;
         }
 
-        string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
-        RiskAssessment assessment = riskEngine.Evaluate(action, identity, ipMatched, verification.TrustScore);
-        riskEngine.RecordOutcome(identity, assessment);
+        RiskAssessment puzzleAssessment = riskEngine.Evaluate(action, identity, ipMatched, verification.TrustScore);
+        riskEngine.RecordOutcome(identity, puzzleAssessment);
 
-        if (!assessment.Passed)
+        if (!puzzleAssessment.Passed)
         {
             logger.LogInformation(
-                "Captcha {ChallengeId} risk-denied for {Identity}: score {Score:F2} < required {Required:F2} ({Reasons})",
+                "Captcha {ChallengeId} risk-denied for {IdentityHash}: score {Score:F2} < required {Required:F2} ({Reasons})",
                 submission.ChallengeId,
-                identity,
-                assessment.Score,
-                assessment.RequiredScore,
-                string.Join("; ", assessment.Reasons));
+                RedactIdentity(identity),
+                puzzleAssessment.Score,
+                puzzleAssessment.RequiredScore,
+                string.Join("; ", puzzleAssessment.Reasons));
         }
 
-        return assessment.Passed;
+        return puzzleAssessment.Passed;
     }
+
+    private void RecordFailure(string identity, double trustScore) =>
+        riskEngine.RecordOutcome(identity, new RiskAssessment(trustScore, 0, false, []));
+
+    private static string RedactIdentity(string identity) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12];
 
     private CaptchaChallengeDto CreateTextChallenge(string challengeId, string? issuerIp)
     {
@@ -170,12 +179,33 @@ public sealed class CaptchaService(
     private static string CacheKey(string challengeId) => $"captcha:{challengeId}";
 
     /// <summary>Server-side-only validation context cached per challenge; never sent to the client.</summary>
-    private sealed record ChallengeRecord(string Type, string? TextAnswer, MazeDto? Maze, TileRotateDto? TileRotate, string? IssuerIp)
+    private sealed class ChallengeRecord
     {
+        private int _consumed;
+
+        public string Type { get; }
+        public string? TextAnswer { get; }
+        public MazeDto? Maze { get; }
+        public TileRotateDto? TileRotate { get; }
+        public string? IssuerIp { get; }
+
+        private ChallengeRecord(string type, string? textAnswer, MazeDto? maze, TileRotateDto? tileRotate, string? issuerIp)
+        {
+            Type = type;
+            TextAnswer = textAnswer;
+            Maze = maze;
+            TileRotate = tileRotate;
+            IssuerIp = issuerIp;
+        }
+
+        public bool TryConsume() => Interlocked.CompareExchange(ref _consumed, 1, 0) == 0;
+
         public static ChallengeRecord ForText(string answer, string? issuerIp) =>
             new(TextChallenge.TypeName, answer, null, null, issuerIp);
+
         public static ChallengeRecord ForMaze(MazeDto maze, string? issuerIp) =>
             new(MazeGenerator.TypeName, null, maze, null, issuerIp);
+
         public static ChallengeRecord ForTileRotate(TileRotateDto tileRotate, string? issuerIp) =>
             new(TileRotatePuzzleGenerator.TypeName, null, null, tileRotate, issuerIp);
     }

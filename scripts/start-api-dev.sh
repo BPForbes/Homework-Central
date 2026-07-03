@@ -16,7 +16,9 @@ ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
 DEV_POSTGRES_PASSWORD="postgres"
 JWT_SECRET=""
+FCAPTCHA_SECRET=""
 POSTGRES_HOST_PORT="5434"
+FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -30,11 +32,13 @@ trim_whitespace() {
   printf '%s' "$value"
 }
 
-read_jwt_secret() {
+read_env_secrets() {
   [[ -f "$ENV_FILE" ]] || fail ".env not found at $ENV_FILE. Run scripts/run-dev.sh first."
 
   JWT_SECRET=""
+  FCAPTCHA_SECRET=""
   POSTGRES_HOST_PORT="5434"
+  FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -47,20 +51,26 @@ read_jwt_secret() {
 
     case "$key" in
       JWT_SECRET) JWT_SECRET="$value" ;;
+      FCAPTCHA_SECRET) FCAPTCHA_SECRET="$value" ;;
       POSTGRES_HOST_PORT) POSTGRES_HOST_PORT="$value" ;;
+      FCAPTCHA_HOST_PORT) FCAPTCHA_HOST_PORT="$value" ;;
     esac
   done <"$ENV_FILE"
 
   POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
   [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
+  FCAPTCHA_HOST_PORT="$(trim_whitespace "$FCAPTCHA_HOST_PORT")"
+  [[ -n "$FCAPTCHA_HOST_PORT" ]] || FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
   [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
+  [[ -n "$FCAPTCHA_SECRET" ]] || fail "FCAPTCHA_SECRET is not set in .env"
 }
 
-read_jwt_secret
+read_env_secrets
 
 export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5000
 export Jwt__Secret="$JWT_SECRET"
+export FCaptcha__Secret="$FCAPTCHA_SECRET"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 export HC_DEV_BYPASS=1
 export ConnectionStrings__MasterConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
@@ -81,9 +91,7 @@ trap cleanup_api EXIT
 
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
-  # Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
-  # FCaptcha:ServerUrl override.
-  ensure_dev_fcaptcha_running "3010" || fail "Could not start the FCaptcha Docker container on localhost:3010. Run scripts/run-dev.sh or start Docker Desktop."
+  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" || fail "Could not start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
 if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then

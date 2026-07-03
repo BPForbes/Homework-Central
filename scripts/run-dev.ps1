@@ -33,9 +33,6 @@ $DevPostgresPassword = 'postgres'
 $DevPostgresHostPort = '5434'
 $DevPostgresHostPortMin = 5434
 $DevPostgresHostPortMax = 5450
-# Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
-# FCaptcha:ServerUrl override — if you change this, update both of those too.
-$DevFCaptchaHostPort = '3010'
 $script:ApiBuildFailed = $false
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
@@ -363,8 +360,10 @@ Pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
 function Read-EnvFile {
     $values = @{
         JWT_SECRET = ''
+        FCAPTCHA_SECRET = ''
         POSTGRES_PASSWORD = ''
         POSTGRES_HOST_PORT = $DevPostgresHostPort
+        FCAPTCHA_HOST_PORT = $script:DevFCaptchaHostPort
     }
 
     foreach ($line in Get-Content $EnvFile) {
@@ -378,6 +377,10 @@ function Read-EnvFile {
 
     if ([string]::IsNullOrWhiteSpace($values['POSTGRES_HOST_PORT'])) {
         $values['POSTGRES_HOST_PORT'] = $DevPostgresHostPort
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_HOST_PORT'])) {
+        $values['FCAPTCHA_HOST_PORT'] = $script:DevFCaptchaHostPort
     }
 
     return $values
@@ -395,6 +398,11 @@ function Ensure-EnvFile {
 
     if ([string]::IsNullOrWhiteSpace($values['JWT_SECRET']) -or $values['JWT_SECRET'] -eq 'replace-with-a-long-random-secret') {
         $values['JWT_SECRET'] = New-RandomSecret
+        $updated = $true
+    }
+
+    if ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_SECRET']) -or $values['FCAPTCHA_SECRET'] -eq 'replace-with-a-long-random-secret') {
+        $values['FCAPTCHA_SECRET'] = New-RandomSecret
         $updated = $true
     }
 
@@ -425,7 +433,7 @@ function Ensure-EnvFile {
                 $newLines += $line
             }
         }
-        foreach ($key in @('JWT_SECRET', 'POSTGRES_PASSWORD', 'POSTGRES_HOST_PORT')) {
+        foreach ($key in @('JWT_SECRET', 'FCAPTCHA_SECRET', 'POSTGRES_PASSWORD', 'POSTGRES_HOST_PORT', 'FCAPTCHA_HOST_PORT')) {
             if (-not $seen.ContainsKey($key) -and $values.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($values[$key])) {
                 $newLines += "$key=$($values[$key])"
             }
@@ -444,6 +452,9 @@ function Ensure-EnvFile {
     if ([string]::IsNullOrWhiteSpace($values['POSTGRES_PASSWORD'])) {
         throw 'POSTGRES_PASSWORD is not set in .env'
     }
+    if ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_SECRET'])) {
+        throw 'FCAPTCHA_SECRET is not set in .env'
+    }
 
     return (Resolve-PostgresHostPort $values)
 }
@@ -458,9 +469,7 @@ function Wait-ForPostgres {
     throw "Postgres did not become ready within ${attempts}s"
 }
 
-function Start-Postgres([hashtable]$EnvValues) {
-    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
-
+function Assert-DockerRunning {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw 'Docker CLI not found. Install Docker Desktop and ensure docker is on PATH.'
     }
@@ -469,23 +478,22 @@ function Start-Postgres([hashtable]$EnvValues) {
     if ($LASTEXITCODE -ne 0) {
         throw 'Docker is not running. Start Docker Desktop and retry.'
     }
+}
+
+function Start-Postgres([hashtable]$EnvValues) {
+    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
+
+    Assert-DockerRunning
 
     Ensure-PostgresReady $EnvValues
 }
 
 function Start-FCaptcha {
-    Write-Step "Starting FCaptcha (Docker) on localhost:$DevFCaptchaHostPort"
+    Write-Step "Starting FCaptcha (Docker) on localhost:$($script:DevFCaptchaHostPort)"
 
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        throw 'Docker CLI not found. Install Docker Desktop and ensure docker is on PATH.'
-    }
+    Assert-DockerRunning
 
-    docker info *> $null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Docker is not running. Start Docker Desktop and retry.'
-    }
-
-    Ensure-DevFCaptchaRunning -Port $DevFCaptchaHostPort
+    Ensure-DevFCaptchaRunning -Port $script:DevFCaptchaHostPort
 }
 
 function Build-PostgresHostCheck {
@@ -647,7 +655,7 @@ function Start-DevStack([hashtable]$EnvValues) {
         Write-Host '  Postgres: localhost:' -NoNewline
         Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline
         Write-Host ' (Docker; stops when both terminals are closed)'
-        Write-Host "  FCaptcha: localhost:$DevFCaptchaHostPort (Docker; stops when both terminals are closed)"
+        Write-Host "  FCaptcha: localhost:$($script:DevFCaptchaHostPort) (Docker; stops when both terminals are closed)"
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'

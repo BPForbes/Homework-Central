@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Captcha.FCaptcha;
-using HomeworkCentral.Api.Captcha.Maze;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;
@@ -174,128 +173,8 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     Assert.DoesNotContain("VerifiedUser", registered.User.Roles);
   }
 
-  /// <summary>Builds a submission that correctly solves whichever challenge type was issued,
-  /// tagged with a placeholder FCaptcha token — the caller is responsible for setting
-  /// <see cref="IntegrationTestFixture.FCaptchaVerifier"/>'s verdict before submitting.</summary>
-  private static CaptchaSubmissionDto BuildCorrectSubmission(CaptchaChallengeDto challenge)
-  {
-    CaptchaSubmissionDto submission = new()
-    {
-      ChallengeId = challenge.ChallengeId,
-      FCaptchaToken = "token",
-    };
-
-    switch (challenge.Type)
-    {
-      case "maze" when HasPath(challenge.Maze!):
-        submission.MazePath = SolveMaze(challenge.Maze!);
-        break;
-      case "maze":
-        // Some maze challenges are deliberately generated with no path from A to B at all;
-        // correctly recognizing that is itself the correct answer.
-        submission.MazeUnsolvableClaim = true;
-        break;
-      case "tileRotate":
-        submission.TileRotationClicks = challenge.TileRotate!.Tiles
-          .Select(tile => (tile.TargetRotationSteps - tile.InitialRotationSteps + 8) % 8)
-          .ToList();
-        break;
-      default:
-        submission.Answer = SolveText(challenge.Content!);
-        break;
-    }
-
-    return submission;
-  }
-
-  private static string SolveText(string content)
-  {
-    System.Text.RegularExpressions.Match arithmetic =
-      System.Text.RegularExpressions.Regex.Match(content, @"^(\d+) \+ (\d+)$");
-    if (arithmetic.Success)
-    {
-      int a = int.Parse(arithmetic.Groups[1].Value);
-      int b = int.Parse(arithmetic.Groups[2].Value);
-      return (a + b).ToString();
-    }
-
-    // Code challenges: the content is the answer itself.
-    return content;
-  }
-
-  private static bool HasPath(MazeDto maze)
-  {
-    if (maze.StartIndex == maze.EndIndex)
-      return true;
-
-    bool[] visited = new bool[maze.CellWalls.Length];
-    Queue<int> queue = new();
-    queue.Enqueue(maze.StartIndex);
-    visited[maze.StartIndex] = true;
-
-    while (queue.Count > 0)
-    {
-      int current = queue.Dequeue();
-      if (current == maze.EndIndex)
-        return true;
-
-      int walls = maze.CellWalls[current];
-      int x = current % maze.Width;
-      int y = current / maze.Width;
-      if ((walls & 1) != 0 && y > 0 && !visited[current - maze.Width]) { visited[current - maze.Width] = true; queue.Enqueue(current - maze.Width); }
-      if ((walls & 2) != 0 && x < maze.Width - 1 && !visited[current + 1]) { visited[current + 1] = true; queue.Enqueue(current + 1); }
-      if ((walls & 4) != 0 && y < maze.Height - 1 && !visited[current + maze.Width]) { visited[current + maze.Width] = true; queue.Enqueue(current + maze.Width); }
-      if ((walls & 8) != 0 && x > 0 && !visited[current - 1]) { visited[current - 1] = true; queue.Enqueue(current - 1); }
-    }
-
-    return false;
-  }
-
-  private static List<int> SolveMaze(MazeDto maze)
-  {
-    int cellCount = maze.Width * maze.Height;
-    int[] previous = new int[cellCount];
-    Array.Fill(previous, -1);
-    bool[] visited = new bool[cellCount];
-    Queue<int> queue = new();
-    queue.Enqueue(maze.StartIndex);
-    visited[maze.StartIndex] = true;
-
-    while (queue.Count > 0)
-    {
-      int current = queue.Dequeue();
-      if (current == maze.EndIndex)
-        break;
-
-      int walls = maze.CellWalls[current];
-      int x = current % maze.Width;
-      int y = current / maze.Width;
-      List<int> neighbors = new();
-      if ((walls & 1) != 0 && y > 0) neighbors.Add(current - maze.Width);
-      if ((walls & 2) != 0 && x < maze.Width - 1) neighbors.Add(current + 1);
-      if ((walls & 4) != 0 && y < maze.Height - 1) neighbors.Add(current + maze.Width);
-      if ((walls & 8) != 0 && x > 0) neighbors.Add(current - 1);
-
-      foreach (int neighbor in neighbors)
-      {
-        if (visited[neighbor]) continue;
-        visited[neighbor] = true;
-        previous[neighbor] = current;
-        queue.Enqueue(neighbor);
-      }
-    }
-
-    List<int> reversed = new();
-    int step = maze.EndIndex;
-    while (step != maze.StartIndex)
-    {
-      reversed.Add(step);
-      step = previous[step];
-    }
-    reversed.Add(maze.StartIndex);
-    reversed.Reverse();
-    return reversed;
-  }
+  private static CaptchaSubmissionDto BuildCorrectSubmission(CaptchaChallengeDto challenge) =>
+    CaptchaTestSolvers.BuildCorrectSubmission(challenge);
 
   private static string? ReadAccountClassClaim(string accessToken)
   {
@@ -342,6 +221,7 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
     builder.UseSetting("ConnectionStrings:PostgresAdmin", _adminConnectionString);
     builder.UseSetting("Tenancy:ClusterEnvironment", "dev");
     builder.UseSetting("Jwt:Secret", "integration-test-jwt-secret-key-32chars!");
+    builder.UseSetting("FCaptcha:Secret", "integration-test-fcaptcha-secret-key!");
     builder.UseSetting(DevBypass.EnvVarName, "0");
 
     builder.ConfigureTestServices(services =>

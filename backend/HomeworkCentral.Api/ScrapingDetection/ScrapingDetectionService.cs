@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace HomeworkCentral.Api.ScrapingDetection;
@@ -13,17 +14,14 @@ public sealed class ScrapingDetectionService(IMemoryCache cache) : IScrapingDete
     private const double BlockThreshold = 0.75;
     private const int MinSamplesBeforeAssessing = 10;
     private const int MaxSamplesPerIdentity = 300;
+    private static readonly ConcurrentDictionary<string, object> CreationLocks = new();
 
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan IdleExpiration = TimeSpan.FromMinutes(10);
 
     public ScrapingAssessment RecordRequest(ScrapingRequestSample sample)
     {
-        IdentityWindow window = cache.GetOrCreate(CacheKey(sample.Identity), entry =>
-        {
-            entry.SlidingExpiration = IdleExpiration;
-            return new IdentityWindow();
-        })!;
+        IdentityWindow window = GetOrCreateWindow(sample.Identity);
 
         List<RequestRecord> snapshot;
         lock (window.Lock)
@@ -47,11 +45,31 @@ public sealed class ScrapingDetectionService(IMemoryCache cache) : IScrapingDete
         if (!cache.TryGetValue(CacheKey(identity), out IdentityWindow? window) || window is null)
             return new ScrapingAssessment(0, false, null);
 
+        DateTime nowUtc = DateTime.UtcNow;
+        DateTime cutoff = nowUtc - Window;
+
         List<RequestRecord> snapshot;
         lock (window.Lock)
-            snapshot = [.. window.Samples];
+            snapshot = window.Samples.Where(s => s.TimestampUtc >= cutoff).ToList();
 
-        return Assess(snapshot, DateTime.UtcNow);
+        return Assess(snapshot, nowUtc);
+    }
+
+    private IdentityWindow GetOrCreateWindow(string identity)
+    {
+        string cacheKey = CacheKey(identity);
+        if (cache.TryGetValue(cacheKey, out IdentityWindow? existing) && existing is not null)
+            return existing;
+
+        object creationLock = CreationLocks.GetOrAdd(identity, _ => new object());
+        lock (creationLock)
+        {
+            return cache.GetOrCreate(cacheKey, entry =>
+            {
+                entry.SlidingExpiration = IdleExpiration;
+                return new IdentityWindow();
+            })!;
+        }
     }
 
     private static ScrapingAssessment Assess(List<RequestRecord> samples, DateTime nowUtc)

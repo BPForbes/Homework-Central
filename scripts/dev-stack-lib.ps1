@@ -12,6 +12,7 @@ $script:DevStackMutexName = 'Global\HomeworkCentralDevStack'
 $script:DevStackComposeFile = Join-Path $script:RepoRoot 'docker-compose.yml'
 $script:DevStackEnvFile = Join-Path $script:RepoRoot '.env'
 $script:DevPostgresPassword = 'postgres'
+$script:DevFCaptchaHostPort = '3010'
 $script:DevStackServerRegistered = $false
 
 function Read-DevStackState {

@@ -67,7 +67,7 @@ public class RoleAssignmentService(
                 await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction cleanupTransaction =
                     await db.Database.BeginTransactionAsync(ct);
                 await db.SaveChangesAsync(ct);
-                await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+                await EffectiveMaskService.RebuildOnContextAsync(db, targetUserId, ct);
                 await cleanupTransaction.CommitAsync(ct);
                 return;
             }
@@ -82,7 +82,7 @@ public class RoleAssignmentService(
 
             await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
             await db.SaveChangesAsync(ct);
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+            await EffectiveMaskService.RebuildOnContextAsync(db, targetUserId, ct);
             await transaction.CommitAsync(ct);
         }
         finally
@@ -125,7 +125,7 @@ public class RoleAssignmentService(
             db.UserRoles.Remove(assignment);
             await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
             await db.SaveChangesAsync(ct);
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+            await EffectiveMaskService.RebuildOnContextAsync(db, targetUserId, ct);
             await transaction.CommitAsync(ct);
         }
         finally
