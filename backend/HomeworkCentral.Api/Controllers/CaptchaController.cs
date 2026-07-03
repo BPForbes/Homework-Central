@@ -14,6 +14,12 @@ public class CaptchaController(ICaptchaService captcha, ICaptchaRoleService capt
     [HttpGet("challenge")]
     public ActionResult<CaptchaChallengeDto> GetChallenge() => Ok(captcha.CreateChallenge());
 
+    /// <summary>Checks an FCaptcha widget token and tells the frontend whether the fallback puzzle
+    /// must be shown. Does not consume a challenge.</summary>
+    [HttpPost("assess-fcaptcha")]
+    public async Task<ActionResult<FCaptchaAssessmentDto>> AssessFCaptcha([FromBody] AssessFCaptchaRequest request) =>
+        Ok(await captcha.AssessFCaptchaAsync(request.Token));
+
     /// <summary>Dashboard "Verify" button: solving the puzzle correctly AND passing the behavioral
     /// score threshold strips Guest (if present) and grants VerifiedUser to the current user.</summary>
     [HttpPost("verify-role")]
@@ -38,4 +44,9 @@ public class CaptchaController(ICaptchaService captcha, ICaptchaRoleService capt
 
         return Guid.TryParse(sub, out Guid userId) ? userId : null;
     }
+}
+
+public sealed class AssessFCaptchaRequest
+{
+    public string? Token { get; set; }
 }

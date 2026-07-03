@@ -63,7 +63,7 @@ export function GetRoles() {
             type="button"
             className={`get-roles-button ${subject.claimed ? 'claimed' : ''}`}
             onClick={() => toggle(subject)}
-            disabled={pending === subject.name}
+            disabled={pending !== null}
           >
             <FontAwesomeIcon icon={getCategoryIcon(subject.name.replace(/\s/g, ''))} className="get-roles-button-icon" />
             <span>{subject.name}</span>

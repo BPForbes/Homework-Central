@@ -45,6 +45,42 @@ public class CaptchaServiceTests
     }
 
     [Fact]
+    public async Task Assess_fcaptcha_reports_no_puzzle_when_confident()
+    {
+        (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
+        verifier.NextResult = new FCaptchaVerification(true, 0.9);
+
+        FCaptchaAssessmentDto assessment = await service.AssessFCaptchaAsync("token");
+
+        Assert.True(assessment.Valid);
+        Assert.False(assessment.PuzzleRequired);
+    }
+
+    [Fact]
+    public async Task Assess_fcaptcha_reports_puzzle_when_uncertain()
+    {
+        (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
+        verifier.NextResult = new FCaptchaVerification(true, 0.6);
+
+        FCaptchaAssessmentDto assessment = await service.AssessFCaptchaAsync("token");
+
+        Assert.True(assessment.Valid);
+        Assert.True(assessment.PuzzleRequired);
+    }
+
+    [Fact]
+    public async Task Assess_fcaptcha_reports_invalid_without_puzzle()
+    {
+        (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
+        verifier.NextResult = new FCaptchaVerification(false, 0.0);
+
+        FCaptchaAssessmentDto assessment = await service.AssessFCaptchaAsync("token");
+
+        Assert.False(assessment.Valid);
+        Assert.False(assessment.PuzzleRequired);
+    }
+
+    [Fact]
     public async Task Invalid_fcaptcha_token_fails_even_with_a_correct_puzzle_answer()
     {
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();

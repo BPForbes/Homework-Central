@@ -43,6 +43,16 @@ public sealed class CaptchaService(
         };
     }
 
+    public async Task<FCaptchaAssessmentDto> AssessFCaptchaAsync(string? token)
+    {
+        FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(token);
+        if (!verification.Valid)
+            return new FCaptchaAssessmentDto(false, false);
+
+        bool puzzleRequired = verification.TrustScore < fCaptchaVerifier.AllowTrustScore;
+        return new FCaptchaAssessmentDto(true, puzzleRequired);
+    }
+
     public async Task<bool> ValidateAsync(CaptchaSubmissionDto? submission, CaptchaAction action)
     {
         if (submission is null || string.IsNullOrWhiteSpace(submission.ChallengeId))

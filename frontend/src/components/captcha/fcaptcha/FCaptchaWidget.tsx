@@ -18,29 +18,25 @@ declare global {
   }
 }
 
-const loadedScripts = new Set<string>()
+const scriptPromises = new Map<string, Promise<void>>()
 
 function loadScript(src: string): Promise<void> {
-  if (loadedScripts.has(src)) return Promise.resolve()
+  const cached = scriptPromises.get(src)
+  if (cached) return cached
 
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`)
-    if (existing) {
-      loadedScripts.add(src)
-      resolve()
-      return
-    }
-
+  const promise = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script')
     script.src = src
     script.async = true
-    script.onload = () => {
-      loadedScripts.add(src)
-      resolve()
+    script.onload = () => resolve()
+    script.onerror = () => {
+      scriptPromises.delete(src)
+      reject(new Error(`Failed to load ${src}`))
     }
-    script.onerror = () => reject(new Error(`Failed to load ${src}`))
     document.head.appendChild(script)
   })
+  scriptPromises.set(src, promise)
+  return promise
 }
 
 /**

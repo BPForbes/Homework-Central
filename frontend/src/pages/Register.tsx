@@ -54,6 +54,7 @@ export function Register() {
       await register(email.trim().toLowerCase(), username.trim(), password, captcha.buildSubmission() ?? undefined)
       navigate('/dashboard')
     } catch (err: unknown) {
+      void captcha.refresh()
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
         'Registration failed. Please try again.'

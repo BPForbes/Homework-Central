@@ -6,6 +6,14 @@ export type { TileChallenge, TileRotateChallenge } from './arrowMatch'
 
 export type CaptchaChallengeType = 'text' | 'maze' | 'tileRotate'
 
+/** Which step of the captcha flow is currently visible to the user. */
+export type CaptchaPhase = 'fcaptcha' | 'puzzle' | 'fcaptcha-only-ready'
+
+export interface FCaptchaAssessment {
+  valid: boolean
+  puzzleRequired: boolean
+}
+
 export interface CaptchaChallenge {
   challengeId: string
   type: CaptchaChallengeType
@@ -25,7 +33,7 @@ export interface CaptchaChallenge {
 
 export interface CaptchaSubmission {
   challengeId: string
-  /** The FCaptcha widget token. Required on every submission. */
+  /** The FCaptcha widget token. Populated asynchronously once the user completes the checkbox. */
   fCaptchaToken?: string
   answer?: string
   mazePath?: number[]

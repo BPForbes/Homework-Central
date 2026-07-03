@@ -156,7 +156,7 @@ export function TextChallenge({ content, answer, onAnswerChange, disabled, input
     <>
       <div
         className="captcha-content"
-        aria-label={content}
+        aria-hidden="true"
         onCopy={blockEvent}
         onCut={blockEvent}
         onContextMenu={blockEvent}

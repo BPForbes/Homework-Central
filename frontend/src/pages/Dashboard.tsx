@@ -25,7 +25,11 @@ export function Dashboard() {
     setVerifyError('')
     try {
       await captchaApi.verifyRole(submission)
-      await refreshUser()
+      try {
+        await refreshUser()
+      } catch {
+        // Verification succeeded server-side; local user refresh can be retried later.
+      }
     } catch {
       setVerifyError("We couldn't verify you're human. Try the new challenge below.")
       void captcha.refresh()

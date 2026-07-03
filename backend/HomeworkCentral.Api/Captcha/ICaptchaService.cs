@@ -43,9 +43,20 @@ public sealed record CaptchaChallengeDto(
 /// Used both by signup (to grant <c>VerifiedUser</c> instead of <c>Guest</c>) and by the dashboard
 /// "Verify" button (to promote an existing Guest).
 /// </summary>
+/// <summary>Result of checking an FCaptcha widget token without consuming a challenge. The frontend
+/// uses this to decide whether to reveal the fallback puzzle or let the user submit with FCaptcha
+/// alone.</summary>
+public sealed record FCaptchaAssessmentDto(bool Valid, bool PuzzleRequired);
+
 public interface ICaptchaService
 {
     CaptchaChallengeDto CreateChallenge();
+
+    /// <summary>
+    /// Checks an FCaptcha token and reports whether the fallback puzzle must also be shown/solved.
+    /// Does not consume a challenge.
+    /// </summary>
+    Task<FCaptchaAssessmentDto> AssessFCaptchaAsync(string? token);
 
     /// <summary>
     /// Validates and consumes a challenge (each challenge can only be checked once, regardless of

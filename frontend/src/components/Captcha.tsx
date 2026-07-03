@@ -12,27 +12,33 @@ interface CaptchaProps {
   inputId?: string
 }
 
+function phaseLabel(captcha: CaptchaHookState): string {
+  if (captcha.loading) return 'Loading a verification challenge…'
+  if (!captcha.challenge) return 'Could not load a verification challenge.'
+  if (captcha.phase === 'fcaptcha-only-ready') return 'Verification check passed — you can submit.'
+  if (captcha.phase === 'puzzle') return captcha.challenge.label
+  return 'Complete the "I\'m not a robot" check below.'
+}
+
 /**
  * Reusable captcha widget — same component backs signup and the dashboard verify button. The
- * FCaptcha "I'm not a robot" checkbox is always shown first and is mandatory; the text, maze, or
- * arrow-match puzzle module underneath is only actually required server-side if FCaptcha's own
- * verdict isn't confident enough on its own (see CaptchaService.ValidateAsync), but is always
- * rendered so solving it up front never hurts.
+ * FCaptcha "I'm not a robot" checkbox is shown first; the text, maze, or arrow-match puzzle is
+ * only revealed when FCaptcha's verdict isn't confident enough on its own.
  */
 export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
-  const { challenge, loading } = captcha
+  const { challenge, loading, phase, assessing } = captcha
+  const showFCaptcha = phase === 'fcaptcha'
+  const showPuzzle = phase === 'puzzle'
 
   return (
     <div className="captcha">
       <div className="captcha-label-row">
-        <span className="captcha-label">
-          {loading ? 'Loading a verification challenge…' : challenge?.label ?? 'Could not load a verification challenge.'}
-        </span>
+        <span className="captcha-label">{phaseLabel(captcha)}</span>
         <button
           type="button"
           className="captcha-refresh"
           onClick={() => void captcha.refresh()}
-          disabled={disabled}
+          disabled={disabled || loading || assessing}
           aria-label="Get a new challenge"
           title="Get a new challenge"
         >
@@ -40,17 +46,21 @@ export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
         </button>
       </div>
 
-      {challenge && (
+      {showFCaptcha && challenge && (
         <FCaptchaWidget
           key={challenge.challengeId}
           siteKey={challenge.fCaptchaSiteKey}
           publicUrl={challenge.fCaptchaPublicUrl}
           onToken={captcha.setFCaptchaToken}
-          disabled={disabled || loading}
+          disabled={disabled || loading || assessing}
         />
       )}
 
-      {challenge?.type === 'text' && challenge.content && (
+      {phase === 'fcaptcha-only-ready' && (
+        <p className="captcha-puzzle-status">The &ldquo;I&apos;m not a robot&rdquo; check passed — no puzzle needed.</p>
+      )}
+
+      {showPuzzle && challenge?.type === 'text' && challenge.content && (
         <TextChallenge
           inputId={inputId}
           content={challenge.content}
@@ -60,7 +70,7 @@ export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
         />
       )}
 
-      {challenge?.type === 'maze' && challenge.maze && (
+      {showPuzzle && challenge?.type === 'maze' && challenge.maze && (
         <MazePuzzle
           maze={challenge.maze}
           path={captcha.mazePath}
@@ -71,7 +81,7 @@ export function Captcha({ captcha, disabled, inputId }: CaptchaProps) {
         />
       )}
 
-      {challenge?.type === 'tileRotate' && challenge.tileRotate && (
+      {showPuzzle && challenge?.type === 'tileRotate' && challenge.tileRotate && (
         <ArrowMatchPuzzle
           tiles={challenge.tileRotate.tiles}
           rotationClicks={captcha.tileRotationClicks}
