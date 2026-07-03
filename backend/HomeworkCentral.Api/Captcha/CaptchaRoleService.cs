@@ -17,8 +17,7 @@ public sealed class CaptchaRoleService(
     ICaptchaService captcha,
     AppDbContext masterDb,
     ITenantDbContextFactory tenantFactory,
-    IHttpContextAccessor httpContextAccessor,
-    IEffectiveMaskService effectiveMaskService) : ICaptchaRoleService
+    IHttpContextAccessor httpContextAccessor) : ICaptchaRoleService
 {
     public async Task<bool> TryVerifyAndPromoteAsync(
         Guid userId,
@@ -38,7 +37,7 @@ public sealed class CaptchaRoleService(
                 .FirstOrDefaultAsync(u => u.UserId == userId, ct)
                 ?? throw new InvalidOperationException("User was not found.");
 
-            await db.PromoteToVerifiedUserAsync(user, assignedBy: userId, effectiveMaskService, ct);
+            await db.PromoteToVerifiedUserAsync(user, assignedBy: userId, ct);
             return true;
         }
         finally

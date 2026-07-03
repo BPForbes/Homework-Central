@@ -33,8 +33,7 @@ public interface ISubjectClaimService
 public sealed class SubjectClaimService(
     AppDbContext masterDb,
     ITenantDbContextFactory tenantFactory,
-    IHttpContextAccessor httpContextAccessor,
-    IEffectiveMaskService effectiveMaskService) : ISubjectClaimService
+    IHttpContextAccessor httpContextAccessor) : ISubjectClaimService
 {
     public async Task<IReadOnlyList<ClaimableSubjectDto>> GetClaimableSubjectsAsync(Guid userId, CancellationToken ct = default)
     {
@@ -98,7 +97,7 @@ public sealed class SubjectClaimService(
                 return;
             }
 
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+            await EffectiveMaskService.RebuildOnContextAsync(db, userId, ct);
         }
         finally
         {
@@ -123,7 +122,7 @@ public sealed class SubjectClaimService(
 
             db.UserSubjects.Remove(assignment);
             await db.SaveChangesAsync(ct);
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+            await EffectiveMaskService.RebuildOnContextAsync(db, userId, ct);
         }
         finally
         {

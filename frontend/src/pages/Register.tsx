@@ -49,9 +49,22 @@ export function Register() {
       return
     }
 
+    const captchaStarted =
+      captcha.assessing ||
+      captcha.phase === 'fcaptcha-only-ready' ||
+      captcha.phase === 'puzzle' ||
+      Boolean(captcha.fCaptchaToken)
+
+    if (captchaStarted && !captcha.canSubmit) {
+      setError('Complete the verification check before creating your account.')
+      return
+    }
+
+    const submission = captcha.buildSubmission()
+
     setIsSubmitting(true)
     try {
-      await register(email.trim().toLowerCase(), username.trim(), password, captcha.buildSubmission() ?? undefined)
+      await register(email.trim().toLowerCase(), username.trim(), password, submission ?? undefined)
       navigate('/dashboard')
     } catch (err: unknown) {
       void captcha.refresh()
@@ -127,7 +140,7 @@ export function Register() {
             <Captcha captcha={captcha} inputId="captcha-answer" disabled={isSubmitting} />
           </div>
           {error && <p className="error">{error}</p>}
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
+          <button type="submit" className="btn-primary" disabled={isSubmitting || captcha.assessing}>
             {isSubmitting ? 'Creating account…' : 'Create account'}
           </button>
         </form>

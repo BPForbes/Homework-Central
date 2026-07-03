@@ -19,7 +19,6 @@ public class AuthService(
     ITenantDbContextFactory tenantFactory,
     IJwtService jwt,
     IHttpContextAccessor http,
-    IEffectiveMaskService effectiveMaskService,
     ICaptchaService captcha,
     IServiceProvider serviceProvider) : IAuthService
 {
@@ -49,7 +48,7 @@ public class AuthService(
         {
             masterDb.Users.Add(user);
             await masterDb.SaveChangesAsync();
-            await masterDb.AssignDefaultRolesAsync(user, effectiveMaskService, captchaVerified);
+            await masterDb.AssignDefaultRolesAsync(user, captchaVerified);
             await transaction.CommitAsync();
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg)

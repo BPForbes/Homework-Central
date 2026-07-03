@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faComments, faShieldHalved } from '@fortawesome/free-solid-svg-icons'
@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
 import { captchaApi } from '../api/captchaApi'
+import { subjectsApi } from '../api/subjectsApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
 
 export function Dashboard() {
@@ -13,8 +14,16 @@ export function Dashboard() {
   const captcha = useCaptcha()
   const [verifying, setVerifying] = useState(false)
   const [verifyError, setVerifyError] = useState('')
+  const [claimedSubjects, setClaimedSubjects] = useState<string[]>([])
 
   const isGuest = hasRole(GUEST_ROLE_BIT)
+
+  useEffect(() => {
+    void subjectsApi
+      .getGeneral()
+      .then(({ data }) => setClaimedSubjects(data.filter((subject) => subject.claimed).map((subject) => subject.name)))
+      .catch(() => setClaimedSubjects([]))
+  }, [user?.userId])
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault()
@@ -91,8 +100,21 @@ export function Dashboard() {
             ))}
           </ul>
         ) : (
-          <p>No roles assigned.</p>
+          <p>No platform roles assigned.</p>
         )}
+        {claimedSubjects.length > 0 && (
+          <>
+            <h4>Subject interests</h4>
+            <ul>
+              {claimedSubjects.map((name) => (
+                <li key={name}>{name}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        <p className="dashboard-hint">
+          Claim more subject interests from <Link to="/get-roles">Get Roles</Link>.
+        </p>
       </section>
 
       <p className="dashboard-footer-link">

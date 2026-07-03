@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft, faCheck } from '@fortawesome/free-solid-svg-icons'
+import { useAuth } from '../context/AuthContext'
 import { subjectsApi } from '../api/subjectsApi'
 import type { ClaimableSubject } from '../types/subjects'
 import { getCategoryIcon } from '../components/chat/chatIcons'
@@ -10,6 +11,7 @@ import { getCategoryIcon } from '../components/chat/chatIcons'
  * subject roles (Math, Science, Computer Science, ...). Reached from the General category in the
  * chat sidebar via ChatSidebar's GET_ROLES_ROOM_ID special case. */
 export function GetRoles() {
+  const { refreshUser } = useAuth()
   const [subjects, setSubjects] = useState<ClaimableSubject[] | null>(null)
   const [error, setError] = useState('')
   const [pending, setPending] = useState<string | null>(null)
@@ -37,6 +39,11 @@ export function GetRoles() {
         await subjectsApi.claim(subject.name)
       }
       await load()
+      try {
+        await refreshUser()
+      } catch {
+        // Claim succeeded; JWT refresh can be retried from the dashboard.
+      }
     } catch {
       setError('Could not update that role. Please try again.')
     } finally {
