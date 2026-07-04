@@ -24,6 +24,8 @@ public interface IMentionRecipientResolver
 /// <summary>
 /// Resolves @username, @role, @everyone, and @here mentions to recipient user IDs.
 /// Scans the master database and all registered tenant databases for matching users.
+/// @username recipients must pass the same room-access check as @role / @everyone
+/// (subject expertise bit, claimed general subject, staff role, or public general room).
 /// </summary>
 public sealed class MentionRecipientResolver(
     AppDbContext masterDb,
@@ -49,8 +51,13 @@ public sealed class MentionRecipientResolver(
             {
                 case MentionKind.User:
                     Guid? userId = await ResolveUsernameAsync(mention.Token, ct);
-                    if (userId is not null && userId.Value != senderId)
+                    if (userId is null || userId.Value == senderId || room is null)
+                        break;
+
+                    UserMaskSnapshot? mentionedUser = allUsers.FirstOrDefault(u => u.UserId == userId.Value);
+                    if (mentionedUser is not null && chatRoomAccess.CanAccessRoom(mentionedUser.Masks, room))
                         recipients.Add(userId.Value);
+
                     break;
 
                 case MentionKind.Role:
