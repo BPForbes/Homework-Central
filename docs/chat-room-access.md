@@ -39,7 +39,7 @@ Chat
 | Category visibility | Dropdown shown only when ≥1 child room is accessible. |
 | Category kind | `General`, `Subject`, or `Staff` — drives nav grouping and `IsPrivateCategory`. |
 | Feature gate | `PlatformFeatures.GroupMessages` is required for **staff** rooms; subject-expertise rooms only require the room-access rule above. General is always open. |
-| Tenant isolation | Messages implement `IScopedResource`; `"ResourceVisibility"` policy applies after room access. |
+| Traffic isolation | Messages implement `IShareableScopedResource`; EF global query filters split **real production** chat from **developer/test** traffic by `OwnerAccountClass` only (no per-tenant match). See `ChatMessage.cs` for rationale — chat is a shared community space, not tenant-private data. |
 
 ## Room blueprint
 
@@ -71,12 +71,24 @@ Use `hasSubjectExpertise`, `hasRole`, and `hasFeature` from `AuthContext` for me
 
 For rich-text message rendering (future), sanitize with DOMPurify before any `dangerouslySetInnerHTML`.
 
+## Typing presence
+
+`IChatTypingTracker` (default: in-process `ChatTypingTracker`) tracks who is typing per SignalR group. State is **in-memory only** and is lost on server restart — acceptable for single-server dev today. Horizontal scaling would require a distributed backing store (e.g. Redis) and a SignalR backplane; the tracker is already behind an interface to allow that swap.
+
 ## Future `ChatChannel` entity
 
-Each channel should store:
+Built-in rooms remain **catalog-driven** today (`ChatRoomCatalog` / `ChatRoomBlueprint`). When admin-configurable or custom rooms are needed, persist them using the same field shape as `ChatRoomDefinition`:
 
 - `ExpertiseCategory` + `ExpertiseBit` **or** `RequiredRoleBit`
-- `OwnerAccountClass` + `TenantDatabaseName` (`IScopedResource`)
 - Sanitized message content via `ISanitizableContent` / `IContentSanitizer`
 
-Do not duplicate visibility logic in controllers — delegate to `IChatRoomAccessService` and `ResourceVisibilityHandler`.
+Channels are shared community spaces like messages, so they would **not** use `IScopedResource` (which enforces per-tenant matching). Merge catalog rooms with any DB-backed channels in `IChatRoomAccessService` rather than duplicating visibility logic in controllers.
+
+## Issue #19 resolution notes
+
+| Item | Status |
+|------|--------|
+| `ChatChannel` DB entity | Deferred — catalog remains source of truth; schema seed documented above |
+| `ChatMessage` scoping | Resolved via `IShareableScopedResource` + EF global query filter (replaces manual filter) |
+| Stale `IScopedResource` docs | Corrected in this file and `tenancy-isolation.md` |
+| Typing persistence | Documented; `IChatTypingTracker` extracted for future distributed implementation |

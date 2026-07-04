@@ -14,8 +14,11 @@ namespace HomeworkCentral.Api.Chat;
 /// tabs, or one tab reconnecting while the old connection hasn't fully closed yet), so presence
 /// is refcounted per connection: a user is only reported as "stopped typing" once none of their
 /// connections in that room are still marked as typing.
+///
+/// State is in-memory only and is lost on server restart. For multi-instance deployments, swap
+/// this implementation for one backed by a shared store and register a SignalR backplane.
 /// </summary>
-public sealed class ChatTypingTracker
+public sealed class ChatTypingTracker : IChatTypingTracker
 {
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, TypingEntry>> _rooms = new();
     private readonly ConcurrentDictionary<string, (string GroupKey, Guid UserId)> _connections = new();

@@ -83,14 +83,11 @@ public sealed class ChatMessageService(
             return [];
 
         int pageSize = limit is > 0 and <= 100 ? limit : DefaultPageSize;
-        bool viewerIsRealAccount = ResolveScope().AccountClass == AccountClass.RealAccount;
 
+        // Real-vs-developer traffic is filtered by the IShareableScopedResource EF global query filter.
         IQueryable<ChatMessage> query = masterDb.ChatMessages
             .AsNoTracking()
-            .Where(message => message.RoomId == roomId)
-            .Where(message => viewerIsRealAccount
-                ? message.OwnerAccountClass == AccountClass.RealAccount
-                : message.OwnerAccountClass != AccountClass.RealAccount);
+            .Where(message => message.RoomId == roomId);
 
         if (beforeUtc is not null)
             query = query.Where(message => message.CreatedAtUtc < beforeUtc.Value);
