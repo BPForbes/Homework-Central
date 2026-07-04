@@ -1006,3 +1006,386 @@ body {
   z-index: 2;
 }
 
+/* Captcha widget (signup + dashboard verify) — label row + content only; no outer box so the
+ * FCaptcha checkbox is not wrapped inside another bordered panel. */
+.captcha {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.captcha-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+.captcha-refresh {
+  background: transparent;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  padding: 0.2rem;
+}
+
+.captcha-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mandatory "I'm not a robot" widget shown above every puzzle */
+.fcaptcha-container {
+  min-height: 2.5rem;
+}
+
+/* The security-relevant part of the challenge (code or expression) — distorted per character and
+ * locked down against selection/copy/drag so it can't be lifted straight into the answer field. */
+.captcha-content {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.65rem 0.5rem;
+  margin-bottom: 0.65rem;
+  background: repeating-linear-gradient(135deg, #eef2ff, #eef2ff 6px, #e0e7ff 6px, #e0e7ff 12px);
+  border: 1.5px dashed #c7d2fe;
+  border-radius: 8px;
+  overflow-x: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* Positioning context for a character's strikethrough overlay — font-family, weight, style,
+ * color, transform, and mask (for the "hole"/tear defect) are all set per character via inline
+ * style (see TextChallenge.tsx). The hole is a real CSS mask on .captcha-char itself rather than
+ * a painted-on copy of the background, so it always lines up pixel-for-pixel with the actual
+ * background behind it instead of showing a differently-phased copy of the stripe pattern.
+ */
+.captcha-char-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.captcha-char {
+  display: inline-block;
+  font-size: 1.4rem;
+  letter-spacing: 0.05em;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  mask-mode: alpha;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.captcha-char-strike {
+  position: absolute;
+  left: -12%;
+  width: 124%;
+  height: 2px;
+  background: rgba(15, 23, 42, 0.6);
+  pointer-events: none;
+}
+
+.captcha-input {
+  width: 100%;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.captcha-input:focus {
+  border-color: #3b82f6;
+}
+
+.captcha-input:disabled {
+  background: #f3f4f6;
+  cursor: not-allowed;
+}
+
+.captcha-puzzle-status {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-top: 0.5rem;
+}
+
+/* Maze puzzle */
+.maze-puzzle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.maze-grid {
+  display: grid;
+  gap: 0;
+  background: #fff;
+  border: 2px solid #1e293b;
+  width: 100%;
+  max-width: 260px;
+  aspect-ratio: 1 / 1;
+}
+
+.maze-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+
+.maze-cell.wall-n { border-top-color: #1e293b; border-top-width: 2px; }
+.maze-cell.wall-e { border-right-color: #1e293b; border-right-width: 2px; }
+.maze-cell.wall-s { border-bottom-color: #1e293b; border-bottom-width: 2px; }
+.maze-cell.wall-w { border-left-color: #1e293b; border-left-width: 2px; }
+
+.maze-cell.visited {
+  background: #eff6ff;
+}
+
+.maze-cell.current {
+  background: #dbeafe;
+}
+
+.maze-marker {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.maze-token {
+  width: 55%;
+  height: 55%;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.maze-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.maze-controls-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.maze-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.maze-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.maze-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.maze-unsolvable-btn {
+  margin-top: 0.65rem;
+  padding: 0.5rem 0.9rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.maze-unsolvable-btn:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.maze-unsolvable-btn.active {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.maze-unsolvable-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Tile-rotate puzzle */
+.tile-rotate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  max-width: 14rem;
+}
+
+.tile-rotate-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 3.5rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: #374151;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.tile-rotate-current {
+  font-size: 1.25rem;
+}
+
+.tile-rotate-button:hover:not(:disabled) {
+  border-color: #93c5fd;
+}
+
+.tile-rotate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tile-rotate-button.aligned {
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #16a34a;
+}
+
+/* Dashboard verify-account card */
+.verify-card-body {
+  width: 100%;
+}
+
+.verify-card-body h3 {
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.verify-card-body p {
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin-bottom: 0.75rem;
+}
+
+.verify-card-body .captcha {
+  margin-bottom: 0.75rem;
+}
+
+.verify-card-body .btn-primary {
+  width: auto;
+  padding: 0.6rem 1.5rem;
+}
+
+/* Persistent back-to-dashboard link on an active chat room */
+.chat-room-header-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  color: #64748b;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chat-room-header-back:hover {
+  background: #f1f5f9;
+  color: #2563eb;
+}
+
+/* Get Roles page */
+.get-roles-page {
+  animation: fade-in 0.25s ease;
+}
+
+.get-roles-header {
+  margin-bottom: 1.5rem;
+}
+
+.get-roles-header h2 {
+  font-size: 1.5rem;
+  margin: 0.75rem 0 0.35rem;
+}
+
+.get-roles-header p {
+  color: #64748b;
+}
+
+.get-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.9rem;
+}
+
+.get-roles-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+
+.get-roles-button:hover:not(:disabled) {
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+}
+
+.get-roles-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.get-roles-button-icon {
+  font-size: 1.5rem;
+  color: #3b82f6;
+}
+
+.get-roles-button.claimed {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #1d4ed8;
+}
+
+.get-roles-claimed-icon {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  color: #16a34a;
+  font-size: 0.85rem;
+}
+

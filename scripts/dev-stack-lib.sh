@@ -7,7 +7,153 @@ DEV_STACK_STATE_FILE="$DEV_STACK_REPO_ROOT/.hc-dev-stack.state"
 DEV_STACK_COMPOSE_FILE="$DEV_STACK_REPO_ROOT/docker-compose.yml"
 DEV_STACK_ENV_FILE="$DEV_STACK_REPO_ROOT/.env"
 DEV_STACK_POSTGRES_PASSWORD="postgres"
+DEV_STACK_POSTGRES_HOST_PORT="5434"
+DEV_STACK_FCAPTCHA_HOST_PORT="3010"
 DEV_STACK_SERVER_REGISTERED=0
+
+trim_dev_env_whitespace() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+generate_dev_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    # URL-safe base64 avoids special characters breaking connection strings and shells.
+    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n'
+  else
+    printf 'error: openssl is required to generate secrets for a new .env file\n' >&2
+    return 1
+  fi
+}
+
+read_dev_env_file() {
+  DEV_ENV_JWT_SECRET=""
+  DEV_ENV_FCAPTCHA_SECRET=""
+  DEV_ENV_POSTGRES_PASSWORD=""
+  DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
+  DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+  DEV_ENV_FCAPTCHA_HOST_PORT_SET=0
+
+  if [[ ! -f "$DEV_STACK_ENV_FILE" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="$(trim_dev_env_whitespace "$key")"
+
+    case "$key" in
+      JWT_SECRET) DEV_ENV_JWT_SECRET="$value" ;;
+      FCAPTCHA_SECRET) DEV_ENV_FCAPTCHA_SECRET="$value" ;;
+      POSTGRES_PASSWORD) DEV_ENV_POSTGRES_PASSWORD="$value" ;;
+      POSTGRES_HOST_PORT) DEV_ENV_POSTGRES_HOST_PORT="$value" ;;
+      FCAPTCHA_HOST_PORT) DEV_ENV_FCAPTCHA_HOST_PORT="$value"; DEV_ENV_FCAPTCHA_HOST_PORT_SET=1 ;;
+    esac
+  done <"$DEV_STACK_ENV_FILE"
+
+  DEV_ENV_POSTGRES_HOST_PORT="$(trim_dev_env_whitespace "$DEV_ENV_POSTGRES_HOST_PORT")"
+  [[ -n "$DEV_ENV_POSTGRES_HOST_PORT" ]] || DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
+  DEV_ENV_FCAPTCHA_HOST_PORT="$(trim_dev_env_whitespace "$DEV_ENV_FCAPTCHA_HOST_PORT")"
+  [[ -n "$DEV_ENV_FCAPTCHA_HOST_PORT" ]] || DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+}
+
+set_dev_env_var() {
+  local key="$1"
+  local value="$2"
+  local tmp replaced=false
+  tmp="$(mktemp)"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${key}="* ]]; then
+      printf '%s=%s\n' "$key" "$value" >>"$tmp"
+      replaced=true
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$DEV_STACK_ENV_FILE"
+
+  if [[ "$replaced" == false ]]; then
+    printf '%s=%s\n' "$key" "$value" >>"$tmp"
+  fi
+
+  mv "$tmp" "$DEV_STACK_ENV_FILE"
+}
+
+ensure_dev_env_file() {
+  local roll_fcaptcha_secret="${1:-0}"
+
+  if [[ ! -f "$DEV_STACK_ENV_FILE" ]]; then
+    printf '==> Creating %s from .env.example\n' "$DEV_STACK_ENV_FILE"
+    cp "$DEV_STACK_REPO_ROOT/.env.example" "$DEV_STACK_ENV_FILE"
+  fi
+
+  read_dev_env_file
+
+  local updated=false
+
+  if [[ "$DEV_ENV_JWT_SECRET" == "replace-with-a-long-random-secret" || -z "$DEV_ENV_JWT_SECRET" ]]; then
+    DEV_ENV_JWT_SECRET="$(generate_dev_secret)" || return 1
+    set_dev_env_var "JWT_SECRET" "$DEV_ENV_JWT_SECRET"
+    updated=true
+  fi
+
+  if [[ "$roll_fcaptcha_secret" == "1" ]]; then
+    DEV_ENV_FCAPTCHA_SECRET="$(generate_dev_secret)" || return 1
+    set_dev_env_var "FCAPTCHA_SECRET" "$DEV_ENV_FCAPTCHA_SECRET"
+    updated=true
+  elif [[ "$DEV_ENV_FCAPTCHA_SECRET" == "replace-with-a-long-random-secret" || -z "$DEV_ENV_FCAPTCHA_SECRET" ]]; then
+    DEV_ENV_FCAPTCHA_SECRET="$(generate_dev_secret)" || return 1
+    set_dev_env_var "FCAPTCHA_SECRET" "$DEV_ENV_FCAPTCHA_SECRET"
+    updated=true
+  fi
+
+  if [[ "$DEV_ENV_FCAPTCHA_HOST_PORT_SET" != "1" ]]; then
+    DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+    set_dev_env_var "FCAPTCHA_HOST_PORT" "$DEV_ENV_FCAPTCHA_HOST_PORT"
+    updated=true
+  fi
+
+  if [[ "$DEV_ENV_POSTGRES_PASSWORD" != "$DEV_STACK_POSTGRES_PASSWORD" ]]; then
+    DEV_ENV_POSTGRES_PASSWORD="$DEV_STACK_POSTGRES_PASSWORD"
+    set_dev_env_var "POSTGRES_PASSWORD" "$DEV_ENV_POSTGRES_PASSWORD"
+    updated=true
+  fi
+
+  if [[ "$DEV_ENV_POSTGRES_HOST_PORT" == "5432" || "$DEV_ENV_POSTGRES_HOST_PORT" == "5433" ]]; then
+    printf '==> Using POSTGRES_HOST_PORT=%s (avoids local PostgreSQL on 5432/5433)\n' "$DEV_STACK_POSTGRES_HOST_PORT"
+    DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
+    set_dev_env_var "POSTGRES_HOST_PORT" "$DEV_ENV_POSTGRES_HOST_PORT"
+    updated=true
+  fi
+
+  if [[ "$updated" == true ]]; then
+    read_dev_env_file
+    if [[ "$roll_fcaptcha_secret" == "1" ]]; then
+      printf '==> Rolled FCAPTCHA_SECRET in .env (local only, not committed)\n'
+    else
+      printf '==> Generated secrets in .env (local only, not committed)\n'
+    fi
+  fi
+
+  [[ -n "$DEV_ENV_JWT_SECRET" ]] || { printf 'error: JWT_SECRET is not set in .env\n' >&2; return 1; }
+  [[ ${#DEV_ENV_JWT_SECRET} -ge 32 ]] || { printf 'error: JWT_SECRET must be at least 32 characters\n' >&2; return 1; }
+  [[ -n "$DEV_ENV_FCAPTCHA_SECRET" ]] || { printf 'error: FCAPTCHA_SECRET is not set in .env\n' >&2; return 1; }
+  [[ ${#DEV_ENV_FCAPTCHA_SECRET} -ge 32 ]] || { printf 'error: FCAPTCHA_SECRET must be at least 32 characters\n' >&2; return 1; }
+  [[ -n "$DEV_ENV_POSTGRES_PASSWORD" ]] || { printf 'error: POSTGRES_PASSWORD is not set in .env\n' >&2; return 1; }
+
+  export JWT_SECRET="$DEV_ENV_JWT_SECRET"
+  export FCAPTCHA_SECRET="$DEV_ENV_FCAPTCHA_SECRET"
+  export POSTGRES_PASSWORD="$DEV_ENV_POSTGRES_PASSWORD"
+  export POSTGRES_HOST_PORT="$DEV_ENV_POSTGRES_HOST_PORT"
+  export FCAPTCHA_HOST_PORT="$DEV_ENV_FCAPTCHA_HOST_PORT"
+}
 
 read_dev_stack_state() {
   local key value
@@ -116,6 +262,98 @@ wait_dev_postgres_ready() {
   return 1
 }
 
+# FCaptcha (see docker-compose.yml's `fcaptcha` service) is stateless — no volume, no credentials
+# to reset — so unlike Postgres above it doesn't need refcounted start/stop bookkeeping in
+# .hc-dev-stack.state; it's simply started alongside Postgres and stopped whenever Postgres is.
+start_dev_stack_fcaptcha_container() {
+  local port="$1"
+  local force_recreate="${2:-0}"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 || return 1
+
+  export FCAPTCHA_HOST_PORT="$port"
+  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d --build)
+  if [[ "$force_recreate" == "1" ]]; then
+    compose_args+=(--force-recreate)
+  fi
+  compose_args+=(fcaptcha)
+  if ! docker compose "${compose_args[@]}"; then
+    printf 'error: docker compose up fcaptcha failed (first run builds from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)\n' >&2
+    return 1
+  fi
+}
+
+get_dev_fcaptcha_container_secret() {
+  local container_id line
+  container_id="$(docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" ps -q fcaptcha 2>/dev/null || true)"
+  [[ -n "$container_id" ]] || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      FCAPTCHA_SECRET=*) printf '%s' "${line#FCAPTCHA_SECRET=}"; return 0 ;;
+    esac
+  done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id" 2>/dev/null)
+  return 1
+}
+
+test_dev_fcaptcha_secret_aligned() {
+  local expected="${DEV_ENV_FCAPTCHA_SECRET:-}"
+  [[ -n "$expected" ]] || return 1
+
+  local actual
+  actual="$(get_dev_fcaptcha_container_secret || true)"
+  [[ -n "$actual" && "$actual" == "$expected" ]]
+}
+
+test_dev_fcaptcha_connection() {
+  local port="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sf --max-time 2 "http://127.0.0.1:${port}/fcaptcha.js" >/dev/null 2>&1
+    return $?
+  fi
+
+  (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+}
+
+wait_dev_fcaptcha_ready() {
+  local port="$1"
+  local attempt
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    if test_dev_fcaptcha_connection "$port"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+ensure_dev_fcaptcha_running() {
+  local port="$1"
+  local needs_start=1
+  local needs_recreate=0
+
+  if test_dev_fcaptcha_connection "$port"; then
+    needs_start=0
+    if ! test_dev_fcaptcha_secret_aligned; then
+      needs_recreate=1
+      printf '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)\n'
+    fi
+  fi
+
+  if [[ "$needs_start" -eq 1 || "$needs_recreate" -eq 1 ]]; then
+    if [[ "$needs_start" -eq 1 ]]; then
+      printf '==> Starting Docker FCaptcha on localhost:%s\n' "$port"
+    fi
+    start_dev_stack_fcaptcha_container "$port" "$needs_recreate" || return 1
+    wait_dev_fcaptcha_ready "$port" || return 1
+  fi
+}
+
+stop_dev_stack_fcaptcha() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" stop fcaptcha >/dev/null 2>&1 || true
+}
+
 _join_dev_stack_if_managed() {
   local port="$1"
   if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
@@ -176,6 +414,7 @@ _init_dev_stack_state_impl() {
     if [[ -n "$state_port" ]]; then
       printf '==> Stopping previous dev stack Postgres session\n'
       stop_dev_stack_postgres "$state_port"
+      stop_dev_stack_fcaptcha
     fi
   fi
 
@@ -191,6 +430,7 @@ _stop_dev_stack_impl() {
     local state_port="${DEV_STACK_STATE_postgres_port:-}"
     if [[ -n "$state_port" ]]; then
       stop_dev_stack_postgres "$state_port"
+      stop_dev_stack_fcaptcha
     fi
   fi
 
@@ -228,6 +468,7 @@ _unregister_dev_stack_server_impl() {
 
   rm -f "$DEV_STACK_STATE_FILE"
   stop_dev_stack_postgres "$state_port"
+  stop_dev_stack_fcaptcha
   DEV_STACK_SERVER_REGISTERED=0
   printf '==> Stopped Docker Postgres and freed localhost port\n'
 }

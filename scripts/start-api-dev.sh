@@ -16,51 +16,25 @@ ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
 DEV_POSTGRES_PASSWORD="postgres"
 JWT_SECRET=""
+FCAPTCHA_SECRET=""
 POSTGRES_HOST_PORT="5434"
+FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
 }
 
-trim_whitespace() {
-  local value="$1"
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  printf '%s' "$value"
-}
-
-read_jwt_secret() {
-  [[ -f "$ENV_FILE" ]] || fail ".env not found at $ENV_FILE. Run scripts/run-dev.sh first."
-
-  JWT_SECRET=""
-  POSTGRES_HOST_PORT="5434"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|\#*) continue ;;
-    esac
-
-    local key="${line%%=*}"
-    local value="${line#*=}"
-    key="$(trim_whitespace "$key")"
-
-    case "$key" in
-      JWT_SECRET) JWT_SECRET="$value" ;;
-      POSTGRES_HOST_PORT) POSTGRES_HOST_PORT="$value" ;;
-    esac
-  done <"$ENV_FILE"
-
-  POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
-  [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
-}
-
-read_jwt_secret
+ensure_dev_env_file 0 || fail "Failed to prepare .env"
+POSTGRES_HOST_PORT="$DEV_ENV_POSTGRES_HOST_PORT"
+FCAPTCHA_HOST_PORT="$DEV_ENV_FCAPTCHA_HOST_PORT"
 
 export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5000
-export Jwt__Secret="$JWT_SECRET"
+export Jwt__Secret="$DEV_ENV_JWT_SECRET"
+export FCaptcha__Secret="$DEV_ENV_FCAPTCHA_SECRET"
+export FCaptcha__ServerUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
+export FCaptcha__PublicUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 export HC_DEV_BYPASS=1
 export ConnectionStrings__MasterConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
@@ -81,6 +55,7 @@ trap cleanup_api EXIT
 
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" || fail "Could not start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
 if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then
@@ -96,6 +71,11 @@ cleanup_on_exit() {
   cleanup_api
 }
 trap cleanup_on_exit EXIT
+
+if [[ "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
+  printf '==> Building API\n'
+  dotnet build "$API_PROJECT" -c Debug -v q
+fi
 
 set +e
 dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)

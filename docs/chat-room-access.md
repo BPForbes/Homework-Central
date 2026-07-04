@@ -7,7 +7,8 @@ Chat navigation uses **categories** (dropdown headers) and **rooms** (joinable c
 ```
 Chat
 ├── General ▾
-│   └── General (public)
+│   ├── General (public)
+│   └── Get Roles (public — not a chat room, buttons to self-claim general subjects)
 ├── Mathematics ▾
 │   ├── Calculus
 │   ├── Algebra
@@ -30,13 +31,14 @@ Chat
 | Rule | Implementation |
 |------|----------------|
 | **General (public)** | `general:lobby` — any authenticated user; `IsPrivate = false`, no key icon. |
-| Subject room | User has matching **expertise bit**; `IsPrivate = true`, key overlay on icon. |
+| **Get Roles (public)** | `general:get-roles` — any authenticated user; frontend routes it to `/get-roles` (a button grid, not chat) instead of the messaging UI. Backed by `GET/POST /api/subjects/*`, not `/api/chat/*`. |
+| General subject claim | Claiming a top-level subject on Get Roles sets the `generalSubjectMask` bit and opens that subject category plus every private room under it. |
+| Expertise room | User has matching **expertise bit** **or** claimed the parent general subject; `IsPrivate = true`, key overlay on icon. |
 | Staff room | User has matching **role bit** (e.g. Moderators needs `PlatformRoles.Moderator`); private with key + role icon (shield for mods). |
 | Super viewers | `Owner` or `Administrator` → all subject and staff rooms. |
 | Category visibility | Dropdown shown only when ≥1 child room is accessible. |
 | Category kind | `General`, `Subject`, or `Staff` — drives nav grouping and `IsPrivateCategory`. |
-| General subject only | `generalSubjectMask` bit **alone** does not open a subject category or room. |
-| Feature gate | User must have `PlatformFeatures.GroupMessages` to send messages. |
+| Feature gate | `PlatformFeatures.GroupMessages` is required for **staff** rooms; subject-expertise rooms only require the room-access rule above. General is always open. |
 | Tenant isolation | Messages implement `IScopedResource`; `"ResourceVisibility"` policy applies after room access. |
 
 ## Room blueprint
@@ -52,6 +54,7 @@ Chat
 ## Examples
 
 - Science + Biology bits → **Science** dropdown with **Biology** room only.
+- Science claimed on Get Roles → **Science** dropdown with **all** private Science rooms.
 - Calculus bit only → **Mathematics** → **Calculus**.
 - Tutor role → **Staff** → **Tutors**.
 - Owner → all categories and rooms from `ChatRoomCatalog`.

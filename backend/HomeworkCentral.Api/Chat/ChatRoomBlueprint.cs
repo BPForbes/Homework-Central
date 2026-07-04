@@ -12,6 +12,7 @@ public static class ChatRoomBlueprint
     public const string GeneralCategoryKey = "General";
     public const string GeneralCategoryDisplayName = "General";
     public const string GeneralRoomId = "general:lobby";
+    public const string GetRolesRoomId = "general:get-roles";
 
     public static ChatRoomDefinition GeneralLobby() =>
         Public(
@@ -21,6 +22,21 @@ public static class ChatRoomBlueprint
             categoryDisplayName: GeneralCategoryDisplayName,
             categoryKind: ChatCategoryKind.General,
             roomDisplayName: "General");
+
+    /// <summary>
+    /// Not a chat room — a button-based page under the General category where any authenticated
+    /// user can self-claim general subject "roles" (Math, Science, Computer Science, ...). Reuses
+    /// ChatRoomKind.General because access is identical (always public, no expertise/role gate);
+    /// the frontend routes this room id to a dedicated page instead of the chat UI.
+    /// </summary>
+    public static ChatRoomDefinition GetRolesLobby() =>
+        Public(
+            id: GetRolesRoomId,
+            kind: ChatRoomKind.General,
+            categoryKey: GeneralCategoryKey,
+            categoryDisplayName: GeneralCategoryDisplayName,
+            categoryKind: ChatCategoryKind.General,
+            roomDisplayName: "Get Roles");
 
     public static ChatRoomDefinition SubjectExpertise(
         string categoryKey,

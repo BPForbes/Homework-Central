@@ -8,9 +8,15 @@ public partial class AppDbContext
 {
     public async Task AssignDefaultRolesAsync(
         User user,
-        IEffectiveMaskService effectiveMaskService,
+        bool captchaVerified = false,
         CancellationToken ct = default)
     {
+        if (captchaVerified)
+        {
+            await PromoteToVerifiedUserAsync(user, assignedBy: null, ct);
+            return;
+        }
+
         Role guestRole = await Roles.FirstOrDefaultAsync(r => r.Name == "Guest", ct)
             ?? throw new InvalidOperationException("Guest role is not configured.");
 
@@ -28,13 +34,12 @@ public partial class AppDbContext
         }
 
         await SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId, ct);
+        await EffectiveMaskService.RebuildOnContextAsync(this, user.UserId, ct);
     }
 
     public async Task PromoteToVerifiedUserAsync(
         User user,
         Guid? assignedBy,
-        IEffectiveMaskService effectiveMaskService,
         CancellationToken ct = default)
     {
         Role? guestRole = await Roles.FirstOrDefaultAsync(r => r.Name == "Guest", ct);
@@ -64,6 +69,6 @@ public partial class AppDbContext
         }
 
         await SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(user.UserId, ct);
+        await EffectiveMaskService.RebuildOnContextAsync(this, user.UserId, ct);
     }
 }

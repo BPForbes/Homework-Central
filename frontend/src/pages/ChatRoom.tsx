@@ -104,6 +104,9 @@ export function ChatRoom() {
   return (
     <div className="chat-room-page chat-room-page--active">
       <header className="chat-room-header">
+        <Link to="/dashboard" className="chat-room-header-back" aria-label="Back to dashboard" title="Back to dashboard">
+          <FontAwesomeIcon icon={faArrowLeft} />
+        </Link>
         <div className="chat-room-hero-icon chat-room-hero-icon--compact">
           <ChatRoomIcon icon={icon} isPrivate={room.isPrivate} layeredClassName="chat-room-hero-layered" />
         </div>
