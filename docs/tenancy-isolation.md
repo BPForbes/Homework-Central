@@ -32,10 +32,10 @@ await authorizationService.AuthorizeAsync(User, resource, AuthorizationPolicyNam
 
 1. **Feature gate** — `PlatformFeatures.GroupMessages` (and related bits) via bitmask.
 2. **Room access** — subject expertise bits and staff role bits ([chat-room-access.md](chat-room-access.md)).
-3. **Resource visibility** — `IScopedResource` + `"ResourceVisibility"` policy.
+3. **Traffic isolation** — `IShareableScopedResource` EF global query filter on `ChatMessage` (real vs. developer/test traffic by `OwnerAccountClass` only; not per-tenant).
 4. **Content safety** — `IContentSanitizer` before persisting free text; React escapes JSX by default.
 
-Future chat/channel code **must** reuse these primitives rather than re-implementing scoping or sanitization.
+Future tenant-private resources **must** use `IScopedResource` + the `"ResourceVisibility"` policy. Shared community resources (chat messages, future channels) use `IShareableScopedResource` instead.
 
 ## XSS baseline
 

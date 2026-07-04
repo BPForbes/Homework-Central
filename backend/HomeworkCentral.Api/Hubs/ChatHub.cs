@@ -25,7 +25,7 @@ namespace HomeworkCentral.Api.Hubs;
 [Authorize]
 public sealed class ChatHub(
     IChatMessageService chatMessageService,
-    ChatTypingTracker typingTracker,
+    IChatTypingTracker typingTracker,
     IHttpContextAccessor httpContextAccessor) : Hub
 {
     public async Task JoinRoom(string roomId)

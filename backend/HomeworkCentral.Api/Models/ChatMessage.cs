@@ -9,9 +9,11 @@ namespace HomeworkCentral.Api.Models;
 /// Unlike homework/grades, a chat message is intentionally NOT an <c>IScopedResource</c>:
 /// each dev persona provisions its own isolated tenant database, so tenant-scoping messages
 /// would make it impossible for two different personas to ever see each other's chat messages.
-/// <see cref="OwnerAccountClass"/> and <see cref="TenantDatabaseName"/> are retained only as
-/// metadata (which persona/session sent the message) and to separate real production chat
-/// traffic from developer/test traffic.
+/// Instead, messages implement <see cref="IShareableScopedResource"/>, which applies the same
+/// real-vs-developer traffic split previously hand-maintained in
+/// <see cref="HomeworkCentral.Api.Chat.ChatMessageService.GetMessagesAsync"/>.
+/// <see cref="OwnerAccountClass"/> and <see cref="TenantDatabaseName"/> are retained as
+/// metadata (which persona/session sent the message).
 ///
 /// <see cref="SenderId"/> intentionally has NO foreign key to <c>Users</c>: chat is always
 /// persisted in the master database, but a sender's User row often lives only in their own
@@ -20,7 +22,7 @@ namespace HomeworkCentral.Api.Models;
 /// is stored denormalized precisely so no cross-database join is ever needed to render a
 /// message.
 /// </summary>
-public class ChatMessage : ISanitizableContent
+public class ChatMessage : ISanitizableContent, IShareableScopedResource
 {
     public Guid MessageId { get; set; }
     public string RoomId { get; set; } = null!;

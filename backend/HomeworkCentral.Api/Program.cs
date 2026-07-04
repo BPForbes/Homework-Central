@@ -81,7 +81,7 @@ builder.Services.AddSingleton<IRiskEngine, RiskEngine>();
 builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
-builder.Services.AddSingleton<ChatTypingTracker>();
+builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 // HtmlContentSanitizer wraps a single immutable HtmlSanitizer whose Sanitize method is safe to
 // call concurrently (its allow-lists are configured once at construction and never mutated), so
 // one shared instance is sufficient — no need to allocate a new HtmlSanitizer per request.
