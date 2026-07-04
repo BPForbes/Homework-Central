@@ -26,10 +26,14 @@ DEV_POSTGRES_PASSWORD="postgres"
 DEV_POSTGRES_HOST_PORT="5434"
 DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
+# Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
+# FCaptcha:ServerUrl override.
+FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 BUILD_ONLY=false
 SKIP_DOCKER=false
 HC_API_BUILD_FAILED=0
 JWT_SECRET=""
+FCAPTCHA_SECRET=""
 POSTGRES_PASSWORD=""
 POSTGRES_HOST_PORT="5434"
 
@@ -98,12 +102,32 @@ parse_args() {
 }
 
 generate_secret() {
-  if command -v openssl >/dev/null 2>&1; then
-    # URL-safe base64 avoids special characters breaking connection strings and shells.
-    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n'
-  else
-    fail "openssl is required to generate secrets for a new .env file"
-  fi
+  generate_dev_secret
+}
+
+trim_whitespace() {
+  trim_dev_env_whitespace "$1"
+}
+
+read_env_file() {
+  read_dev_env_file
+  JWT_SECRET="$DEV_ENV_JWT_SECRET"
+  FCAPTCHA_SECRET="$DEV_ENV_FCAPTCHA_SECRET"
+  POSTGRES_PASSWORD="$DEV_ENV_POSTGRES_PASSWORD"
+  POSTGRES_HOST_PORT="$DEV_ENV_POSTGRES_HOST_PORT"
+  FCAPTCHA_HOST_PORT="$DEV_ENV_FCAPTCHA_HOST_PORT"
+}
+
+set_env_var() {
+  set_dev_env_var "$1" "$2"
+}
+
+ensure_env_file() {
+  ensure_dev_env_file 0 || exit 1
+  POSTGRES_PASSWORD="$DEV_ENV_POSTGRES_PASSWORD"
+  POSTGRES_HOST_PORT="$DEV_ENV_POSTGRES_HOST_PORT"
+  FCAPTCHA_HOST_PORT="$DEV_ENV_FCAPTCHA_HOST_PORT"
+  resolve_postgres_host_port
 }
 
 loopback_port_in_use() {
@@ -306,101 +330,6 @@ ensure_postgres_ready() {
   fi
 }
 
-trim_whitespace() {
-  local value="$1"
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  printf '%s' "$value"
-}
-
-read_env_file() {
-  JWT_SECRET=""
-  POSTGRES_PASSWORD=""
-  POSTGRES_HOST_PORT="5434"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|\#*) continue ;;
-    esac
-
-    local key="${line%%=*}"
-    local value="${line#*=}"
-    key="$(trim_whitespace "$key")"
-
-    case "$key" in
-      JWT_SECRET) JWT_SECRET="$value" ;;
-      POSTGRES_PASSWORD) POSTGRES_PASSWORD="$value" ;;
-      POSTGRES_HOST_PORT) POSTGRES_HOST_PORT="$value" ;;
-    esac
-  done <"$ENV_FILE"
-
-  POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
-}
-
-set_env_var() {
-  local key="$1"
-  local value="$2"
-  local tmp replaced=false
-  tmp="$(mktemp)"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == "${key}="* ]]; then
-      printf '%s=%s\n' "$key" "$value" >>"$tmp"
-      replaced=true
-    else
-      printf '%s\n' "$line" >>"$tmp"
-    fi
-  done <"$ENV_FILE"
-
-  if [[ "$replaced" == false ]]; then
-    printf '%s=%s\n' "$key" "$value" >>"$tmp"
-  fi
-
-  mv "$tmp" "$ENV_FILE"
-}
-
-ensure_env_file() {
-  if [[ ! -f "$ENV_FILE" ]]; then
-    log "Creating $ENV_FILE from .env.example"
-    cp "$REPO_ROOT/.env.example" "$ENV_FILE"
-  fi
-
-  read_env_file
-
-  local updated=false
-
-  if [[ "$JWT_SECRET" == "replace-with-a-long-random-secret" || -z "$JWT_SECRET" ]]; then
-    JWT_SECRET="$(generate_secret)"
-    set_env_var "JWT_SECRET" "$JWT_SECRET"
-    updated=true
-  fi
-
-  if [[ "$POSTGRES_PASSWORD" != "$DEV_POSTGRES_PASSWORD" ]]; then
-    POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
-    set_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-    updated=true
-  fi
-
-  if [[ "$POSTGRES_HOST_PORT" == "5432" || "$POSTGRES_HOST_PORT" == "5433" ]]; then
-    log "Using POSTGRES_HOST_PORT=${DEV_POSTGRES_HOST_PORT} (avoids local PostgreSQL on 5432/5433)"
-    POSTGRES_HOST_PORT="$DEV_POSTGRES_HOST_PORT"
-    set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
-    updated=true
-  fi
-
-  if [[ "$updated" == true ]]; then
-    read_env_file
-    log "Generated secrets in .env (local only, not committed)"
-  fi
-
-  resolve_postgres_host_port
-
-  [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
-  [[ ${#JWT_SECRET} -ge 32 ]] || fail "JWT_SECRET must be at least 32 characters"
-  [[ -n "$POSTGRES_PASSWORD" ]] || fail "POSTGRES_PASSWORD is not set in .env"
-}
-
 wait_for_postgres() {
   local attempts=30
   local i
@@ -422,6 +351,17 @@ start_postgres() {
 
   log "Starting Postgres (Docker) on localhost:${POSTGRES_HOST_PORT}"
   ensure_postgres_ready
+}
+
+start_fcaptcha() {
+  require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
+  fi
+
+  log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
+  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" \
+    || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
 }
 
 build_postgres_host_check() {
@@ -620,6 +560,7 @@ run_stack() {
   fi
   if [[ "$SKIP_DOCKER" == false ]]; then
     log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
+    log "  FCaptcha: localhost:${FCAPTCHA_HOST_PORT} (Docker; stops on exit)"
   fi
   log "Press Ctrl+C to stop servers and free the Postgres port"
   log "Or run: scripts/stop-dev.sh"
@@ -652,8 +593,9 @@ main() {
 
   if [[ "$SKIP_DOCKER" == false ]]; then
     start_postgres
+    start_fcaptcha
   else
-    log "Skipping Docker Postgres (HC_SKIP_DOCKER / --skip-docker)"
+    log "Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / --skip-docker)"
   fi
 
   run_stack

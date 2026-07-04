@@ -20,10 +20,12 @@ public class ChatRoomAccessServiceTests
         ChatNavCategoryDto general = Assert.Single(nav.Categories);
         Assert.Equal(ChatRoomBlueprint.GeneralCategoryKey, general.Key);
         Assert.False(general.IsPrivateCategory);
-        Assert.Single(general.Rooms);
+        Assert.Equal(2, general.Rooms.Count);
         Assert.Equal("General", general.Rooms[0].Name);
         Assert.False(general.Rooms[0].IsPrivate);
+        Assert.Contains(general.Rooms, room => room.Name == "Get Roles" && !room.IsPrivate);
         Assert.True(_service.CanAccessRoom(masks, ChatRoomCatalog.GeneralRoom.Id));
+        Assert.True(_service.CanAccessRoom(masks, ChatRoomCatalog.GetRolesRoom.Id));
     }
 
     [Fact]
@@ -127,13 +129,17 @@ public class ChatRoomAccessServiceTests
     }
 
     [Fact]
-    public void General_subject_bit_without_expertise_does_not_open_category()
+    public void General_subject_claim_opens_that_category_with_all_private_rooms()
     {
         EffectiveMaskDto masks = CreateMasks(generalSubjects: [GeneralSubjects.Science]);
 
         ChatNavDto nav = _service.GetAccessibleNav(masks);
 
-        Assert.DoesNotContain(nav.Categories, c => c.Key == SubjectMaskNames.Science);
+        ChatNavCategoryDto science = nav.Categories.Single(c => c.Key == SubjectMaskNames.Science);
+        Assert.Equal("Science", science.Name);
+        Assert.True(science.IsPrivateCategory);
+        Assert.True(science.Rooms.Count > 1);
+        Assert.All(science.Rooms, room => Assert.True(room.IsPrivate));
         Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
     }
 
@@ -186,6 +192,17 @@ public class ChatRoomBlueprintTests
         Assert.Equal(ChatRoomKind.General, room.Kind);
         Assert.Equal(ChatCategoryKind.General, room.CategoryKind);
         Assert.Equal(ChatRoomBlueprint.GeneralRoomId, room.Id);
+    }
+
+    [Fact]
+    public void GetRolesLobby_is_public_general_category()
+    {
+        ChatRoomDefinition room = ChatRoomBlueprint.GetRolesLobby();
+
+        Assert.False(room.IsPrivate);
+        Assert.Equal(ChatRoomKind.General, room.Kind);
+        Assert.Equal(ChatCategoryKind.General, room.CategoryKind);
+        Assert.Equal(ChatRoomBlueprint.GetRolesRoomId, room.Id);
     }
 
     [Fact]

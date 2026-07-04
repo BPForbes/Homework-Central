@@ -26,43 +26,16 @@ $DevPostgresPassword = 'postgres'
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
-function Read-JwtSecret {
-    if (-not (Test-Path $EnvFile)) {
-        throw ".env not found at $EnvFile. Run scripts/run-dev.ps1 first."
-    }
-
-    $jwtSecret = ''
-    $pgPort = '5434'
-
-    foreach ($line in Get-Content $EnvFile) {
-        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
-        $name, $value = $line -split '=', 2
-        $name = $name.Trim()
-        if ($name -eq 'JWT_SECRET') {
-            $jwtSecret = $value.Trim()
-        }
-        if ($name -eq 'POSTGRES_HOST_PORT' -and -not [string]::IsNullOrWhiteSpace($value)) {
-            $pgPort = $value.Trim()
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($jwtSecret)) {
-        throw 'JWT_SECRET is not set in .env'
-    }
-
-    return @{
-        JWT_SECRET = $jwtSecret
-        POSTGRES_HOST_PORT = $pgPort
-    }
-}
-
-$envValues = Read-JwtSecret
+$envValues = Ensure-DevEnvFile
 $connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 $adminConnectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
 $env:Jwt__Secret = $envValues['JWT_SECRET']
+$env:FCaptcha__Secret = $envValues['FCAPTCHA_SECRET']
+$env:FCaptcha__ServerUrl = "http://localhost:$($envValues['FCAPTCHA_HOST_PORT'])"
+$env:FCaptcha__PublicUrl = "http://localhost:$($envValues['FCAPTCHA_HOST_PORT'])"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 $env:HC_DEV_BYPASS = '1'
 $env:ConnectionStrings__MasterConnection = $connectionString
@@ -84,6 +57,7 @@ $browserProcess = $null
 try {
     if (-not $skipDocker) {
         Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+        Ensure-DevFCaptchaRunning -Port $envValues['FCAPTCHA_HOST_PORT']
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
@@ -97,6 +71,14 @@ try {
 
     $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
     if (Test-Path $errorLog) { Remove-Item $errorLog -Force }
+
+    if ($env:HC_SKIP_DOTNET_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        Write-Host '==> Building API' -ForegroundColor DarkGray
+        dotnet build $ApiProject -c Debug -v q
+        if ($LASTEXITCODE -ne 0) {
+            throw 'API build failed'
+        }
+    }
 
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
         Tee-Object -FilePath $errorLog

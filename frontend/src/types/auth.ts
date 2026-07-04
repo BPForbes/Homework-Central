@@ -1,3 +1,5 @@
+import type { CaptchaSubmission } from './captcha'
+
 export interface LoginRequest {
   email: string
   password: string
@@ -7,6 +9,7 @@ export interface RegisterRequest {
   email: string
   username: string
   password: string
+  captcha?: CaptchaSubmission
 }
 
 export interface AuthResponse {

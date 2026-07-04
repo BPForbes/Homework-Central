@@ -37,9 +37,13 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
     {
         List<ChatNavCategoryDto> categories = new();
 
-        if (CanAccessRoom(masks, ChatRoomCatalog.GeneralRoom))
+        List<ChatRoomDefinition> accessibleGeneralRooms = ChatRoomCatalog.GeneralRooms
+            .Where(room => CanAccessRoom(masks, room))
+            .ToList();
+
+        if (accessibleGeneralRooms.Count > 0)
         {
-            categories.Add(BuildCategoryDto(ChatRoomCatalog.GeneralRoom, [ChatRoomCatalog.GeneralRoom]));
+            categories.Add(BuildCategoryDto(accessibleGeneralRooms[0], accessibleGeneralRooms));
         }
 
         foreach (IGrouping<string, ChatRoomDefinition> subjectGroup in ChatRoomCatalog.SubjectRooms
@@ -108,9 +112,17 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
 
     private static bool HasSubjectExpertise(EffectiveMaskDto masks, string category, short bit)
     {
-        if (!masks.SubjectExpertiseMasks.TryGetValue(category, out string? maskBase64))
-            return false;
+        if (masks.SubjectExpertiseMasks.TryGetValue(category, out string? maskBase64)
+            && BitMask.HasBit(BitMask.FromBase64(maskBase64, 128), bit))
+        {
+            return true;
+        }
 
-        return BitMask.HasBit(BitMask.FromBase64(maskBase64, 128), bit);
+        // Claiming a general subject on Get Roles grants every private room in that category.
+        return SubjectExpertiseCatalog.TryGetGeneralSubjectBit(category, out short generalSubjectBit)
+            && HasGeneralSubject(masks, generalSubjectBit);
     }
+
+    private static bool HasGeneralSubject(EffectiveMaskDto masks, short bit) =>
+        BitMask.HasBit(BitMask.FromBase64(masks.GeneralSubjectMask, 128), bit);
 }

@@ -56,6 +56,7 @@ public static class RoleMaskBuilder
                 SetFeatures(mask,
                     PlatformFeatures.PublicMessages,
                     PlatformFeatures.PrivateMessages,
+                    PlatformFeatures.GroupMessages,
                     PlatformFeatures.PublicProfile,
                     PlatformFeatures.FileUploads,
                     PlatformFeatures.ImageUploads);

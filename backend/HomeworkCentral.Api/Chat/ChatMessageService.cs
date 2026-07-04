@@ -58,15 +58,15 @@ public sealed class ChatMessageService(
         if (!chatRoomAccess.CanAccessRoom(masks, roomId))
             return false;
 
-        // The public General room is intentionally open to any authenticated user (see
-        // ChatRoomAccessService.CanAccessRoom's ChatRoomKind.General case, and
-        // GetAccessibleNav, which lists it for everyone with no feature check). The
-        // GroupMessages feature bit is meant to additionally gate the role/expertise-scoped
-        // "group" rooms (subject-expertise and staff rooms) on top of their role/expertise
-        // requirement — it must not also block General, or a role that lacks GroupMessages
-        // (e.g. Guest, VerifiedUser) would see General in their sidebar but get a 403 the
-        // moment they tried to actually read or send a message there.
+        // GroupMessages feature bit additionally gates staff rooms. Subject-expertise rooms are
+        // already scoped by role/expertise/general-subject claims in ChatRoomAccessService, so
+        // a VerifiedUser who claimed Computer Science can read and send in C# without needing a
+        // separate GroupMessages grant beyond room access.
         if (string.Equals(roomId, ChatRoomCatalog.GeneralRoom.Id, StringComparison.Ordinal))
+            return true;
+
+        ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
+        if (room?.Kind == ChatRoomKind.SubjectExpertise)
             return true;
 
         return HasGroupMessagesFeature(masks);

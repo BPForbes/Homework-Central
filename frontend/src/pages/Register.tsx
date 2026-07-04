@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useCaptcha } from '../hooks/useCaptcha'
+import { Captcha } from '../components/Captcha'
 
 export function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const captcha = useCaptcha()
   const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -46,11 +49,25 @@ export function Register() {
       return
     }
 
+    const captchaStarted =
+      captcha.assessing ||
+      captcha.phase === 'fcaptcha-only-ready' ||
+      captcha.phase === 'puzzle' ||
+      Boolean(captcha.fCaptchaToken)
+
+    if (captchaStarted && !captcha.canSubmit) {
+      setError('Complete the verification check before creating your account.')
+      return
+    }
+
+    const submission = captcha.buildSubmission()
+
     setIsSubmitting(true)
     try {
-      await register(email.trim().toLowerCase(), username.trim(), password)
+      await register(email.trim().toLowerCase(), username.trim(), password, submission ?? undefined)
       navigate('/dashboard')
     } catch (err: unknown) {
+      void captcha.refresh()
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
         'Registration failed. Please try again.'
@@ -118,8 +135,12 @@ export function Register() {
               disabled={isSubmitting}
             />
           </div>
+          <div className="field">
+            <label htmlFor="captcha-answer">Verify you're human (optional — get Verified status immediately)</label>
+            <Captcha captcha={captcha} inputId="captcha-answer" disabled={isSubmitting} />
+          </div>
           {error && <p className="error">{error}</p>}
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
+          <button type="submit" className="btn-primary" disabled={isSubmitting || captcha.assessing}>
             {isSubmitting ? 'Creating account…' : 'Create account'}
           </button>
         </form>

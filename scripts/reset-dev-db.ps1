@@ -12,8 +12,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
+
+. (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
 if (-not $Yes) {
     Write-Host 'This removes the pgdata Docker volume and all local account data.'
@@ -21,21 +22,15 @@ if (-not $Yes) {
     exit 1
 }
 
-if (Test-Path $EnvFile) {
-    Get-Content $EnvFile | ForEach-Object {
-        if ($_ -match '^\s*#' -or $_ -notmatch '=') { return }
-        $name, $value = $_ -split '=', 2
-        Set-Item -Path "Env:$($name.Trim())" -Value $value.Trim()
-    }
-}
+$envValues = Ensure-DevEnvFile -RollFCaptchaSecret
 
-if (-not $env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD = 'postgres' }
-if (-not $env:POSTGRES_HOST_PORT) { $env:POSTGRES_HOST_PORT = '5434' }
+$env:POSTGRES_PASSWORD = $envValues['POSTGRES_PASSWORD']
+$env:POSTGRES_HOST_PORT = $envValues['POSTGRES_HOST_PORT']
+$env:FCAPTCHA_SECRET = $envValues['FCAPTCHA_SECRET']
+$env:JWT_SECRET = $envValues['JWT_SECRET']
+$env:FCAPTCHA_HOST_PORT = $envValues['FCAPTCHA_HOST_PORT']
 
-$composeArgs = @('-f', $ComposeFile)
-if (Test-Path $EnvFile) {
-    $composeArgs += @('--env-file', $EnvFile)
-}
+$composeArgs = @('-f', $ComposeFile, '--env-file', $script:DevStackEnvFile)
 docker compose @composeArgs down -v --remove-orphans
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host '==> Dev database volume removed. Run scripts/run-dev.ps1 to start fresh.'
