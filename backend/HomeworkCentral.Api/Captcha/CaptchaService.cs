@@ -93,8 +93,8 @@ public sealed class CaptchaService(
         if (verification.TrustScore >= fCaptchaVerifier.AllowTrustScore)
         {
             RiskAssessment assessment = riskEngine.Evaluate(action, identity, ipMatched, verification.TrustScore);
-            riskEngine.RecordOutcome(identity, assessment with { Passed = true, Score = verification.TrustScore });
-            return true;
+            riskEngine.RecordOutcome(identity, assessment);
+            return assessment.Passed;
         }
 
         bool solved = record.Type switch
@@ -138,11 +138,11 @@ public sealed class CaptchaService(
             return new FCaptchaVerification(false, 0.0);
 
         string cacheKey = TokenCacheKey(token);
-        if (cache.TryGetValue(cacheKey, out FCaptchaVerification? cached) && cached is not null)
-            return cached;
+        if (cache.TryGetValue(cacheKey, out CachedFCaptchaVerification? cached) && cached is not null)
+            return cached.Verification;
 
         FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(token);
-        cache.Set(cacheKey, verification, TokenVerificationLifetime);
+        cache.Set(cacheKey, new CachedFCaptchaVerification(verification), TokenVerificationLifetime);
         return verification;
     }
 
@@ -152,10 +152,13 @@ public sealed class CaptchaService(
             return new FCaptchaVerification(false, 0.0);
 
         string cacheKey = TokenCacheKey(token);
-        if (cache.TryGetValue(cacheKey, out FCaptchaVerification? cached) && cached is not null)
+        if (cache.TryGetValue(cacheKey, out CachedFCaptchaVerification? cached) && cached is not null)
         {
+            if (!cached.TryConsume())
+                return new FCaptchaVerification(false, 0.0);
+
             cache.Remove(cacheKey);
-            return cached;
+            return cached.Verification;
         }
 
         return await fCaptchaVerifier.VerifyAsync(token);
@@ -250,5 +253,14 @@ public sealed class CaptchaService(
 
         public static ChallengeRecord ForTileRotate(TileRotateDto tileRotate, string? issuerIp) =>
             new(TileRotatePuzzleGenerator.TypeName, null, null, tileRotate, issuerIp);
+    }
+
+    private sealed class CachedFCaptchaVerification(FCaptchaVerification verification)
+    {
+        private int _consumed;
+
+        public FCaptchaVerification Verification { get; } = verification;
+
+        public bool TryConsume() => Interlocked.CompareExchange(ref _consumed, 1, 0) == 0;
     }
 }

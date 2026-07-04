@@ -83,7 +83,7 @@ public class FCaptchaVerifierTests
         FCaptchaVerifier verifier = CreateVerifier();
 
         Task<FCaptchaVerification>[] tasks = Enumerable.Range(0, 8)
-            .Select(_ => verifier.VerifyAsync(token))
+            .Select(_ => Task.Run(async () => await verifier.VerifyAsync(token)))
             .ToArray();
 
         FCaptchaVerification[] results = await Task.WhenAll(tasks);

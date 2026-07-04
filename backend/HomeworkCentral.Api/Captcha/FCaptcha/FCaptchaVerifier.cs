@@ -18,7 +18,9 @@ public sealed class FCaptchaVerifier(
     ILogger<FCaptchaVerifier> logger) : IFCaptchaVerifier
 {
     public const string TypeName = "fcaptcha";
+    private const string UsedSignaturesCacheKey = "fcaptcha:used-signatures";
     private static readonly TimeSpan UsedTokenLifetime = TimeSpan.FromMinutes(5);
+    private static readonly ConcurrentDictionary<string, object> SignatureSetCreationLocks = new();
 
     public string SiteKey => options.Value.SiteKey;
     public string PublicUrl => options.Value.PublicUrl;
@@ -47,11 +49,25 @@ public sealed class FCaptchaVerifier(
 
     private ConcurrentDictionary<string, byte> GetUsedSignatureSet()
     {
-        return cache.GetOrCreate("fcaptcha:used-signatures", entry =>
+        if (cache.TryGetValue(UsedSignaturesCacheKey, out ConcurrentDictionary<string, byte>? existing) && existing is not null)
+            return existing;
+
+        object creationLock = SignatureSetCreationLocks.GetOrAdd(UsedSignaturesCacheKey, _ => new object());
+        lock (creationLock)
         {
-            entry.SlidingExpiration = UsedTokenLifetime;
-            entry.AbsoluteExpirationRelativeToNow = UsedTokenLifetime;
-            return new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
-        }) ?? new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+            if (cache.TryGetValue(UsedSignaturesCacheKey, out ConcurrentDictionary<string, byte>? created) && created is not null)
+                return created;
+
+            return cache.GetOrCreate(UsedSignaturesCacheKey, entry =>
+            {
+                entry.SlidingExpiration = UsedTokenLifetime;
+                entry.AbsoluteExpirationRelativeToNow = UsedTokenLifetime;
+                entry.RegisterPostEvictionCallback(static (_, _, _, _) =>
+                {
+                    SignatureSetCreationLocks.TryRemove(UsedSignaturesCacheKey, out _);
+                }, null);
+                return new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+            }) ?? new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        }
     }
 }
