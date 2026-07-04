@@ -265,14 +265,42 @@ wait_dev_postgres_ready() {
 # .hc-dev-stack.state; it's simply started alongside Postgres and stopped whenever Postgres is.
 start_dev_stack_fcaptcha_container() {
   local port="$1"
+  local force_recreate="${2:-0}"
   command -v docker >/dev/null 2>&1 || return 1
   docker info >/dev/null 2>&1 || return 1
 
   export FCAPTCHA_HOST_PORT="$port"
-  if ! docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d --build fcaptcha; then
+  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d --build)
+  if [[ "$force_recreate" == "1" ]]; then
+    compose_args+=(--force-recreate)
+  fi
+  compose_args+=(fcaptcha)
+  if ! docker compose "${compose_args[@]}"; then
     printf 'error: docker compose up fcaptcha failed (first run builds from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)\n' >&2
     return 1
   fi
+}
+
+get_dev_fcaptcha_container_secret() {
+  local container_id line
+  container_id="$(docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" ps -q fcaptcha 2>/dev/null || true)"
+  [[ -n "$container_id" ]] || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      FCAPTCHA_SECRET=*) printf '%s' "${line#FCAPTCHA_SECRET=}"; return 0 ;;
+    esac
+  done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id" 2>/dev/null)
+  return 1
+}
+
+test_dev_fcaptcha_secret_aligned() {
+  local expected="${DEV_ENV_FCAPTCHA_SECRET:-}"
+  [[ -n "$expected" ]] || return 1
+
+  local actual
+  actual="$(get_dev_fcaptcha_container_secret || true)"
+  [[ -n "$actual" && "$actual" == "$expected" ]]
 }
 
 test_dev_fcaptcha_connection() {
@@ -299,13 +327,24 @@ wait_dev_fcaptcha_ready() {
 
 ensure_dev_fcaptcha_running() {
   local port="$1"
+  local needs_start=1
+  local needs_recreate=0
+
   if test_dev_fcaptcha_connection "$port"; then
-    return 0
+    needs_start=0
+    if ! test_dev_fcaptcha_secret_aligned; then
+      needs_recreate=1
+      printf '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)\n'
+    fi
   fi
 
-  printf '==> Starting Docker FCaptcha on localhost:%s\n' "$port"
-  start_dev_stack_fcaptcha_container "$port" || return 1
-  wait_dev_fcaptcha_ready "$port" || return 1
+  if [[ "$needs_start" -eq 1 || "$needs_recreate" -eq 1 ]]; then
+    if [[ "$needs_start" -eq 1 ]]; then
+      printf '==> Starting Docker FCaptcha on localhost:%s\n' "$port"
+    fi
+    start_dev_stack_fcaptcha_container "$port" "$needs_recreate" || return 1
+    wait_dev_fcaptcha_ready "$port" || return 1
+  fi
 }
 
 stop_dev_stack_fcaptcha() {

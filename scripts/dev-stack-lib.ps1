@@ -311,7 +311,7 @@ function Stop-DevStackPostgres([string]$Port) {
 # FCaptcha (see docker-compose.yml's `fcaptcha` service) is stateless — no volume, no credentials
 # to reset — so unlike Postgres above it doesn't need refcounted start/stop bookkeeping in
 # .hc-dev-stack.state; it's simply started alongside Postgres and stopped whenever Postgres is.
-function Start-DevStackFCaptchaContainer([string]$Port) {
+function Start-DevStackFCaptchaContainer([string]$Port, [switch]$ForceRecreate) {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw 'Docker CLI not found. Install Docker Desktop or run scripts/run-dev.ps1 first.'
     }
@@ -322,10 +322,50 @@ function Start-DevStackFCaptchaContainer([string]$Port) {
     }
 
     $env:FCAPTCHA_HOST_PORT = $Port
-    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile up -d --build fcaptcha
+    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d', '--build')
+    if ($ForceRecreate) {
+        $composeArgs += '--force-recreate'
+    }
+    $composeArgs += 'fcaptcha'
+    docker compose @composeArgs
     if ($LASTEXITCODE -ne 0) {
         throw 'docker compose up fcaptcha failed (first run builds from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)'
     }
+}
+
+function Get-DevFCaptchaContainerSecret {
+    $containerId = docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile ps -q fcaptcha 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
+        return $null
+    }
+
+    $lines = docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' $containerId 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $lines) {
+        return $null
+    }
+
+    foreach ($line in $lines) {
+        if ($line -like 'FCAPTCHA_SECRET=*') {
+            return ($line -split '=', 2)[1]
+        }
+    }
+
+    return $null
+}
+
+function Test-DevFCaptchaSecretAligned {
+    $values = Read-DevEnvFile
+    $expected = $values['FCAPTCHA_SECRET']
+    if ([string]::IsNullOrWhiteSpace($expected)) {
+        return $false
+    }
+
+    $actual = Get-DevFCaptchaContainerSecret
+    if ([string]::IsNullOrWhiteSpace($actual)) {
+        return $false
+    }
+
+    return $actual -eq $expected
 }
 
 function Test-DevFCaptchaConnection([string]$Port) {
@@ -349,13 +389,20 @@ function Wait-DevFCaptchaReady([string]$Port) {
 }
 
 function Ensure-DevFCaptchaRunning([string]$Port) {
-    if (Test-DevFCaptchaConnection $Port) {
-        return
+    $needsStart = -not (Test-DevFCaptchaConnection $Port)
+    $needsRecreate = -not $needsStart -and -not (Test-DevFCaptchaSecretAligned)
+
+    if ($needsRecreate) {
+        Write-Host '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)' -ForegroundColor DarkGray
     }
 
-    Write-Host "==> Starting Docker FCaptcha on localhost:$Port" -ForegroundColor DarkGray
-    Start-DevStackFCaptchaContainer $Port
-    Wait-DevFCaptchaReady $Port
+    if ($needsStart -or $needsRecreate) {
+        if ($needsStart) {
+            Write-Host "==> Starting Docker FCaptcha on localhost:$Port" -ForegroundColor DarkGray
+        }
+        Start-DevStackFCaptchaContainer -Port $Port -ForceRecreate:($needsRecreate)
+        Wait-DevFCaptchaReady $Port
+    }
 }
 
 function Stop-DevStackFCaptcha {

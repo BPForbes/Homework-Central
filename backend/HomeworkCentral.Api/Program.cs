@@ -71,7 +71,7 @@ builder.Services.AddOptions<FCaptchaOptions>()
     .Bind(builder.Configuration.GetSection("FCaptcha"))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<FCaptchaOptions>, FCaptchaOptionsValidator>();
-builder.Services.AddHttpClient<IFCaptchaVerifier, FCaptchaVerifier>(client => client.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<IFCaptchaVerifier, FCaptchaVerifier>();
 builder.Services.AddScoped<ICaptchaService, CaptchaService>();
 builder.Services.AddScoped<ICaptchaRoleService, CaptchaRoleService>();
 builder.Services.AddSingleton<IScrapingDetectionService, ScrapingDetectionService>();
