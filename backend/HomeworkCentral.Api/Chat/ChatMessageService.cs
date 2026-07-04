@@ -176,6 +176,8 @@ public sealed class ChatMessageService(
                 groupKey,
                 activeMentions,
                 userId,
+                accountClass,
+                tenantDatabaseName,
                 ct);
 
             ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);

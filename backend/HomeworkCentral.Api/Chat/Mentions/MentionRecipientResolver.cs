@@ -1,8 +1,8 @@
 using System.Collections;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
-using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Tenancy;
@@ -18,14 +18,17 @@ public interface IMentionRecipientResolver
         string groupKey,
         IReadOnlyList<ParsedMention> activeMentions,
         Guid senderId,
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
         CancellationToken ct = default);
 }
 
 /// <summary>
 /// Resolves @username, @role, @everyone, and @here mentions to recipient user IDs.
-/// Scans the master database and all registered tenant databases for matching users.
-/// @username recipients must pass the same room-access check as @role / @everyone
-/// (subject expertise bit, claimed general subject, staff role, or public general room).
+/// Recipients are limited to the sender's account-class and tenant scope: real accounts
+/// may only notify real accounts (master DB); developer personas may only notify users
+/// in the same tenant (or any dev persona for DevAdmin senders). @here is already
+/// scoped by the real-vs-dev SignalR group bucket.
 /// </summary>
 public sealed class MentionRecipientResolver(
     AppDbContext masterDb,
@@ -39,10 +42,12 @@ public sealed class MentionRecipientResolver(
         string groupKey,
         IReadOnlyList<ParsedMention> activeMentions,
         Guid senderId,
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
         CancellationToken ct = default)
     {
         HashSet<Guid> recipients = [];
-        List<UserMaskSnapshot> allUsers = await LoadAllUserMasksAsync(ct);
+        List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(senderAccountClass, senderTenantDatabaseName, ct);
         ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
 
         foreach (ParsedMention mention in activeMentions.Where(m => m.IsActive))
@@ -50,13 +55,21 @@ public sealed class MentionRecipientResolver(
             switch (mention.Kind)
             {
                 case MentionKind.User:
-                    Guid? userId = await ResolveUsernameAsync(mention.Token, ct);
-                    if (userId is null || userId.Value == senderId || room is null)
-                        break;
+                    UserMaskSnapshot? mentionedUser = await ResolveUsernameAsync(
+                        mention.Token,
+                        senderAccountClass,
+                        senderTenantDatabaseName,
+                        eligibleUsers,
+                        ct);
 
-                    UserMaskSnapshot? mentionedUser = allUsers.FirstOrDefault(u => u.UserId == userId.Value);
-                    if (mentionedUser is not null && chatRoomAccess.CanAccessRoom(mentionedUser.Masks, room))
-                        recipients.Add(userId.Value);
+                    if (mentionedUser is not null
+                        && mentionedUser.UserId != senderId
+                        && room is not null
+                        && IsEligibleRecipient(senderAccountClass, senderTenantDatabaseName, mentionedUser)
+                        && chatRoomAccess.CanAccessRoom(mentionedUser.Masks, room))
+                    {
+                        recipients.Add(mentionedUser.UserId);
+                    }
 
                     break;
 
@@ -64,7 +77,7 @@ public sealed class MentionRecipientResolver(
                     if (!PlatformRoleCatalog.TryGetRoleBit(mention.Token, out short roleBit))
                         break;
 
-                    foreach (UserMaskSnapshot snapshot in allUsers)
+                    foreach (UserMaskSnapshot snapshot in eligibleUsers)
                     {
                         if (snapshot.UserId == senderId)
                             continue;
@@ -79,7 +92,7 @@ public sealed class MentionRecipientResolver(
                     break;
 
                 case MentionKind.Everyone:
-                    foreach (UserMaskSnapshot snapshot in allUsers)
+                    foreach (UserMaskSnapshot snapshot in eligibleUsers)
                     {
                         if (snapshot.UserId == senderId)
                             continue;
@@ -92,9 +105,10 @@ public sealed class MentionRecipientResolver(
 
                 case MentionKind.Here:
                     IReadOnlyCollection<Guid> online = onlineTracker.GetOnlineUserIds(groupKey);
+                    HashSet<Guid> eligibleIds = eligibleUsers.Select(u => u.UserId).ToHashSet();
                     foreach (Guid onlineUserId in online)
                     {
-                        if (onlineUserId != senderId)
+                        if (onlineUserId != senderId && eligibleIds.Contains(onlineUserId))
                             recipients.Add(onlineUserId);
                     }
 
@@ -105,67 +119,186 @@ public sealed class MentionRecipientResolver(
         return recipients;
     }
 
-    private async Task<Guid?> ResolveUsernameAsync(string username, CancellationToken ct)
+    private static bool IsEligibleRecipient(
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
+        UserMaskSnapshot recipient) =>
+        MentionNotifyScope.CanNotify(
+            senderAccountClass,
+            senderTenantDatabaseName,
+            recipient.AccountClass,
+            recipient.TenantDatabaseName);
+
+    private async Task<UserMaskSnapshot?> ResolveUsernameAsync(
+        string username,
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
+        List<UserMaskSnapshot> eligibleUsers,
+        CancellationToken ct)
     {
-        Guid? masterUser = await masterDb.Users
-            .AsNoTracking()
-            .Where(user => EF.Functions.ILike(user.Username, username))
-            .Select(user => (Guid?)user.UserId)
-            .FirstOrDefaultAsync(ct);
+        UserMaskSnapshot? fromEligible = eligibleUsers.FirstOrDefault(
+            user => string.Equals(user.Username, username, StringComparison.OrdinalIgnoreCase));
 
-        if (masterUser is not null)
-            return masterUser;
+        if (fromEligible is not null)
+            return fromEligible;
 
-        List<string> tenantDatabases = await masterRegistry.Tenants
-            .AsNoTracking()
-            .Select(tenant => tenant.DatabaseName)
-            .ToListAsync(ct);
+        if (senderAccountClass == AccountClass.RealAccount)
+            return null;
 
-        foreach (string databaseName in tenantDatabases)
+        if (senderAccountClass == AccountClass.DeveloperAccount
+            && string.Equals(username, DevBypass.DevAdminUsername, StringComparison.OrdinalIgnoreCase))
         {
-            await using AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
-            Guid? tenantUser = await tenantDb.Users
-                .AsNoTracking()
-                .Where(user => EF.Functions.ILike(user.Username, username))
-                .Select(user => (Guid?)user.UserId)
-                .FirstOrDefaultAsync(ct);
-
-            if (tenantUser is not null)
-                return tenantUser;
+            return await LoadDevAdminSnapshotAsync(ct);
         }
 
         return null;
     }
 
-    private async Task<List<UserMaskSnapshot>> LoadAllUserMasksAsync(CancellationToken ct)
+    private async Task<List<UserMaskSnapshot>> LoadEligibleUsersAsync(
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
+        CancellationToken ct)
     {
-        List<UserMaskSnapshot> snapshots = await LoadMasksFromContextAsync(masterDb, ct);
+        if (senderAccountClass == AccountClass.RealAccount)
+            return await LoadMasksFromMasterAsync(realUsersOnly: true, ct);
 
-        List<string> tenantDatabases = await masterRegistry.Tenants
+        if (senderAccountClass == AccountClass.DeveloperAccount
+            && !string.IsNullOrEmpty(senderTenantDatabaseName))
+        {
+            List<UserMaskSnapshot> snapshots = [];
+            await using AppDbContext tenantDb =
+                await tenantFactory.CreateForRegisteredTenantAsync(senderTenantDatabaseName, ct);
+            snapshots.AddRange(await LoadMasksFromContextAsync(
+                tenantDb,
+                AccountClass.DeveloperAccount,
+                senderTenantDatabaseName,
+                ct));
+            return snapshots;
+        }
+
+        if (senderAccountClass == AccountClass.DevAdmin)
+        {
+            List<UserMaskSnapshot> snapshots = [];
+            List<string> tenantDatabases = await masterRegistry.Tenants
+                .AsNoTracking()
+                .Select(tenant => tenant.DatabaseName)
+                .ToListAsync(ct);
+
+            foreach (string databaseName in tenantDatabases)
+            {
+                await using AppDbContext tenantDb =
+                    await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
+                snapshots.AddRange(await LoadMasksFromContextAsync(
+                    tenantDb,
+                    AccountClass.DeveloperAccount,
+                    databaseName,
+                    ct));
+            }
+
+            UserMaskSnapshot? devAdmin = await LoadDevAdminSnapshotAsync(ct);
+            if (devAdmin is not null)
+                snapshots.Add(devAdmin);
+
+            return snapshots;
+        }
+
+        return [];
+    }
+
+    private async Task<UserMaskSnapshot?> LoadDevAdminSnapshotAsync(CancellationToken ct)
+    {
+        User? devAdmin = await masterDb.Users
             .AsNoTracking()
-            .Select(tenant => tenant.DatabaseName)
+            .FirstOrDefaultAsync(user => user.Username == DevBypass.DevAdminUsername, ct);
+
+        if (devAdmin is null)
+            return null;
+
+        UserEffectiveMask? mask = await masterDb.UserEffectiveMasks
+            .AsNoTracking()
+            .Include(m => m.SubjectExpertiseMasks)
+            .FirstOrDefaultAsync(m => m.UserId == devAdmin.UserId, ct);
+
+        if (mask is null)
+            return null;
+
+        return new UserMaskSnapshot(
+            devAdmin.UserId,
+            devAdmin.Username,
+            AccountClass.DevAdmin,
+            null,
+            mask.ToEffectiveMaskDto(),
+            mask.EffectiveRoleMask);
+    }
+
+    private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
+    {
+        List<UserEffectiveMask> masks = await masterDb.UserEffectiveMasks
+            .AsNoTracking()
+            .Include(mask => mask.SubjectExpertiseMasks)
             .ToListAsync(ct);
 
-        foreach (string databaseName in tenantDatabases)
+        Dictionary<Guid, string> usernames = await masterDb.Users
+            .AsNoTracking()
+            .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))
+            .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
+
+        List<UserMaskSnapshot> snapshots = [];
+        foreach (UserEffectiveMask mask in masks)
         {
-            await using AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
-            snapshots.AddRange(await LoadMasksFromContextAsync(tenantDb, ct));
+            if (!usernames.TryGetValue(mask.UserId, out string? username))
+                continue;
+
+            bool isDevAdmin = string.Equals(username, DevBypass.DevAdminUsername, StringComparison.Ordinal);
+            if (realUsersOnly && isDevAdmin)
+                continue;
+
+            AccountClass accountClass = isDevAdmin ? AccountClass.DevAdmin : AccountClass.RealAccount;
+            snapshots.Add(new UserMaskSnapshot(
+                mask.UserId,
+                username,
+                accountClass,
+                null,
+                mask.ToEffectiveMaskDto(),
+                mask.EffectiveRoleMask));
         }
 
         return snapshots;
     }
 
-    private static async Task<List<UserMaskSnapshot>> LoadMasksFromContextAsync(AppDbContext db, CancellationToken ct)
+    private static async Task<List<UserMaskSnapshot>> LoadMasksFromContextAsync(
+        AppDbContext db,
+        AccountClass accountClass,
+        string tenantDatabaseName,
+        CancellationToken ct)
     {
         List<UserEffectiveMask> masks = await db.UserEffectiveMasks
             .AsNoTracking()
             .Include(mask => mask.SubjectExpertiseMasks)
             .ToListAsync(ct);
 
+        Dictionary<Guid, string> usernames = await db.Users
+            .AsNoTracking()
+            .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))
+            .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
+
         return masks
-            .Select(mask => new UserMaskSnapshot(mask.UserId, mask.ToEffectiveMaskDto(), mask.EffectiveRoleMask))
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Select(mask => new UserMaskSnapshot(
+                mask.UserId,
+                usernames[mask.UserId],
+                accountClass,
+                tenantDatabaseName,
+                mask.ToEffectiveMaskDto(),
+                mask.EffectiveRoleMask))
             .ToList();
     }
 
-    private sealed record UserMaskSnapshot(Guid UserId, EffectiveMaskDto Masks, BitArray RoleMask);
+    private sealed record UserMaskSnapshot(
+        Guid UserId,
+        string Username,
+        AccountClass AccountClass,
+        string? TenantDatabaseName,
+        EffectiveMaskDto Masks,
+        BitArray RoleMask);
 }

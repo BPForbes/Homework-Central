@@ -128,6 +128,8 @@ public class ChatMessageServiceTests
             string groupKey,
             IReadOnlyList<ParsedMention> activeMentions,
             Guid senderId,
+            AccountClass senderAccountClass,
+            string? senderTenantDatabaseName,
             CancellationToken ct = default) =>
             Task.FromResult(new HashSet<Guid>());
     }
