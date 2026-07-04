@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authorization;
@@ -26,6 +27,7 @@ namespace HomeworkCentral.Api.Hubs;
 public sealed class ChatHub(
     IChatMessageService chatMessageService,
     IChatTypingTracker typingTracker,
+    IChatOnlineTracker onlineTracker,
     IHttpContextAccessor httpContextAccessor) : Hub
 {
     public async Task JoinRoom(string roomId)
@@ -37,6 +39,7 @@ public sealed class ChatHub(
 
         string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
         await Groups.AddToGroupAsync(Context.ConnectionId, groupKey);
+        onlineTracker.UserJoined(groupKey, Context.ConnectionId, userId);
 
         // Live UserTyping events are broadcast only to OthersInGroup, so a user who joins (or
         // reconnects and re-joins) after someone started typing would otherwise miss them until
@@ -52,6 +55,7 @@ public sealed class ChatHub(
         if (cleared is not null && cleared.Value.GroupKey == groupKey)
             await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
 
+        onlineTracker.UserLeft(groupKey, Context.ConnectionId, GetUserId());
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupKey);
     }
 
@@ -91,6 +95,8 @@ public sealed class ChatHub(
         (string GroupKey, Guid UserId)? cleared = typingTracker.ClearTypingForConnection(Context.ConnectionId);
         if (cleared is not null)
             await Clients.OthersInGroup(cleared.Value.GroupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
+
+        onlineTracker.UserDisconnected(Context.ConnectionId);
 
         await base.OnDisconnectedAsync(exception);
     }

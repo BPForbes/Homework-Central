@@ -7,7 +7,9 @@ import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
 import { captchaApi } from '../api/captchaApi'
 import { subjectsApi } from '../api/subjectsApi'
+import { inboxApi } from '../api/inboxApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
+import type { ChatInboxSummaryItem } from '../types/inbox'
 
 export function Dashboard() {
   const { user, hasRole, refreshUser } = useAuth()
@@ -15,6 +17,7 @@ export function Dashboard() {
   const [verifying, setVerifying] = useState(false)
   const [verifyError, setVerifyError] = useState('')
   const [claimedSubjects, setClaimedSubjects] = useState<string[]>([])
+  const [inboxSummary, setInboxSummary] = useState<ChatInboxSummaryItem[]>([])
 
   const isGuest = hasRole(GUEST_ROLE_BIT)
 
@@ -23,6 +26,13 @@ export function Dashboard() {
       .getGeneral()
       .then(({ data }) => setClaimedSubjects(data.filter((subject) => subject.claimed).map((subject) => subject.name)))
       .catch(() => setClaimedSubjects([]))
+  }, [user?.userId])
+
+  useEffect(() => {
+    void inboxApi
+      .getSummary()
+      .then(({ data }) => setInboxSummary(data.categories))
+      .catch(() => setInboxSummary([]))
   }, [user?.userId])
 
   async function handleVerify(e: React.FormEvent) {
@@ -61,6 +71,21 @@ export function Dashboard() {
       <p className="dashboard-hint">
         Open the <strong>Chats</strong> menu on the left to browse subject and staff rooms you can access.
       </p>
+
+      {inboxSummary.length > 0 && (
+        <section className="dashboard-inbox-summary">
+          <h3>New messages</h3>
+          <ul className="dashboard-inbox-list">
+            {inboxSummary.map((item) => (
+              <li key={item.categoryKey}>
+                <Link to="/inbox" className="dashboard-inbox-link">
+                  New Message ({item.categoryDisplayName}): {item.unreadCount}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="dashboard-card">
         <div className="dashboard-card-icon">
@@ -119,6 +144,8 @@ export function Dashboard() {
 
       <p className="dashboard-footer-link">
         <Link to="/chat">Browse chats</Link>
+        {' · '}
+        <Link to="/inbox">Open inbox</Link>
       </p>
     </div>
   )

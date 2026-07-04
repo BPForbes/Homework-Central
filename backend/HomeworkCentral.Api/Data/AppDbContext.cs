@@ -33,6 +33,7 @@ public partial class AppDbContext(
     public DbSet<UserSubjectExpertiseMask> UserSubjectExpertiseMasks => Set<UserSubjectExpertiseMask>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMentionNotification> ChatMentionNotifications => Set<ChatMentionNotification>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -197,6 +198,28 @@ public partial class AppDbContext(
             e.Property(m => m.TenantDatabaseName).HasMaxLength(128);
             e.HasIndex(m => new { m.RoomId, m.CreatedAtUtc });
             e.HasIndex(m => m.SenderId);
+        });
+
+        mb.Entity<ChatMentionNotification>(e =>
+        {
+            e.HasKey(n => n.NotificationId);
+            e.Property(n => n.NotificationId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(n => n.SenderUsername).HasMaxLength(64).IsRequired();
+            e.Property(n => n.RoomId).HasMaxLength(128).IsRequired();
+            e.Property(n => n.RoomDisplayName).HasMaxLength(128).IsRequired();
+            e.Property(n => n.CategoryKey).HasMaxLength(64).IsRequired();
+            e.Property(n => n.CategoryDisplayName).HasMaxLength(128).IsRequired();
+            e.Property(n => n.MessageContent).IsRequired();
+            e.Property(n => n.MentionKind).HasMaxLength(32).IsRequired();
+            e.Property(n => n.CreatedAtUtc).IsRequired();
+            e.Property(n => n.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(n => n.TenantDatabaseName).HasMaxLength(128);
+            e.HasIndex(n => new { n.RecipientUserId, n.ReadAtUtc });
+            e.HasIndex(n => new { n.RecipientUserId, n.CategoryKey });
+            e.HasIndex(n => n.MessageId);
         });
 
         mb.ApplyScopedResourceFilters(this);

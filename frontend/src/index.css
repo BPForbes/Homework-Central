@@ -690,6 +690,152 @@ body {
   font-weight: 500;
 }
 
+.dashboard-inbox-summary {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.dashboard-inbox-summary h3 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.dashboard-inbox-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboard-inbox-link {
+  display: block;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.dashboard-inbox-link:hover {
+  background: #fde68a;
+}
+
+.inbox-page {
+  animation: fade-in 0.25s ease;
+}
+
+.inbox-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.inbox-header-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #b45309;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+.inbox-subtitle {
+  color: #64748b;
+  margin-top: 0.25rem;
+}
+
+.inbox-status,
+.inbox-empty {
+  color: #64748b;
+}
+
+.inbox-error {
+  color: #dc2626;
+}
+
+.inbox-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.inbox-item {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.inbox-item--read {
+  opacity: 0.85;
+}
+
+.inbox-item-link {
+  display: block;
+  padding: 1rem 1.1rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.inbox-item-link:hover {
+  background: #f8fafc;
+}
+
+.inbox-item-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+}
+
+.inbox-item-category {
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.inbox-item-room {
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.inbox-item-sender {
+  font-size: 0.875rem;
+  color: #475569;
+  margin-bottom: 0.5rem;
+}
+
+.inbox-item-message {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+.chat-mention {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1d4ed8;
+  border-radius: 4px;
+  padding: 0 0.15rem;
+  font-weight: 600;
+}
+
+.chat-mention--broadcast {
+  background: rgba(245, 158, 11, 0.2);
+  color: #b45309;
+}
+
 /* Chat room page */
 .chat-room-page {
   animation: fade-in 0.25s ease;

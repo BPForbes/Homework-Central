@@ -1,6 +1,7 @@
 using System.Collections;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
@@ -64,6 +65,8 @@ public class ChatMessageServiceTests
             effectiveMaskService,
             new ChatRoomAccessService(),
             new HtmlContentSanitizer(),
+            new MentionCooldownTracker(),
+            new FakeMentionRecipientResolver(),
             new FakeHubContext());
     }
 
@@ -116,6 +119,17 @@ public class ChatMessageServiceTests
             SubjectExpertiseMasks = expertiseMasks,
             StatusMask = BitMask.ToBase64(BitMask.Create(64)),
         };
+    }
+
+    private sealed class FakeMentionRecipientResolver : IMentionRecipientResolver
+    {
+        public Task<HashSet<Guid>> ResolveRecipientsAsync(
+            string roomId,
+            string groupKey,
+            IReadOnlyList<ParsedMention> activeMentions,
+            Guid senderId,
+            CancellationToken ct = default) =>
+            Task.FromResult(new HashSet<Guid>());
     }
 
     private sealed class FakeEffectiveMaskService(UserEffectiveMask mask) : IEffectiveMaskService

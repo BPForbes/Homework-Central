@@ -5,6 +5,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Captcha.FCaptcha;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Hubs;
@@ -82,6 +83,10 @@ builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
+builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
+builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
+builder.Services.AddScoped<IMentionRecipientResolver, MentionRecipientResolver>();
+builder.Services.AddScoped<IChatInboxService, ChatInboxService>();
 // HtmlContentSanitizer wraps a single immutable HtmlSanitizer whose Sanitize method is safe to
 // call concurrently (its allow-lists are configured once at construction and never mutated), so
 // one shared instance is sufficient — no need to allocate a new HtmlSanitizer per request.

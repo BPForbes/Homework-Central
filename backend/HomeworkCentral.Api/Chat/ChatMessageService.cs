@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Security.Claims;
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
@@ -47,10 +49,13 @@ public sealed class ChatMessageService(
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
     IContentSanitizer contentSanitizer,
+    IMentionCooldownTracker mentionCooldownTracker,
+    IMentionRecipientResolver mentionRecipientResolver,
     IHubContext<ChatHub> hubContext) : IChatMessageService
 {
     private const int MaxMessageLength = 4000;
     private const int DefaultPageSize = 50;
+    private static readonly TimeSpan MentionCooldown = TimeSpan.FromSeconds(3);
 
     public async Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default)
     {
@@ -114,13 +119,30 @@ public sealed class ChatMessageService(
         if (string.IsNullOrEmpty(trimmed) || trimmed.Length > MaxMessageLength)
             return null;
 
+        EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
+        BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
+        bool canUseBroadcastMentions = MentionPermissions.CanUseBroadcastMentions(roleMask);
+        MentionParseResult parsed = MentionParser.Parse(trimmed, canUseBroadcastMentions);
+
+        if (parsed.ActiveMentions.Any(mention => mention.IsActive))
+        {
+            if (MentionPermissions.IsGuest(roleMask))
+                throw new SendMessageMentionException(SendMessageMentionError.GuestCannotMention);
+
+            if (!MentionPermissions.IsSeniorStaff(roleMask)
+                && !mentionCooldownTracker.TryRecordMention(userId, MentionCooldown, out TimeSpan retryAfter))
+            {
+                throw new SendMessageMentionException(SendMessageMentionError.MentionCooldown, retryAfter);
+            }
+        }
+
         // The sender's User row may only exist in their own tenant database (dev personas are
         // fully isolated per tenant), so the username is read from the JWT claim already
         // present on every authenticated request rather than looked up in a tenant-scoped
         // Users table — keeping this service entirely master-db-only.
         string senderUsername = ResolveUsername(userId);
         (AccountClass accountClass, string? tenantDatabaseName) = ResolveScope();
-        string sanitized = contentSanitizer.Sanitize(trimmed);
+        string sanitized = contentSanitizer.Sanitize(parsed.DisplayContent);
 
         ChatMessage message = new()
         {
@@ -128,7 +150,7 @@ public sealed class ChatMessageService(
             RoomId = roomId,
             SenderId = userId,
             SenderUsername = senderUsername,
-            RawContent = trimmed,
+            RawContent = parsed.DisplayContent,
             SanitizedContent = sanitized,
             CreatedAtUtc = DateTime.UtcNow,
             OwnerAccountClass = accountClass,
@@ -136,11 +158,54 @@ public sealed class ChatMessageService(
         };
 
         masterDb.ChatMessages.Add(message);
+
+        IReadOnlyList<ParsedMention> activeMentions = parsed.ActiveMentions.Where(mention => mention.IsActive).ToArray();
+        if (activeMentions.Count > 0)
+        {
+            string groupKey = ChatRoomGroupKey.Build(roomId, accountClass);
+            HashSet<Guid> recipients = await mentionRecipientResolver.ResolveRecipientsAsync(
+                roomId,
+                groupKey,
+                activeMentions,
+                userId,
+                ct);
+
+            ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
+            string roomDisplayName = room?.RoomDisplayName ?? roomId;
+            string categoryKey = room?.CategoryKey ?? ChatRoomBlueprint.GeneralCategoryKey;
+            string categoryDisplayName = room?.CategoryDisplayName ?? ChatRoomBlueprint.GeneralCategoryDisplayName;
+
+            foreach (Guid recipientId in recipients)
+            {
+                string mentionKind = activeMentions.Count == 1
+                    ? activeMentions[0].Kind.ToString()
+                    : "Multiple";
+
+                masterDb.ChatMentionNotifications.Add(new ChatMentionNotification
+                {
+                    NotificationId = Guid.NewGuid(),
+                    MessageId = message.MessageId,
+                    RecipientUserId = recipientId,
+                    SenderId = userId,
+                    SenderUsername = senderUsername,
+                    RoomId = roomId,
+                    RoomDisplayName = roomDisplayName,
+                    CategoryKey = categoryKey,
+                    CategoryDisplayName = categoryDisplayName,
+                    MessageContent = sanitized,
+                    MentionKind = mentionKind,
+                    CreatedAtUtc = message.CreatedAtUtc,
+                    OwnerAccountClass = accountClass,
+                    TenantDatabaseName = tenantDatabaseName,
+                });
+            }
+        }
+
         await masterDb.SaveChangesAsync(ct);
 
         ChatMessageDto dto = ToDto(message);
-        string groupKey = ChatRoomGroupKey.Build(roomId, accountClass);
-        await hubContext.Clients.Group(groupKey).SendAsync("ReceiveMessage", dto, ct);
+        string broadcastGroupKey = ChatRoomGroupKey.Build(roomId, accountClass);
+        await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", dto, ct);
         return dto;
     }
 
@@ -179,7 +244,7 @@ public sealed class ChatMessageService(
 
     private static bool HasGroupMessagesFeature(EffectiveMaskDto masks)
     {
-        System.Collections.BitArray featureMask = BitMask.FromBase64(masks.FeatureMask, 256);
+        BitArray featureMask = BitMask.FromBase64(masks.FeatureMask, 256);
         return BitMask.HasBit(featureMask, PlatformFeatures.GroupMessages);
     }
 

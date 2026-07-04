@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { chatApi } from '../api/chatApi'
 import type { ChatMessage, ChatTypingUser } from '../types/chat'
+import type { SendChatMessageError } from '../types/inbox'
+import { isAxiosError } from 'axios'
 
 export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -179,8 +181,12 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       const { data } = await chatApi.sendMessage(roomId, trimmed)
       addMessage(data)
       return true
-    } catch {
-      setError('Failed to send message.')
+    } catch (err) {
+      if (isAxiosError<SendChatMessageError>(err) && err.response?.data?.message) {
+        setError(err.response.data.message)
+      } else {
+        setError('Failed to send message.')
+      }
       notifyTyping()
       return false
     } finally {

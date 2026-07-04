@@ -1,5 +1,6 @@
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
@@ -79,11 +80,37 @@ public class ChatController(
         if (!await chatMessageService.CanAccessRoomAsync(decodedRoomId, userId.Value, ct))
             return Forbid();
 
-        ChatMessageDto? message = await chatMessageService.SendMessageAsync(
-            decodedRoomId,
-            userId.Value,
-            request.Content,
-            ct);
+        ChatMessageDto? message;
+        try
+        {
+            message = await chatMessageService.SendMessageAsync(
+                decodedRoomId,
+                userId.Value,
+                request.Content,
+                ct);
+        }
+        catch (SendMessageMentionException mentionError)
+        {
+            return mentionError.Error switch
+            {
+                SendMessageMentionError.GuestCannotMention => StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new SendChatMessageErrorResponse
+                    {
+                        Message = "Guests cannot use @mentions.",
+                        Code = "guest_cannot_mention",
+                    }),
+                SendMessageMentionError.MentionCooldown => StatusCode(
+                    StatusCodes.Status429TooManyRequests,
+                    new SendChatMessageErrorResponse
+                    {
+                        Message = "Please wait before mentioning again.",
+                        Code = "mention_cooldown",
+                        RetryAfterSeconds = (int)Math.Ceiling((mentionError.RetryAfter ?? TimeSpan.FromSeconds(3)).TotalSeconds),
+                    }),
+                _ => BadRequest(new { message = "Message content is invalid." }),
+            };
+        }
 
         // Access was already confirmed above, so a null result here can only mean the
         // (non-whitespace) content was rejected for another reason, e.g. exceeding the max

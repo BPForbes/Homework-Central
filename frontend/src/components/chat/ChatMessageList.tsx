@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { ChatMessage, ChatTypingUser } from '../../types/chat'
+import { MentionContent } from './MentionContent'
 import { TypingIndicator } from './TypingIndicator'
 
 interface ChatMessageListProps {
@@ -46,7 +47,9 @@ export function ChatMessageList({ messages, typingUsers, loading, currentUserId 
             {!isOwn && message.senderUsername && (
               <div className="chat-bubble-sender">{message.senderUsername}</div>
             )}
-            <div className="chat-bubble-content">{message.content}</div>
+            <div className="chat-bubble-content">
+              <MentionContent content={message.content} />
+            </div>
             <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
               {formatUtcTimestamp(message.createdAtUtc)}
             </time>
