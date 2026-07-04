@@ -38,7 +38,7 @@ Chat
 | Super viewers | `Owner` or `Administrator` → all subject and staff rooms. |
 | Category visibility | Dropdown shown only when ≥1 child room is accessible. |
 | Category kind | `General`, `Subject`, or `Staff` — drives nav grouping and `IsPrivateCategory`. |
-| Feature gate | User must have `PlatformFeatures.GroupMessages` to send messages. |
+| Feature gate | `PlatformFeatures.GroupMessages` is required for **staff** rooms; subject-expertise rooms only require the room-access rule above. General is always open. |
 | Tenant isolation | Messages implement `IScopedResource`; `"ResourceVisibility"` policy applies after room access. |
 
 ## Room blueprint

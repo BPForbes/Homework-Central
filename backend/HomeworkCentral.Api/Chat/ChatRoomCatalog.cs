@@ -48,6 +48,17 @@ public static class ChatRoomCatalog
             [SubjectMaskNames.Education] = "Education",
         };
 
+    private static readonly IReadOnlyDictionary<string, string> ExpertiseDisplayNameOverrides =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["CPlusPlus"] = "C++",
+            ["CSharp"] = "C#",
+            ["Css"] = "CSS",
+            ["RestApis"] = "APIs",
+            ["PostgreSql"] = "PostgreSQL",
+            ["MySql"] = "MySQL",
+        };
+
     public static readonly ChatRoomDefinition GeneralRoom = ChatRoomBlueprint.GeneralLobby();
 
     public static readonly ChatRoomDefinition GetRolesRoom = ChatRoomBlueprint.GetRolesLobby();
@@ -106,7 +117,9 @@ public static class ChatRoomCatalog
                     continue;
 
                 short expertiseBit = (short)field.GetValue(null)!;
-                string roomName = ToDisplayName(field.Name);
+                string roomName = ExpertiseDisplayNameOverrides.TryGetValue(field.Name, out string? overrideName)
+                    ? overrideName
+                    : ToDisplayName(field.Name);
 
                 rooms.Add(ChatRoomBlueprint.SubjectExpertise(
                     category.ExpertiseMaskName,
