@@ -14,7 +14,12 @@ public interface IChatTypingTracker
     /// <summary>Returns true when this was the user's last active connection in the room.</summary>
     bool ClearTyping(string connectionId, string groupKey, Guid userId);
 
+    /// <summary>Clears any typing state left by a disconnecting connection. Returns the room and
+    /// user to notify as "stopped typing" only if this was that user's last active connection in
+    /// the room, or null if the connection wasn't marked as typing anywhere.</summary>
     (string GroupKey, Guid UserId)? ClearTypingForConnection(string connectionId);
 
+    /// <summary>Returns every user currently marked as typing in <paramref name="groupKey"/>,
+    /// optionally omitting <paramref name="excludeUserId"/>.</summary>
     IReadOnlyList<ChatTypingDto> GetActiveTypers(string groupKey, Guid? excludeUserId = null);
 }

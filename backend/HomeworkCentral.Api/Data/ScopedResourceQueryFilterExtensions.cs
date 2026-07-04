@@ -41,14 +41,17 @@ public static class ScopedResourceQueryFilterExtensions
     private static void SetShareableScopedResourceFilter<TEntity>(ModelBuilder modelBuilder, AppDbContext context)
         where TEntity : class, IShareableScopedResource
     {
-        // Real production accounts see only RealAccount traffic; all other account classes share
-        // developer/test chat history regardless of tenant database (see ChatMessage.cs).
+        // Mirrors ShareableResourceVisibilityScope.CanView, but expressed as a flat boolean so
+        // every operand is either a DbContext scalar, an entity column, or a constant — all
+        // translatable. Real production accounts see only RealAccount traffic; all other account
+        // classes share developer/test chat history regardless of tenant database (see ChatMessage.cs).
         modelBuilder.Entity<TEntity>().HasQueryFilter(entity =>
             context.ScopeBypassFilters
             || (context.ScopeIsAuthenticated
-                && ShareableResourceVisibilityScope.CanView(
-                    context.ScopeAccountClass,
-                    entity.OwnerAccountClass)));
+                && ((context.ScopeAccountClass == AccountClass.RealAccount
+                        && entity.OwnerAccountClass == AccountClass.RealAccount)
+                    || (context.ScopeAccountClass != AccountClass.RealAccount
+                        && entity.OwnerAccountClass != AccountClass.RealAccount))));
     }
 
     private static void SetScopedResourceFilter<TEntity>(ModelBuilder modelBuilder, AppDbContext context)
