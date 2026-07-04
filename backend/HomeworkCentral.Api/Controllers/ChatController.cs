@@ -121,6 +121,50 @@ public class ChatController(
         return Ok(message);
     }
 
+    /// <summary>Returns mention notifications for the current user's inbox.</summary>
+    [HttpGet("inbox")]
+    public async Task<ActionResult<IReadOnlyList<ChatInboxItemDto>>> GetInbox(CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        return Ok(await chatMessageService.GetInboxAsync(userId.Value, ct));
+    }
+
+    /// <summary>Returns unread mention counts grouped by chat category.</summary>
+    [HttpGet("inbox/summary")]
+    public async Task<ActionResult<ChatInboxSummaryDto>> GetInboxSummary(CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        return Ok(await chatMessageService.GetInboxSummaryAsync(userId.Value, ct));
+    }
+
+    [HttpPost("inbox/{notificationId:guid}/read")]
+    public async Task<IActionResult> MarkInboxRead(Guid notificationId, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        bool updated = await chatMessageService.MarkInboxReadAsync(userId.Value, notificationId, ct);
+        return updated ? NoContent() : NotFound();
+    }
+
+    [HttpPost("inbox/read-all")]
+    public async Task<IActionResult> MarkInboxAllRead(CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        await chatMessageService.MarkInboxAllReadAsync(userId.Value, ct);
+        return NoContent();
+    }
+
     private Guid? GetUserId()
     {
         string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value

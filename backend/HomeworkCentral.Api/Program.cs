@@ -86,7 +86,6 @@ builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
 builder.Services.AddScoped<IMentionRecipientResolver, MentionRecipientResolver>();
-builder.Services.AddScoped<IChatInboxService, ChatInboxService>();
 // HtmlContentSanitizer wraps a single immutable HtmlSanitizer whose Sanitize method is safe to
 // call concurrently (its allow-lists are configured once at construction and never mutated), so
 // one shared instance is sufficient — no need to allocate a new HtmlSanitizer per request.
