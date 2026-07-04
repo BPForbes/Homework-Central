@@ -30,7 +30,7 @@ public class CaptchaServiceTests
     {
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
         CaptchaChallengeDto challenge = service.CreateChallenge();
-        verifier.NextResult = new FCaptchaVerification(true, 0.9); // >= AllowTrustScore (0.7)
+        verifier.NextResult = new FCaptchaVerification(true, 0.9); // >= AllowTrustScore (0.65)
 
         HomeworkCentral.Api.Captcha.CaptchaSubmissionDto submission = new()
         {
@@ -48,6 +48,18 @@ public class CaptchaServiceTests
     {
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
         verifier.NextResult = new FCaptchaVerification(true, 0.9);
+
+        FCaptchaAssessmentDto assessment = await service.AssessFCaptchaAsync("token");
+
+        Assert.True(assessment.Valid);
+        Assert.False(assessment.PuzzleRequired);
+    }
+
+    [Fact]
+    public async Task Assess_fcaptcha_skips_puzzle_for_borderline_allow_band_scores()
+    {
+        (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
+        verifier.NextResult = new FCaptchaVerification(true, 0.66);
 
         FCaptchaAssessmentDto assessment = await service.AssessFCaptchaAsync("token");
 
@@ -124,7 +136,7 @@ public class CaptchaServiceTests
     {
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService();
         CaptchaChallengeDto challenge = GetChallengeOfType(service, CaptchaTypeOf.Text);
-        // Below AllowTrustScore (0.7) -> falls back to the puzzle. Required score for a first
+        // Below AllowTrustScore (0.65) -> falls back to the puzzle. Required score for a first
         // attempt is the base 0.50 + new-identity penalty 0.05 = 0.55; 0.6 clears it.
         verifier.NextResult = new FCaptchaVerification(true, 0.6);
 
@@ -430,7 +442,7 @@ public class CaptchaServiceTests
     {
         // Demonstrates the "don't block on one signal alone" design: the same IP mismatch as
         // above (raising the bar to the 0.68 ceiling) doesn't fail this attempt, because the
-        // trust score here (0.69, still below AllowTrustScore so the puzzle is still required) is
+        // trust score here (0.69, now above AllowTrustScore so the puzzle is not required) is
         // strong enough to clear even the raised bar.
         FakeHttpContextAccessor accessor = new() { HttpContext = ContextWithIp("203.0.113.10") };
         (CaptchaService service, FakeFCaptchaVerifier verifier) = CreateService(accessor);

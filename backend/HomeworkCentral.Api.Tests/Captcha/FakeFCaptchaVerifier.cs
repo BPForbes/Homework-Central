@@ -9,7 +9,7 @@ public sealed class FakeFCaptchaVerifier : IFCaptchaVerifier
 {
     public string SiteKey { get; set; } = "test-site-key";
     public string PublicUrl { get; set; } = "http://localhost:3010";
-    public double AllowTrustScore { get; set; } = 0.7;
+    public double AllowTrustScore { get; set; } = 0.65;
     public FCaptchaVerification NextResult { get; set; } = new(true, 0.0);
     public int VerifyCallCount { get; private set; }
 

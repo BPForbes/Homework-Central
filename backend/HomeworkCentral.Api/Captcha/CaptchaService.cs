@@ -57,6 +57,11 @@ public sealed class CaptchaService(
         }
 
         bool puzzleRequired = verification.TrustScore < fCaptchaVerifier.AllowTrustScore;
+        logger.LogInformation(
+            "FCaptcha assess: trust={TrustScore:F2}, allow={AllowTrustScore:F2}, puzzleRequired={PuzzleRequired}.",
+            verification.TrustScore,
+            fCaptchaVerifier.AllowTrustScore,
+            puzzleRequired);
         return new FCaptchaAssessmentDto(true, puzzleRequired);
     }
 

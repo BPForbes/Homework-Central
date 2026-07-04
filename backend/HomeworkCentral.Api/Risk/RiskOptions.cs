@@ -9,8 +9,8 @@ namespace HomeworkCentral.Api.Risk;
 /// The <c>Score</c> this engine evaluates is now FCaptcha's trust score (see
 /// <c>HomeworkCentral.Api.Captcha.FCaptcha.IFCaptchaVerifier</c>) rather than the old raw-telemetry
 /// heuristic, and — critically — this engine is only ever consulted when that score is BELOW
-/// <c>FCaptchaOptions.AllowTrustScore</c> (0.7 by default): anything at or above that threshold
-/// already passed without reaching here. So every threshold below is calibrated against the 0..0.7
+/// <c>FCaptchaOptions.AllowTrustScore</c> (0.65 by default): anything at or above that threshold
+/// already passed without reaching here. So every threshold below is calibrated against the 0..0.65
 /// range, not 0..1 — a base threshold anywhere near 0.7 would make the fallback path nearly
 /// impossible to clear even for a genuinely-solved puzzle.
 /// </summary>

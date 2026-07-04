@@ -36,9 +36,10 @@ public sealed class FCaptchaOptions
 
     /// <summary>Trust score (0..1, already normalized so higher = more human — see
     /// <c>IFCaptchaVerifier</c>) at or above which FCaptcha's own verdict is treated as sufficient
-    /// on its own, with no further in-house puzzle required. Mirrors FCaptcha's documented
-    /// "&lt; 0.3 raw score = Allow" band, inverted (1 - 0.3 = 0.7).</summary>
-    public double AllowTrustScore { get; set; } = 0.7;
+    /// on its own, with no further in-house puzzle required. FCaptcha's documented allow band is
+    /// raw score &lt; 0.3 (trust &gt; 0.7), but a direct checkbox click often scores ~0.35 on the
+    /// raw scale, so the default is 0.65 (puzzle only when raw &gt;= 0.35).</summary>
+    public double AllowTrustScore { get; set; } = 0.65;
 }
 
 /// <summary>Fails fast when FCaptcha is misconfigured — especially shipping dev defaults to
