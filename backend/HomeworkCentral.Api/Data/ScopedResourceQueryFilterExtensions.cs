@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace HomeworkCentral.Api.Data;
 
 /// <summary>
-/// Applies global query filters for every entity implementing <see cref="IScopedResource"/>,
-/// enforcing the same rules as <see cref="ResourceVisibilityScope.CanView"/>. The filter
+/// Applies global query filters for entities implementing <see cref="IScopedResource"/> or
+/// <see cref="IShareableScopedResource"/>. <see cref="IScopedResource"/> filters enforce the
+/// same rules as <see cref="ResourceVisibilityScope.CanView"/>. The filter
 /// predicate is built entirely from <see cref="AppDbContext"/>'s own scalar properties
 /// (<see cref="AppDbContext.ScopeIsAuthenticated"/> etc., resolved once per DbContext instance)
 /// and the entity's own columns — it deliberately never calls back into
@@ -19,23 +20,38 @@ public static class ScopedResourceQueryFilterExtensions
 {
     public static void ApplyScopedResourceFilters(this ModelBuilder modelBuilder, AppDbContext context)
     {
-        MethodInfo? setFilter = typeof(ScopedResourceQueryFilterExtensions)
-            .GetMethod(nameof(SetFilter), BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo? setScopedFilter = typeof(ScopedResourceQueryFilterExtensions)
+            .GetMethod(nameof(SetScopedResourceFilter), BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo? setShareableFilter = typeof(ScopedResourceQueryFilterExtensions)
+            .GetMethod(nameof(SetShareableScopedResourceFilter), BindingFlags.NonPublic | BindingFlags.Static);
 
-        if (setFilter is null)
+        if (setScopedFilter is null || setShareableFilter is null)
             return;
 
         foreach (Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType in modelBuilder.Model.GetEntityTypes())
         {
             Type clrType = entityType.ClrType;
-            if (!typeof(IScopedResource).IsAssignableFrom(clrType))
-                continue;
-
-            setFilter.MakeGenericMethod(clrType).Invoke(null, [modelBuilder, context]);
+            if (typeof(IScopedResource).IsAssignableFrom(clrType))
+                setScopedFilter.MakeGenericMethod(clrType).Invoke(null, [modelBuilder, context]);
+            else if (typeof(IShareableScopedResource).IsAssignableFrom(clrType))
+                setShareableFilter.MakeGenericMethod(clrType).Invoke(null, [modelBuilder, context]);
         }
     }
 
-    private static void SetFilter<TEntity>(ModelBuilder modelBuilder, AppDbContext context)
+    private static void SetShareableScopedResourceFilter<TEntity>(ModelBuilder modelBuilder, AppDbContext context)
+        where TEntity : class, IShareableScopedResource
+    {
+        // Real production accounts see only RealAccount traffic; all other account classes share
+        // developer/test chat history regardless of tenant database (see ChatMessage.cs).
+        modelBuilder.Entity<TEntity>().HasQueryFilter(entity =>
+            context.ScopeBypassFilters
+            || (context.ScopeIsAuthenticated
+                && ShareableResourceVisibilityScope.CanView(
+                    context.ScopeAccountClass,
+                    entity.OwnerAccountClass)));
+    }
+
+    private static void SetScopedResourceFilter<TEntity>(ModelBuilder modelBuilder, AppDbContext context)
         where TEntity : class, IScopedResource
     {
         // Mirrors ResourceVisibilityScope.CanView's switch, but expressed as a flat boolean so

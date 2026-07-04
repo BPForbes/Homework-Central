@@ -1,8 +1,9 @@
 namespace HomeworkCentral.Api.Authorization;
 
 /// <summary>
-/// Implemented by any entity/DTO subject to account-class and tenant scoping
-/// (chat messages, channels, notifications, presence, audit logs, etc.).
+/// Implemented by tenant-private entities subject to account-class and tenant scoping
+/// (notifications, presence, audit logs, etc.). Shared community resources such as chat messages
+/// use <see cref="IShareableScopedResource"/> instead.
 /// </summary>
 public interface IScopedResource
 {
