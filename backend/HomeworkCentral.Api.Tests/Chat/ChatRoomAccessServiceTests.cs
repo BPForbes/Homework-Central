@@ -129,13 +129,17 @@ public class ChatRoomAccessServiceTests
     }
 
     [Fact]
-    public void General_subject_bit_without_expertise_does_not_open_category()
+    public void General_subject_claim_opens_that_category_with_all_private_rooms()
     {
         EffectiveMaskDto masks = CreateMasks(generalSubjects: [GeneralSubjects.Science]);
 
         ChatNavDto nav = _service.GetAccessibleNav(masks);
 
-        Assert.DoesNotContain(nav.Categories, c => c.Key == SubjectMaskNames.Science);
+        ChatNavCategoryDto science = nav.Categories.Single(c => c.Key == SubjectMaskNames.Science);
+        Assert.Equal("Science", science.Name);
+        Assert.True(science.IsPrivateCategory);
+        Assert.True(science.Rooms.Count > 1);
+        Assert.All(science.Rooms, room => Assert.True(room.IsPrivate));
         Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
     }
 

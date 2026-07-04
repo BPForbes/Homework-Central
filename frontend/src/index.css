@@ -1255,25 +1255,8 @@ body {
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.tile-rotate-target {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #cbd5e1;
-  font-size: 1.1rem;
-  pointer-events: none;
-}
-
 .tile-rotate-current {
-  position: relative;
-  z-index: 1;
-}
-
-.tile-rotate-button.aligned .tile-rotate-target {
-  color: #86efac;
+  font-size: 1.25rem;
 }
 
 .tile-rotate-button:hover:not(:disabled) {

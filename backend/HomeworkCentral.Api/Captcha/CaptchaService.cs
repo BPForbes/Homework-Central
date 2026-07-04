@@ -182,7 +182,7 @@ public sealed class CaptchaService(
         return new CaptchaChallengeDto(
             challengeId,
             TileRotatePuzzleGenerator.TypeName,
-            "Rotate each arrow to match its faint target.",
+            "Rotate each arrow until they are all aligned.",
             null,
             null,
             tileRotate,

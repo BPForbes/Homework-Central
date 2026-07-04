@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faChevronDown, faChevronRight, faComments, faIdBadge, faTimes } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../../api/chatApi'
+import { useAuth } from '../../context/AuthContext'
 import { GET_ROLES_ROOM_ID } from '../../types/chat'
 import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
@@ -15,6 +16,7 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   const location = useLocation()
+  const { user } = useAuth()
   const [nav, setNav] = useState<ChatNav | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -48,7 +50,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [user?.generalSubjectMask, user?.subjectExpertiseMasks, user?.roleMask])
 
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
