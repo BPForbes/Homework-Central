@@ -1006,12 +1006,12 @@ body {
   z-index: 2;
 }
 
-/* Captcha widget (signup + dashboard verify) */
+/* Captcha widget (signup + dashboard verify) — label row + content only; no outer box so the
+ * FCaptcha checkbox is not wrapped inside another bordered panel. */
 .captcha {
-  border: 1.5px solid #d1d5db;
-  border-radius: 8px;
-  padding: 0.75rem;
-  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .captcha-label-row {
@@ -1021,7 +1021,6 @@ body {
   gap: 0.75rem;
   font-size: 0.9rem;
   color: #374151;
-  margin-bottom: 0.5rem;
 }
 
 .captcha-refresh {
@@ -1040,10 +1039,6 @@ body {
 }
 
 /* Mandatory "I'm not a robot" widget shown above every puzzle */
-.fcaptcha-widget {
-  margin-bottom: 0.75rem;
-}
-
 .fcaptcha-container {
   min-height: 2.5rem;
 }

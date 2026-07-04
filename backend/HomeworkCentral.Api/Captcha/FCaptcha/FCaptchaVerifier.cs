@@ -32,7 +32,7 @@ public sealed class FCaptchaVerifier(
         if (!result.IsValid)
         {
             logger.LogInformation(
-                "FCaptcha rejected a token as invalid ({Reason}).",
+                "FCaptcha locally rejected a token ({Reason}).",
                 result.Reason ?? "unknown");
             return Task.FromResult(new FCaptchaVerification(false, 0.0));
         }

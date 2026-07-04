@@ -110,6 +110,11 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
+if [[ "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
+  printf '==> Building API\n'
+  dotnet build "$API_PROJECT" -c Debug -v q
+fi
+
 set +e
 dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 api_status=$?

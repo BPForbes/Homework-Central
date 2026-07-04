@@ -117,6 +117,14 @@ try {
     $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
     if (Test-Path $errorLog) { Remove-Item $errorLog -Force }
 
+    if ($env:HC_SKIP_DOTNET_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        Write-Host '==> Building API' -ForegroundColor DarkGray
+        dotnet build $ApiProject -c Debug -v q
+        if ($LASTEXITCODE -ne 0) {
+            throw 'API build failed'
+        }
+    }
+
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
         Tee-Object -FilePath $errorLog
     $exitCode = $LASTEXITCODE
