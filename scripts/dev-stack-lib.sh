@@ -34,6 +34,7 @@ read_dev_env_file() {
   DEV_ENV_POSTGRES_PASSWORD=""
   DEV_ENV_POSTGRES_HOST_PORT="$DEV_STACK_POSTGRES_HOST_PORT"
   DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
+  DEV_ENV_FCAPTCHA_HOST_PORT_SET=0
 
   if [[ ! -f "$DEV_STACK_ENV_FILE" ]]; then
     return 0
@@ -53,7 +54,7 @@ read_dev_env_file() {
       FCAPTCHA_SECRET) DEV_ENV_FCAPTCHA_SECRET="$value" ;;
       POSTGRES_PASSWORD) DEV_ENV_POSTGRES_PASSWORD="$value" ;;
       POSTGRES_HOST_PORT) DEV_ENV_POSTGRES_HOST_PORT="$value" ;;
-      FCAPTCHA_HOST_PORT) DEV_ENV_FCAPTCHA_HOST_PORT="$value" ;;
+      FCAPTCHA_HOST_PORT) DEV_ENV_FCAPTCHA_HOST_PORT="$value"; DEV_ENV_FCAPTCHA_HOST_PORT_SET=1 ;;
     esac
   done <"$DEV_STACK_ENV_FILE"
 
@@ -113,7 +114,7 @@ ensure_dev_env_file() {
     updated=true
   fi
 
-  if [[ "$DEV_ENV_FCAPTCHA_HOST_PORT" != "$DEV_STACK_FCAPTCHA_HOST_PORT" && -z "$(grep -E '^FCAPTCHA_HOST_PORT=' "$DEV_STACK_ENV_FILE" || true)" ]]; then
+  if [[ "$DEV_ENV_FCAPTCHA_HOST_PORT_SET" != "1" ]]; then
     DEV_ENV_FCAPTCHA_HOST_PORT="$DEV_STACK_FCAPTCHA_HOST_PORT"
     set_dev_env_var "FCAPTCHA_HOST_PORT" "$DEV_ENV_FCAPTCHA_HOST_PORT"
     updated=true
@@ -144,6 +145,7 @@ ensure_dev_env_file() {
   [[ -n "$DEV_ENV_JWT_SECRET" ]] || { printf 'error: JWT_SECRET is not set in .env\n' >&2; return 1; }
   [[ ${#DEV_ENV_JWT_SECRET} -ge 32 ]] || { printf 'error: JWT_SECRET must be at least 32 characters\n' >&2; return 1; }
   [[ -n "$DEV_ENV_FCAPTCHA_SECRET" ]] || { printf 'error: FCAPTCHA_SECRET is not set in .env\n' >&2; return 1; }
+  [[ ${#DEV_ENV_FCAPTCHA_SECRET} -ge 32 ]] || { printf 'error: FCAPTCHA_SECRET must be at least 32 characters\n' >&2; return 1; }
   [[ -n "$DEV_ENV_POSTGRES_PASSWORD" ]] || { printf 'error: POSTGRES_PASSWORD is not set in .env\n' >&2; return 1; }
 
   export JWT_SECRET="$DEV_ENV_JWT_SECRET"

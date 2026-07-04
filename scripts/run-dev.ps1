@@ -540,7 +540,11 @@ function Start-DevStack([hashtable]$EnvValues) {
         Write-Host '  Postgres: localhost:' -NoNewline
         Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline
         Write-Host ' (Docker; stops when both terminals are closed)'
-        Write-Host "  FCaptcha: localhost:$($script:DevFCaptchaHostPort) (Docker; stops when both terminals are closed)"
+        $fcaptchaPort = $EnvValues['FCAPTCHA_HOST_PORT']
+        if ([string]::IsNullOrWhiteSpace($fcaptchaPort)) {
+            $fcaptchaPort = $script:DevFCaptchaHostPort
+        }
+        Write-Host "  FCaptcha: localhost:$fcaptchaPort (Docker; stops when both terminals are closed)"
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'

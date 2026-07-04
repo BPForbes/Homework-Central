@@ -79,6 +79,12 @@ public sealed class IdentityRiskProfileService(IMemoryCache cache, IOptions<Risk
             return cache.GetOrCreate(cacheKey, entry =>
             {
                 entry.SlidingExpiration = IdleExpiration;
+                entry.AbsoluteExpirationRelativeToNow = IdleExpiration;
+                entry.RegisterPostEvictionCallback(static (_, _, _, state) =>
+                {
+                    if (state is string identity)
+                        CreationLocks.TryRemove(identity, out _);
+                }, identity);
                 return new ProfileState();
             })!;
         }

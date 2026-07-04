@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -26,7 +27,7 @@ public sealed class FCaptchaVerifier(
     public Task<FCaptchaVerification> VerifyAsync(string? token, CancellationToken ct = default)
     {
         FCaptchaOptions opts = options.Value;
-        HashSet<string> usedSignatures = GetUsedSignatureSet();
+        ConcurrentDictionary<string, byte> usedSignatures = GetUsedSignatureSet();
         FCaptchaLocalVerificationResult result = FCaptchaTokenValidator.Verify(token ?? string.Empty, opts.Secret, usedSignatures);
 
         if (!result.IsValid)
@@ -44,12 +45,13 @@ public sealed class FCaptchaVerifier(
         return Task.FromResult(new FCaptchaVerification(true, trustScore));
     }
 
-    private HashSet<string> GetUsedSignatureSet()
+    private ConcurrentDictionary<string, byte> GetUsedSignatureSet()
     {
         return cache.GetOrCreate("fcaptcha:used-signatures", entry =>
         {
             entry.SlidingExpiration = UsedTokenLifetime;
-            return new HashSet<string>(StringComparer.Ordinal);
-        }) ?? new HashSet<string>(StringComparer.Ordinal);
+            entry.AbsoluteExpirationRelativeToNow = UsedTokenLifetime;
+            return new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        }) ?? new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
     }
 }

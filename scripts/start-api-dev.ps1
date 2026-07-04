@@ -26,52 +26,7 @@ $DevPostgresPassword = 'postgres'
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
-function Read-DevSecrets {
-    if (-not (Test-Path $EnvFile)) {
-        throw ".env not found at $EnvFile. Run scripts/run-dev.ps1 first."
-    }
-
-    $jwtSecret = ''
-    $fcaptchaSecret = ''
-    $pgPort = '5434'
-    $fcaptchaPort = $script:DevFCaptchaHostPort
-
-    foreach ($line in Get-Content $EnvFile) {
-        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
-        $name, $value = $line -split '=', 2
-        $name = $name.Trim()
-        switch ($name) {
-            'JWT_SECRET' { $jwtSecret = $value.Trim() }
-            'FCAPTCHA_SECRET' { $fcaptchaSecret = $value.Trim() }
-            'POSTGRES_HOST_PORT' {
-                if (-not [string]::IsNullOrWhiteSpace($value)) {
-                    $pgPort = $value.Trim()
-                }
-            }
-            'FCAPTCHA_HOST_PORT' {
-                if (-not [string]::IsNullOrWhiteSpace($value)) {
-                    $fcaptchaPort = $value.Trim()
-                }
-            }
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($jwtSecret)) {
-        throw 'JWT_SECRET is not set in .env'
-    }
-    if ([string]::IsNullOrWhiteSpace($fcaptchaSecret)) {
-        throw 'FCAPTCHA_SECRET is not set in .env'
-    }
-
-    return @{
-        JWT_SECRET = $jwtSecret
-        FCAPTCHA_SECRET = $fcaptchaSecret
-        POSTGRES_HOST_PORT = $pgPort
-        FCAPTCHA_HOST_PORT = $fcaptchaPort
-    }
-}
-
-$envValues = Read-DevSecrets
+$envValues = Ensure-DevEnvFile
 $connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 $adminConnectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 

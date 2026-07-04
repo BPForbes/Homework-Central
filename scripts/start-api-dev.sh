@@ -25,52 +25,14 @@ fail() {
   exit 1
 }
 
-trim_whitespace() {
-  local value="$1"
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  printf '%s' "$value"
-}
-
-read_env_secrets() {
-  [[ -f "$ENV_FILE" ]] || fail ".env not found at $ENV_FILE. Run scripts/run-dev.sh first."
-
-  JWT_SECRET=""
-  FCAPTCHA_SECRET=""
-  POSTGRES_HOST_PORT="5434"
-  FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|\#*) continue ;;
-    esac
-
-    local key="${line%%=*}"
-    local value="${line#*=}"
-    key="$(trim_whitespace "$key")"
-
-    case "$key" in
-      JWT_SECRET) JWT_SECRET="$value" ;;
-      FCAPTCHA_SECRET) FCAPTCHA_SECRET="$value" ;;
-      POSTGRES_HOST_PORT) POSTGRES_HOST_PORT="$value" ;;
-      FCAPTCHA_HOST_PORT) FCAPTCHA_HOST_PORT="$value" ;;
-    esac
-  done <"$ENV_FILE"
-
-  POSTGRES_HOST_PORT="$(trim_whitespace "$POSTGRES_HOST_PORT")"
-  [[ -n "$POSTGRES_HOST_PORT" ]] || POSTGRES_HOST_PORT="5434"
-  FCAPTCHA_HOST_PORT="$(trim_whitespace "$FCAPTCHA_HOST_PORT")"
-  [[ -n "$FCAPTCHA_HOST_PORT" ]] || FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
-  [[ -n "$JWT_SECRET" ]] || fail "JWT_SECRET is not set in .env"
-  [[ -n "$FCAPTCHA_SECRET" ]] || fail "FCAPTCHA_SECRET is not set in .env"
-}
-
-read_env_secrets
+ensure_dev_env_file 0 || fail "Failed to prepare .env"
+POSTGRES_HOST_PORT="$DEV_ENV_POSTGRES_HOST_PORT"
+FCAPTCHA_HOST_PORT="$DEV_ENV_FCAPTCHA_HOST_PORT"
 
 export ASPNETCORE_ENVIRONMENT=Development
 export ASPNETCORE_URLS=http://localhost:5000
-export Jwt__Secret="$JWT_SECRET"
-export FCaptcha__Secret="$FCAPTCHA_SECRET"
+export Jwt__Secret="$DEV_ENV_JWT_SECRET"
+export FCaptcha__Secret="$DEV_ENV_FCAPTCHA_SECRET"
 export FCaptcha__ServerUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 export FCaptcha__PublicUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.

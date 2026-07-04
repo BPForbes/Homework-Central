@@ -96,7 +96,6 @@ function Ensure-DevEnvFile {
         Copy-Item $exampleFile $script:DevStackEnvFile
     }
 
-    $lines = Get-Content $script:DevStackEnvFile
     $values = Read-DevEnvFile
     $updated = $false
 
@@ -125,27 +124,7 @@ function Ensure-DevEnvFile {
     }
 
     if ($updated) {
-        $newLines = @()
-        $seen = @{}
-        foreach ($line in $lines) {
-            if ($line -match '^\s*#' -or $line -notmatch '=') {
-                $newLines += $line
-                continue
-            }
-            $name = ($line -split '=', 2)[0].Trim()
-            if ($values.ContainsKey($name)) {
-                $newLines += "$name=$($values[$name])"
-                $seen[$name] = $true
-            } else {
-                $newLines += $line
-            }
-        }
-        foreach ($key in @('JWT_SECRET', 'FCAPTCHA_SECRET', 'POSTGRES_PASSWORD', 'POSTGRES_HOST_PORT', 'FCAPTCHA_HOST_PORT')) {
-            if (-not $seen.ContainsKey($key) -and $values.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($values[$key])) {
-                $newLines += "$key=$($values[$key])"
-            }
-        }
-        Set-Content -Path $script:DevStackEnvFile -Value $newLines
+        Update-DevEnvFileValues $values
         if ($RollFCaptchaSecret) {
             Write-Host '==> Rolled FCAPTCHA_SECRET in .env (local only, not committed)' -ForegroundColor DarkGray
         } else {
@@ -165,6 +144,9 @@ function Ensure-DevEnvFile {
     }
     if ([string]::IsNullOrWhiteSpace($values['FCAPTCHA_SECRET'])) {
         throw 'FCAPTCHA_SECRET is not set in .env'
+    }
+    if ($values['FCAPTCHA_SECRET'].Length -lt 32) {
+        throw 'FCAPTCHA_SECRET must be at least 32 characters'
     }
 
     return $values

@@ -49,7 +49,7 @@ public sealed class CaptchaService(
     public async Task<FCaptchaAssessmentDto> AssessFCaptchaAsync(string? token)
     {
         string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
-        FCaptchaVerification verification = await VerifyFCaptchaOnceAsync(token);
+        FCaptchaVerification verification = await VerifyFCaptchaForAssessAsync(token);
         if (!verification.Valid)
         {
             RecordFailure(identity, verification.TrustScore);
@@ -82,7 +82,7 @@ public sealed class CaptchaService(
         string identity = RequestIdentity.Resolve(httpContextAccessor.HttpContext);
         bool ipMatched = record.IssuerIp is null || string.Equals(record.IssuerIp, ResolveClientIp(), StringComparison.Ordinal);
 
-        FCaptchaVerification verification = await VerifyFCaptchaOnceAsync(submission.FCaptchaToken);
+        FCaptchaVerification verification = await VerifyFCaptchaForValidateAsync(submission.FCaptchaToken);
         if (!verification.Valid)
         {
             logger.LogInformation("Captcha {ChallengeId} rejected: FCaptcha token did not verify.", submission.ChallengeId);
@@ -132,7 +132,7 @@ public sealed class CaptchaService(
         return puzzleAssessment.Passed;
     }
 
-    private async Task<FCaptchaVerification> VerifyFCaptchaOnceAsync(string? token)
+    private async Task<FCaptchaVerification> VerifyFCaptchaForAssessAsync(string? token)
     {
         if (string.IsNullOrWhiteSpace(token))
             return new FCaptchaVerification(false, 0.0);
@@ -144,6 +144,21 @@ public sealed class CaptchaService(
         FCaptchaVerification verification = await fCaptchaVerifier.VerifyAsync(token);
         cache.Set(cacheKey, verification, TokenVerificationLifetime);
         return verification;
+    }
+
+    private async Task<FCaptchaVerification> VerifyFCaptchaForValidateAsync(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return new FCaptchaVerification(false, 0.0);
+
+        string cacheKey = TokenCacheKey(token);
+        if (cache.TryGetValue(cacheKey, out FCaptchaVerification? cached) && cached is not null)
+        {
+            cache.Remove(cacheKey);
+            return cached;
+        }
+
+        return await fCaptchaVerifier.VerifyAsync(token);
     }
 
     private void RecordFailure(string identity, double trustScore) =>

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -15,7 +16,7 @@ internal static class FCaptchaTokenValidator
 {
     private static readonly TimeSpan TokenLifetime = TimeSpan.FromMinutes(5);
 
-    public static FCaptchaLocalVerificationResult Verify(string token, string secret, ISet<string> usedSignatures)
+    public static FCaptchaLocalVerificationResult Verify(string token, string secret, ConcurrentDictionary<string, byte> usedSignatures)
     {
         if (string.IsNullOrWhiteSpace(token))
             return FCaptchaLocalVerificationResult.FromInvalid("empty_token");
@@ -72,16 +73,15 @@ internal static class FCaptchaTokenValidator
                 return FCaptchaLocalVerificationResult.FromInvalid("invalid_signature");
             }
 
-            if (usedSignatures.Contains(signature))
+            if (!usedSignatures.TryAdd(signature, 0))
                 return FCaptchaLocalVerificationResult.FromInvalid("token_already_used");
 
             if (!root.TryGetProperty("score", out JsonElement scoreElement)
                 || !scoreElement.TryGetDouble(out double score))
             {
+                usedSignatures.TryRemove(signature, out _);
                 return FCaptchaLocalVerificationResult.FromInvalid("missing_score");
             }
-
-            usedSignatures.Add(signature);
             return FCaptchaLocalVerificationResult.FromValid(score);
         }
     }

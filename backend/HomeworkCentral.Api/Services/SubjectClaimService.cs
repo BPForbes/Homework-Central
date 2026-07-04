@@ -80,13 +80,14 @@ public sealed class SubjectClaimService(
             if (alreadyClaimed)
                 return;
 
-            db.UserSubjects.Add(new UserSubject
+            UserSubject assignment = new UserSubject
             {
                 UserId = userId,
                 SubjectId = subject.SubjectId,
                 AssignedAt = DateTime.UtcNow,
                 AssignedBy = userId,
-            });
+            };
+            db.UserSubjects.Add(assignment);
 
             try
             {
@@ -94,6 +95,7 @@ public sealed class SubjectClaimService(
             }
             catch (DbUpdateException ex) when (IsDuplicateUserSubject(ex))
             {
+                db.Entry(assignment).State = EntityState.Detached;
                 return;
             }
 
@@ -121,7 +123,16 @@ public sealed class SubjectClaimService(
                 return;
 
             db.UserSubjects.Remove(assignment);
-            await db.SaveChangesAsync(ct);
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return;
+            }
+
             await EffectiveMaskService.RebuildOnContextAsync(db, userId, ct);
         }
         finally

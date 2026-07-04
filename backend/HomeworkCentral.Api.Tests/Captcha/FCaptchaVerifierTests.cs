@@ -76,6 +76,22 @@ public class FCaptchaVerifierTests
         Assert.Equal(0.9, verification.TrustScore, precision: 3);
     }
 
+    [Fact]
+    public async Task Concurrent_replay_of_the_same_token_is_rejected()
+    {
+        string token = CreateToken(Secret, siteKey: "homework-central-dev", rawScore: 0.2, ip: "127.0.0.1:12345");
+        FCaptchaVerifier verifier = CreateVerifier();
+
+        Task<FCaptchaVerification>[] tasks = Enumerable.Range(0, 8)
+            .Select(_ => verifier.VerifyAsync(token))
+            .ToArray();
+
+        FCaptchaVerification[] results = await Task.WhenAll(tasks);
+
+        Assert.Equal(1, results.Count(static r => r.Valid));
+        Assert.Equal(7, results.Count(static r => !r.Valid));
+    }
+
     private static FCaptchaVerifier CreateVerifier()
     {
         IMemoryCache cache = new MemoryCache(new MemoryCacheOptions());
