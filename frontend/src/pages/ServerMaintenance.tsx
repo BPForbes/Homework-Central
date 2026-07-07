@@ -120,17 +120,26 @@ export function ServerMaintenance() {
     }
   }
 
+  function buildAccessRulesPayload(): CustomChannelAccessRuleInput[] {
+    return accessRules.map((rule) => {
+      if (rule.customRoleId) return { customRoleId: rule.customRoleId }
+      if (rule.platformRoleBit != null) return { platformRoleBit: rule.platformRoleBit }
+      return {}
+    })
+  }
+
   function buildPayload(password?: string): Record<string, unknown> {
-    return {
+    const payload: Record<string, unknown> = {
       displayName,
       iconName,
       categoryKey: categoryKey || 'Custom',
       categoryDisplayName: categoryDisplayName || 'Custom',
       isPrivate,
-      infoContent: roomType === 'Info' ? infoContent : undefined,
-      accessRules,
-      password,
+      accessRules: isPrivate ? buildAccessRulesPayload() : [],
     }
+    if (roomType === 'Info') payload.infoContent = infoContent
+    if (password) payload.password = password
+    return payload
   }
 
   async function submitPayload(payload: { mode: 'create' | 'update'; body: Record<string, unknown>; channelId?: string }) {
@@ -303,8 +312,9 @@ export function ServerMaintenance() {
             </>
           )}
 
+          {isPrivate && (
           <fieldset className="access-rules-fieldset">
-            <legend>Access roles {isPrivate ? '(required when private)' : '(optional)'}</legend>
+            <legend>Access roles (required)</legend>
             <div className="access-rule-add">
               <select value={selectedCustomRoleId} onChange={(e) => setSelectedCustomRoleId(e.target.value)}>
                 <option value="">Custom role…</option>
@@ -333,6 +343,7 @@ export function ServerMaintenance() {
               ))}
             </ul>
           </fieldset>
+          )}
 
           <div className="infra-list-actions">
             <button type="submit" className="btn-primary" disabled={saving}>

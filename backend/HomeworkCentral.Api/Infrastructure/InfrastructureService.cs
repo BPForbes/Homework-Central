@@ -403,6 +403,10 @@ public sealed class InfrastructureService(
             channel.CategoryDisplayName = categoryDisplayName;
         }
         bool wasPrivate = channel.IsPrivate;
+        bool targetPrivate = request.IsPrivate ?? wasPrivate;
+        bool becomingPublic = wasPrivate && !targetPrivate;
+        bool becomingPrivate = !wasPrivate && targetPrivate;
+
         if (request.IsPrivate.HasValue)
             channel.IsPrivate = request.IsPrivate.Value;
         if (request.InfoContent is not null)
@@ -416,29 +420,40 @@ public sealed class InfrastructureService(
         if (request.TiePlatformRoleBit.HasValue)
             channel.TiePlatformRoleBit = request.TiePlatformRoleBit;
 
-        bool becomingPublic = request.IsPrivate.HasValue && wasPrivate && !channel.IsPrivate;
-        bool becomingPrivate = request.IsPrivate.HasValue && !wasPrivate && channel.IsPrivate;
-
         if (becomingPublic)
         {
             db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
             channel.AccessRules.Clear();
         }
-        else if (request.AccessRules is not null)
+        else if (targetPrivate && (becomingPrivate || request.AccessRules is not null))
+        {
+            IReadOnlyList<CustomChannelAccessRuleInput> rules = request.AccessRules ?? [];
+            if (rules.Count == 0)
+            {
+                throw new InvalidOperationException("Private rooms must specify at least one access role.");
+            }
+
+            db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
+            channel.AccessRules.Clear();
+            await ApplyAccessRulesAsync(
+                channel,
+                rules,
+                isPrivate: true,
+                request.Password,
+                actorUserId,
+                ct);
+        }
+        else if (!targetPrivate && request.AccessRules is { Count: > 0 })
         {
             db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
             channel.AccessRules.Clear();
             await ApplyAccessRulesAsync(
                 channel,
                 request.AccessRules,
-                channel.IsPrivate,
+                isPrivate: false,
                 request.Password,
                 actorUserId,
                 ct);
-        }
-        else if (becomingPrivate)
-        {
-            throw new InvalidOperationException("Private rooms must specify at least one access role.");
         }
 
         if (channel.RoomType == CustomRoomType.RoleClaim
