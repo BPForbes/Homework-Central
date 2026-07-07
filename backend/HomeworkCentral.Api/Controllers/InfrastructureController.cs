@@ -208,6 +208,41 @@ public class InfrastructureController(IInfrastructureService infrastructure) : C
         return Ok(warning ?? new ModerationRiskWarningDto { RequiresPassword = false });
     }
 
+    [HttpGet("users/search")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<IReadOnlyList<InfrastructureUserLookupDto>>> SearchUsers(
+        [FromQuery] string q,
+        CancellationToken ct) =>
+        Ok(await infrastructure.SearchUsersAsync(q, ct));
+
+    [HttpGet("users/{userId:guid}")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<InfrastructureUserLookupDto>> GetUser(Guid userId, CancellationToken ct)
+    {
+        InfrastructureUserLookupDto? user = await infrastructure.GetUserWithCustomRolesAsync(userId, ct);
+        return user is null ? NotFound() : Ok(user);
+    }
+
+    [HttpPost("users/{userId:guid}/roles/{roleId:guid}")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<IActionResult> AssignRoleToUser(Guid userId, Guid roleId, CancellationToken ct)
+    {
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        bool assigned = await infrastructure.AdminAssignCustomRoleAsync(actorId.Value, userId, roleId, ct);
+        return assigned ? NoContent() : NotFound();
+    }
+
+    [HttpDelete("users/{userId:guid}/roles/{roleId:guid}")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<IActionResult> RevokeRoleFromUser(Guid userId, Guid roleId, CancellationToken ct)
+    {
+        bool removed = await infrastructure.AdminRevokeCustomRoleAsync(userId, roleId, ct);
+        return removed ? NoContent() : NotFound();
+    }
+
     private Guid? GetUserId()
     {
         string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value

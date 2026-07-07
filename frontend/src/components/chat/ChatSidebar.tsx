@@ -56,7 +56,7 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   onCloseRef.current = onClose
 
   useEffect(() => {
-    if (location.pathname.startsWith('/chat/') || location.pathname === '/get-roles')
+    if (location.pathname.startsWith('/chat/'))
       onCloseRef.current()
   }, [location.pathname])
 
@@ -148,19 +148,21 @@ function CategorySection({
       {expanded && (
         <ul className="chat-room-list">
           {category.rooms.map((room) => {
-            const isGetRoles = room.id === GET_ROLES_ROOM_ID
-            const baseIcon = isGetRoles
-              ? faIdBadge
-              : isStaff
-                ? getStaffRoomIcon(room.name)
-                : isGeneral
-                  ? getCategoryIcon('General')
-                  : getRoomIcon(room.name, category.key)
+            const baseIcon =
+              room.roomType === 'Info'
+                ? getCategoryIcon('General')
+                : room.roomType === 'RoleClaim' || room.id === GET_ROLES_ROOM_ID
+                  ? faIdBadge
+                  : isStaff
+                    ? getStaffRoomIcon(room.name)
+                    : isGeneral
+                      ? getCategoryIcon('General')
+                      : getRoomIcon(room.name, category.key)
 
             return (
             <li key={room.id}>
               <NavLink
-                to={isGetRoles ? '/get-roles' : `/chat/${encodeURIComponent(room.id)}`}
+                to={`/chat/${encodeURIComponent(room.id)}`}
                 className={({ isActive }) => `chat-room-link ${isActive ? 'active' : ''}`}
                 tabIndex={tabIndex}
               >

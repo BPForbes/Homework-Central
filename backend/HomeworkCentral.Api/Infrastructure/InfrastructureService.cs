@@ -29,6 +29,11 @@ public interface IInfrastructureService
 
     Task<CustomChannelDto?> GetChannelForUserAsync(Guid userId, string roomId, CancellationToken ct = default);
     Task<ModerationRiskWarningDto?> PreviewAccessRuleRiskAsync(Guid customRoleId, bool isPublicRoom, CancellationToken ct = default);
+
+    Task<IReadOnlyList<InfrastructureUserLookupDto>> SearchUsersAsync(string query, CancellationToken ct = default);
+    Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, CancellationToken ct = default);
+    Task<bool> AdminAssignCustomRoleAsync(Guid actorUserId, Guid targetUserId, Guid roleId, CancellationToken ct = default);
+    Task<bool> AdminRevokeCustomRoleAsync(Guid targetUserId, Guid roleId, CancellationToken ct = default);
 }
 
 public sealed class InfrastructureService(
@@ -36,7 +41,8 @@ public sealed class InfrastructureService(
     IRoleMaskService roleMaskService,
     IEffectiveMaskService effectiveMaskService,
     ICustomChannelStore channelStore,
-    IPasswordConfirmationService passwordConfirmation) : IInfrastructureService
+    IPasswordConfirmationService passwordConfirmation,
+    IChatRoomAccessService chatRoomAccess) : IInfrastructureService
 {
     private const int InfoRoomAdminEditDays = 3;
 
@@ -116,6 +122,25 @@ public sealed class InfrastructureService(
 
         if (role is null)
             return null;
+
+        if (request.Name is not null)
+        {
+            string name = request.Name.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidOperationException("Role name is required.");
+
+            if (AuthorizationCatalog.RolesByName.ContainsKey(name)
+                || PlatformRoleCatalog.TryGetRoleBit(name, out _))
+            {
+                throw new InvalidOperationException("That role name conflicts with a built-in platform role.");
+            }
+
+            bool nameTaken = await db.Roles.AnyAsync(r => r.Name == name && r.RoleId != roleId, ct);
+            if (nameTaken)
+                throw new InvalidOperationException("A role with that name already exists.");
+
+            role.Name = name;
+        }
 
         if (request.Description is not null)
             role.Description = request.Description.Trim();
@@ -307,13 +332,10 @@ public sealed class InfrastructureService(
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
 
-        if (request.InfoContent is not null || channel.RoomType == CustomRoomType.Info)
+        if (request.InfoContent is not null && !CanEditInfoRoom(mask, channel))
         {
-            if (!CanEditInfoRoom(mask, channel))
-            {
-                throw new InvalidOperationException(
-                    "You cannot edit this info room. Administrators may only edit info rooms within three days of creation; Owner and System Administrator can always edit.");
-            }
+            throw new InvalidOperationException(
+                "You cannot edit this info room. Administrators may only edit info rooms within three days of creation; Owner and System Administrator can always edit.");
         }
 
         if (request.DisplayName is not null)
@@ -389,6 +411,10 @@ public sealed class InfrastructureService(
         string roomId,
         CancellationToken ct = default)
     {
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+        if (!chatRoomAccess.CanAccessRoom(masks, roomId))
+            return [];
+
         List<Role> roles = await db.Roles
             .AsNoTracking()
             .Where(r => r.IsCustom && r.ClaimHostRoomId == roomId)
@@ -414,6 +440,10 @@ public sealed class InfrastructureService(
 
     public async Task<bool> ClaimCustomRoleAsync(Guid userId, Guid roleId, string roomId, CancellationToken ct = default)
     {
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+        if (!chatRoomAccess.CanAccessRoom(masks, roomId))
+            return false;
+
         Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
         if (role is null || !string.Equals(role.ClaimHostRoomId, roomId, StringComparison.Ordinal))
             return false;
@@ -451,6 +481,10 @@ public sealed class InfrastructureService(
 
     public async Task<CustomChannelDto?> GetChannelForUserAsync(Guid userId, string roomId, CancellationToken ct = default)
     {
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+        if (!chatRoomAccess.CanAccessRoom(masks, roomId))
+            return null;
+
         CustomChannel? channel = await db.CustomChannels
             .AsNoTracking()
             .Include(c => c.AccessRules)
@@ -482,6 +516,106 @@ public sealed class InfrastructureService(
         {
             RequiresPassword = true,
             RiskyPermissions = ModerationRiskPermissions.GetHighRiskPermissionNames(role),
+        };
+    }
+
+    public async Task<IReadOnlyList<InfrastructureUserLookupDto>> SearchUsersAsync(string query, CancellationToken ct = default)
+    {
+        string term = query.Trim();
+        if (term.Length < 2)
+            return [];
+
+        string pattern = $"%{term}%";
+        List<User> users = await db.Users
+            .AsNoTracking()
+            .Where(u => EF.Functions.ILike(u.Username, pattern) || EF.Functions.ILike(u.Email, pattern))
+            .OrderBy(u => u.Username)
+            .Take(20)
+            .ToListAsync(ct);
+
+        List<InfrastructureUserLookupDto> results = new();
+        foreach (User user in users)
+            results.Add(await BuildUserLookupAsync(user, ct));
+
+        return results;
+    }
+
+    public async Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, CancellationToken ct = default)
+    {
+        User? user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == userId, ct);
+        return user is null ? null : await BuildUserLookupAsync(user, ct);
+    }
+
+    public async Task<bool> AdminAssignCustomRoleAsync(
+        Guid actorUserId,
+        Guid targetUserId,
+        Guid roleId,
+        CancellationToken ct = default)
+    {
+        Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
+        if (role is null)
+            return false;
+
+        User? target = await db.Users.FirstOrDefaultAsync(u => u.UserId == targetUserId, ct);
+        if (target is null)
+            return false;
+
+        bool already = await db.UserRoles.AnyAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
+        if (already)
+            return true;
+
+        db.UserRoles.Add(new UserRole
+        {
+            UserId = targetUserId,
+            RoleId = roleId,
+            AssignedBy = actorUserId,
+            AssignedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(ct);
+        await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+        return true;
+    }
+
+    public async Task<bool> AdminRevokeCustomRoleAsync(Guid targetUserId, Guid roleId, CancellationToken ct = default)
+    {
+        UserRole? assignment = await db.UserRoles
+            .FirstOrDefaultAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
+        if (assignment is null)
+            return false;
+
+        Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
+        if (role is null)
+            return false;
+
+        db.UserRoles.Remove(assignment);
+        await db.SaveChangesAsync(ct);
+        await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+        return true;
+    }
+
+    private async Task<InfrastructureUserLookupDto> BuildUserLookupAsync(User user, CancellationToken ct)
+    {
+        List<Guid> customRoleIds = await db.UserRoles
+            .AsNoTracking()
+            .Where(ur => ur.UserId == user.UserId)
+            .Join(db.Roles.Where(r => r.IsCustom), ur => ur.RoleId, r => r.RoleId, (_, r) => r.RoleId)
+            .ToListAsync(ct);
+
+        List<Role> customRoles = customRoleIds.Count == 0
+            ? []
+            : await db.Roles
+                .AsNoTracking()
+                .Include(r => r.RolePermissions)
+                .Where(r => customRoleIds.Contains(r.RoleId))
+                .OrderBy(r => r.Name)
+                .ToListAsync(ct);
+
+        return new InfrastructureUserLookupDto
+        {
+            UserId = user.UserId,
+            Username = user.Username,
+            Email = user.Email,
+            CustomRoles = customRoles.Select(MapRole).ToList(),
         };
     }
 

@@ -712,6 +712,67 @@ body {
   font-size: 1rem;
 }
 
+.user-lookup-form {
+  max-width: 36rem;
+}
+
+.user-lookup-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.user-lookup-row input {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.user-lookup-results {
+  list-style: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.user-lookup-result {
+  width: 100%;
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  border: none;
+  background: #fff;
+  cursor: pointer;
+}
+
+.user-lookup-result:hover {
+  background: #f1f5f9;
+}
+
+.user-lookup-selected {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.user-lookup-selected h4 {
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0.35rem;
+}
+
+.get-roles-hint {
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.get-roles-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
 .chat-menu-toggle {
   display: inline-flex;
   align-items: center;

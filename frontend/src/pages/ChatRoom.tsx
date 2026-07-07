@@ -3,40 +3,49 @@ import { Link, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../api/chatApi'
-import { infrastructureApi } from '../api/infrastructureApi'
-import type { ChatNavRoom } from '../types/chat'
+import type { ChatRoomDetail } from '../types/chat'
 import { useAuth } from '../context/AuthContext'
-import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from '../constants/permissions'
 import { useChatRoom } from '../hooks/useChatRoom'
 import { ChatComposer } from '../components/chat/ChatComposer'
 import { ChatMessageList } from '../components/chat/ChatMessageList'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
-import { CustomInfoRoomPanel, CustomRoleClaimPanel } from '../components/infrastructure/CustomRoomPanels'
+import {
+  CustomInfoRoomPanel,
+  CustomRoleClaimPanel,
+} from '../components/infrastructure/CustomRoomPanels'
+import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
-import type { CustomChannel } from '../types/infrastructure'
 
-function resolveRoomIcon(room: ChatNavRoom, categoryKey: string): ReturnType<typeof getCategoryIcon> {
-  if (categoryKey === 'Staff')
+function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
+  if (room.categoryKey === 'Staff')
     return getStaffRoomIcon(room.name)
-  if (categoryKey === 'General')
+  if (room.categoryKey === 'General' || room.categoryKind === 'Custom')
     return getCategoryIcon('General')
-  if (categoryKey === 'Custom')
-    return getCategoryIcon('General')
-  return getRoomIcon(room.name, categoryKey)
+  return getRoomIcon(room.name, room.categoryKey)
+}
+
+function navTitleForRoomType(roomType: string): string {
+  switch (roomType) {
+    case 'Info':
+      return 'Info'
+    case 'RoleClaim':
+    case 'GetRoles':
+      return 'Role Claim'
+    default:
+      return 'Chat'
+  }
 }
 
 export function ChatRoom() {
   const { roomId } = useParams<{ roomId: string }>()
   const decodedRoomId = roomId ? decodeURIComponent(roomId) : ''
-  const { user, hasPermission } = useAuth()
-  const [room, setRoom] = useState<ChatNavRoom | null>(null)
-  const [categoryKey, setCategoryKey] = useState<string>('General')
-  const [categoryName, setCategoryName] = useState<string>('General')
+  const { user } = useAuth()
+  const [room, setRoom] = useState<ChatRoomDetail | null>(null)
   const [roomLoading, setRoomLoading] = useState(true)
-  const [customChannel, setCustomChannel] = useState<CustomChannel | null>(null)
+  const [accessDenied, setAccessDenied] = useState(false)
 
-  const roomType = room?.roomType ?? customChannel?.roomType ?? 'Chat'
+  const roomType = room?.roomType ?? 'Chat'
   const isChatRoom = roomType === 'Chat'
 
   const {
@@ -53,63 +62,28 @@ export function ChatRoom() {
   useEffect(() => {
     let cancelled = false
     setRoom(null)
-    setCustomChannel(null)
     setRoomLoading(true)
+    setAccessDenied(false)
 
-    const load = async () => {
-      try {
-        const { data } = await chatApi.getNav()
-        if (cancelled)
-          return
-
-        for (const category of data.categories) {
-          const match = category.rooms.find((r) => r.id === decodedRoomId)
-          if (match) {
-            setRoom(match)
-            setCategoryKey(category.key)
-            setCategoryName(category.name)
-            if (match.roomType && match.roomType !== 'Chat') {
-              try {
-                const channelRes = await infrastructureApi.getChannelByRoom(decodedRoomId)
-                if (!cancelled) setCustomChannel(channelRes.data)
-              } catch {
-                // Info/claim metadata optional if nav already identified type.
-              }
-            }
-            return
-          }
-        }
-
-        if (decodedRoomId.startsWith('custom:')) {
-          try {
-            const channelRes = await infrastructureApi.getChannelByRoom(decodedRoomId)
-            if (cancelled) return
-            const ch = channelRes.data
-            setCustomChannel(ch)
-            setRoom({
-              id: ch.roomId,
-              name: ch.displayName,
-              isPrivate: ch.isPrivate,
-              categoryKey: ch.categoryKey,
-              categoryKind: 'Custom',
-              roomType: ch.roomType,
-            })
-            setCategoryKey(ch.categoryKey)
-            setCategoryName(ch.categoryDisplayName)
-          } catch {
-            if (!cancelled) setRoom(null)
-          }
-        }
-      } catch {
-        if (!cancelled)
+    void chatApi
+      .getRoom(decodedRoomId)
+      .then(({ data }) => {
+        if (!cancelled) setRoom(data)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          const status =
+            typeof err === 'object' && err !== null && 'response' in err
+              ? (err as { response?: { status?: number } }).response?.status
+              : undefined
+          setAccessDenied(status === 403)
           setRoom(null)
-      } finally {
-        if (!cancelled)
-          setRoomLoading(false)
-      }
-    }
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRoomLoading(false)
+      })
 
-    void load()
     return () => {
       cancelled = true
     }
@@ -126,7 +100,9 @@ export function ChatRoom() {
   if (!room) {
     return (
       <div className="chat-room-page">
-        <p className="chat-room-error">This room is not available.</p>
+        <p className="chat-room-error">
+          {accessDenied ? 'You do not have access to this room.' : 'This room is not available.'}
+        </p>
         <Link to="/dashboard" className="chat-room-back">
           <FontAwesomeIcon icon={faArrowLeft} /> Back to dashboard
         </Link>
@@ -134,19 +110,14 @@ export function ChatRoom() {
     )
   }
 
-  const icon = resolveRoomIcon(room, categoryKey)
+  const icon = resolveRoomIcon(room)
   const subtitle = room.isPrivate
-    ? `${categoryName} · private · ${roomType}`
-    : `${categoryName} · public · ${roomType}`
-
-  const navTitle =
-    roomType === 'Info' ? 'Info' : roomType === 'RoleClaim' ? 'Role Claim' : 'Chat'
-
-  const canManageInfo = hasPermission(MANAGE_SERVER_INFRASTRUCTURE_BIT)
+    ? `${room.categoryDisplayName} · private · ${roomType}`
+    : `${room.categoryDisplayName} · public · ${roomType}`
 
   return (
     <div className="chat-room-page chat-room-page--active">
-      <ServerMaintenanceNav title={navTitle} />
+      <ServerMaintenanceNav title={navTitleForRoomType(roomType)} />
 
       <header className="chat-room-header">
         <Link to="/dashboard" className="chat-room-header-back" aria-label="Back to dashboard" title="Back to dashboard">
@@ -162,10 +133,18 @@ export function ChatRoom() {
       </header>
 
       {roomType === 'Info' && (
-        <CustomInfoRoomPanel roomId={decodedRoomId} canEdit={canManageInfo} />
+        <CustomInfoRoomPanel
+          room={room}
+          onUpdated={(content) => setRoom((prev) => (prev ? { ...prev, infoContent: content } : prev))}
+        />
       )}
 
-      {roomType === 'RoleClaim' && <CustomRoleClaimPanel roomId={decodedRoomId} />}
+      {(roomType === 'RoleClaim' || roomType === 'GetRoles') &&
+        (roomType === 'GetRoles' ? (
+          <GetRolesPanel roomId={decodedRoomId} />
+        ) : (
+          <CustomRoleClaimPanel roomId={decodedRoomId} />
+        ))}
 
       {isChatRoom && (
         <>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { infrastructureApi } from '../api/infrastructureApi'
@@ -21,12 +21,20 @@ const ROOM_TYPES: { value: CustomRoomType; label: string }[] = [
   { value: 'RoleClaim', label: 'Role claim page' },
 ]
 
+function rulesFromChannel(channel: CustomChannel): CustomChannelAccessRuleInput[] {
+  return channel.accessRules.map((r) => ({
+    customRoleId: r.customRoleId ?? undefined,
+    platformRoleBit: r.platformRoleBit ?? undefined,
+  }))
+}
+
 export function ServerMaintenance() {
   const [channels, setChannels] = useState<CustomChannel[]>([])
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([])
   const [navCategories, setNavCategories] = useState<ChatNavCategory[]>([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const [displayName, setDisplayName] = useState('')
   const [categoryKey, setCategoryKey] = useState('')
@@ -40,9 +48,9 @@ export function ServerMaintenance() {
 
   const [riskModalOpen, setRiskModalOpen] = useState(false)
   const [riskPermissions, setRiskPermissions] = useState<string[]>([])
-  const [pendingCreate, setPendingCreate] = useState<Record<string, unknown> | null>(null)
+  const [pendingPayload, setPendingPayload] = useState<{ mode: 'create' | 'update'; body: Record<string, unknown>; channelId?: string } | null>(null)
 
-  const load = useCallback(async () => {
+  const load = async () => {
     try {
       const [channelsRes, rolesRes, navRes] = await Promise.all([
         infrastructureApi.listChannels(),
@@ -55,11 +63,33 @@ export function ServerMaintenance() {
     } catch {
       setError('Could not load server configuration.')
     }
-  }, [])
+  }
 
   useEffect(() => {
     void load()
-  }, [load])
+  }, [])
+
+  function resetForm() {
+    setEditingId(null)
+    setDisplayName('')
+    setCategoryKey('')
+    setCategoryDisplayName('')
+    setRoomType('Chat')
+    setIsPrivate(false)
+    setInfoContent('')
+    setAccessRules([])
+  }
+
+  function startEdit(channel: CustomChannel) {
+    setEditingId(channel.channelId)
+    setDisplayName(channel.displayName)
+    setCategoryKey(channel.categoryKey)
+    setCategoryDisplayName(channel.categoryDisplayName)
+    setRoomType(channel.roomType)
+    setIsPrivate(channel.isPrivate)
+    setInfoContent(channel.infoContent ?? '')
+    setAccessRules(rulesFromChannel(channel))
+  }
 
   function pickCategory(key: string) {
     const cat = navCategories.find((c) => c.key === key)
@@ -76,75 +106,77 @@ export function ServerMaintenance() {
       return
     }
     if (selectedPlatformBit) {
-      setAccessRules((prev) => [
-        ...prev,
-        { platformRoleBit: Number(selectedPlatformBit) },
-      ])
+      setAccessRules((prev) => [...prev, { platformRoleBit: Number(selectedPlatformBit) }])
       setSelectedPlatformBit('')
     }
   }
 
-  function buildCreatePayload(password?: string): Record<string, unknown> {
+  function buildPayload(password?: string): Record<string, unknown> {
     return {
       displayName,
       categoryKey: categoryKey || 'Custom',
       categoryDisplayName: categoryDisplayName || 'Custom',
-      roomType,
       isPrivate,
       infoContent: roomType === 'Info' ? infoContent : undefined,
-      tieType: 'None',
-      accessRules: isPrivate ? accessRules : accessRules,
+      accessRules,
       password,
     }
   }
 
-  async function submitCreate(payload: Record<string, unknown>) {
+  async function submitPayload(payload: { mode: 'create' | 'update'; body: Record<string, unknown>; channelId?: string }) {
     setSaving(true)
     setError('')
     try {
-      await infrastructureApi.createChannel(payload)
-      setDisplayName('')
-      setInfoContent('')
-      setAccessRules([])
-      setIsPrivate(false)
+      if (payload.mode === 'create') {
+        await infrastructureApi.createChannel({ ...payload.body, roomType, tieType: 'None' })
+      } else if (payload.channelId) {
+        await infrastructureApi.updateChannel(payload.channelId, payload.body)
+      }
+      resetForm()
       await load()
     } catch (err: unknown) {
-      setError(extractMessage(err) ?? 'Could not create room.')
+      setError(extractMessage(err) ?? 'Could not save room.')
     } finally {
       setSaving(false)
-      setPendingCreate(null)
+      setPendingPayload(null)
       setRiskModalOpen(false)
     }
   }
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
+  async function maybeConfirmAndSubmit(mode: 'create' | 'update', channelId?: string) {
     if (isPrivate && accessRules.length === 0) {
       setError('Private rooms need at least one access role.')
       return
     }
 
-    const payload = buildCreatePayload()
+    const body = buildPayload()
     if (!isPrivate && accessRules.some((r) => r.customRoleId)) {
       for (const rule of accessRules) {
         if (!rule.customRoleId) continue
         const { data } = await infrastructureApi.previewAccessRisk(rule.customRoleId, true)
         if (data.requiresPassword) {
           setRiskPermissions(data.riskyPermissions)
-          setPendingCreate(payload)
+          setPendingPayload({ mode, body, channelId })
           setRiskModalOpen(true)
           return
         }
       }
     }
 
-    await submitCreate(payload)
+    await submitPayload({ mode, body, channelId })
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (editingId) await maybeConfirmAndSubmit('update', editingId)
+    else await maybeConfirmAndSubmit('create')
   }
 
   async function handleArchive(channelId: string) {
     if (!window.confirm('Archive this room?')) return
     try {
       await infrastructureApi.archiveChannel(channelId)
+      if (editingId === channelId) resetForm()
       await load()
     } catch {
       setError('Could not archive room.')
@@ -162,8 +194,8 @@ export function ServerMaintenance() {
         <div>
           <h2>Server Maintenance</h2>
           <p className="server-page-subtitle">
-            Create custom chat, info, or role-claim rooms. Public or private; private rooms require
-            role access. Info rooms follow edit rules for Administrators vs Owner/System Admin.
+            Create or update custom chat, info, and role-claim rooms. All room types are opened via{' '}
+            <code>/chat/&#123;roomId&#125;</code> in the sidebar.
           </p>
         </div>
       </header>
@@ -171,38 +203,41 @@ export function ServerMaintenance() {
       {error && <p className="error">{error}</p>}
 
       <section className="server-page-card">
-        <h3>Create room</h3>
-        <form className="server-stub-form server-form-wide" onSubmit={handleCreate}>
+        <h3>{editingId ? 'Edit room' : 'Create room'}</h3>
+        <form className="server-stub-form server-form-wide" onSubmit={handleSubmit}>
           <label htmlFor="room-name">Room name</label>
-          <input
-            id="room-name"
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            required
-          />
+          <input id="room-name" type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
 
-          <label htmlFor="room-type">Room type</label>
-          <select id="room-type" value={roomType} onChange={(e) => setRoomType(e.target.value as CustomRoomType)}>
-            {ROOM_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
+          {!editingId && (
+            <>
+              <label htmlFor="room-type">Room type</label>
+              <select id="room-type" value={roomType} onChange={(e) => setRoomType(e.target.value as CustomRoomType)}>
+                {ROOM_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </>
+          )}
+          {editingId && <p className="infra-meta">Room type: {roomType} (cannot change after creation)</p>}
 
-          <label htmlFor="room-category">Category (existing or new)</label>
+          <label htmlFor="room-category">Category</label>
           <select id="room-category" value={categoryKey} onChange={(e) => pickCategory(e.target.value)}>
             <option value="">Custom category…</option>
             {navCategories.map((cat) => (
-              <option key={cat.key} value={cat.key}>
-                {cat.name}
-              </option>
+              <option key={cat.key} value={cat.key}>{cat.name}</option>
             ))}
           </select>
+          <label htmlFor="custom-cat-name">Category display name</label>
+          <input
+            id="custom-cat-name"
+            type="text"
+            value={categoryDisplayName}
+            onChange={(e) => setCategoryDisplayName(e.target.value)}
+            placeholder="e.g. Mathematics"
+          />
           {!categoryKey && (
             <>
-              <label htmlFor="custom-cat-key">New category key</label>
+              <label htmlFor="custom-cat-key">Category key</label>
               <input
                 id="custom-cat-key"
                 type="text"
@@ -210,86 +245,60 @@ export function ServerMaintenance() {
                 onChange={(e) => setCategoryKey(e.target.value)}
                 placeholder="e.g. Mathematics"
               />
-              <label htmlFor="custom-cat-name">New category display name</label>
-              <input
-                id="custom-cat-name"
-                type="text"
-                value={categoryDisplayName}
-                onChange={(e) => setCategoryDisplayName(e.target.value)}
-                placeholder="e.g. Mathematics"
-              />
             </>
           )}
 
           <label htmlFor="room-private">
-            <input
-              id="room-private"
-              type="checkbox"
-              checked={isPrivate}
-              onChange={(e) => setIsPrivate(e.target.checked)}
-            />
+            <input id="room-private" type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
             Private room (role-gated access)
           </label>
 
           {roomType === 'Info' && (
             <>
               <label htmlFor="info-content">Info content</label>
-              <textarea
-                id="info-content"
-                rows={5}
-                value={infoContent}
-                onChange={(e) => setInfoContent(e.target.value)}
-                placeholder="Rules, welcome text, etc."
-              />
+              <textarea id="info-content" rows={5} value={infoContent} onChange={(e) => setInfoContent(e.target.value)} />
             </>
           )}
 
-          {(isPrivate || accessRules.length > 0) && (
-            <fieldset className="access-rules-fieldset">
-              <legend>Access roles {isPrivate ? '(required)' : '(optional)'}</legend>
-              <div className="access-rule-add">
-                <select value={selectedCustomRoleId} onChange={(e) => setSelectedCustomRoleId(e.target.value)}>
-                  <option value="">Custom role…</option>
-                  {customRoles.map((r) => (
-                    <option key={r.roleId} value={r.roleId}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-                <select value={selectedPlatformBit} onChange={(e) => setSelectedPlatformBit(e.target.value)}>
-                  <option value="">Platform role…</option>
-                  {PLATFORM_ROLES.map((r) => (
-                    <option key={r.bit} value={r.bit}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="btn-secondary" onClick={addAccessRule}>
-                  Add
-                </button>
-              </div>
-              <ul className="access-rule-list">
-                {accessRules.map((rule, idx) => (
-                  <li key={idx}>
-                    {rule.customRoleId
-                      ? customRoles.find((r) => r.roleId === rule.customRoleId)?.name ?? rule.customRoleId
-                      : PLATFORM_ROLES.find((r) => r.bit === rule.platformRoleBit)?.name}
-                    <button
-                      type="button"
-                      className="btn-link"
-                      onClick={() => setAccessRules((prev) => prev.filter((_, i) => i !== idx))}
-                    >
-                      Remove
-                    </button>
-                  </li>
+          <fieldset className="access-rules-fieldset">
+            <legend>Access roles {isPrivate ? '(required when private)' : '(optional)'}</legend>
+            <div className="access-rule-add">
+              <select value={selectedCustomRoleId} onChange={(e) => setSelectedCustomRoleId(e.target.value)}>
+                <option value="">Custom role…</option>
+                {customRoles.map((r) => (
+                  <option key={r.roleId} value={r.roleId}>{r.name}</option>
                 ))}
-              </ul>
-            </fieldset>
-          )}
+              </select>
+              <select value={selectedPlatformBit} onChange={(e) => setSelectedPlatformBit(e.target.value)}>
+                <option value="">Platform role…</option>
+                {PLATFORM_ROLES.map((r) => (
+                  <option key={r.bit} value={r.bit}>{r.name}</option>
+                ))}
+              </select>
+              <button type="button" className="btn-secondary" onClick={addAccessRule}>Add</button>
+            </div>
+            <ul className="access-rule-list">
+              {accessRules.map((rule, idx) => (
+                <li key={idx}>
+                  {rule.customRoleId
+                    ? customRoles.find((r) => r.roleId === rule.customRoleId)?.name ?? rule.customRoleId
+                    : PLATFORM_ROLES.find((r) => r.bit === rule.platformRoleBit)?.name}
+                  <button type="button" className="btn-link" onClick={() => setAccessRules((prev) => prev.filter((_, i) => i !== idx))}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </fieldset>
 
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? 'Creating…' : 'Create room'}
-          </button>
+          <div className="infra-list-actions">
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create room'}
+            </button>
+            {editingId && (
+              <button type="button" className="btn-secondary" onClick={resetForm}>Cancel edit</button>
+            )}
+          </div>
         </form>
       </section>
 
@@ -302,17 +311,14 @@ export function ServerMaintenance() {
               <div>
                 <strong>{channel.displayName}</strong>
                 <p className="infra-meta">
-                  {channel.roomType} · {channel.categoryDisplayName} ·{' '}
-                  {channel.isPrivate ? 'Private' : 'Public'}
+                  {channel.roomType} · {channel.categoryDisplayName} · {channel.isPrivate ? 'Private' : 'Public'}
                 </p>
+                <p className="infra-meta"><code>{channel.roomId}</code></p>
               </div>
               <div className="infra-list-actions">
-                <Link to={`/chat/${encodeURIComponent(channel.roomId)}`} className="btn-secondary">
-                  Open
-                </Link>
-                <button type="button" className="btn-secondary" onClick={() => void handleArchive(channel.channelId)}>
-                  Archive
-                </button>
+                <Link to={`/chat/${encodeURIComponent(channel.roomId)}`} className="btn-secondary">Open</Link>
+                <button type="button" className="btn-secondary" onClick={() => startEdit(channel)}>Edit</button>
+                <button type="button" className="btn-secondary" onClick={() => void handleArchive(channel.channelId)}>Archive</button>
               </div>
             </li>
           ))}
@@ -322,12 +328,9 @@ export function ServerMaintenance() {
       <ModerationRiskModal
         open={riskModalOpen}
         riskyPermissions={riskPermissions}
-        onCancel={() => {
-          setRiskModalOpen(false)
-          setPendingCreate(null)
-        }}
+        onCancel={() => { setRiskModalOpen(false); setPendingPayload(null) }}
         onConfirm={async (password) => {
-          if (pendingCreate) await submitCreate({ ...pendingCreate, password })
+          if (pendingPayload) await submitPayload({ ...pendingPayload, body: { ...pendingPayload.body, password } })
         }}
       />
     </div>

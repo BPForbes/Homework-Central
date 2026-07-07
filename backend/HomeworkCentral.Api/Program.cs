@@ -82,6 +82,7 @@ builder.Services.AddSingleton<IIdentityRiskProfileService, IdentityRiskProfileSe
 builder.Services.AddSingleton<IRiskEngine, RiskEngine>();
 builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
+builder.Services.AddScoped<IChatRoomDetailService, ChatRoomDetailService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
 builder.Services.AddSingleton<ICustomChannelStore, CustomChannelStore>();
 builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();

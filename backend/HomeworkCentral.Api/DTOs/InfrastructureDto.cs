@@ -19,6 +19,7 @@ public class CreateCustomRoleRequest
 
 public class UpdateCustomRoleRequest
 {
+    public string? Name { get; set; }
     public string? Description { get; set; }
     public List<short>? PermissionIds { get; set; }
 }
@@ -111,4 +112,17 @@ public class ModerationRiskWarningDto
 {
     public bool RequiresPassword { get; set; }
     public List<string> RiskyPermissions { get; set; } = [];
+}
+
+public class InfrastructureUserLookupDto
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = null!;
+    public string Email { get; set; } = null!;
+    public List<CustomRoleDto> CustomRoles { get; set; } = [];
+}
+
+public class AssignCustomRoleRequest
+{
+    public string? Password { get; set; }
 }

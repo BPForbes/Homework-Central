@@ -91,4 +91,10 @@ export const PLATFORM_ROLES: { bit: number; name: string }[] = [
 
 export const GET_ROLES_ROOM_ID = 'general:get-roles'
 
-export const HIGH_RISK_PERMISSION_IDS = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 18, 20])
+export interface InfrastructureUserLookup {
+  userId: string
+  username: string
+  email: string
+  customRoles: CustomRole[]
+}
+

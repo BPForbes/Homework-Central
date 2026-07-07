@@ -4,6 +4,7 @@ import type {
   CustomChannel,
   CustomChannelAccessRuleInput,
   CustomRole,
+  InfrastructureUserLookup,
   ModerationRiskWarning,
 } from '../types/infrastructure'
 
@@ -19,7 +20,7 @@ export const infrastructureApi = {
   listRoles: () => api.get<CustomRole[]>('/roles'),
   createRole: (body: { name: string; description?: string; permissionIds: number[] }) =>
     api.post<CustomRole>('/roles', body),
-  updateRole: (roleId: string, body: { description?: string; permissionIds?: number[] }) =>
+  updateRole: (roleId: string, body: { name?: string; description?: string; permissionIds?: number[] }) =>
     api.put<CustomRole>(`/roles/${roleId}`, body),
   setRolePlacement: (roleId: string, body: { claimHostRoomId?: string | null; password?: string }) =>
     api.put(`/roles/${roleId}/placement`, body),
@@ -42,6 +43,14 @@ export const infrastructureApi = {
   claimRole: (roleId: string, roomId: string) =>
     api.post(`/roles/${roleId}/claim`, null, { params: { roomId } }),
   unclaimRole: (roleId: string) => api.delete(`/roles/${roleId}/claim`),
+
+  searchUsers: (q: string) =>
+    api.get<InfrastructureUserLookup[]>('/users/search', { params: { q } }),
+  getUser: (userId: string) => api.get<InfrastructureUserLookup>(`/users/${userId}`),
+  assignRoleToUser: (userId: string, roleId: string) =>
+    api.post(`/users/${userId}/roles/${roleId}`),
+  revokeRoleFromUser: (userId: string, roleId: string) =>
+    api.delete(`/users/${userId}/roles/${roleId}`),
 }
 
 export type { CustomChannelAccessRuleInput }

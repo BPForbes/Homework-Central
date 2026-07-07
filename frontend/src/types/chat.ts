@@ -1,5 +1,4 @@
-/** Matches ChatRoomBlueprint.GetRolesRoomId on the backend. Not a chat room — the sidebar routes
- * this id to the /get-roles page instead of the chat message UI. */
+/** Matches ChatRoomBlueprint.GetRolesRoomId on the backend. Not a chat room — routed via /chat. */
 export const GET_ROLES_ROOM_ID = 'general:get-roles'
 
 export interface ChatNavRoom {
@@ -21,6 +20,19 @@ export interface ChatNavCategory {
 
 export interface ChatNav {
   categories: ChatNavCategory[]
+}
+
+export interface ChatRoomDetail {
+  id: string
+  name: string
+  categoryKey: string
+  categoryDisplayName: string
+  categoryKind: string
+  isPrivate: boolean
+  roomType: string
+  infoContent?: string | null
+  canEditInfo: boolean
+  customChannelId?: string | null
 }
 
 export interface ChatMessage {

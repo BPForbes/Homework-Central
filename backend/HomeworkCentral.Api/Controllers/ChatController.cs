@@ -16,7 +16,8 @@ namespace HomeworkCentral.Api.Controllers;
 public class ChatController(
     IChatRoomAccessService chatRoomAccess,
     IEffectiveMaskService effectiveMaskService,
-    IChatMessageService chatMessageService) : ControllerBase
+    IChatMessageService chatMessageService,
+    IChatRoomDetailService chatRoomDetailService) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
     [HttpGet("nav")]
@@ -31,6 +32,24 @@ public class ChatController(
 
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
         return Ok(chatRoomAccess.GetAccessibleNav(masks));
+    }
+
+    /// <summary>Returns room metadata for catalog and custom rooms (chat, info, role claim).</summary>
+    [HttpGet("rooms/{roomId}")]
+    public async Task<ActionResult<ChatRoomDetailDto>> GetRoom(string roomId, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        string decodedRoomId = Uri.UnescapeDataString(roomId);
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
+
+        if (!chatRoomAccess.CanAccessRoom(masks, decodedRoomId))
+            return Forbid();
+
+        ChatRoomDetailDto? room = await chatRoomDetailService.GetRoomAsync(decodedRoomId, masks, ct);
+        return room is null ? NotFound() : Ok(room);
     }
 
     /// <summary>Returns recent messages for a chat room.</summary>

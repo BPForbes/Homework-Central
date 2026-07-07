@@ -3,37 +3,31 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../../api/infrastructureApi'
 import { useAuth } from '../../context/AuthContext'
-import type { ClaimableCustomRole, CustomChannel } from '../../types/infrastructure'
+import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from '../../constants/permissions'
+import type { ClaimableCustomRole } from '../../types/infrastructure'
+import type { ChatRoomDetail } from '../../types/chat'
 
 interface CustomInfoRoomPanelProps {
-  roomId: string
-  canEdit: boolean
+  room: ChatRoomDetail
+  onUpdated: (content: string) => void
 }
 
-export function CustomInfoRoomPanel({ roomId, canEdit }: CustomInfoRoomPanelProps) {
-  const [channel, setChannel] = useState<CustomChannel | null>(null)
-  const [content, setContent] = useState('')
+export function CustomInfoRoomPanel({ room, onUpdated }: CustomInfoRoomPanelProps) {
+  const { hasPermission } = useAuth()
+  const [content, setContent] = useState(room.infoContent ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    void infrastructureApi
-      .getChannelByRoom(roomId)
-      .then(({ data }) => {
-        setChannel(data)
-        setContent(data.infoContent ?? '')
-      })
-      .catch(() => setError('Could not load info page.'))
-  }, [roomId])
+  const canEdit = hasPermission(MANAGE_SERVER_INFRASTRUCTURE_BIT) && room.canEditInfo
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    if (!channel) return
+    if (!room.customChannelId) return
     setSaving(true)
     setError('')
     try {
-      const { data } = await infrastructureApi.updateChannel(channel.channelId, { infoContent: content })
-      setChannel(data)
+      const { data } = await infrastructureApi.updateChannel(room.customChannelId, { infoContent: content })
+      onUpdated(data.infoContent ?? '')
     } catch (err: unknown) {
       const msg =
         typeof err === 'object' && err !== null && 'response' in err
@@ -45,12 +39,9 @@ export function CustomInfoRoomPanel({ roomId, canEdit }: CustomInfoRoomPanelProp
     }
   }
 
-  if (error && !channel) return <p className="chat-room-error">{error}</p>
-  if (!channel) return <p className="chat-room-status">Loading info…</p>
-
   return (
     <div className="custom-info-panel">
-      {canEdit && channel.canEditInfo ? (
+      {canEdit ? (
         <form onSubmit={handleSave}>
           <textarea
             className="custom-info-editor"
@@ -64,9 +55,9 @@ export function CustomInfoRoomPanel({ roomId, canEdit }: CustomInfoRoomPanelProp
           </button>
         </form>
       ) : (
-        <div className="custom-info-content">{channel.infoContent || 'No content yet.'}</div>
+        <div className="custom-info-content">{room.infoContent || 'No content yet.'}</div>
       )}
-      {!channel.canEditInfo && canEdit && (
+      {hasPermission(MANAGE_SERVER_INFRASTRUCTURE_BIT) && !room.canEditInfo && (
         <p className="dashboard-hint">
           This info room is older than three days. Only Owner or System Administrator can edit it now.
         </p>
@@ -75,11 +66,7 @@ export function CustomInfoRoomPanel({ roomId, canEdit }: CustomInfoRoomPanelProp
   )
 }
 
-interface CustomRoleClaimPanelProps {
-  roomId: string
-}
-
-export function CustomRoleClaimPanel({ roomId }: CustomRoleClaimPanelProps) {
+export function CustomRoleClaimPanel({ roomId }: { roomId: string }) {
   const { refreshUser } = useAuth()
   const [roles, setRoles] = useState<ClaimableCustomRole[]>([])
   const [error, setError] = useState('')
@@ -102,11 +89,8 @@ export function CustomRoleClaimPanel({ roomId }: CustomRoleClaimPanelProps) {
     setPending(role.roleId)
     setError('')
     try {
-      if (role.claimed) {
-        await infrastructureApi.unclaimRole(role.roleId)
-      } else {
-        await infrastructureApi.claimRole(role.roleId, roomId)
-      }
+      if (role.claimed) await infrastructureApi.unclaimRole(role.roleId)
+      else await infrastructureApi.claimRole(role.roleId, roomId)
       await load()
       try {
         await refreshUser()
@@ -123,7 +107,9 @@ export function CustomRoleClaimPanel({ roomId }: CustomRoleClaimPanelProps) {
   return (
     <div className="custom-role-claim-panel">
       {error && <p className="error">{error}</p>}
-      {roles.length === 0 && <p className="chat-room-status">No custom roles are hosted on this claim page yet.</p>}
+      {roles.length === 0 && (
+        <p className="chat-room-status">No custom roles are hosted on this claim page yet.</p>
+      )}
       <div className="get-roles-grid">
         {roles.map((role) => (
           <button
