@@ -679,7 +679,7 @@ public sealed class InfrastructureService(
         if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             return [];
 
-        short actorLevel = await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+        short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
         IReadOnlyList<(User User, string? TenantDatabaseName)> users =
             await userDirectory.ListUsersForAssignmentAsync(ct);
 
@@ -720,7 +720,7 @@ public sealed class InfrastructureService(
         if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             throw new InvalidOperationException("That role is not available in your account scope.");
 
-        short actorLevel = await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+        short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
         int assigned = 0;
 
         foreach (BulkAssignUserTarget target in request.Users)
@@ -783,7 +783,7 @@ public sealed class InfrastructureService(
                 .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
                 .FirstAsync(u => u.UserId == targetUserId, ct);
 
-            short actorLevel = await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+            short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
             short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(target);
             if (!PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel))
                 return false;
@@ -891,6 +891,32 @@ public sealed class InfrastructureService(
         }
     }
 
+    private async Task<short> GetActorGrantLevelAsync(
+        Guid actorUserId,
+        AccessScope scope,
+        CancellationToken ct)
+    {
+        if (scope.AccountClass == AccountClass.DevAdmin)
+            return PlatformRoles.Owner;
+
+        return await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+    }
+
+    private static async Task<Guid?> ResolveAssignedByForTargetDbAsync(
+        AppDbContext targetDb,
+        Guid? actorUserId,
+        CancellationToken ct)
+    {
+        if (actorUserId is null)
+            return null;
+
+        bool actorExistsInTargetDb = await targetDb.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.UserId == actorUserId, ct);
+
+        return actorExistsInTargetDb ? actorUserId : null;
+    }
+
     private async Task<bool> AssignCustomRoleOnDbAsync(
         AppDbContext targetDb,
         Guid? actorUserId,
@@ -907,11 +933,13 @@ public sealed class InfrastructureService(
         if (already)
             return true;
 
+        Guid? assignedBy = await ResolveAssignedByForTargetDbAsync(targetDb, actorUserId, ct);
+
         targetDb.UserRoles.Add(new UserRole
         {
             UserId = targetUserId,
             RoleId = role.RoleId,
-            AssignedBy = actorUserId,
+            AssignedBy = assignedBy,
             AssignedAt = DateTime.UtcNow,
         });
         await targetDb.SaveChangesAsync(ct);

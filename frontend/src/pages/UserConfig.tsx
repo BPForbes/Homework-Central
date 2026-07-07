@@ -17,10 +17,25 @@ import {
 
 type ViewMode = 'form' | 'assign'
 
+function userSelectionKey(user: AssignableUser): string {
+  return `${user.userId}:${user.tenantDatabaseName ?? 'master'}`
+}
+
+interface DialogState {
+  title: string
+  message: string
+  actions: Array<{
+    label: string
+    variant: 'primary' | 'secondary'
+    onClick: () => void
+    disabled?: boolean
+  }>
+}
+
 export function UserConfig() {
   const [roles, setRoles] = useState<CustomRole[]>([])
   const [channels, setChannels] = useState<CustomChannel[]>([])
-  const [error, setError] = useState('')
+  const [dialog, setDialog] = useState<DialogState | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [iconName, setIconName] = useState('fas:id-badge')
@@ -33,9 +48,32 @@ export function UserConfig() {
   const [viewMode, setViewMode] = useState<ViewMode>('form')
   const [assignRole, setAssignRole] = useState<CustomRole | null>(null)
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([])
-  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set())
+  const [selectedUserKeys, setSelectedUserKeys] = useState<Set<string>>(new Set())
   const [assignLoading, setAssignLoading] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmAssignOpen, setConfirmAssignOpen] = useState(false)
+
+  const showError = useCallback((message: string) => {
+    setDialog({
+      title: 'Something went wrong',
+      message,
+      actions: [{ label: 'OK', variant: 'primary', onClick: () => setDialog(null) }],
+    })
+  }, [])
+
+  const showInfo = useCallback((title: string, message: string, onClose?: () => void) => {
+    setDialog({
+      title,
+      message,
+      actions: [{
+        label: 'OK',
+        variant: 'primary',
+        onClick: () => {
+          setDialog(null)
+          onClose?.()
+        },
+      }],
+    })
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -46,9 +84,9 @@ export function UserConfig() {
       setRoles(rolesRes.data)
       setChannels(channelsRes.data.filter((c: CustomChannel) => c.roomType === 'RoleClaim'))
     } catch {
-      setError('Could not load custom roles.')
+      showError('Could not load custom roles.')
     }
-  }, [])
+  }, [showError])
 
   useEffect(() => {
     void load()
@@ -69,8 +107,8 @@ export function UserConfig() {
     setViewMode('form')
     setAssignRole(null)
     setAssignableUsers([])
-    setSelectedUserIds(new Set())
-    setConfirmOpen(false)
+    setSelectedUserKeys(new Set())
+    setConfirmAssignOpen(false)
   }
 
   function startEditRole(role: CustomRole) {
@@ -84,18 +122,26 @@ export function UserConfig() {
   }
 
   async function openAssignFlow(role: CustomRole) {
-    setError('')
+    setDialog(null)
     setAssignLoading(true)
     setAssignRole(role)
     setViewMode('assign')
-    setSelectedUserIds(new Set())
+    setSelectedUserKeys(new Set())
     try {
       const { data } = await infrastructureApi.listAssignableUsers(role.roleId)
       setAssignableUsers(data)
-    } catch {
-      setError('Could not load users for assignment.')
-      setViewMode('form')
-      setAssignRole(null)
+      const selectable = data.filter((user) => user.canAssign && !user.alreadyAssigned)
+      if (selectable.length === 0) {
+        setViewMode('form')
+        setAssignRole(null)
+        showInfo(
+          'No eligible users',
+          'No users are available for assignment right now. You can only assign to users whose highest platform role is below yours.',
+        )
+      }
+    } catch (err: unknown) {
+      showError(axiosMessage(err) ?? 'Could not load users for assignment.')
+      resetRoleForm()
     } finally {
       setAssignLoading(false)
     }
@@ -104,7 +150,7 @@ export function UserConfig() {
   async function handleSaveRole(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    setError('')
+    setDialog(null)
     try {
       const payload = {
         name,
@@ -127,65 +173,100 @@ export function UserConfig() {
         setPermissionIds([])
       }
     } catch (err: unknown) {
-      setError(axiosMessage(err) ?? 'Could not save that role.')
+      showError(axiosMessage(err) ?? 'Could not save that role.')
     } finally {
       setSaving(false)
     }
   }
 
   async function savePlacement(roleId: string) {
-    setError('')
+    setDialog(null)
     try {
       await infrastructureApi.setRolePlacement(roleId, { claimHostRoomId: placementRoomId || null })
       setPlacementRoleId(null)
       setPlacementRoomId('')
       await load()
     } catch (err: unknown) {
-      setError(axiosMessage(err) ?? 'Could not assign role to a claim room.')
+      showError(axiosMessage(err) ?? 'Could not assign role to a claim room.')
     }
   }
 
+  function openDeleteConfirm(role: CustomRole) {
+    setDialog({
+      title: 'Delete custom role',
+      message: `Delete the role “${role.name}”? This cannot be undone.`,
+      actions: [
+        {
+          label: 'No',
+          variant: 'secondary',
+          onClick: () => setDialog(null),
+        },
+        {
+          label: 'Yes',
+          variant: 'primary',
+          onClick: () => void handleDelete(role.roleId),
+        },
+      ],
+    })
+  }
+
   async function handleDelete(roleId: string) {
-    if (!window.confirm('Delete this custom role?')) return
+    setDialog(null)
     try {
       await infrastructureApi.deleteRole(roleId)
       if (editingRoleId === roleId || assignRole?.roleId === roleId) resetRoleForm()
       await load()
     } catch {
-      setError('Could not delete that role.')
+      showError('Could not delete that role.')
     }
   }
 
-  function toggleUserSelection(userId: string) {
-    setSelectedUserIds((prev) => {
+  function toggleUserSelection(key: string) {
+    setSelectedUserKeys((prev) => {
       const next = new Set(prev)
-      if (next.has(userId)) next.delete(userId)
-      else next.add(userId)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
   async function confirmAssignments() {
-    if (!assignRole || selectedUserIds.size === 0) return
+    if (!assignRole || selectedUserKeys.size === 0) return
     setAssignLoading(true)
-    setError('')
+    setConfirmAssignOpen(false)
+    setDialog(null)
     try {
       const users = assignableUsers
-        .filter((user) => selectedUserIds.has(user.userId))
+        .filter((user) => selectedUserKeys.has(userSelectionKey(user)))
         .map((user) => ({
           userId: user.userId,
           tenantDatabaseName: user.tenantDatabaseName ?? undefined,
         }))
 
-      await infrastructureApi.bulkAssignRole(assignRole.roleId, users)
-      setConfirmOpen(false)
-      resetRoleForm()
-      await load()
+      const { data } = await infrastructureApi.bulkAssignRole(assignRole.roleId, users)
+      showInfo(
+        'Roles assigned',
+        `Assigned “${assignRole.name}” to ${data.assigned} user${data.assigned === 1 ? '' : 's'}.`,
+        () => {
+          resetRoleForm()
+          void load()
+        },
+      )
     } catch (err: unknown) {
-      setError(axiosMessage(err) ?? 'Could not assign the selected roles.')
+      showError(axiosMessage(err) ?? 'Could not assign the selected roles.')
     } finally {
       setAssignLoading(false)
     }
+  }
+
+  function openPlacementModal(role: CustomRole) {
+    setPlacementRoleId(role.roleId)
+    setPlacementRoomId(role.claimHostRoomId ?? '')
+  }
+
+  function closePlacementModal() {
+    setPlacementRoleId(null)
+    setPlacementRoomId('')
   }
 
   const claimRoomOptions = [
@@ -194,6 +275,7 @@ export function UserConfig() {
   ]
 
   const selectableUsers = assignableUsers.filter((user) => user.canAssign && !user.alreadyAssigned)
+  const placementRole = placementRoleId ? roles.find((role) => role.roleId === placementRoleId) ?? null : null
 
   return (
     <div className="server-page">
@@ -211,8 +293,6 @@ export function UserConfig() {
         </div>
       </header>
 
-      {error && <p className="error">{error}</p>}
-
       {viewMode === 'assign' && assignRole && (
         <section className="server-page-card">
           <h3>Assign “{assignRole.name}”</h3>
@@ -222,66 +302,48 @@ export function UserConfig() {
 
           {assignLoading && <p className="chat-sidebar-status">Loading users…</p>}
 
-          {!assignLoading && selectableUsers.length === 0 && (
-            <p className="infra-meta">No eligible users are available for assignment right now.</p>
-          )}
-
           {!assignLoading && selectableUsers.length > 0 && (
-            <ul className="assignable-user-list">
-              {selectableUsers.map((user) => (
-                <li key={`${user.userId}:${user.tenantDatabaseName ?? 'master'}`}>
-                  <label className="assignable-user-row">
-                    <input
-                      type="checkbox"
-                      checked={selectedUserIds.has(user.userId)}
-                      onChange={() => toggleUserSelection(user.userId)}
-                    />
-                    <span>
-                      <strong>{user.username}</strong>
-                      <span className="infra-meta">
-                        {' '}
-                        · {user.highestPlatformRoleName}
-                        {user.tenantDatabaseName ? ` · ${user.tenantDatabaseName}` : ''}
-                      </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
+            <div className="assignable-user-scroll">
+              <ul className="assignable-user-list">
+                {selectableUsers.map((user) => {
+                  const key = userSelectionKey(user)
+                  return (
+                    <li key={key}>
+                      <label className="assignable-user-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedUserKeys.has(key)}
+                          onChange={() => toggleUserSelection(key)}
+                        />
+                        <span>
+                          <strong>{user.username}</strong>
+                          <span className="infra-meta">
+                            {' '}
+                            · {user.highestPlatformRoleName}
+                            {user.tenantDatabaseName ? ` · ${user.tenantDatabaseName}` : ''}
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
           )}
 
           <div className="infra-list-actions">
             <button
               type="button"
               className="btn-primary"
-              disabled={selectedUserIds.size === 0 || assignLoading}
-              onClick={() => setConfirmOpen(true)}
+              disabled={selectedUserKeys.size === 0 || assignLoading}
+              onClick={() => setConfirmAssignOpen(true)}
             >
-              Confirm selection ({selectedUserIds.size})
+              Confirm selection ({selectedUserKeys.size})
             </button>
             <button type="button" className="btn-secondary" onClick={resetRoleForm}>
               Back to roles
             </button>
           </div>
-
-          {confirmOpen && (
-            <div className="confirm-modal-backdrop" role="presentation">
-              <div className="confirm-modal" role="dialog" aria-modal="true">
-                <p>
-                  Assign <strong>{assignRole.name}</strong> to {selectedUserIds.size} user
-                  {selectedUserIds.size === 1 ? '' : 's'}?
-                </p>
-                <div className="infra-list-actions">
-                  <button type="button" className="btn-primary" disabled={assignLoading} onClick={() => void confirmAssignments()}>
-                    Yes
-                  </button>
-                  <button type="button" className="btn-secondary" onClick={() => setConfirmOpen(false)}>
-                    No
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </section>
       )}
 
@@ -354,26 +416,118 @@ export function UserConfig() {
               <div className="infra-list-actions">
                 <button type="button" className="btn-secondary" onClick={() => startEditRole(role)}>Edit</button>
                 <button type="button" className="btn-secondary" onClick={() => void openAssignFlow(role)}>Assign users</button>
-                <button type="button" className="btn-secondary" onClick={() => { setPlacementRoleId(role.roleId); setPlacementRoomId(role.claimHostRoomId ?? '') }}>
+                <button type="button" className="btn-secondary" onClick={() => openPlacementModal(role)}>
                   Set claim room
                 </button>
-                <button type="button" className="btn-secondary" onClick={() => void handleDelete(role.roleId)}>Delete</button>
+                <button type="button" className="btn-secondary" onClick={() => openDeleteConfirm(role)}>Delete</button>
               </div>
-              {placementRoleId === role.roleId && (
-                <div className="infra-inline-form">
-                  <select value={placementRoomId} onChange={(e) => setPlacementRoomId(e.target.value)}>
-                    <option value="">Not on any claim page</option>
-                    {claimRoomOptions.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
-                  </select>
-                  <button type="button" className="btn-primary" onClick={() => void savePlacement(role.roleId)}>Save placement</button>
-                </div>
-              )}
             </li>
           ))}
         </ul>
       </section>
+
+      {confirmAssignOpen && assignRole && (
+        <div className="confirm-modal-backdrop" role="presentation" onClick={() => setConfirmAssignOpen(false)}>
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-assign-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 id="confirm-assign-title" className="confirm-modal-title">Confirm assignment</h4>
+            <p>
+              Assign <strong>{assignRole.name}</strong> to {selectedUserKeys.size} user
+              {selectedUserKeys.size === 1 ? '' : 's'}?
+            </p>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="btn-secondary confirm-modal-button"
+                disabled={assignLoading}
+                onClick={() => setConfirmAssignOpen(false)}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="btn-primary confirm-modal-button"
+                disabled={assignLoading}
+                onClick={() => void confirmAssignments()}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {placementRole && (
+        <div className="confirm-modal-backdrop" role="presentation" onClick={closePlacementModal}>
+          <div
+            className="confirm-modal confirm-modal-wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="placement-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 id="placement-modal-title" className="confirm-modal-title">Set claim room</h4>
+            <p className="server-page-subtitle">
+              Choose where users can claim “{placementRole.name}”.
+            </p>
+            <select
+              className="confirm-modal-select"
+              value={placementRoomId}
+              onChange={(e) => setPlacementRoomId(e.target.value)}
+            >
+              <option value="">Not on any claim page</option>
+              {claimRoomOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+            <div className="confirm-modal-actions">
+              <button type="button" className="btn-secondary confirm-modal-button" onClick={closePlacementModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary confirm-modal-button"
+                onClick={() => void savePlacement(placementRole.roleId)}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dialog && (
+        <div className="confirm-modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 id="dialog-title" className="confirm-modal-title">{dialog.title}</h4>
+            <p>{dialog.message}</p>
+            <div className={`confirm-modal-actions ${dialog.actions.length > 1 ? '' : 'confirm-modal-actions-single'}`}>
+              {dialog.actions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  className={`${action.variant === 'primary' ? 'btn-primary' : 'btn-secondary'} confirm-modal-button`}
+                  disabled={action.disabled}
+                  onClick={action.onClick}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
