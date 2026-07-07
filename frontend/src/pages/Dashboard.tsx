@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faComments, faShieldHalved } from '@fortawesome/free-solid-svg-icons'
+import { faShieldHalved } from '@fortawesome/free-solid-svg-icons'
 import { useAuth } from '../context/AuthContext'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
@@ -9,6 +9,8 @@ import { captchaApi } from '../api/captchaApi'
 import { subjectsApi } from '../api/subjectsApi'
 import { inboxApi } from '../api/inboxApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
+import { byPrefixAndName } from '../icons/byPrefixAndName'
 import type { ChatInboxSummaryItem } from '../types/inbox'
 
 export function Dashboard() {
@@ -67,6 +69,8 @@ export function Dashboard() {
 
   return (
     <div className="dashboard-content">
+      <ServerMaintenanceNav title="Dashboard" />
+
       <h2>Welcome, {user?.username}!</h2>
       <p className="dashboard-hint">
         Open the <strong>Chats</strong> menu on the left to browse subject and staff rooms you can access.
@@ -79,6 +83,7 @@ export function Dashboard() {
             {inboxSummary.map((item) => (
               <li key={item.categoryKey}>
                 <Link to="/inbox" className="dashboard-inbox-link">
+                  <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} className="dashboard-inbox-icon" />
                   New Message ({item.categoryDisplayName}): {item.unreadCount}
                 </Link>
               </li>
@@ -89,7 +94,7 @@ export function Dashboard() {
 
       <section className="dashboard-card">
         <div className="dashboard-card-icon">
-          <FontAwesomeIcon icon={faComments} />
+          <FontAwesomeIcon icon={byPrefixAndName.far.comments} />
         </div>
         <div>
           <h3>Chat rooms</h3>
@@ -141,12 +146,6 @@ export function Dashboard() {
           Claim more subject interests from <Link to="/get-roles">Get Roles</Link>.
         </p>
       </section>
-
-      <p className="dashboard-footer-link">
-        <Link to="/chat">Browse chats</Link>
-        {' · '}
-        <Link to="/inbox">Open inbox</Link>
-      </p>
     </div>
   )
 }

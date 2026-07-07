@@ -83,6 +83,7 @@ public class AuthorizationCatalogTests
         RoleMaskBuilder.RoleMaskSet ownerMasks = AuthorizationCatalog.GetRoleMasks("Owner");
         Assert.True(BitMaskHasBit(ownerMasks.PermissionMask, ModerationPermissions.ViewReports));
         Assert.True(BitMaskHasBit(ownerMasks.PermissionMask, ModerationPermissions.HandleAppeals));
+        Assert.True(BitMaskHasBit(ownerMasks.PermissionMask, ModerationPermissions.ManageServerInfrastructure));
     }
 
     // Pinned to the catalog's current content — repeatability alone (comparing the hash to
@@ -90,7 +91,7 @@ public class AuthorizationCatalogTests
     // (e.g. always returning a fixed string). If a legitimate catalog change causes this to
     // fail, recompute and update the pinned literal deliberately rather than loosening the test.
     private const string ExpectedContentHashHex =
-        "A9904995010DABE523C1C36F92F7EA1F506EF4497529CB3C9AF7B20B02F01408";
+        "8C27F8FF57C6DE0F475FFD7F5BA34AD7F08319FA539685F100D48A396D7156BA";
 
     [Fact]
     public void ContentHashHex_is_stable()

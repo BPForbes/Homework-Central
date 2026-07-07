@@ -9,6 +9,7 @@ import { useChatRoom } from '../hooks/useChatRoom'
 import { ChatComposer } from '../components/chat/ChatComposer'
 import { ChatMessageList } from '../components/chat/ChatMessageList'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
 
 function resolveRoomIcon(room: ChatNavRoom, categoryKey: string): ReturnType<typeof getCategoryIcon> {
@@ -103,6 +104,8 @@ export function ChatRoom() {
 
   return (
     <div className="chat-room-page chat-room-page--active">
+      <ServerMaintenanceNav title="Chat" />
+
       <header className="chat-room-header">
         <Link to="/dashboard" className="chat-room-header-back" aria-label="Back to dashboard" title="Back to dashboard">
           <FontAwesomeIcon icon={faArrowLeft} />

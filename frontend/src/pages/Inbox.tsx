@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faAt } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
 import { MentionContent } from '../components/chat/MentionContent'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
+import { byPrefixAndName } from '../icons/byPrefixAndName'
 import type { ChatInboxItem } from '../types/inbox'
 
 function formatUtcTimestamp(iso: string): string {
@@ -48,9 +49,11 @@ export function Inbox() {
 
   return (
     <div className="inbox-page">
+      <ServerMaintenanceNav title="Inbox" />
+
       <header className="inbox-header">
         <div className="inbox-header-icon">
-          <FontAwesomeIcon icon={faAt} />
+          <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} />
         </div>
         <div>
           <h2>Inbox</h2>
