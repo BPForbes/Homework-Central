@@ -1052,13 +1052,22 @@ public sealed class InfrastructureService(
                 }
             }
 
-            channel.AccessRules.Add(new CustomChannelAccessRule
+            // Explicitly Add() to the DbSet (not just channel.AccessRules) so EF marks this new row
+            // as Added. AccessRuleId has a store-generated default (gen_random_uuid()); if we only
+            // append to the navigation collection of an already-tracked `channel`, EF's automatic
+            // change detection infers state from whether the key "looks set" — since we assign a
+            // non-empty Guid up front, it wrongly concludes the row already exists and issues an
+            // UPDATE instead of an INSERT, which affects 0 rows and throws
+            // DbUpdateConcurrencyException.
+            CustomChannelAccessRule newRule = new()
             {
                 AccessRuleId = Guid.NewGuid(),
                 ChannelId = channel.ChannelId,
                 CustomRoleId = rule.CustomRoleId,
                 PlatformRoleBit = rule.PlatformRoleBit,
-            });
+            };
+            db.CustomChannelAccessRules.Add(newRule);
+            channel.AccessRules.Add(newRule);
         }
     }
 
