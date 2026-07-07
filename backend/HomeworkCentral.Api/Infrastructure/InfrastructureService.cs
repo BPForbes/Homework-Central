@@ -384,7 +384,9 @@ public sealed class InfrastructureService(
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
 
-        if (request.InfoContent is not null && !CanEditInfoRoom(mask, channel))
+        if (request.InfoContent is not null
+            && !string.Equals(request.InfoContent, channel.InfoContent, StringComparison.Ordinal)
+            && !CanEditInfoRoom(mask, channel))
         {
             throw new InvalidOperationException(
                 "You cannot edit this info room. Administrators may only edit info rooms within three days of creation; Owner and System Administrator can always edit.");
@@ -402,11 +404,8 @@ public sealed class InfrastructureService(
             channel.CategoryKey = categoryKey;
             channel.CategoryDisplayName = categoryDisplayName;
         }
-        bool wasPrivate = channel.IsPrivate;
-        bool targetPrivate = request.IsPrivate ?? wasPrivate;
-        bool becomingPublic = wasPrivate && !targetPrivate;
-        bool becomingPrivate = !wasPrivate && targetPrivate;
 
+        bool wasPrivate = channel.IsPrivate;
         if (request.IsPrivate.HasValue)
             channel.IsPrivate = request.IsPrivate.Value;
         if (request.InfoContent is not null)
@@ -420,15 +419,19 @@ public sealed class InfrastructureService(
         if (request.TiePlatformRoleBit.HasValue)
             channel.TiePlatformRoleBit = request.TiePlatformRoleBit;
 
-        if (becomingPublic)
+        bool isPrivateNow = channel.IsPrivate;
+
+        if (!isPrivateNow)
         {
-            db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
-            channel.AccessRules.Clear();
+            if (channel.AccessRules.Count > 0)
+            {
+                db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
+                channel.AccessRules.Clear();
+            }
         }
-        else if (targetPrivate && (becomingPrivate || request.AccessRules is not null))
+        else if (request.AccessRules is not null)
         {
-            IReadOnlyList<CustomChannelAccessRuleInput> rules = request.AccessRules ?? [];
-            if (rules.Count == 0)
+            if (request.AccessRules.Count == 0)
             {
                 throw new InvalidOperationException("Private rooms must specify at least one access role.");
             }
@@ -437,23 +440,15 @@ public sealed class InfrastructureService(
             channel.AccessRules.Clear();
             await ApplyAccessRulesAsync(
                 channel,
-                rules,
+                request.AccessRules,
                 isPrivate: true,
                 request.Password,
                 actorUserId,
                 ct);
         }
-        else if (!targetPrivate && request.AccessRules is { Count: > 0 })
+        else if (!wasPrivate)
         {
-            db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
-            channel.AccessRules.Clear();
-            await ApplyAccessRulesAsync(
-                channel,
-                request.AccessRules,
-                isPrivate: false,
-                request.Password,
-                actorUserId,
-                ct);
+            throw new InvalidOperationException("Private rooms must specify at least one access role.");
         }
 
         if (channel.RoomType == CustomRoomType.RoleClaim

@@ -41,6 +41,7 @@ export function ServerMaintenance() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingChannel, setEditingChannel] = useState<CustomChannel | null>(null)
 
   const [displayName, setDisplayName] = useState('')
   const [iconName, setIconName] = useState(defaultCustomRoomIcon('Chat'))
@@ -78,6 +79,7 @@ export function ServerMaintenance() {
 
   function resetForm() {
     setEditingId(null)
+    setEditingChannel(null)
     setDisplayName('')
     setIconName(defaultCustomRoomIcon('Chat'))
     setCategoryKey('')
@@ -90,6 +92,7 @@ export function ServerMaintenance() {
 
   function startEdit(channel: CustomChannel) {
     setEditingId(channel.channelId)
+    setEditingChannel(channel)
     setDisplayName(channel.displayName)
     setIconName(channel.iconName ?? defaultCustomRoomIcon(channel.roomType))
     setCategoryKey(channel.categoryKey)
@@ -121,11 +124,12 @@ export function ServerMaintenance() {
   }
 
   function buildAccessRulesPayload(): CustomChannelAccessRuleInput[] {
-    return accessRules.map((rule) => {
-      if (rule.customRoleId) return { customRoleId: rule.customRoleId }
-      if (rule.platformRoleBit != null) return { platformRoleBit: rule.platformRoleBit }
-      return {}
-    })
+    const rules: CustomChannelAccessRuleInput[] = []
+    for (const rule of accessRules) {
+      if (rule.customRoleId) rules.push({ customRoleId: rule.customRoleId })
+      else if (rule.platformRoleBit != null) rules.push({ platformRoleBit: rule.platformRoleBit })
+    }
+    return rules
   }
 
   function buildPayload(password?: string): Record<string, unknown> {
@@ -135,9 +139,16 @@ export function ServerMaintenance() {
       categoryKey: categoryKey || 'Custom',
       categoryDisplayName: categoryDisplayName || 'Custom',
       isPrivate,
-      accessRules: isPrivate ? buildAccessRulesPayload() : [],
     }
-    if (roomType === 'Info') payload.infoContent = infoContent
+    if (isPrivate) {
+      payload.accessRules = buildAccessRulesPayload()
+    }
+    if (roomType === 'Info') {
+      const originalContent = editingChannel?.infoContent ?? ''
+      if (!editingId || infoContent !== originalContent) {
+        payload.infoContent = infoContent
+      }
+    }
     if (password) payload.password = password
     return payload
   }
