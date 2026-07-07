@@ -402,6 +402,7 @@ public sealed class InfrastructureService(
             channel.CategoryKey = categoryKey;
             channel.CategoryDisplayName = categoryDisplayName;
         }
+        bool wasPrivate = channel.IsPrivate;
         if (request.IsPrivate.HasValue)
             channel.IsPrivate = request.IsPrivate.Value;
         if (request.InfoContent is not null)
@@ -415,7 +416,15 @@ public sealed class InfrastructureService(
         if (request.TiePlatformRoleBit.HasValue)
             channel.TiePlatformRoleBit = request.TiePlatformRoleBit;
 
-        if (request.AccessRules is not null)
+        bool becomingPublic = request.IsPrivate.HasValue && wasPrivate && !channel.IsPrivate;
+        bool becomingPrivate = request.IsPrivate.HasValue && !wasPrivate && channel.IsPrivate;
+
+        if (becomingPublic)
+        {
+            db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
+            channel.AccessRules.Clear();
+        }
+        else if (request.AccessRules is not null)
         {
             db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
             channel.AccessRules.Clear();
@@ -426,6 +435,10 @@ public sealed class InfrastructureService(
                 request.Password,
                 actorUserId,
                 ct);
+        }
+        else if (becomingPrivate)
+        {
+            throw new InvalidOperationException("Private rooms must specify at least one access role.");
         }
 
         if (channel.RoomType == CustomRoomType.RoleClaim

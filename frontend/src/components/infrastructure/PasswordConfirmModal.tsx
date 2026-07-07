@@ -46,7 +46,6 @@ export function PasswordConfirmModal({
       >
         <h3 id="password-modal-title">{title}</h3>
         <p className="modal-message">{message}</p>
-        <p className="modal-hint">Dev accounts: use password <code>hcentralpassword</code>.</p>
         <form onSubmit={handleSubmit}>
           <label htmlFor="confirm-password">Your password</label>
           <input

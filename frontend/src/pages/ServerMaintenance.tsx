@@ -5,6 +5,7 @@ import { infrastructureApi } from '../api/infrastructureApi'
 import { chatApi } from '../api/chatApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ModerationRiskModal } from '../components/infrastructure/ModerationRiskModal'
+import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import {
   CUSTOM_ROOM_ICON_OPTIONS,
@@ -281,7 +282,17 @@ export function ServerMaintenance() {
           )}
 
           <label htmlFor="room-private">
-            <input id="room-private" type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
+            <input
+              id="room-private"
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => {
+                const nextPrivate = e.target.checked
+                setIsPrivate(nextPrivate)
+                if (!nextPrivate)
+                  setAccessRules([])
+              }}
+            />
             Private room (role-gated access)
           </label>
 
@@ -342,9 +353,11 @@ export function ServerMaintenance() {
             <li key={channel.channelId} className="infra-list-item">
               <div>
                 <strong>
-                  <FontAwesomeIcon
+                  <ChatRoomIcon
                     icon={resolveCustomRoomIcon(channel.iconName, channel.roomType)}
+                    isPrivate={channel.isPrivate}
                     className="custom-role-list-icon"
+                    layeredClassName="chat-room-icon-layered"
                   />
                   {' '}
                   {channel.displayName}
