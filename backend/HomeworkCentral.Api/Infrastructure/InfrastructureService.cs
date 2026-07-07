@@ -423,11 +423,7 @@ public sealed class InfrastructureService(
 
         if (!isPrivateNow)
         {
-            if (channel.AccessRules.Count > 0)
-            {
-                db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
-                channel.AccessRules.Clear();
-            }
+            await ClearChannelAccessRulesAsync(channel, ct);
         }
         else if (request.AccessRules is not null)
         {
@@ -436,8 +432,7 @@ public sealed class InfrastructureService(
                 throw new InvalidOperationException("Private rooms must specify at least one access role.");
             }
 
-            db.CustomChannelAccessRules.RemoveRange(channel.AccessRules);
-            channel.AccessRules.Clear();
+            await ClearChannelAccessRulesAsync(channel, ct);
             await ApplyAccessRulesAsync(
                 channel,
                 request.AccessRules,
@@ -1002,6 +997,21 @@ public sealed class InfrastructureService(
     private AccessScope RequireScope() =>
         accessScope.ResolveCurrent()
         ?? throw new InvalidOperationException("Authenticated account scope is required.");
+
+    private async Task ClearChannelAccessRulesAsync(CustomChannel channel, CancellationToken ct)
+    {
+        foreach (CustomChannelAccessRule rule in channel.AccessRules.ToList())
+        {
+            if (db.Entry(rule).State != EntityState.Detached)
+                db.Entry(rule).State = EntityState.Detached;
+        }
+
+        channel.AccessRules.Clear();
+
+        await db.CustomChannelAccessRules
+            .Where(r => r.ChannelId == channel.ChannelId)
+            .ExecuteDeleteAsync(ct);
+    }
 
     private async Task ApplyAccessRulesAsync(
         CustomChannel channel,
