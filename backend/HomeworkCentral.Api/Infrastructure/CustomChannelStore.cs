@@ -2,6 +2,7 @@ using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeworkCentral.Api.Infrastructure;
 
@@ -33,7 +34,7 @@ public sealed record CustomChannelSnapshot(
     short? TiePlatformRoleBit,
     IReadOnlyList<CustomChannelAccessSnapshot> AccessRules);
 
-public sealed class CustomChannelStore(AppDbContext db) : ICustomChannelStore
+public sealed class CustomChannelStore(IServiceScopeFactory scopeFactory) : ICustomChannelStore
 {
     private IReadOnlyList<CustomChannelSnapshot> _channels = [];
 
@@ -44,6 +45,9 @@ public sealed class CustomChannelStore(AppDbContext db) : ICustomChannelStore
 
     public async Task RefreshAsync(CancellationToken ct = default)
     {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         List<CustomChannel> channels = await db.CustomChannels
             .AsNoTracking()
             .Include(c => c.AccessRules)
