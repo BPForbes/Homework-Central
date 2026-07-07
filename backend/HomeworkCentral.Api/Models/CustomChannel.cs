@@ -8,6 +8,7 @@ public class CustomChannel
     public Guid ChannelId { get; set; }
     public string RoomId { get; set; } = null!;
     public string DisplayName { get; set; } = null!;
+    public string? IconName { get; set; }
     public string CategoryKey { get; set; } = null!;
     public string CategoryDisplayName { get; set; } = null!;
     public CustomRoomType RoomType { get; set; }

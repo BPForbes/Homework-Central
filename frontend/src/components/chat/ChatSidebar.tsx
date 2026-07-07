@@ -8,6 +8,7 @@ import { useChatNavSync } from '../../hooks/useChatNavSync'
 import { GET_ROLES_ROOM_ID } from '../../types/chat'
 import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
+import { resolveCustomRoomIcon } from '../infrastructure/customRoomIcons'
 import { ChatRoomIcon } from './ChatRoomIcon'
 
 interface ChatSidebarProps {
@@ -149,8 +150,9 @@ function CategorySection({
       {expanded && (
         <ul className="chat-room-list">
           {category.rooms.map((room) => {
-            const baseIcon =
-              room.roomType === 'Info'
+            const baseIcon = room.iconName
+              ? resolveCustomRoomIcon(room.iconName, room.roomType as 'Chat' | 'Info' | 'RoleClaim' | undefined)
+              : room.roomType === 'Info'
                 ? getCategoryIcon('General')
                 : room.roomType === 'RoleClaim' || room.id === GET_ROLES_ROOM_ID
                   ? faIdBadge

@@ -13,4 +13,5 @@ public class ChatRoomDetailDto
     public string? InfoContent { get; set; }
     public bool CanEditInfo { get; set; }
     public Guid? CustomChannelId { get; set; }
+    public string? IconName { get; set; }
 }

@@ -239,6 +239,7 @@ public partial class AppDbContext(
             e.Property(c => c.RoomId).HasMaxLength(128).IsRequired();
             e.HasIndex(c => c.RoomId).IsUnique();
             e.Property(c => c.DisplayName).HasMaxLength(128).IsRequired();
+            e.Property(c => c.IconName).HasMaxLength(64);
             e.Property(c => c.CategoryKey).HasMaxLength(64).IsRequired();
             e.Property(c => c.CategoryDisplayName).HasMaxLength(128).IsRequired();
             e.Property(c => c.RoomType)

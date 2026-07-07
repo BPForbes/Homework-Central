@@ -314,6 +314,7 @@ public sealed class InfrastructureService(
             ChannelId = channelId,
             RoomId = roomId,
             DisplayName = request.DisplayName.Trim(),
+            IconName = NormalizeIconName(request.IconName),
             CategoryKey = request.CategoryKey.Trim(),
             CategoryDisplayName = request.CategoryDisplayName.Trim(),
             RoomType = roomType,
@@ -387,6 +388,8 @@ public sealed class InfrastructureService(
 
         if (request.DisplayName is not null)
             channel.DisplayName = request.DisplayName.Trim();
+        if (request.IconName is not null)
+            channel.IconName = NormalizeIconName(request.IconName);
         if (request.CategoryKey is not null)
             channel.CategoryKey = request.CategoryKey.Trim();
         if (request.CategoryDisplayName is not null)
@@ -1048,6 +1051,7 @@ public sealed class InfrastructureService(
             ChannelId = channel.ChannelId,
             RoomId = channel.RoomId,
             DisplayName = channel.DisplayName,
+            IconName = channel.IconName,
             CategoryKey = channel.CategoryKey,
             CategoryDisplayName = channel.CategoryDisplayName,
             RoomType = channel.RoomType.ToString(),

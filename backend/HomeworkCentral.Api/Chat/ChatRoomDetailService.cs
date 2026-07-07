@@ -83,6 +83,7 @@ public sealed class ChatRoomDetailService(
             InfoContent = channel.InfoContent,
             CanEditInfo = CanEditInfoFromMask(masks, channel.RoomType, channel.CreatedAtUtc),
             CustomChannelId = channel.ChannelId,
+            IconName = channel.IconName,
         };
 
     private static ChatRoomDetailDto MapChannel(CustomChannel channel, EffectiveMaskDto masks) =>
@@ -98,6 +99,7 @@ public sealed class ChatRoomDetailService(
             InfoContent = channel.InfoContent,
             CanEditInfo = CanEditInfoFromMask(masks, channel.RoomType, channel.CreatedAtUtc),
             CustomChannelId = channel.ChannelId,
+            IconName = channel.IconName,
         };
 
     private static bool CanEditInfoFromMask(EffectiveMaskDto masks, CustomRoomType roomType, DateTime createdAtUtc)

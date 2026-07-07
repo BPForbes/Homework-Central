@@ -7,6 +7,11 @@ import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ModerationRiskModal } from '../components/infrastructure/ModerationRiskModal'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import {
+  CUSTOM_ROOM_ICON_OPTIONS,
+  defaultCustomRoomIcon,
+  resolveCustomRoomIcon,
+} from '../components/infrastructure/customRoomIcons'
+import {
   PLATFORM_ROLES,
   type CustomChannel,
   type CustomChannelAccessRuleInput,
@@ -37,6 +42,7 @@ export function ServerMaintenance() {
   const [editingId, setEditingId] = useState<string | null>(null)
 
   const [displayName, setDisplayName] = useState('')
+  const [iconName, setIconName] = useState(defaultCustomRoomIcon('Chat'))
   const [categoryKey, setCategoryKey] = useState('')
   const [categoryDisplayName, setCategoryDisplayName] = useState('')
   const [roomType, setRoomType] = useState<CustomRoomType>('Chat')
@@ -72,6 +78,7 @@ export function ServerMaintenance() {
   function resetForm() {
     setEditingId(null)
     setDisplayName('')
+    setIconName(defaultCustomRoomIcon('Chat'))
     setCategoryKey('')
     setCategoryDisplayName('')
     setRoomType('Chat')
@@ -83,6 +90,7 @@ export function ServerMaintenance() {
   function startEdit(channel: CustomChannel) {
     setEditingId(channel.channelId)
     setDisplayName(channel.displayName)
+    setIconName(channel.iconName ?? defaultCustomRoomIcon(channel.roomType))
     setCategoryKey(channel.categoryKey)
     setCategoryDisplayName(channel.categoryDisplayName)
     setRoomType(channel.roomType)
@@ -114,6 +122,7 @@ export function ServerMaintenance() {
   function buildPayload(password?: string): Record<string, unknown> {
     return {
       displayName,
+      iconName,
       categoryKey: categoryKey || 'Custom',
       categoryDisplayName: categoryDisplayName || 'Custom',
       isPrivate,
@@ -211,7 +220,15 @@ export function ServerMaintenance() {
           {!editingId && (
             <>
               <label htmlFor="room-type">Room type</label>
-              <select id="room-type" value={roomType} onChange={(e) => setRoomType(e.target.value as CustomRoomType)}>
+              <select
+                id="room-type"
+                value={roomType}
+                onChange={(e) => {
+                  const nextType = e.target.value as CustomRoomType
+                  setRoomType(nextType)
+                  setIconName(defaultCustomRoomIcon(nextType))
+                }}
+              >
                 {ROOM_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
@@ -219,6 +236,21 @@ export function ServerMaintenance() {
             </>
           )}
           {editingId && <p className="infra-meta">Room type: {roomType} (cannot change after creation)</p>}
+
+          <label>Icon</label>
+          <div className="custom-role-icon-picker">
+            {CUSTOM_ROOM_ICON_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={`custom-role-icon-option ${iconName === option.id ? 'selected' : ''}`}
+                onClick={() => setIconName(option.id)}
+                title={option.label}
+              >
+                <FontAwesomeIcon icon={option.icon} />
+              </button>
+            ))}
+          </div>
 
           <label htmlFor="room-category">Category</label>
           <select id="room-category" value={categoryKey} onChange={(e) => pickCategory(e.target.value)}>
@@ -309,7 +341,14 @@ export function ServerMaintenance() {
           {channels.map((channel) => (
             <li key={channel.channelId} className="infra-list-item">
               <div>
-                <strong>{channel.displayName}</strong>
+                <strong>
+                  <FontAwesomeIcon
+                    icon={resolveCustomRoomIcon(channel.iconName, channel.roomType)}
+                    className="custom-role-list-icon"
+                  />
+                  {' '}
+                  {channel.displayName}
+                </strong>
                 <p className="infra-meta">
                   {channel.roomType} · {channel.categoryDisplayName} · {channel.isPrivate ? 'Private' : 'Public'}
                 </p>

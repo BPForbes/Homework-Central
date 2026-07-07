@@ -16,11 +16,21 @@ import {
 import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
+import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
 
 function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
+  if (room.iconName)
+    return resolveCustomRoomIcon(room.iconName, room.roomType as 'Chat' | 'Info' | 'RoleClaim')
+
   if (room.categoryKey === 'Staff')
     return getStaffRoomIcon(room.name)
-  if (room.categoryKey === 'General' || room.categoryKind === 'Custom')
+  if (room.roomType === 'Info')
+    return resolveCustomRoomIcon(null, 'Info')
+  if (room.roomType === 'RoleClaim' || room.roomType === 'GetRoles')
+    return resolveCustomRoomIcon(null, 'RoleClaim')
+  if (room.categoryKind === 'Custom')
+    return resolveCustomRoomIcon(null, 'Chat')
+  if (room.categoryKey === 'General')
     return getCategoryIcon('General')
   return getRoomIcon(room.name, room.categoryKey)
 }

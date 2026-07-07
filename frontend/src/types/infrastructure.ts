@@ -22,6 +22,7 @@ export interface CustomChannel {
   channelId: string
   roomId: string
   displayName: string
+  iconName?: string | null
   categoryKey: string
   categoryDisplayName: string
   roomType: CustomRoomType

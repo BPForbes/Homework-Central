@@ -8,6 +8,7 @@ export interface ChatNavRoom {
   categoryKey: string
   categoryKind: string
   roomType?: string
+  iconName?: string | null
 }
 
 export interface ChatNavCategory {
@@ -33,6 +34,7 @@ export interface ChatRoomDetail {
   infoContent?: string | null
   canEditInfo: boolean
   customChannelId?: string | null
+  iconName?: string | null
 }
 
 export interface ChatMessage {

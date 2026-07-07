@@ -46,6 +46,7 @@ public class CustomChannelDto
     public Guid ChannelId { get; set; }
     public string RoomId { get; set; } = null!;
     public string DisplayName { get; set; } = null!;
+    public string? IconName { get; set; }
     public string CategoryKey { get; set; } = null!;
     public string CategoryDisplayName { get; set; } = null!;
     public string RoomType { get; set; } = null!;
@@ -64,6 +65,7 @@ public class CustomChannelDto
 public class CreateCustomChannelRequest
 {
     public string DisplayName { get; set; } = null!;
+    public string? IconName { get; set; }
     public string CategoryKey { get; set; } = null!;
     public string CategoryDisplayName { get; set; } = null!;
     public string RoomType { get; set; } = null!;
@@ -80,6 +82,7 @@ public class CreateCustomChannelRequest
 public class UpdateCustomChannelRequest
 {
     public string? DisplayName { get; set; }
+    public string? IconName { get; set; }
     public string? CategoryKey { get; set; }
     public string? CategoryDisplayName { get; set; }
     public bool? IsPrivate { get; set; }

@@ -89,6 +89,7 @@ public sealed class ChatRoomAccessService(
                         CategoryKey = channel.CategoryKey,
                         CategoryKind = "Custom",
                         RoomType = channel.RoomType.ToString(),
+                        IconName = channel.IconName,
                     })
                     .ToList(),
             });
