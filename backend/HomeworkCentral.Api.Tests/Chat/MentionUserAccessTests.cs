@@ -12,7 +12,7 @@ namespace HomeworkCentral.Api.Tests.Chat;
 /// </summary>
 public class MentionUserAccessTests
 {
-    private readonly ChatRoomAccessService _access = new();
+    private readonly ChatRoomAccessService _access = new(new EmptyCustomChannelStore());
 
     [Fact]
     public void User_with_subject_expertise_can_be_mentioned_in_that_room()

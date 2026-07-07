@@ -82,6 +82,9 @@ public sealed class ChatMessageService(
         if (room?.Kind == ChatRoomKind.SubjectExpertise)
             return true;
 
+        if (room is null)
+            return true;
+
         return HasGroupMessagesFeature(masks);
     }
 
@@ -284,12 +287,8 @@ public sealed class ChatMessageService(
         await masterDb.SaveChangesAsync(ct);
     }
 
-    private async Task<EffectiveMaskDto> GetMasksAsync(Guid userId, CancellationToken ct)
-    {
-        UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId, ct)
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
-        return mask.ToEffectiveMaskDto();
-    }
+    private async Task<EffectiveMaskDto> GetMasksAsync(Guid userId, CancellationToken ct) =>
+        await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
 
     private string ResolveUsername(Guid userId)
     {

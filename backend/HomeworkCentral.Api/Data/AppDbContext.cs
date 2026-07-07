@@ -34,6 +34,8 @@ public partial class AppDbContext(
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatMentionNotification> ChatMentionNotifications => Set<ChatMentionNotification>();
+    public DbSet<CustomChannel> CustomChannels => Set<CustomChannel>();
+    public DbSet<CustomChannelAccessRule> CustomChannelAccessRules => Set<CustomChannelAccessRule>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -61,6 +63,9 @@ public partial class AppDbContext(
             e.Property(r => r.PermissionMask).HasBitColumn("bit(256)", 256);
             e.Property(r => r.FeatureMask).HasBitColumn("bit(256)", 256);
             e.Property(r => r.Description);
+            e.Property(r => r.IsCustom).HasDefaultValue(false);
+            e.Property(r => r.CreatedAtUtc).IsRequired();
+            e.Property(r => r.ClaimHostRoomId).HasMaxLength(128);
         });
 
         mb.Entity<UserRole>(e =>
@@ -220,6 +225,44 @@ public partial class AppDbContext(
             e.HasIndex(n => new { n.RecipientUserId, n.ReadAtUtc });
             e.HasIndex(n => new { n.RecipientUserId, n.CategoryKey });
             e.HasIndex(n => n.MessageId);
+        });
+
+        mb.Entity<CustomChannel>(e =>
+        {
+            e.HasKey(c => c.ChannelId);
+            e.Property(c => c.ChannelId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(c => c.RoomId).HasMaxLength(128).IsRequired();
+            e.HasIndex(c => c.RoomId).IsUnique();
+            e.Property(c => c.DisplayName).HasMaxLength(128).IsRequired();
+            e.Property(c => c.CategoryKey).HasMaxLength(64).IsRequired();
+            e.Property(c => c.CategoryDisplayName).HasMaxLength(128).IsRequired();
+            e.Property(c => c.RoomType)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(c => c.TieType)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(c => c.TieSubjectMask).HasMaxLength(64);
+            e.Property(c => c.CreatedAtUtc).IsRequired();
+            e.Property(c => c.UpdatedAtUtc).IsRequired();
+            e.Property(c => c.IsArchived).HasDefaultValue(false);
+        });
+
+        mb.Entity<CustomChannelAccessRule>(e =>
+        {
+            e.HasKey(r => r.AccessRuleId);
+            e.Property(r => r.AccessRuleId).HasDefaultValueSql("gen_random_uuid()");
+            e.HasOne(r => r.Channel)
+                .WithMany(c => c.AccessRules)
+                .HasForeignKey(r => r.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(r => r.CustomRole)
+                .WithMany()
+                .HasForeignKey(r => r.CustomRoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => r.ChannelId);
         });
 
         mb.ApplyScopedResourceFilters(this);

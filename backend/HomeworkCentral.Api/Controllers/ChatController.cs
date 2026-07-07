@@ -29,7 +29,7 @@ public class ChatController(
         UserEffectiveMask? mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId.Value, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId.Value, ct);
 
-        EffectiveMaskDto masks = mask.ToEffectiveMaskDto();
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
         return Ok(chatRoomAccess.GetAccessibleNav(masks));
     }
 

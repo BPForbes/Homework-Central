@@ -63,7 +63,7 @@ public class ChatMessageServiceTests
             db,
             new FakeHttpContextAccessor(),
             effectiveMaskService,
-            new ChatRoomAccessService(),
+            new ChatRoomAccessService(new EmptyCustomChannelStore()),
             new HtmlContentSanitizer(),
             new MentionCooldownTracker(),
             new FakeMentionRecipientResolver(),
@@ -141,6 +141,13 @@ public class ChatMessageServiceTests
 
         public Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default) =>
             Task.FromResult(mask);
+
+        public Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default)
+        {
+            EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+            dto.CustomRoleIds = [];
+            return Task.FromResult(dto);
+        }
     }
 
     private sealed class FakeHttpContextAccessor : IHttpContextAccessor

@@ -13,6 +13,7 @@ public interface IEffectiveMaskService
 {
     Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default);
     Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default);
+    Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default);
 }
 
 public class EffectiveMaskService(
@@ -31,6 +32,27 @@ public class EffectiveMaskService(
             .AsNoTracking()
             .Include(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(m => m.UserId == userId, ct);
+    }
+
+    public async Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default)
+    {
+        (AppDbContext db, _) = await GetContextAsync(ct);
+        UserEffectiveMask mask = await GetUserEffectiveMaskAsync(userId, ct)
+            ?? await RebuildUserEffectiveMaskAsync(userId, ct);
+
+        List<Guid> customRoleIds = await db.UserRoles
+            .AsNoTracking()
+            .Where(ur => ur.UserId == userId)
+            .Join(
+                db.Roles.Where(r => r.IsCustom),
+                ur => ur.RoleId,
+                role => role.RoleId,
+                (ur, role) => role.RoleId)
+            .ToListAsync(ct);
+
+        EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+        dto.CustomRoleIds = customRoleIds;
+        return dto;
     }
 
     public async Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
@@ -94,7 +116,15 @@ public class EffectiveMaskService(
         foreach (UserRole userRole in user.UserRoles)
         {
             if (!PlatformRoleCatalog.TryGetRoleBit(userRole.Role.Name, out short directBit))
+            {
+                if (userRole.Role.IsCustom)
+                {
+                    moderationMask = BitMask.Or(moderationMask, userRole.Role.PermissionMask);
+                    featureMask = BitMask.Or(featureMask, userRole.Role.FeatureMask);
+                }
+
                 continue;
+            }
 
             foreach (short bit in RoleHierarchy.ExpandRoleBits(directBit))
             {

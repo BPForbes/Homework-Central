@@ -1,24 +1,27 @@
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Utilities;
 
 namespace HomeworkCentral.Api.Chat;
 
-public sealed class ChatRoomAccessService : IChatRoomAccessService
+public sealed class ChatRoomAccessService(ICustomChannelStore channelStore) : IChatRoomAccessService
 {
-    public bool CanAccessAllRooms(EffectiveMaskDto masks) =>
-        HasRole(masks.RoleMask, PlatformRoles.Owner)
-        || HasRole(masks.RoleMask, PlatformRoles.Administrator);
+    public bool CanAccessAllRooms(EffectiveMaskDto masks) => HasElevatedRoomAccess(masks);
 
     public bool CanAccessRoom(EffectiveMaskDto masks, string roomId)
     {
         ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
-        return room is not null && CanAccessRoom(masks, room);
+        if (room is not null)
+            return CanAccessRoom(masks, room);
+
+        CustomChannelSnapshot? custom = channelStore.FindByRoomId(roomId);
+        return custom is not null && CanAccessCustomChannel(masks, custom);
     }
 
     public bool CanAccessRoom(EffectiveMaskDto masks, ChatRoomDefinition room)
     {
-        if (CanAccessAllRooms(masks))
+        if (HasElevatedRoomAccess(masks))
             return true;
 
         return room.Kind switch
@@ -54,9 +57,6 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
             categories.Add(BuildCategoryDto(first, subjectGroup));
         }
 
-        // ChatRoomCatalog.StaffRooms is deliberately ordered by seniority/authority (Staff,
-        // Tutor, Senior Tutor, ..., Admins, Community Managers), not alphabetically — .Where
-        // preserves that source order, so it must not be re-sorted here or in BuildCategoryDto.
         List<ChatRoomDefinition> accessibleStaffRooms = ChatRoomCatalog.StaffRooms
             .Where(room => CanAccessRoom(masks, room))
             .ToList();
@@ -64,6 +64,32 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
         if (accessibleStaffRooms.Count > 0)
         {
             categories.Add(BuildCategoryDto(accessibleStaffRooms[0], accessibleStaffRooms, preserveRoomOrder: true));
+        }
+
+        foreach (IGrouping<string, CustomChannelSnapshot> customGroup in channelStore.Channels
+                     .Where(channel => CanAccessCustomChannel(masks, channel))
+                     .GroupBy(channel => channel.CategoryKey, StringComparer.Ordinal))
+        {
+            CustomChannelSnapshot first = customGroup.First();
+            categories.Add(new ChatNavCategoryDto
+            {
+                Key = first.CategoryKey,
+                Name = first.CategoryDisplayName,
+                CategoryKind = "Custom",
+                IsPrivateCategory = customGroup.Any(c => c.IsPrivate),
+                Rooms = customGroup
+                    .OrderBy(c => c.DisplayName, StringComparer.Ordinal)
+                    .Select(channel => new ChatNavRoomDto
+                    {
+                        Id = channel.RoomId,
+                        Name = channel.DisplayName,
+                        IsPrivate = channel.IsPrivate,
+                        CategoryKey = channel.CategoryKey,
+                        CategoryKind = "Custom",
+                        RoomType = channel.RoomType.ToString(),
+                    })
+                    .ToList(),
+            });
         }
 
         categories.Sort((left, right) =>
@@ -75,6 +101,26 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
         });
 
         return new ChatNavDto { Categories = categories };
+    }
+
+    private static bool CanAccessCustomChannel(EffectiveMaskDto masks, CustomChannelSnapshot channel)
+    {
+        if (HasElevatedRoomAccess(masks))
+            return true;
+
+        if (!channel.IsPrivate)
+            return true;
+
+        foreach (CustomChannelAccessSnapshot rule in channel.AccessRules)
+        {
+            if (rule.PlatformRoleBit is short platformBit && HasRole(masks.RoleMask, platformBit))
+                return true;
+
+            if (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId))
+                return true;
+        }
+
+        return false;
     }
 
     private static ChatNavCategoryDto BuildCategoryDto(
@@ -95,6 +141,7 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
                     IsPrivate = room.IsPrivate,
                     CategoryKey = room.CategoryKey,
                     CategoryKind = room.CategoryKind.ToString(),
+                    RoomType = "Chat",
                 })
                 .ToList(),
         };
@@ -118,11 +165,15 @@ public sealed class ChatRoomAccessService : IChatRoomAccessService
             return true;
         }
 
-        // Claiming a general subject on Get Roles grants every private room in that category.
         return SubjectExpertiseCatalog.TryGetGeneralSubjectBit(category, out short generalSubjectBit)
             && HasGeneralSubject(masks, generalSubjectBit);
     }
 
     private static bool HasGeneralSubject(EffectiveMaskDto masks, short bit) =>
         BitMask.HasBit(BitMask.FromBase64(masks.GeneralSubjectMask, 128), bit);
+
+    private static bool HasElevatedRoomAccess(EffectiveMaskDto masks) =>
+        HasRole(masks.RoleMask, PlatformRoles.Owner)
+        || HasRole(masks.RoleMask, PlatformRoles.Administrator)
+        || HasRole(masks.RoleMask, PlatformRoles.SystemAdministrator);
 }

@@ -9,6 +9,7 @@ using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Hubs;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.ScrapingDetection;
 using HomeworkCentral.Api.Security;
@@ -82,6 +83,9 @@ builder.Services.AddSingleton<IRiskEngine, RiskEngine>();
 builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
+builder.Services.AddSingleton<ICustomChannelStore, CustomChannelStore>();
+builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();
+builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
@@ -246,6 +250,8 @@ using (IServiceScope seedScope = app.Services.CreateScope())
     ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await AuthorizationSeedData.SeedAsync(seedDb);
+    ICustomChannelStore channelStore = seedScope.ServiceProvider.GetRequiredService<ICustomChannelStore>();
+    await channelStore.RefreshAsync();
     if (devBypassEnabled)
     {
         await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);

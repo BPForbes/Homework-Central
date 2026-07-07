@@ -1,0 +1,114 @@
+namespace HomeworkCentral.Api.DTOs;
+
+public class CustomRoleDto
+{
+    public Guid RoleId { get; set; }
+    public string Name { get; set; } = null!;
+    public string? Description { get; set; }
+    public string? ClaimHostRoomId { get; set; }
+    public List<short> PermissionIds { get; set; } = [];
+    public DateTime CreatedAtUtc { get; set; }
+}
+
+public class CreateCustomRoleRequest
+{
+    public string Name { get; set; } = null!;
+    public string? Description { get; set; }
+    public List<short> PermissionIds { get; set; } = [];
+}
+
+public class UpdateCustomRoleRequest
+{
+    public string? Description { get; set; }
+    public List<short>? PermissionIds { get; set; }
+}
+
+public class SetRoleClaimPlacementRequest
+{
+    public string? ClaimHostRoomId { get; set; }
+    public string? Password { get; set; }
+}
+
+public class CustomChannelAccessRuleDto
+{
+    public Guid? CustomRoleId { get; set; }
+    public string? CustomRoleName { get; set; }
+    public short? PlatformRoleBit { get; set; }
+    public string? PlatformRoleName { get; set; }
+}
+
+public class CustomChannelDto
+{
+    public Guid ChannelId { get; set; }
+    public string RoomId { get; set; } = null!;
+    public string DisplayName { get; set; } = null!;
+    public string CategoryKey { get; set; } = null!;
+    public string CategoryDisplayName { get; set; } = null!;
+    public string RoomType { get; set; } = null!;
+    public bool IsPrivate { get; set; }
+    public string? InfoContent { get; set; }
+    public string TieType { get; set; } = null!;
+    public string? TieSubjectMask { get; set; }
+    public short? TieSubjectBitIndex { get; set; }
+    public short? TiePlatformRoleBit { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+    public List<CustomChannelAccessRuleDto> AccessRules { get; set; } = [];
+    public bool CanEditInfo { get; set; }
+}
+
+public class CreateCustomChannelRequest
+{
+    public string DisplayName { get; set; } = null!;
+    public string CategoryKey { get; set; } = null!;
+    public string CategoryDisplayName { get; set; } = null!;
+    public string RoomType { get; set; } = null!;
+    public bool IsPrivate { get; set; }
+    public string? InfoContent { get; set; }
+    public string TieType { get; set; } = "None";
+    public string? TieSubjectMask { get; set; }
+    public short? TieSubjectBitIndex { get; set; }
+    public short? TiePlatformRoleBit { get; set; }
+    public List<CustomChannelAccessRuleInput> AccessRules { get; set; } = [];
+    public string? Password { get; set; }
+}
+
+public class UpdateCustomChannelRequest
+{
+    public string? DisplayName { get; set; }
+    public string? CategoryKey { get; set; }
+    public string? CategoryDisplayName { get; set; }
+    public bool? IsPrivate { get; set; }
+    public string? InfoContent { get; set; }
+    public string? TieType { get; set; }
+    public string? TieSubjectMask { get; set; }
+    public short? TieSubjectBitIndex { get; set; }
+    public short? TiePlatformRoleBit { get; set; }
+    public List<CustomChannelAccessRuleInput>? AccessRules { get; set; }
+    public string? Password { get; set; }
+}
+
+public class CustomChannelAccessRuleInput
+{
+    public Guid? CustomRoleId { get; set; }
+    public short? PlatformRoleBit { get; set; }
+}
+
+public class ClaimableCustomRoleDto
+{
+    public Guid RoleId { get; set; }
+    public string Name { get; set; } = null!;
+    public string? Description { get; set; }
+    public bool Claimed { get; set; }
+}
+
+public class PasswordConfirmRequest
+{
+    public string Password { get; set; } = null!;
+}
+
+public class ModerationRiskWarningDto
+{
+    public bool RequiresPassword { get; set; }
+    public List<string> RiskyPermissions { get; set; } = [];
+}

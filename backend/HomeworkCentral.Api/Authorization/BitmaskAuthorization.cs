@@ -59,6 +59,7 @@ public class BitmaskAuthorizationHandler(
 public static class AuthorizationPolicyNames
 {
     public const string ResourceVisibility = "ResourceVisibility";
+    public const string ManageServerInfrastructure = "mask:Moderation:20";
 
     public static string For(MaskType maskType, short bit, string? subjectCategory = null) =>
         subjectCategory is null

@@ -8,6 +8,7 @@ export interface ChatNavRoom {
   isPrivate: boolean
   categoryKey: string
   categoryKind: string
+  roomType?: string
 }
 
 export interface ChatNavCategory {

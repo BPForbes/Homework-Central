@@ -4,6 +4,9 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft, faCheck } from '@fortawesome/free-solid-svg-icons'
 import { useAuth } from '../context/AuthContext'
 import { subjectsApi } from '../api/subjectsApi'
+import { infrastructureApi } from '../api/infrastructureApi'
+import type { ClaimableCustomRole } from '../types/infrastructure'
+import { GET_ROLES_ROOM_ID } from '../types/chat'
 import type { ClaimableSubject } from '../types/subjects'
 import { getCategoryIcon } from '../components/chat/chatIcons'
 
@@ -13,6 +16,7 @@ import { getCategoryIcon } from '../components/chat/chatIcons'
 export function GetRoles() {
   const { refreshUser } = useAuth()
   const [subjects, setSubjects] = useState<ClaimableSubject[] | null>(null)
+  const [customRoles, setCustomRoles] = useState<ClaimableCustomRole[]>([])
   const [error, setError] = useState('')
   const [pending, setPending] = useState<string | null>(null)
 
@@ -22,8 +26,12 @@ export function GetRoles() {
 
   async function load() {
     try {
-      const { data } = await subjectsApi.getGeneral()
-      setSubjects(data)
+      const [subjectsRes, customRes] = await Promise.all([
+        subjectsApi.getGeneral(),
+        infrastructureApi.getClaimableRoles(GET_ROLES_ROOM_ID),
+      ])
+      setSubjects(subjectsRes.data)
+      setCustomRoles(customRes.data)
     } catch {
       setError('Could not load roles. Please try again.')
     }
@@ -46,6 +54,28 @@ export function GetRoles() {
       }
     } catch {
       setError('Could not update that role. Please try again.')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function toggleCustom(role: ClaimableCustomRole) {
+    setPending(role.roleId)
+    setError('')
+    try {
+      if (role.claimed) {
+        await infrastructureApi.unclaimRole(role.roleId)
+      } else {
+        await infrastructureApi.claimRole(role.roleId, GET_ROLES_ROOM_ID)
+      }
+      await load()
+      try {
+        await refreshUser()
+      } catch {
+        // Claim succeeded; JWT refresh can retry later.
+      }
+    } catch {
+      setError('Could not update that custom role.')
     } finally {
       setPending(null)
     }
@@ -78,6 +108,26 @@ export function GetRoles() {
           </button>
         ))}
       </div>
+
+      {customRoles.length > 0 && (
+        <>
+          <h3 className="get-roles-section-title">Custom roles</h3>
+          <div className="get-roles-grid">
+            {customRoles.map((role) => (
+              <button
+                key={role.roleId}
+                type="button"
+                className={`get-roles-button ${role.claimed ? 'claimed' : ''}`}
+                onClick={() => void toggleCustom(role)}
+                disabled={pending !== null}
+              >
+                <span>{role.name}</span>
+                {role.claimed && <FontAwesomeIcon icon={faCheck} className="get-roles-claimed-icon" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

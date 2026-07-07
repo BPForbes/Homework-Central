@@ -268,7 +268,7 @@ public static class AuthorizationSeedData
 
         HashSet<Guid> validRoleIds = AuthorizationCatalog.Roles.Select(role => role.RoleId).ToHashSet();
         List<Role> staleRoles = await db.Roles
-            .Where(role => !validRoleIds.Contains(role.RoleId))
+            .Where(role => !validRoleIds.Contains(role.RoleId) && !role.IsCustom)
             .ToListAsync(ct);
         if (staleRoles.Count > 0)
             db.Roles.RemoveRange(staleRoles);
