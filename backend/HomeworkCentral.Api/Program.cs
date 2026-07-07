@@ -253,6 +253,17 @@ using (IServiceScope seedScope = app.Services.CreateScope())
     ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await AuthorizationSeedData.SeedAsync(seedDb);
+    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    await roleMaskService.RebuildAllRoleMasksAsync();
+
+    List<Guid> customRoleUserIds = await seedDb.UserRoles
+        .Where(ur => ur.Role.IsCustom)
+        .Select(ur => ur.UserId)
+        .Distinct()
+        .ToListAsync();
+    foreach (Guid userId in customRoleUserIds)
+        await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
+
     ICustomChannelStore channelStore = seedScope.ServiceProvider.GetRequiredService<ICustomChannelStore>();
     await channelStore.RefreshAsync();
     if (devBypassEnabled)

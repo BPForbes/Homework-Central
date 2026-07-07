@@ -309,14 +309,18 @@ public sealed class InfrastructureService(
         DateTime now = DateTime.UtcNow;
         AccessScope scope = RequireScope();
 
+        (string categoryKey, string categoryDisplayName) = NormalizeCategory(
+            request.CategoryKey,
+            request.CategoryDisplayName);
+
         CustomChannel channel = new CustomChannel
         {
             ChannelId = channelId,
             RoomId = roomId,
             DisplayName = request.DisplayName.Trim(),
             IconName = NormalizeIconName(request.IconName),
-            CategoryKey = request.CategoryKey.Trim(),
-            CategoryDisplayName = request.CategoryDisplayName.Trim(),
+            CategoryKey = categoryKey,
+            CategoryDisplayName = categoryDisplayName,
             RoomType = roomType,
             IsPrivate = request.IsPrivate,
             InfoContent = request.InfoContent,
@@ -390,10 +394,14 @@ public sealed class InfrastructureService(
             channel.DisplayName = request.DisplayName.Trim();
         if (request.IconName is not null)
             channel.IconName = NormalizeIconName(request.IconName);
-        if (request.CategoryKey is not null)
-            channel.CategoryKey = request.CategoryKey.Trim();
-        if (request.CategoryDisplayName is not null)
-            channel.CategoryDisplayName = request.CategoryDisplayName.Trim();
+        if (request.CategoryKey is not null || request.CategoryDisplayName is not null)
+        {
+            (string categoryKey, string categoryDisplayName) = NormalizeCategory(
+                request.CategoryKey ?? channel.CategoryKey,
+                request.CategoryDisplayName ?? channel.CategoryDisplayName);
+            channel.CategoryKey = categoryKey;
+            channel.CategoryDisplayName = categoryDisplayName;
+        }
         if (request.IsPrivate.HasValue)
             channel.IsPrivate = request.IsPrivate.Value;
         if (request.InfoContent is not null)
@@ -919,6 +927,25 @@ public sealed class InfrastructureService(
 
         string trimmed = iconName.Trim();
         return trimmed.Length > 64 ? trimmed[..64] : trimmed;
+    }
+
+    private static (string CategoryKey, string CategoryDisplayName) NormalizeCategory(
+        string categoryKey,
+        string categoryDisplayName)
+    {
+        string trimmedKey = categoryKey.Trim();
+        string trimmedDisplayName = categoryDisplayName.Trim();
+
+        if (ChatRoomCatalog.TryGetCatalogCategoryTemplate(trimmedKey, out ChatRoomCatalog.CatalogCategoryTemplate template))
+        {
+            return (
+                template.Key,
+                string.IsNullOrWhiteSpace(trimmedDisplayName) ? template.DisplayName : trimmedDisplayName);
+        }
+
+        return (
+            string.IsNullOrWhiteSpace(trimmedKey) ? "Custom" : trimmedKey,
+            string.IsNullOrWhiteSpace(trimmedDisplayName) ? "Custom" : trimmedDisplayName);
     }
 
     private AccessScope RequireScope() =>

@@ -68,8 +68,21 @@ public sealed class ChatRoomAccessService(
             categories.Add(BuildCategoryDto(accessibleStaffRooms[0], accessibleStaffRooms, preserveRoomOrder: true));
         }
 
-        foreach (IGrouping<string, CustomChannelSnapshot> customGroup in VisibleCustomChannels()
-                     .Where(channel => CanAccessCustomChannel(masks, channel))
+        List<CustomChannelSnapshot> accessibleCustomChannels = VisibleCustomChannels()
+            .Where(channel => CanAccessCustomChannel(masks, channel))
+            .ToList();
+
+        List<CustomChannelSnapshot> unmatchedCustomChannels = new();
+
+        foreach (CustomChannelSnapshot channel in accessibleCustomChannels)
+        {
+            if (TryMergeCustomChannel(categories, channel))
+                continue;
+
+            unmatchedCustomChannels.Add(channel);
+        }
+
+        foreach (IGrouping<string, CustomChannelSnapshot> customGroup in unmatchedCustomChannels
                      .GroupBy(channel => channel.CategoryKey, StringComparer.Ordinal))
         {
             CustomChannelSnapshot first = customGroup.First();
@@ -81,16 +94,7 @@ public sealed class ChatRoomAccessService(
                 IsPrivateCategory = customGroup.Any(c => c.IsPrivate),
                 Rooms = customGroup
                     .OrderBy(c => c.DisplayName, StringComparer.Ordinal)
-                    .Select(channel => new ChatNavRoomDto
-                    {
-                        Id = channel.RoomId,
-                        Name = channel.DisplayName,
-                        IsPrivate = channel.IsPrivate,
-                        CategoryKey = channel.CategoryKey,
-                        CategoryKind = "Custom",
-                        RoomType = channel.RoomType.ToString(),
-                        IconName = channel.IconName,
-                    })
+                    .Select(channel => MapCustomRoom(channel, channel.CategoryKey, "Custom"))
                     .ToList(),
             });
         }
@@ -105,6 +109,50 @@ public sealed class ChatRoomAccessService(
 
         return new ChatNavDto { Categories = categories };
     }
+
+    private static bool TryMergeCustomChannel(
+        List<ChatNavCategoryDto> categories,
+        CustomChannelSnapshot channel)
+    {
+        if (!ChatRoomCatalog.TryGetCatalogCategoryTemplate(channel.CategoryKey, out ChatRoomCatalog.CatalogCategoryTemplate template))
+            return false;
+
+        ChatNavCategoryDto? category = categories.FirstOrDefault(existing =>
+            string.Equals(existing.Key, template.Key, StringComparison.Ordinal));
+
+        if (category is null)
+        {
+            category = new ChatNavCategoryDto
+            {
+                Key = template.Key,
+                Name = template.DisplayName,
+                CategoryKind = template.CategoryKind.ToString(),
+                IsPrivateCategory = ChatRoomCatalog.IsPrivateCategory(template.CategoryKind),
+            };
+            categories.Add(category);
+        }
+
+        category.Rooms.Add(MapCustomRoom(channel, template.Key, template.CategoryKind.ToString()));
+        if (channel.IsPrivate)
+            category.IsPrivateCategory = true;
+
+        return true;
+    }
+
+    private static ChatNavRoomDto MapCustomRoom(
+        CustomChannelSnapshot channel,
+        string categoryKey,
+        string categoryKind) =>
+        new()
+        {
+            Id = channel.RoomId,
+            Name = channel.DisplayName,
+            IsPrivate = channel.IsPrivate,
+            CategoryKey = categoryKey,
+            CategoryKind = categoryKind,
+            RoomType = channel.RoomType.ToString(),
+            IconName = channel.IconName,
+        };
 
     private CustomChannelSnapshot? FindVisibleCustomChannel(string roomId)
     {

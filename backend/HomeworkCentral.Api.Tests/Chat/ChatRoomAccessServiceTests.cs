@@ -2,6 +2,7 @@ using System.Collections;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Utilities;
 
 namespace HomeworkCentral.Api.Tests.Chat;
@@ -141,6 +142,39 @@ public class ChatRoomAccessServiceTests
         Assert.True(science.Rooms.Count > 1);
         Assert.All(science.Rooms, room => Assert.True(room.IsPrivate));
         Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
+    }
+
+    [Fact]
+    public void Custom_general_room_merges_into_existing_general_category()
+    {
+        Guid channelId = Guid.NewGuid();
+        CustomChannelSnapshot customGeneral = new(
+            channelId,
+            $"custom:{channelId:N}",
+            "Announcements",
+            "fas:bullhorn",
+            ChatRoomBlueprint.GeneralCategoryKey,
+            ChatRoomBlueprint.GeneralCategoryDisplayName,
+            CustomRoomType.Chat,
+            IsPrivate: false,
+            InfoContent: null,
+            CreatedAtUtc: DateTime.UtcNow,
+            UpdatedAtUtc: DateTime.UtcNow,
+            OwnerAccountClass: AccountClass.RealAccount,
+            TieType: ChannelTieType.None,
+            TieSubjectMask: null,
+            TieSubjectBitIndex: null,
+            TiePlatformRoleBit: null,
+            AccessRules: []);
+
+        ChatRoomAccessService service = new(new FixedCustomChannelStore(customGeneral), new FixedAccessScopeAccessor());
+        ChatNavDto nav = service.GetAccessibleNav(CreateMasks());
+
+        ChatNavCategoryDto general = nav.Categories.Single(c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
+        Assert.Equal(3, general.Rooms.Count);
+        Assert.Contains(general.Rooms, room => room.Name == "Announcements");
+        Assert.Contains(general.Rooms, room => room.Name == "General");
+        Assert.Contains(general.Rooms, room => room.Name == "Get Roles");
     }
 
     private static EffectiveMaskDto CreateMasks(
