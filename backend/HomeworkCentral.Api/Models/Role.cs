@@ -1,4 +1,5 @@
 using System.Collections;
+using HomeworkCentral.Api.Authorization;
 
 namespace HomeworkCentral.Api.Models;
 
@@ -9,6 +10,7 @@ public class Role
     public string? Description { get; set; }
     public bool IsCustom { get; set; }
     public DateTime CreatedAtUtc { get; set; }
+    public AccountClass OwnerAccountClass { get; set; }
     /// <summary>Room id where this custom role can be claimed (e.g. general:get-roles or custom:guid).</summary>
     public string? ClaimHostRoomId { get; set; }
     public BitArray RoleMask { get; set; } = new(64);

@@ -5,7 +5,9 @@ using HomeworkCentral.Api.Utilities;
 
 namespace HomeworkCentral.Api.Chat;
 
-public sealed class ChatRoomAccessService(ICustomChannelStore channelStore) : IChatRoomAccessService
+public sealed class ChatRoomAccessService(
+    ICustomChannelStore channelStore,
+    IAccessScopeAccessor accessScope) : IChatRoomAccessService
 {
     public bool CanAccessAllRooms(EffectiveMaskDto masks) => HasElevatedRoomAccess(masks);
 
@@ -15,7 +17,7 @@ public sealed class ChatRoomAccessService(ICustomChannelStore channelStore) : IC
         if (room is not null)
             return CanAccessRoom(masks, room);
 
-        CustomChannelSnapshot? custom = channelStore.FindByRoomId(roomId);
+        CustomChannelSnapshot? custom = FindVisibleCustomChannel(roomId);
         return custom is not null && CanAccessCustomChannel(masks, custom);
     }
 
@@ -66,7 +68,7 @@ public sealed class ChatRoomAccessService(ICustomChannelStore channelStore) : IC
             categories.Add(BuildCategoryDto(accessibleStaffRooms[0], accessibleStaffRooms, preserveRoomOrder: true));
         }
 
-        foreach (IGrouping<string, CustomChannelSnapshot> customGroup in channelStore.Channels
+        foreach (IGrouping<string, CustomChannelSnapshot> customGroup in VisibleCustomChannels()
                      .Where(channel => CanAccessCustomChannel(masks, channel))
                      .GroupBy(channel => channel.CategoryKey, StringComparer.Ordinal))
         {
@@ -101,6 +103,29 @@ public sealed class ChatRoomAccessService(ICustomChannelStore channelStore) : IC
         });
 
         return new ChatNavDto { Categories = categories };
+    }
+
+    private CustomChannelSnapshot? FindVisibleCustomChannel(string roomId)
+    {
+        CustomChannelSnapshot? channel = channelStore.FindByRoomId(roomId);
+        if (channel is null)
+            return null;
+
+        AccessScope? scope = accessScope.ResolveCurrent();
+        return scope is not null
+            && InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass)
+            ? channel
+            : null;
+    }
+
+    private IEnumerable<CustomChannelSnapshot> VisibleCustomChannels()
+    {
+        AccessScope? scope = accessScope.ResolveCurrent();
+        if (scope is null)
+            return [];
+
+        return channelStore.Channels.Where(channel =>
+            InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass));
     }
 
     private static bool CanAccessCustomChannel(EffectiveMaskDto masks, CustomChannelSnapshot channel)

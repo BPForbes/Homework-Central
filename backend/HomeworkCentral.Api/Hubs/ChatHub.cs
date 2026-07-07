@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.DTOs;
@@ -86,6 +87,13 @@ public sealed class ChatHub(
             await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", userId);
     }
 
+    public override async Task OnConnectedAsync()
+    {
+        AccountClass accountClass = ResolveAccountClass(Context.User);
+        await Groups.AddToGroupAsync(Context.ConnectionId, ChatNavGroupKey.Build(accountClass));
+        await base.OnConnectedAsync();
+    }
+
     // Typing state has no server-side timeout (the indicator is meant to persist for as long
     // as the client reports text in the composer), so an abrupt disconnect must explicitly
     // clear it — otherwise a dropped connection would leave a "stuck" typing indicator for
@@ -99,6 +107,18 @@ public sealed class ChatHub(
         onlineTracker.UserDisconnected(Context.ConnectionId);
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    private static AccountClass ResolveAccountClass(ClaimsPrincipal? user)
+    {
+        string? accountClassClaim = user?.FindFirst(TenancyConstants.AccountClassClaimName)?.Value;
+        if (!string.IsNullOrWhiteSpace(accountClassClaim)
+            && Enum.TryParse(accountClassClaim, ignoreCase: false, out AccountClass parsed))
+        {
+            return parsed;
+        }
+
+        return AccountClass.RealAccount;
     }
 
     /// <summary>See the class-level remarks: makes IHttpContextAccessor-dependent services

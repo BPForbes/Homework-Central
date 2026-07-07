@@ -42,12 +42,15 @@ public sealed class InfrastructureService(
     IEffectiveMaskService effectiveMaskService,
     ICustomChannelStore channelStore,
     IPasswordConfirmationService passwordConfirmation,
-    IChatRoomAccessService chatRoomAccess) : IInfrastructureService
+    IChatRoomAccessService chatRoomAccess,
+    IAccessScopeAccessor accessScope,
+    IChatNavNotifier chatNavNotifier) : IInfrastructureService
 {
     private const int InfoRoomAdminEditDays = 3;
 
     public async Task<IReadOnlyList<CustomRoleDto>> ListCustomRolesAsync(CancellationToken ct = default)
     {
+        AccessScope? scope = RequireScope();
         List<Role> roles = await db.Roles
             .AsNoTracking()
             .Include(r => r.RolePermissions)
@@ -55,7 +58,10 @@ public sealed class InfrastructureService(
             .OrderBy(r => r.Name)
             .ToListAsync(ct);
 
-        return roles.Select(MapRole).ToList();
+        return roles
+            .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            .Select(MapRole)
+            .ToList();
     }
 
     public async Task<CustomRoleDto> CreateCustomRoleAsync(
@@ -78,6 +84,7 @@ public sealed class InfrastructureService(
             throw new InvalidOperationException("A role with that name already exists.");
 
         DateTime now = DateTime.UtcNow;
+        AccessScope scope = RequireScope();
         Role role = new Role
         {
             RoleId = Guid.NewGuid(),
@@ -86,6 +93,7 @@ public sealed class InfrastructureService(
             IsCustom = true,
             CreatedAtUtc = now,
             ClaimHostRoomId = null,
+            OwnerAccountClass = scope.AccountClass,
         };
 
         foreach (short permissionId in request.PermissionIds.Distinct())
@@ -103,6 +111,7 @@ public sealed class InfrastructureService(
         db.Roles.Add(role);
         await db.SaveChangesAsync(ct);
         await roleMaskService.RebuildRoleMasksAsync(role.RoleId, ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
 
         return MapRole(await db.Roles
             .AsNoTracking()
@@ -121,6 +130,10 @@ public sealed class InfrastructureService(
             .FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
 
         if (role is null)
+            return null;
+
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             return null;
 
         if (request.Name is not null)
@@ -175,6 +188,8 @@ public sealed class InfrastructureService(
         foreach (Guid userId in affectedUsers)
             await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
 
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
+
         return MapRole(await db.Roles
             .AsNoTracking()
             .Include(r => r.RolePermissions)
@@ -191,15 +206,23 @@ public sealed class InfrastructureService(
         if (role is null)
             return false;
 
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            return false;
+
         string? hostRoomId = string.IsNullOrWhiteSpace(request.ClaimHostRoomId)
             ? null
             : request.ClaimHostRoomId.Trim();
 
         if (hostRoomId is not null
-            && !string.Equals(hostRoomId, InfrastructureRoleClaimRooms.DefaultClaimRoomId, StringComparison.Ordinal)
-            && channelStore.FindByRoomId(hostRoomId) is null)
+            && !string.Equals(hostRoomId, InfrastructureRoleClaimRooms.DefaultClaimRoomId, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Claim host room was not found.");
+            CustomChannelSnapshot? hostRoom = channelStore.FindByRoomId(hostRoomId);
+            if (hostRoom is null)
+                throw new InvalidOperationException("Claim host room was not found.");
+
+            if (!InfrastructureAccountScope.CanViewInfrastructure(scope, hostRoom.OwnerAccountClass))
+                throw new InvalidOperationException("Claim host room is not available in your account scope.");
         }
 
         if (hostRoomId is not null
@@ -211,6 +234,7 @@ public sealed class InfrastructureService(
 
         role.ClaimHostRoomId = hostRoomId;
         await db.SaveChangesAsync(ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
 
@@ -224,6 +248,10 @@ public sealed class InfrastructureService(
         if (role is null)
             return false;
 
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            return false;
+
         List<CustomChannelAccessRule> accessRules = await db.CustomChannelAccessRules
             .Where(r => r.CustomRoleId == roleId)
             .ToListAsync(ct);
@@ -233,11 +261,13 @@ public sealed class InfrastructureService(
         db.Roles.Remove(role);
         await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
 
     public async Task<IReadOnlyList<CustomChannelDto>> ListCustomChannelsAsync(Guid actorUserId, CancellationToken ct = default)
     {
+        AccessScope scope = RequireScope();
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
 
@@ -250,7 +280,10 @@ public sealed class InfrastructureService(
             .ThenBy(c => c.DisplayName)
             .ToListAsync(ct);
 
-        return channels.Select(c => MapChannel(c, mask)).ToList();
+        return channels
+            .Where(channel => InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass))
+            .Select(c => MapChannel(c, mask))
+            .ToList();
     }
 
     public async Task<CustomChannelDto> CreateCustomChannelAsync(
@@ -267,6 +300,7 @@ public sealed class InfrastructureService(
         Guid channelId = Guid.NewGuid();
         string roomId = CustomChannelIds.BuildRoomId(channelId);
         DateTime now = DateTime.UtcNow;
+        AccessScope scope = RequireScope();
 
         CustomChannel channel = new CustomChannel
         {
@@ -281,6 +315,7 @@ public sealed class InfrastructureService(
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
             CreatedByUserId = actorUserId,
+            OwnerAccountClass = scope.AccountClass,
             TieType = tieType,
             TieSubjectMask = request.TieSubjectMask,
             TieSubjectBitIndex = request.TieSubjectBitIndex,
@@ -304,6 +339,7 @@ public sealed class InfrastructureService(
         db.CustomChannels.Add(channel);
         await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
+        await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
 
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
@@ -327,6 +363,10 @@ public sealed class InfrastructureService(
             .FirstOrDefaultAsync(c => c.ChannelId == channelId && !c.IsArchived, ct);
 
         if (channel is null)
+            return null;
+
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass))
             return null;
 
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
@@ -385,6 +425,7 @@ public sealed class InfrastructureService(
         channel.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
+        await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
 
         return MapChannel(await db.CustomChannels
             .AsNoTracking()
@@ -399,10 +440,15 @@ public sealed class InfrastructureService(
         if (channel is null)
             return false;
 
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass))
+            return false;
+
         channel.IsArchived = true;
         channel.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
+        await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
         return true;
     }
 
@@ -421,6 +467,10 @@ public sealed class InfrastructureService(
             .OrderBy(r => r.Name)
             .ToListAsync(ct);
 
+        AccessScope? scope = accessScope.ResolveCurrent();
+        if (scope is null)
+            return [];
+
         HashSet<Guid> claimed = (await db.UserRoles
             .AsNoTracking()
             .Where(ur => ur.UserId == userId)
@@ -428,6 +478,7 @@ public sealed class InfrastructureService(
             .ToListAsync(ct)).ToHashSet();
 
         return roles
+            .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             .Select(role => new ClaimableCustomRoleDto
             {
                 RoleId = role.RoleId,
@@ -448,6 +499,13 @@ public sealed class InfrastructureService(
         if (role is null || !string.Equals(role.ClaimHostRoomId, roomId, StringComparison.Ordinal))
             return false;
 
+        AccessScope? scope = accessScope.ResolveCurrent();
+        if (scope is null
+            || !InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+        {
+            return false;
+        }
+
         bool already = await db.UserRoles.AnyAsync(ur => ur.UserId == userId && ur.RoleId == roleId, ct);
         if (already)
             return true;
@@ -460,6 +518,7 @@ public sealed class InfrastructureService(
         });
         await db.SaveChangesAsync(ct);
         await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
 
@@ -476,6 +535,7 @@ public sealed class InfrastructureService(
         db.UserRoles.Remove(assignment);
         await db.SaveChangesAsync(ct);
         await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
 
@@ -493,6 +553,13 @@ public sealed class InfrastructureService(
 
         if (channel is null)
             return null;
+
+        AccessScope? scope = accessScope.ResolveCurrent();
+        if (scope is null
+            || !InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass))
+        {
+            return null;
+        }
 
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
@@ -512,6 +579,10 @@ public sealed class InfrastructureService(
         if (role is null || !ModerationRiskPermissions.RoleHasHighRiskPermissions(role))
             return null;
 
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            return null;
+
         return new ModerationRiskWarningDto
         {
             RequiresPassword = true,
@@ -526,6 +597,7 @@ public sealed class InfrastructureService(
             return [];
 
         string pattern = $"%{term}%";
+        AccessScope scope = RequireScope();
         List<User> users = await db.Users
             .AsNoTracking()
             .Where(u => EF.Functions.ILike(u.Username, pattern) || EF.Functions.ILike(u.Email, pattern))
@@ -535,7 +607,16 @@ public sealed class InfrastructureService(
 
         List<InfrastructureUserLookupDto> results = new();
         foreach (User user in users)
+        {
+            if (!InfrastructureAccountScope.CanViewInfrastructure(
+                    scope,
+                    InfrastructureAccountScope.ResolveUserAccountClass(user)))
+            {
+                continue;
+            }
+
             results.Add(await BuildUserLookupAsync(user, ct));
+        }
 
         return results;
     }
@@ -543,7 +624,18 @@ public sealed class InfrastructureService(
     public async Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, CancellationToken ct = default)
     {
         User? user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == userId, ct);
-        return user is null ? null : await BuildUserLookupAsync(user, ct);
+        if (user is null)
+            return null;
+
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(
+                scope,
+                InfrastructureAccountScope.ResolveUserAccountClass(user)))
+        {
+            return null;
+        }
+
+        return await BuildUserLookupAsync(user, ct);
     }
 
     public async Task<bool> AdminAssignCustomRoleAsync(
@@ -556,9 +648,20 @@ public sealed class InfrastructureService(
         if (role is null)
             return false;
 
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            return false;
+
         User? target = await db.Users.FirstOrDefaultAsync(u => u.UserId == targetUserId, ct);
         if (target is null)
             return false;
+
+        if (!InfrastructureAccountScope.CanViewInfrastructure(
+                scope,
+                InfrastructureAccountScope.ResolveUserAccountClass(target)))
+        {
+            return false;
+        }
 
         bool already = await db.UserRoles.AnyAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
         if (already)
@@ -573,6 +676,7 @@ public sealed class InfrastructureService(
         });
         await db.SaveChangesAsync(ct);
         await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
 
@@ -587,14 +691,29 @@ public sealed class InfrastructureService(
         if (role is null)
             return false;
 
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            return false;
+
+        User? target = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == targetUserId, ct);
+        if (target is null
+            || !InfrastructureAccountScope.CanViewInfrastructure(
+                scope,
+                InfrastructureAccountScope.ResolveUserAccountClass(target)))
+        {
+            return false;
+        }
+
         db.UserRoles.Remove(assignment);
         await db.SaveChangesAsync(ct);
         await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
 
     private async Task<InfrastructureUserLookupDto> BuildUserLookupAsync(User user, CancellationToken ct)
     {
+        AccessScope scope = RequireScope();
         List<Guid> customRoleIds = await db.UserRoles
             .AsNoTracking()
             .Where(ur => ur.UserId == user.UserId)
@@ -615,9 +734,16 @@ public sealed class InfrastructureService(
             UserId = user.UserId,
             Username = user.Username,
             Email = user.Email,
-            CustomRoles = customRoles.Select(MapRole).ToList(),
+            CustomRoles = customRoles
+                .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+                .Select(MapRole)
+                .ToList(),
         };
     }
+
+    private AccessScope RequireScope() =>
+        accessScope.ResolveCurrent()
+        ?? throw new InvalidOperationException("Authenticated account scope is required.");
 
     private async Task ApplyAccessRulesAsync(
         CustomChannel channel,
@@ -627,10 +753,12 @@ public sealed class InfrastructureService(
         Guid actorUserId,
         CancellationToken ct)
     {
+        AccessScope scope = RequireScope();
+
         if (!isPrivate)
         {
             if (rules.Count > 0)
-                await EnsurePublicHighRiskConfirmedAsync(rules, password, actorUserId, ct);
+                await EnsurePublicHighRiskConfirmedAsync(rules, password, actorUserId, scope, ct);
             return;
         }
 
@@ -648,6 +776,12 @@ public sealed class InfrastructureService(
                     .FirstOrDefaultAsync(r => r.RoleId == rule.CustomRoleId && r.IsCustom, ct);
                 if (customRole is null)
                     throw new InvalidOperationException("Custom access role was not found.");
+
+                if (!InfrastructureAccountScope.CanViewInfrastructure(scope, customRole.OwnerAccountClass))
+                {
+                    throw new InvalidOperationException(
+                        "Custom access roles must belong to the same account scope as the room.");
+                }
             }
 
             channel.AccessRules.Add(new CustomChannelAccessRule
@@ -664,6 +798,7 @@ public sealed class InfrastructureService(
         IReadOnlyList<CustomChannelAccessRuleInput> rules,
         string? password,
         Guid actorUserId,
+        AccessScope scope,
         CancellationToken ct)
     {
         bool needsPassword = false;
@@ -671,11 +806,17 @@ public sealed class InfrastructureService(
         {
             Role? role = await db.Roles.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.RoleId == rule.CustomRoleId && r.IsCustom, ct);
-            if (role is not null && ModerationRiskPermissions.RoleHasHighRiskPermissions(role))
+            if (role is null)
+                throw new InvalidOperationException("Custom access role was not found.");
+
+            if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             {
-                needsPassword = true;
-                break;
+                throw new InvalidOperationException(
+                    "Custom access roles must belong to the same account scope as the room.");
             }
+
+            if (ModerationRiskPermissions.RoleHasHighRiskPermissions(role))
+                needsPassword = true;
         }
 
         if (!needsPassword)

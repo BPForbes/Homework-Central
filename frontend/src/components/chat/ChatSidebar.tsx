@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faChevronDown, faChevronRight, faComments, faIdBadge, faTimes } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../../api/chatApi'
 import { useAuth } from '../../context/AuthContext'
+import { useChatNavSync } from '../../hooks/useChatNavSync'
 import { GET_ROLES_ROOM_ID } from '../../types/chat'
 import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
@@ -22,35 +23,35 @@ export function ChatSidebar({ open, onClose }: ChatSidebarProps) {
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
+  const loadNav = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await chatApi.getNav()
+      setNav(data)
+      const initialExpanded: Record<string, boolean> = {}
+      for (const category of data.categories)
+        initialExpanded[category.key] = true
+      setExpanded(initialExpanded)
+    } catch {
+      setError('Could not load chat rooms.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useChatNavSync(() => {
+    void loadNav()
+  })
+
   useEffect(() => {
-    let cancelled = false
+    void loadNav()
+  }, [loadNav, user?.generalSubjectMask, user?.subjectExpertiseMasks, user?.roleMask, user?.permissionMask])
 
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const { data } = await chatApi.getNav()
-        if (!cancelled) {
-          setNav(data)
-          const initialExpanded: Record<string, boolean> = {}
-          for (const category of data.categories)
-            initialExpanded[category.key] = true
-          setExpanded(initialExpanded)
-        }
-      } catch {
-        if (!cancelled)
-          setError('Could not load chat rooms.')
-      } finally {
-        if (!cancelled)
-          setLoading(false)
-      }
-    }
-
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [user?.generalSubjectMask, user?.subjectExpertiseMasks, user?.roleMask])
+  useEffect(() => {
+    if (open)
+      void loadNav()
+  }, [open, loadNav])
 
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose

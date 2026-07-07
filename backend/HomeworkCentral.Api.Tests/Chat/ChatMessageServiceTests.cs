@@ -63,7 +63,7 @@ public class ChatMessageServiceTests
             db,
             new FakeHttpContextAccessor(),
             effectiveMaskService,
-            new ChatRoomAccessService(new EmptyCustomChannelStore()),
+            new ChatRoomAccessService(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor()),
             new HtmlContentSanitizer(),
             new MentionCooldownTracker(),
             new FakeMentionRecipientResolver(),

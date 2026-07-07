@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
@@ -28,6 +29,7 @@ public sealed record CustomChannelSnapshot(
     string? InfoContent,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc,
+    AccountClass OwnerAccountClass,
     ChannelTieType TieType,
     string? TieSubjectMask,
     short? TieSubjectBitIndex,
@@ -66,6 +68,7 @@ public sealed class CustomChannelStore(IServiceScopeFactory scopeFactory) : ICus
                 channel.InfoContent,
                 channel.CreatedAtUtc,
                 channel.UpdatedAtUtc,
+                channel.OwnerAccountClass,
                 channel.TieType,
                 channel.TieSubjectMask,
                 channel.TieSubjectBitIndex,

@@ -8,7 +8,7 @@ namespace HomeworkCentral.Api.Tests.Chat;
 
 public class ChatRoomAccessServiceTests
 {
-    private readonly ChatRoomAccessService _service = new(new EmptyCustomChannelStore());
+    private readonly ChatRoomAccessService _service = new(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor());
 
     [Fact]
     public void General_room_is_public_and_visible_without_role_or_expertise()

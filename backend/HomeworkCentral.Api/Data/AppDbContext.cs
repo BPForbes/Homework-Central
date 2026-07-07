@@ -66,6 +66,10 @@ public partial class AppDbContext(
             e.Property(r => r.IsCustom).HasDefaultValue(false);
             e.Property(r => r.CreatedAtUtc).IsRequired();
             e.Property(r => r.ClaimHostRoomId).HasMaxLength(128);
+            e.Property(r => r.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
         });
 
         mb.Entity<UserRole>(e =>
@@ -247,6 +251,10 @@ public partial class AppDbContext(
             e.Property(c => c.TieSubjectMask).HasMaxLength(64);
             e.Property(c => c.CreatedAtUtc).IsRequired();
             e.Property(c => c.UpdatedAtUtc).IsRequired();
+            e.Property(c => c.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
             e.Property(c => c.IsArchived).HasDefaultValue(false);
         });
 

@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Infrastructure;
 
 namespace HomeworkCentral.Api.Models;
@@ -15,6 +16,7 @@ public class CustomChannel
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
     public Guid CreatedByUserId { get; set; }
+    public AccountClass OwnerAccountClass { get; set; }
     public ChannelTieType TieType { get; set; }
     public string? TieSubjectMask { get; set; }
     public short? TieSubjectBitIndex { get; set; }
