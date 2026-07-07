@@ -5,6 +5,7 @@ import type {
   CustomChannelAccessRuleInput,
   CustomRole,
   InfrastructureUserLookup,
+  AssignableUser,
   ModerationRiskWarning,
 } from '../types/infrastructure'
 
@@ -18,9 +19,9 @@ api.interceptors.request.use((config) => {
 
 export const infrastructureApi = {
   listRoles: () => api.get<CustomRole[]>('/roles'),
-  createRole: (body: { name: string; description?: string; permissionIds: number[] }) =>
+  createRole: (body: { name: string; description?: string; iconName?: string; permissionIds: number[] }) =>
     api.post<CustomRole>('/roles', body),
-  updateRole: (roleId: string, body: { name?: string; description?: string; permissionIds?: number[] }) =>
+  updateRole: (roleId: string, body: { name?: string; description?: string; iconName?: string; permissionIds?: number[] }) =>
     api.put<CustomRole>(`/roles/${roleId}`, body),
   setRolePlacement: (roleId: string, body: { claimHostRoomId?: string | null; password?: string }) =>
     api.put(`/roles/${roleId}/placement`, body),
@@ -46,11 +47,22 @@ export const infrastructureApi = {
 
   searchUsers: (q: string) =>
     api.get<InfrastructureUserLookup[]>('/users/search', { params: { q } }),
-  getUser: (userId: string) => api.get<InfrastructureUserLookup>(`/users/${userId}`),
-  assignRoleToUser: (userId: string, roleId: string) =>
-    api.post(`/users/${userId}/roles/${roleId}`),
-  revokeRoleFromUser: (userId: string, roleId: string) =>
-    api.delete(`/users/${userId}/roles/${roleId}`),
+  getUser: (userId: string, tenantDatabaseName?: string | null) =>
+    api.get<InfrastructureUserLookup>(`/users/${userId}`, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  listAssignableUsers: (roleId: string) =>
+    api.get<AssignableUser[]>(`/roles/${roleId}/assignable-users`),
+  bulkAssignRole: (roleId: string, users: { userId: string; tenantDatabaseName?: string | null }[]) =>
+    api.post<{ assigned: number }>(`/roles/${roleId}/assignments`, { users }),
+  assignRoleToUser: (userId: string, roleId: string, tenantDatabaseName?: string | null) =>
+    api.post(`/users/${userId}/roles/${roleId}`, null, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  revokeRoleFromUser: (userId: string, roleId: string, tenantDatabaseName?: string | null) =>
+    api.delete(`/users/${userId}/roles/${roleId}`, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
 }
 
 export type { CustomChannelAccessRuleInput }

@@ -5,6 +5,7 @@ public class CustomRoleDto
     public Guid RoleId { get; set; }
     public string Name { get; set; } = null!;
     public string? Description { get; set; }
+    public string? IconName { get; set; }
     public string? ClaimHostRoomId { get; set; }
     public List<short> PermissionIds { get; set; } = [];
     public DateTime CreatedAtUtc { get; set; }
@@ -14,6 +15,7 @@ public class CreateCustomRoleRequest
 {
     public string Name { get; set; } = null!;
     public string? Description { get; set; }
+    public string? IconName { get; set; }
     public List<short> PermissionIds { get; set; } = [];
 }
 
@@ -21,6 +23,7 @@ public class UpdateCustomRoleRequest
 {
     public string? Name { get; set; }
     public string? Description { get; set; }
+    public string? IconName { get; set; }
     public List<short>? PermissionIds { get; set; }
 }
 
@@ -100,6 +103,7 @@ public class ClaimableCustomRoleDto
     public Guid RoleId { get; set; }
     public string Name { get; set; } = null!;
     public string? Description { get; set; }
+    public string? IconName { get; set; }
     public bool Claimed { get; set; }
 }
 
@@ -119,7 +123,33 @@ public class InfrastructureUserLookupDto
     public Guid UserId { get; set; }
     public string Username { get; set; } = null!;
     public string Email { get; set; } = null!;
+    public string? TenantDatabaseName { get; set; }
+    public short HighestPlatformRoleBit { get; set; }
+    public string HighestPlatformRoleName { get; set; } = null!;
     public List<CustomRoleDto> CustomRoles { get; set; } = [];
+}
+
+public class AssignableUserDto
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = null!;
+    public string Email { get; set; } = null!;
+    public string? TenantDatabaseName { get; set; }
+    public short HighestPlatformRoleBit { get; set; }
+    public string HighestPlatformRoleName { get; set; } = null!;
+    public bool AlreadyAssigned { get; set; }
+    public bool CanAssign { get; set; }
+}
+
+public class BulkAssignCustomRoleRequest
+{
+    public List<BulkAssignUserTarget> Users { get; set; } = [];
+}
+
+public class BulkAssignUserTarget
+{
+    public Guid UserId { get; set; }
+    public string? TenantDatabaseName { get; set; }
 }
 
 public class AssignCustomRoleRequest

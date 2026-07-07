@@ -13,6 +13,8 @@ public class Role
     public AccountClass OwnerAccountClass { get; set; }
     /// <summary>Room id where this custom role can be claimed (e.g. general:get-roles or custom:guid).</summary>
     public string? ClaimHostRoomId { get; set; }
+    /// <summary>Font Awesome icon id, e.g. fas:shield-halved.</summary>
+    public string? IconName { get; set; }
     public BitArray RoleMask { get; set; } = new(64);
     public BitArray PermissionMask { get; set; } = new(256);
     public BitArray FeatureMask { get; set; } = new(256);

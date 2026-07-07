@@ -8,6 +8,7 @@ import { GET_ROLES_ROOM_ID } from '../../types/chat'
 import type { ClaimableCustomRole } from '../../types/infrastructure'
 import type { ClaimableSubject } from '../../types/subjects'
 import { getCategoryIcon } from '../chat/chatIcons'
+import { resolveCustomRoleIcon } from './customRoleIcons'
 
 /** Built-in and custom role claim UI — used from /chat/general:get-roles and role-claim rooms. */
 export function GetRolesPanel({ roomId = GET_ROLES_ROOM_ID }: { roomId?: string }) {
@@ -118,6 +119,7 @@ export function GetRolesPanel({ roomId = GET_ROLES_ROOM_ID }: { roomId?: string 
                 onClick={() => void toggleCustom(role)}
                 disabled={pending !== null}
               >
+                <FontAwesomeIcon icon={resolveCustomRoleIcon(role.iconName)} className="get-roles-button-icon" />
                 <span>{role.name}</span>
                 {role.claimed && <FontAwesomeIcon icon={faCheck} className="get-roles-claimed-icon" />}
               </button>

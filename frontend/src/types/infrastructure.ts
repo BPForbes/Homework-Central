@@ -5,6 +5,7 @@ export interface CustomRole {
   roleId: string
   name: string
   description?: string
+  iconName?: string | null
   claimHostRoomId?: string | null
   permissionIds: number[]
   createdAtUtc: string
@@ -40,6 +41,7 @@ export interface ClaimableCustomRole {
   roleId: string
   name: string
   description?: string
+  iconName?: string | null
   claimed: boolean
 }
 
@@ -95,6 +97,20 @@ export interface InfrastructureUserLookup {
   userId: string
   username: string
   email: string
+  tenantDatabaseName?: string | null
+  highestPlatformRoleBit: number
+  highestPlatformRoleName: string
   customRoles: CustomRole[]
+}
+
+export interface AssignableUser {
+  userId: string
+  username: string
+  email: string
+  tenantDatabaseName?: string | null
+  highestPlatformRoleBit: number
+  highestPlatformRoleName: string
+  alreadyAssigned: boolean
+  canAssign: boolean
 }
 

@@ -86,6 +86,7 @@ builder.Services.AddScoped<IChatRoomDetailService, ChatRoomDetailService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
 builder.Services.AddSingleton<ICustomChannelStore, CustomChannelStore>();
 builder.Services.AddSingleton<IChatNavNotifier, ChatNavNotifier>();
+builder.Services.AddScoped<InfrastructureUserDirectory>();
 builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();

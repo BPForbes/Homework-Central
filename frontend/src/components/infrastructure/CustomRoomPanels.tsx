@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
+import { resolveCustomRoleIcon } from './customRoleIcons'
 import { infrastructureApi } from '../../api/infrastructureApi'
 import { useAuth } from '../../context/AuthContext'
 import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from '../../constants/permissions'
@@ -119,6 +120,7 @@ export function CustomRoleClaimPanel({ roomId }: { roomId: string }) {
             onClick={() => void toggle(role)}
             disabled={pending !== null}
           >
+            <FontAwesomeIcon icon={resolveCustomRoleIcon(role.iconName)} className="get-roles-button-icon" />
             <span>{role.name}</span>
             {role.description && <small>{role.description}</small>}
             {role.claimed && <FontAwesomeIcon icon={faCheck} className="get-roles-claimed-icon" />}

@@ -208,6 +208,41 @@ public class InfrastructureController(IInfrastructureService infrastructure) : C
         return Ok(warning ?? new ModerationRiskWarningDto { RequiresPassword = false });
     }
 
+    [HttpGet("roles/{roleId:guid}/assignable-users")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<IReadOnlyList<AssignableUserDto>>> ListAssignableUsers(
+        Guid roleId,
+        CancellationToken ct)
+    {
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        return Ok(await infrastructure.ListAssignableUsersAsync(actorId.Value, roleId, ct));
+    }
+
+    [HttpPost("roles/{roleId:guid}/assignments")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<IActionResult> BulkAssignRole(
+        Guid roleId,
+        [FromBody] BulkAssignCustomRoleRequest request,
+        CancellationToken ct)
+    {
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        try
+        {
+            int assigned = await infrastructure.BulkAssignCustomRoleAsync(actorId.Value, roleId, request, ct);
+            return Ok(new { assigned });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("users/search")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
     public async Task<ActionResult<IReadOnlyList<InfrastructureUserLookupDto>>> SearchUsers(
@@ -217,29 +252,48 @@ public class InfrastructureController(IInfrastructureService infrastructure) : C
 
     [HttpGet("users/{userId:guid}")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
-    public async Task<ActionResult<InfrastructureUserLookupDto>> GetUser(Guid userId, CancellationToken ct)
+    public async Task<ActionResult<InfrastructureUserLookupDto>> GetUser(
+        Guid userId,
+        [FromQuery] string? tenantDatabaseName,
+        CancellationToken ct)
     {
-        InfrastructureUserLookupDto? user = await infrastructure.GetUserWithCustomRolesAsync(userId, ct);
+        InfrastructureUserLookupDto? user = await infrastructure.GetUserWithCustomRolesAsync(
+            userId,
+            tenantDatabaseName,
+            ct);
         return user is null ? NotFound() : Ok(user);
     }
 
     [HttpPost("users/{userId:guid}/roles/{roleId:guid}")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
-    public async Task<IActionResult> AssignRoleToUser(Guid userId, Guid roleId, CancellationToken ct)
+    public async Task<IActionResult> AssignRoleToUser(
+        Guid userId,
+        Guid roleId,
+        [FromQuery] string? tenantDatabaseName,
+        CancellationToken ct)
     {
         Guid? actorId = GetUserId();
         if (actorId is null)
             return Unauthorized();
 
-        bool assigned = await infrastructure.AdminAssignCustomRoleAsync(actorId.Value, userId, roleId, ct);
+        bool assigned = await infrastructure.AdminAssignCustomRoleAsync(
+            actorId.Value,
+            userId,
+            roleId,
+            tenantDatabaseName,
+            ct);
         return assigned ? NoContent() : NotFound();
     }
 
     [HttpDelete("users/{userId:guid}/roles/{roleId:guid}")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
-    public async Task<IActionResult> RevokeRoleFromUser(Guid userId, Guid roleId, CancellationToken ct)
+    public async Task<IActionResult> RevokeRoleFromUser(
+        Guid userId,
+        Guid roleId,
+        [FromQuery] string? tenantDatabaseName,
+        CancellationToken ct)
     {
-        bool removed = await infrastructure.AdminRevokeCustomRoleAsync(userId, roleId, ct);
+        bool removed = await infrastructure.AdminRevokeCustomRoleAsync(userId, roleId, tenantDatabaseName, ct);
         return removed ? NoContent() : NotFound();
     }
 

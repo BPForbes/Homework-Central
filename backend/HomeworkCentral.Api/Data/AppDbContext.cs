@@ -66,6 +66,7 @@ public partial class AppDbContext(
             e.Property(r => r.IsCustom).HasDefaultValue(false);
             e.Property(r => r.CreatedAtUtc).IsRequired();
             e.Property(r => r.ClaimHostRoomId).HasMaxLength(128);
+            e.Property(r => r.IconName).HasMaxLength(64);
             e.Property(r => r.OwnerAccountClass)
                 .HasConversion<string>()
                 .HasMaxLength(32)

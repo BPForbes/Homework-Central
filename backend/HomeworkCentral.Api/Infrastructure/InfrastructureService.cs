@@ -31,9 +31,11 @@ public interface IInfrastructureService
     Task<ModerationRiskWarningDto?> PreviewAccessRuleRiskAsync(Guid customRoleId, bool isPublicRoom, CancellationToken ct = default);
 
     Task<IReadOnlyList<InfrastructureUserLookupDto>> SearchUsersAsync(string query, CancellationToken ct = default);
-    Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, CancellationToken ct = default);
-    Task<bool> AdminAssignCustomRoleAsync(Guid actorUserId, Guid targetUserId, Guid roleId, CancellationToken ct = default);
-    Task<bool> AdminRevokeCustomRoleAsync(Guid targetUserId, Guid roleId, CancellationToken ct = default);
+    Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, string? tenantDatabaseName = null, CancellationToken ct = default);
+    Task<IReadOnlyList<AssignableUserDto>> ListAssignableUsersAsync(Guid actorUserId, Guid roleId, CancellationToken ct = default);
+    Task<int> BulkAssignCustomRoleAsync(Guid actorUserId, Guid roleId, BulkAssignCustomRoleRequest request, CancellationToken ct = default);
+    Task<bool> AdminAssignCustomRoleAsync(Guid actorUserId, Guid targetUserId, Guid roleId, string? tenantDatabaseName = null, CancellationToken ct = default);
+    Task<bool> AdminRevokeCustomRoleAsync(Guid targetUserId, Guid roleId, string? tenantDatabaseName = null, CancellationToken ct = default);
 }
 
 public sealed class InfrastructureService(
@@ -44,7 +46,8 @@ public sealed class InfrastructureService(
     IPasswordConfirmationService passwordConfirmation,
     IChatRoomAccessService chatRoomAccess,
     IAccessScopeAccessor accessScope,
-    IChatNavNotifier chatNavNotifier) : IInfrastructureService
+    IChatNavNotifier chatNavNotifier,
+    InfrastructureUserDirectory userDirectory) : IInfrastructureService
 {
     private const int InfoRoomAdminEditDays = 3;
 
@@ -93,6 +96,7 @@ public sealed class InfrastructureService(
             IsCustom = true,
             CreatedAtUtc = now,
             ClaimHostRoomId = null,
+            IconName = NormalizeIconName(request.IconName),
             OwnerAccountClass = scope.AccountClass,
         };
 
@@ -157,6 +161,9 @@ public sealed class InfrastructureService(
 
         if (request.Description is not null)
             role.Description = request.Description.Trim();
+
+        if (request.IconName is not null)
+            role.IconName = NormalizeIconName(request.IconName);
 
         if (request.PermissionIds is not null)
         {
@@ -471,22 +478,32 @@ public sealed class InfrastructureService(
         if (scope is null)
             return [];
 
-        HashSet<Guid> claimed = (await db.UserRoles
-            .AsNoTracking()
-            .Where(ur => ur.UserId == userId)
-            .Select(ur => ur.RoleId)
-            .ToListAsync(ct)).ToHashSet();
+        UserDatabaseLocation actorDb = await userDirectory.ResolveActorDbAsync(ct);
+        try
+        {
+            HashSet<Guid> claimed = (await actorDb.Db.UserRoles
+                .AsNoTracking()
+                .Where(ur => ur.UserId == userId)
+                .Select(ur => ur.RoleId)
+                .ToListAsync(ct)).ToHashSet();
 
-        return roles
-            .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
-            .Select(role => new ClaimableCustomRoleDto
-            {
-                RoleId = role.RoleId,
-                Name = role.Name,
-                Description = role.Description,
-                Claimed = claimed.Contains(role.RoleId),
-            })
-            .ToList();
+            return roles
+                .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+                .Select(role => new ClaimableCustomRoleDto
+                {
+                    RoleId = role.RoleId,
+                    Name = role.Name,
+                    Description = role.Description,
+                    IconName = role.IconName,
+                    Claimed = claimed.Contains(role.RoleId),
+                })
+                .ToList();
+        }
+        finally
+        {
+            if (actorDb.DisposeDb)
+                await actorDb.Db.DisposeAsync();
+        }
     }
 
     public async Task<bool> ClaimCustomRoleAsync(Guid userId, Guid roleId, string roomId, CancellationToken ct = default)
@@ -506,37 +523,48 @@ public sealed class InfrastructureService(
             return false;
         }
 
-        bool already = await db.UserRoles.AnyAsync(ur => ur.UserId == userId && ur.RoleId == roleId, ct);
-        if (already)
-            return true;
-
-        db.UserRoles.Add(new UserRole
+        UserDatabaseLocation actorDb = await userDirectory.ResolveActorDbAsync(ct);
+        try
         {
-            UserId = userId,
-            RoleId = roleId,
-            AssignedAt = DateTime.UtcNow,
-        });
-        await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
-        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
-        return true;
+            return await AssignCustomRoleOnDbAsync(
+                actorDb.Db,
+                actorUserId: null,
+                targetUserId: userId,
+                role,
+                ct);
+        }
+        finally
+        {
+            if (actorDb.DisposeDb)
+                await actorDb.Db.DisposeAsync();
+        }
     }
 
     public async Task<bool> UnclaimCustomRoleAsync(Guid userId, Guid roleId, CancellationToken ct = default)
     {
-        UserRole? assignment = await db.UserRoles.FirstOrDefaultAsync(ur => ur.UserId == userId && ur.RoleId == roleId, ct);
-        if (assignment is null)
-            return false;
-
         Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
         if (role is null)
             return false;
 
-        db.UserRoles.Remove(assignment);
-        await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
-        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
-        return true;
+        UserDatabaseLocation actorDb = await userDirectory.ResolveActorDbAsync(ct);
+        try
+        {
+            UserRole? assignment = await actorDb.Db.UserRoles
+                .FirstOrDefaultAsync(ur => ur.UserId == userId && ur.RoleId == roleId, ct);
+            if (assignment is null)
+                return false;
+
+            actorDb.Db.UserRoles.Remove(assignment);
+            await actorDb.Db.SaveChangesAsync(ct);
+            await EffectiveMaskService.RebuildOnContextAsync(actorDb.Db, userId, ct);
+            await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
+            return true;
+        }
+        finally
+        {
+            if (actorDb.DisposeDb)
+                await actorDb.Db.DisposeAsync();
+        }
     }
 
     public async Task<CustomChannelDto?> GetChannelForUserAsync(Guid userId, string roomId, CancellationToken ct = default)
@@ -592,56 +620,138 @@ public sealed class InfrastructureService(
 
     public async Task<IReadOnlyList<InfrastructureUserLookupDto>> SearchUsersAsync(string query, CancellationToken ct = default)
     {
-        string term = query.Trim();
-        if (term.Length < 2)
+        IReadOnlyList<(User User, string? TenantDatabaseName)> matches =
+            await userDirectory.SearchUsersAsync(query, ct);
+
+        List<InfrastructureUserLookupDto> results = [];
+        foreach ((User user, string? tenantDatabaseName) in matches)
+            results.Add(await BuildUserLookupAsync(user, tenantDatabaseName, ct));
+
+        return results;
+    }
+
+    public async Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(
+        Guid userId,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default)
+    {
+        UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(userId, tenantDatabaseName, ct);
+        if (location is null)
+            return null;
+
+        try
+        {
+            User? user = await location.Db.Users
+                .AsNoTracking()
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId, ct);
+
+            return user is null ? null : await BuildUserLookupAsync(user, location.TenantDatabaseName, ct);
+        }
+        finally
+        {
+            if (location.DisposeDb)
+                await location.Db.DisposeAsync();
+        }
+    }
+
+    public async Task<IReadOnlyList<AssignableUserDto>> ListAssignableUsersAsync(
+        Guid actorUserId,
+        Guid roleId,
+        CancellationToken ct = default)
+    {
+        Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
+        if (role is null)
             return [];
 
-        string pattern = $"%{term}%";
         AccessScope scope = RequireScope();
-        List<User> users = await db.Users
-            .AsNoTracking()
-            .Where(u => EF.Functions.ILike(u.Username, pattern) || EF.Functions.ILike(u.Email, pattern))
-            .OrderBy(u => u.Username)
-            .Take(20)
-            .ToListAsync(ct);
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            return [];
 
-        List<InfrastructureUserLookupDto> results = new();
-        foreach (User user in users)
+        short actorLevel = await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+        IReadOnlyList<(User User, string? TenantDatabaseName)> users =
+            await userDirectory.ListUsersForAssignmentAsync(ct);
+
+        List<AssignableUserDto> results = [];
+        foreach ((User user, string? tenantDatabaseName) in users)
         {
-            if (!InfrastructureAccountScope.CanViewInfrastructure(
-                    scope,
-                    InfrastructureAccountScope.ResolveUserAccountClass(user)))
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(user);
+            bool alreadyAssigned = user.UserRoles.Any(ur => ur.RoleId == roleId);
+            results.Add(new AssignableUserDto
             {
-                continue;
-            }
-
-            results.Add(await BuildUserLookupAsync(user, ct));
+                UserId = user.UserId,
+                Username = user.Username,
+                Email = user.Email,
+                TenantDatabaseName = tenantDatabaseName,
+                HighestPlatformRoleBit = targetLevel,
+                HighestPlatformRoleName = InfrastructureUserDirectory.GetHighestPlatformRoleName(targetLevel),
+                AlreadyAssigned = alreadyAssigned,
+                CanAssign = !alreadyAssigned
+                    && user.UserId != actorUserId
+                    && PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel),
+            });
         }
 
         return results;
     }
 
-    public async Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, CancellationToken ct = default)
+    public async Task<int> BulkAssignCustomRoleAsync(
+        Guid actorUserId,
+        Guid roleId,
+        BulkAssignCustomRoleRequest request,
+        CancellationToken ct = default)
     {
-        User? user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == userId, ct);
-        if (user is null)
-            return null;
+        Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
+        if (role is null)
+            throw new InvalidOperationException("Custom role was not found.");
 
         AccessScope scope = RequireScope();
-        if (!InfrastructureAccountScope.CanViewInfrastructure(
-                scope,
-                InfrastructureAccountScope.ResolveUserAccountClass(user)))
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            throw new InvalidOperationException("That role is not available in your account scope.");
+
+        short actorLevel = await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+        int assigned = 0;
+
+        foreach (BulkAssignUserTarget target in request.Users)
         {
-            return null;
+            UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(
+                target.UserId,
+                target.TenantDatabaseName,
+                ct);
+            if (location is null)
+                throw new InvalidOperationException($"User {target.UserId} was not found.");
+
+            try
+            {
+                User user = await location.Db.Users
+                    .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                    .FirstAsync(u => u.UserId == target.UserId, ct);
+
+                short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(user);
+                if (!PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel))
+                {
+                    throw new InvalidOperationException(
+                        $"You cannot assign roles to {user.Username} because their platform role is not below yours.");
+                }
+
+                if (await AssignCustomRoleOnDbAsync(location.Db, actorUserId, target.UserId, role, ct))
+                    assigned++;
+            }
+            finally
+            {
+                if (location.DisposeDb)
+                    await location.Db.DisposeAsync();
+            }
         }
 
-        return await BuildUserLookupAsync(user, ct);
+        return assigned;
     }
 
     public async Task<bool> AdminAssignCustomRoleAsync(
         Guid actorUserId,
         Guid targetUserId,
         Guid roleId,
+        string? tenantDatabaseName = null,
         CancellationToken ct = default)
     {
         Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
@@ -652,41 +762,36 @@ public sealed class InfrastructureService(
         if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             return false;
 
-        User? target = await db.Users.FirstOrDefaultAsync(u => u.UserId == targetUserId, ct);
-        if (target is null)
+        UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(targetUserId, tenantDatabaseName, ct);
+        if (location is null)
             return false;
 
-        if (!InfrastructureAccountScope.CanViewInfrastructure(
-                scope,
-                InfrastructureAccountScope.ResolveUserAccountClass(target)))
+        try
         {
-            return false;
+            User target = await location.Db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstAsync(u => u.UserId == targetUserId, ct);
+
+            short actorLevel = await GetActorHighestPlatformRoleBitAsync(actorUserId, ct);
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(target);
+            if (!PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel))
+                return false;
+
+            return await AssignCustomRoleOnDbAsync(location.Db, actorUserId, targetUserId, role, ct);
         }
-
-        bool already = await db.UserRoles.AnyAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
-        if (already)
-            return true;
-
-        db.UserRoles.Add(new UserRole
+        finally
         {
-            UserId = targetUserId,
-            RoleId = roleId,
-            AssignedBy = actorUserId,
-            AssignedAt = DateTime.UtcNow,
-        });
-        await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
-        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
-        return true;
+            if (location.DisposeDb)
+                await location.Db.DisposeAsync();
+        }
     }
 
-    public async Task<bool> AdminRevokeCustomRoleAsync(Guid targetUserId, Guid roleId, CancellationToken ct = default)
+    public async Task<bool> AdminRevokeCustomRoleAsync(
+        Guid targetUserId,
+        Guid roleId,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default)
     {
-        UserRole? assignment = await db.UserRoles
-            .FirstOrDefaultAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
-        if (assignment is null)
-            return false;
-
         Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.RoleId == roleId && r.IsCustom, ct);
         if (role is null)
             return false;
@@ -695,30 +800,42 @@ public sealed class InfrastructureService(
         if (!InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
             return false;
 
-        User? target = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == targetUserId, ct);
-        if (target is null
-            || !InfrastructureAccountScope.CanViewInfrastructure(
-                scope,
-                InfrastructureAccountScope.ResolveUserAccountClass(target)))
-        {
+        UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(targetUserId, tenantDatabaseName, ct);
+        if (location is null)
             return false;
-        }
 
-        db.UserRoles.Remove(assignment);
-        await db.SaveChangesAsync(ct);
-        await effectiveMaskService.RebuildUserEffectiveMaskAsync(targetUserId, ct);
-        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
-        return true;
+        try
+        {
+            UserRole? assignment = await location.Db.UserRoles
+                .FirstOrDefaultAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
+            if (assignment is null)
+                return false;
+
+            location.Db.UserRoles.Remove(assignment);
+            await location.Db.SaveChangesAsync(ct);
+            await EffectiveMaskService.RebuildOnContextAsync(location.Db, targetUserId, ct);
+            await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
+            return true;
+        }
+        finally
+        {
+            if (location.DisposeDb)
+                await location.Db.DisposeAsync();
+        }
     }
 
-    private async Task<InfrastructureUserLookupDto> BuildUserLookupAsync(User user, CancellationToken ct)
+    private async Task<InfrastructureUserLookupDto> BuildUserLookupAsync(
+        User user,
+        string? tenantDatabaseName,
+        CancellationToken ct)
     {
         AccessScope scope = RequireScope();
-        List<Guid> customRoleIds = await db.UserRoles
-            .AsNoTracking()
-            .Where(ur => ur.UserId == user.UserId)
-            .Join(db.Roles.Where(r => r.IsCustom), ur => ur.RoleId, r => r.RoleId, (_, r) => r.RoleId)
-            .ToListAsync(ct);
+        short highestBit = InfrastructureUserDirectory.GetHighestPlatformRoleBit(user);
+
+        List<Guid> customRoleIds = user.UserRoles
+            .Where(ur => ur.Role.IsCustom)
+            .Select(ur => ur.RoleId)
+            .ToList();
 
         List<Role> customRoles = customRoleIds.Count == 0
             ? []
@@ -734,11 +851,71 @@ public sealed class InfrastructureService(
             UserId = user.UserId,
             Username = user.Username,
             Email = user.Email,
+            TenantDatabaseName = tenantDatabaseName,
+            HighestPlatformRoleBit = highestBit,
+            HighestPlatformRoleName = InfrastructureUserDirectory.GetHighestPlatformRoleName(highestBit),
             CustomRoles = customRoles
                 .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
                 .Select(MapRole)
                 .ToList(),
         };
+    }
+
+    private async Task<short> GetActorHighestPlatformRoleBitAsync(Guid actorUserId, CancellationToken ct)
+    {
+        UserDatabaseLocation actorDb = await userDirectory.ResolveActorDbAsync(ct);
+        try
+        {
+            User actor = await actorDb.Db.Users
+                .AsNoTracking()
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstAsync(u => u.UserId == actorUserId, ct);
+
+            return InfrastructureUserDirectory.GetHighestPlatformRoleBit(actor);
+        }
+        finally
+        {
+            if (actorDb.DisposeDb)
+                await actorDb.Db.DisposeAsync();
+        }
+    }
+
+    private async Task<bool> AssignCustomRoleOnDbAsync(
+        AppDbContext targetDb,
+        Guid? actorUserId,
+        Guid targetUserId,
+        Role role,
+        CancellationToken ct)
+    {
+        if (!ReferenceEquals(targetDb, db))
+            await CustomRoleReplicationService.EnsureRoleSyncedAsync(db, targetDb, role.RoleId, ct);
+
+        bool already = await targetDb.UserRoles.AnyAsync(
+            ur => ur.UserId == targetUserId && ur.RoleId == role.RoleId,
+            ct);
+        if (already)
+            return true;
+
+        targetDb.UserRoles.Add(new UserRole
+        {
+            UserId = targetUserId,
+            RoleId = role.RoleId,
+            AssignedBy = actorUserId,
+            AssignedAt = DateTime.UtcNow,
+        });
+        await targetDb.SaveChangesAsync(ct);
+        await EffectiveMaskService.RebuildOnContextAsync(targetDb, targetUserId, ct);
+        await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
+        return true;
+    }
+
+    private static string? NormalizeIconName(string? iconName)
+    {
+        if (string.IsNullOrWhiteSpace(iconName))
+            return null;
+
+        string trimmed = iconName.Trim();
+        return trimmed.Length > 64 ? trimmed[..64] : trimmed;
     }
 
     private AccessScope RequireScope() =>
@@ -859,6 +1036,7 @@ public sealed class InfrastructureService(
             RoleId = role.RoleId,
             Name = role.Name,
             Description = role.Description,
+            IconName = role.IconName,
             ClaimHostRoomId = role.ClaimHostRoomId,
             PermissionIds = role.RolePermissions.Select(rp => rp.PermissionId).OrderBy(id => id).ToList(),
             CreatedAtUtc = role.CreatedAtUtc,

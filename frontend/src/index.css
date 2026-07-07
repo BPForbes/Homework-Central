@@ -511,6 +511,71 @@ body {
   margin-bottom: 1rem;
 }
 
+.custom-role-icon-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.custom-role-icon-option {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.custom-role-icon-option.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.custom-role-list-icon {
+  margin-right: 0.35rem;
+  color: #475569;
+}
+
+.assignable-user-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.assignable-user-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.confirm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+
+.confirm-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.25rem;
+  max-width: 24rem;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.2);
+}
+
 .server-stub-form {
   display: flex;
   flex-direction: column;
