@@ -12,6 +12,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [sending, setSending] = useState(false)
   const [typingUsers, setTypingUsers] = useState<ChatTypingUser[]>([])
   const [connected, setConnected] = useState(false)
+  const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null)
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const isTypingRef = useRef(false)
@@ -29,6 +30,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     setLoading(true)
     setError(null)
     setMessages([])
+    setReplyTarget(null)
 
     const load = async () => {
       try {
@@ -175,11 +177,13 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     if (!trimmed || sending)
       return false
 
+    const replyToMessageId = replyTarget?.messageId
     setSending(true)
     stopTyping()
     try {
-      const { data } = await chatApi.sendMessage(roomId, trimmed)
+      const { data } = await chatApi.sendMessage(roomId, trimmed, replyToMessageId)
       addMessage(data)
+      setReplyTarget(null)
       return true
     } catch (err) {
       if (isAxiosError<SendChatMessageError>(err) && err.response?.data?.message) {
@@ -192,7 +196,15 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     } finally {
       setSending(false)
     }
-  }, [roomId, sending, addMessage, stopTyping, notifyTyping])
+  }, [roomId, sending, replyTarget, addMessage, stopTyping, notifyTyping])
+
+  const startReply = useCallback((message: ChatMessage) => {
+    setReplyTarget(message)
+  }, [])
+
+  const cancelReply = useCallback(() => {
+    setReplyTarget(null)
+  }, [])
 
   return {
     messages,
@@ -201,8 +213,11 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     sending,
     typingUsers,
     connected,
+    replyTarget,
     sendMessage,
     notifyTyping,
     stopTyping,
+    startReply,
+    cancelReply,
   }
 }

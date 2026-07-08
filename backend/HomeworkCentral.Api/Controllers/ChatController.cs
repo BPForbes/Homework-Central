@@ -106,6 +106,7 @@ public class ChatController(
                 decodedRoomId,
                 userId.Value,
                 request.Content,
+                request.ReplyToMessageId,
                 ct);
         }
         catch (SendMessageMentionException mentionError)

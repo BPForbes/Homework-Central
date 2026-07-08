@@ -64,9 +64,12 @@ export function ChatRoom() {
     error: messagesError,
     sending,
     typingUsers,
+    replyTarget,
     sendMessage,
     notifyTyping,
     stopTyping,
+    startReply,
+    cancelReply,
   } = useChatRoom(isChatRoom ? decodedRoomId : '', user?.userId)
 
   useEffect(() => {
@@ -165,6 +168,7 @@ export function ChatRoom() {
               typingUsers={typingUsers}
               loading={messagesLoading}
               currentUserId={user?.userId}
+              onReply={startReply}
             />
             {room.isPrivate && (
               <div className="chat-key-badge" aria-hidden="true">
@@ -174,9 +178,11 @@ export function ChatRoom() {
             <ChatComposer
               disabled={messagesLoading}
               sending={sending}
+              replyTarget={replyTarget}
               onSend={sendMessage}
               onTyping={notifyTyping}
               onStopTyping={stopTyping}
+              onCancelReply={cancelReply}
             />
           </div>
         </>

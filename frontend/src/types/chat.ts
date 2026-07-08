@@ -44,6 +44,10 @@ export interface ChatMessage {
   senderUsername: string
   content: string
   createdAtUtc: string
+  replyToMessageId?: string | null
+  replyToSenderId?: string | null
+  replyToSenderUsername?: string | null
+  replyToContentSnippet?: string | null
 }
 
 export interface ChatTypingUser {

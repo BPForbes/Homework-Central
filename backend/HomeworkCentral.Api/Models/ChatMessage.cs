@@ -33,4 +33,15 @@ public class ChatMessage : ISanitizableContent, IShareableScopedResource
     public DateTime CreatedAtUtc { get; set; }
     public AccountClass OwnerAccountClass { get; set; }
     public string? TenantDatabaseName { get; set; }
+
+    /// <summary>
+    /// The message this one is replying to, if any. Sender/content are denormalized onto the
+    /// reply itself (rather than requiring a join back to the parent row) so the quoted preview
+    /// still renders correctly even if the parent message is ever deleted or falls outside a
+    /// paginated history window.
+    /// </summary>
+    public Guid? ReplyToMessageId { get; set; }
+    public Guid? ReplyToSenderId { get; set; }
+    public string? ReplyToSenderUsername { get; set; }
+    public string? ReplyToContentSnippet { get; set; }
 }

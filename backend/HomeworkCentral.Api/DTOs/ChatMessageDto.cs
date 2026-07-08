@@ -17,6 +17,12 @@ public class ChatMessageDto
     public string SenderUsername { get; set; } = null!;
     public string Content { get; set; } = null!;
     public DateTime CreatedAtUtc { get; set; }
+
+    /// <summary>Populated only when this message is a reply to another message in the same room.</summary>
+    public Guid? ReplyToMessageId { get; set; }
+    public Guid? ReplyToSenderId { get; set; }
+    public string? ReplyToSenderUsername { get; set; }
+    public string? ReplyToContentSnippet { get; set; }
 }
 
 public class SendChatMessageRequest
@@ -30,6 +36,13 @@ public class SendChatMessageRequest
     [Required]
     [StringLength(4000, MinimumLength = 1)]
     public string Content { get; set; } = null!;
+
+    /// <summary>
+    /// Optional id of the message being replied to. Silently ignored (message sends as a normal,
+    /// non-reply message) if it doesn't resolve to a real, visible message in the same room —
+    /// this keeps a stale or cross-scope reply target from blocking the send entirely.
+    /// </summary>
+    public Guid? ReplyToMessageId { get; set; }
 }
 
 public class ChatTypingDto

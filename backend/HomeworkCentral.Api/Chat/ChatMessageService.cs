@@ -29,6 +29,7 @@ public interface IChatMessageService
         string roomId,
         Guid userId,
         string content,
+        Guid? replyToMessageId = null,
         CancellationToken ct = default);
 
     Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default);
@@ -121,6 +122,7 @@ public sealed class ChatMessageService(
         string roomId,
         Guid userId,
         string content,
+        Guid? replyToMessageId = null,
         CancellationToken ct = default)
     {
         if (!await CanAccessRoomAsync(roomId, userId, ct))
@@ -155,6 +157,16 @@ public sealed class ChatMessageService(
         (AccountClass accountClass, string? tenantDatabaseName) = ResolveScope();
         string sanitized = contentSanitizer.Sanitize(parsed.DisplayContent);
 
+        // The IShareableScopedResource query filter already confines this lookup to messages the
+        // sender's account class may see, so a reply target in a different room, a different
+        // real-vs-developer scope, or one that simply doesn't exist all resolve to null here —
+        // the message is then sent as a normal (non-reply) message rather than failing the send.
+        ChatMessage? replyTarget = replyToMessageId is Guid targetId
+            ? await masterDb.ChatMessages
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.MessageId == targetId && m.RoomId == roomId, ct)
+            : null;
+
         ChatMessage message = new()
         {
             MessageId = Guid.NewGuid(),
@@ -166,9 +178,24 @@ public sealed class ChatMessageService(
             CreatedAtUtc = DateTime.UtcNow,
             OwnerAccountClass = accountClass,
             TenantDatabaseName = tenantDatabaseName,
+            ReplyToMessageId = replyTarget?.MessageId,
+            ReplyToSenderId = replyTarget?.SenderId,
+            ReplyToSenderUsername = replyTarget?.SenderUsername,
+            ReplyToContentSnippet = replyTarget is null
+                ? null
+                : ChatReplySnippet.Build(replyTarget.SanitizedContent ?? replyTarget.RawContent),
         };
 
         masterDb.ChatMessages.Add(message);
+
+        ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
+        string roomDisplayName = room?.RoomDisplayName ?? roomId;
+        string categoryKey = room?.CategoryKey ?? ChatRoomBlueprint.GeneralCategoryKey;
+        string categoryDisplayName = room?.CategoryDisplayName ?? ChatRoomBlueprint.GeneralCategoryDisplayName;
+
+        // Tracks who has already been queued a notification for this message so a user who is
+        // both @mentioned and the original sender being replied to only gets a single row.
+        HashSet<Guid> notifiedRecipients = [];
 
         IReadOnlyList<ParsedMention> activeMentions = parsed.ActiveMentions.Where(mention => mention.IsActive).ToArray();
         if (activeMentions.Count > 0)
@@ -183,16 +210,14 @@ public sealed class ChatMessageService(
                 tenantDatabaseName,
                 ct);
 
-            ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
-            string roomDisplayName = room?.RoomDisplayName ?? roomId;
-            string categoryKey = room?.CategoryKey ?? ChatRoomBlueprint.GeneralCategoryKey;
-            string categoryDisplayName = room?.CategoryDisplayName ?? ChatRoomBlueprint.GeneralCategoryDisplayName;
+            string mentionKind = activeMentions.Count == 1
+                ? activeMentions[0].Kind.ToString()
+                : "Multiple";
 
             foreach (Guid recipientId in recipients)
             {
-                string mentionKind = activeMentions.Count == 1
-                    ? activeMentions[0].Kind.ToString()
-                    : "Multiple";
+                if (!notifiedRecipients.Add(recipientId))
+                    continue;
 
                 masterDb.ChatMentionNotifications.Add(new ChatMentionNotification
                 {
@@ -212,6 +237,33 @@ public sealed class ChatMessageService(
                     TenantDatabaseName = tenantDatabaseName,
                 });
             }
+        }
+
+        // A reply notifies the original sender the same way a mention does (surfaced in their
+        // Inbox), as long as they aren't replying to themselves and cross-scope notify rules
+        // (real accounts never notify developer accounts and vice versa) allow it.
+        if (replyTarget is not null
+            && replyTarget.SenderId != userId
+            && MentionNotifyScope.CanNotify(accountClass, tenantDatabaseName, replyTarget.OwnerAccountClass, replyTarget.TenantDatabaseName)
+            && notifiedRecipients.Add(replyTarget.SenderId))
+        {
+            masterDb.ChatMentionNotifications.Add(new ChatMentionNotification
+            {
+                NotificationId = Guid.NewGuid(),
+                MessageId = message.MessageId,
+                RecipientUserId = replyTarget.SenderId,
+                SenderId = userId,
+                SenderUsername = senderUsername,
+                RoomId = roomId,
+                RoomDisplayName = roomDisplayName,
+                CategoryKey = categoryKey,
+                CategoryDisplayName = categoryDisplayName,
+                MessageContent = sanitized,
+                MentionKind = "Reply",
+                CreatedAtUtc = message.CreatedAtUtc,
+                OwnerAccountClass = accountClass,
+                TenantDatabaseName = tenantDatabaseName,
+            });
         }
 
         await masterDb.SaveChangesAsync(ct);
@@ -331,6 +383,10 @@ public sealed class ChatMessageService(
             SenderUsername = message.SenderUsername,
             Content = message.SanitizedContent ?? message.RawContent,
             CreatedAtUtc = message.CreatedAtUtc,
+            ReplyToMessageId = message.ReplyToMessageId,
+            ReplyToSenderId = message.ReplyToSenderId,
+            ReplyToSenderUsername = message.ReplyToSenderUsername,
+            ReplyToContentSnippet = message.ReplyToContentSnippet,
         };
 
     private static ChatInboxItemDto ToInboxDto(ChatMentionNotification notification) =>

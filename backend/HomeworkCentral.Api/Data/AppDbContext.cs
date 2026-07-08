@@ -206,8 +206,11 @@ public partial class AppDbContext(
                 .HasMaxLength(32)
                 .IsRequired();
             e.Property(m => m.TenantDatabaseName).HasMaxLength(128);
+            e.Property(m => m.ReplyToSenderUsername).HasMaxLength(64);
+            e.Property(m => m.ReplyToContentSnippet).HasMaxLength(200);
             e.HasIndex(m => new { m.RoomId, m.CreatedAtUtc });
             e.HasIndex(m => m.SenderId);
+            e.HasIndex(m => m.ReplyToMessageId);
         });
 
         mb.Entity<ChatMentionNotification>(e =>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faAt, faReply } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
 import { MentionContent } from '../components/chat/MentionContent'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
@@ -57,7 +58,7 @@ export function Inbox() {
         </div>
         <div>
           <h2>Inbox</h2>
-          <p className="inbox-subtitle">Messages where you were @mentioned</p>
+          <p className="inbox-subtitle">Mentions and replies to your messages</p>
         </div>
       </header>
 
@@ -65,7 +66,7 @@ export function Inbox() {
       {error && <p className="inbox-error">{error}</p>}
 
       {!loading && !error && items.length === 0 && (
-        <p className="inbox-empty">No mentions yet. When someone @mentions you, it will show up here.</p>
+        <p className="inbox-empty">Nothing yet. @mentions and replies to your messages will show up here.</p>
       )}
 
       <ul className="inbox-list">
@@ -81,7 +82,17 @@ export function Inbox() {
                 <time dateTime={item.createdAtUtc}>{formatUtcTimestamp(item.createdAtUtc)}</time>
               </div>
               <div className="inbox-item-room">#{item.roomDisplayName}</div>
-              <div className="inbox-item-sender">From {item.senderUsername}</div>
+              <div className="inbox-item-sender">
+                {item.mentionKind === 'Reply' ? (
+                  <span className="inbox-item-kind inbox-item-kind--reply">
+                    <FontAwesomeIcon icon={faReply} /> {item.senderUsername} replied to you
+                  </span>
+                ) : (
+                  <span className="inbox-item-kind inbox-item-kind--mention">
+                    <FontAwesomeIcon icon={faAt} /> From {item.senderUsername}
+                  </span>
+                )}
+              </div>
               <div className="inbox-item-message">
                 <MentionContent content={item.messageContent} />
               </div>
