@@ -1,0 +1,72 @@
+import axios from 'axios'
+import type {
+  ClaimableCustomRole,
+  CustomChannel,
+  CustomChannelAccessRuleInput,
+  CustomRole,
+  InfrastructureUserLookup,
+  AssignableUser,
+  ModerationRiskWarning,
+  RoleAppearance,
+} from '../types/infrastructure'
+
+const api = axios.create({ baseURL: '/api/infrastructure' })
+
+api.interceptors.request.use((config) => {
+  const token = sessionStorage.getItem('accessToken')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+export const infrastructureApi = {
+  listRoles: () => api.get<CustomRole[]>('/roles'),
+  createRole: (body: { name: string; description?: string; iconName?: string; permissionIds: number[] }) =>
+    api.post<CustomRole>('/roles', body),
+  updateRole: (roleId: string, body: { name?: string; description?: string; iconName?: string; permissionIds?: number[] }) =>
+    api.put<CustomRole>(`/roles/${roleId}`, body),
+  setRolePlacement: (roleId: string, body: { claimHostRoomId?: string | null; password?: string }) =>
+    api.put(`/roles/${roleId}/placement`, body),
+  deleteRole: (roleId: string) => api.delete(`/roles/${roleId}`),
+  listRoleAppearance: () => api.get<RoleAppearance[]>('/role-appearance'),
+  updateRoleAppearance: (roleId: string, body: { messageColor?: string; isMentionableByUsers?: boolean }) =>
+    api.put<RoleAppearance>(`/roles/${roleId}/appearance`, body),
+  previewAccessRisk: (roleId: string, isPublicRoom: boolean) =>
+    api.get<ModerationRiskWarning>(`/roles/${roleId}/access-risk`, { params: { isPublicRoom } }),
+
+  listChannels: () => api.get<CustomChannel[]>('/channels'),
+  createChannel: (body: Record<string, unknown>) => api.post<CustomChannel>('/channels', body),
+  updateChannel: (channelId: string, body: Record<string, unknown>) =>
+    api.put<CustomChannel>(`/channels/${channelId}`, body),
+  archiveChannel: (channelId: string) => api.delete(`/channels/${channelId}`),
+  getChannelByRoom: (roomId: string) =>
+    api.get<CustomChannel>(`/channels/by-room/${encodeURIComponent(roomId)}`),
+
+  getClaimableRoles: (roomId: string) =>
+    api.get<ClaimableCustomRole[]>(
+      `/channels/by-room/${encodeURIComponent(roomId)}/claimable-roles`
+    ),
+  claimRole: (roleId: string, roomId: string) =>
+    api.post(`/roles/${roleId}/claim`, null, { params: { roomId } }),
+  unclaimRole: (roleId: string) => api.delete(`/roles/${roleId}/claim`),
+
+  searchUsers: (q: string) =>
+    api.get<InfrastructureUserLookup[]>('/users/search', { params: { q } }),
+  getUser: (userId: string, tenantDatabaseName?: string | null) =>
+    api.get<InfrastructureUserLookup>(`/users/${userId}`, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  listAssignableUsers: (roleId: string) =>
+    api.get<AssignableUser[]>(`/roles/${roleId}/assignable-users`),
+  bulkAssignRole: (roleId: string, users: { userId: string; tenantDatabaseName?: string | null }[]) =>
+    api.post<{ assigned: number }>(`/roles/${roleId}/assignments`, { users }),
+  assignRoleToUser: (userId: string, roleId: string, tenantDatabaseName?: string | null) =>
+    api.post(`/users/${userId}/roles/${roleId}`, null, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  revokeRoleFromUser: (userId: string, roleId: string, tenantDatabaseName?: string | null) =>
+    api.delete(`/users/${userId}/roles/${roleId}`, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+}
+
+export type { CustomChannelAccessRuleInput }

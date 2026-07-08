@@ -1,58 +1,83 @@
-import { useEffect, useRef } from 'react'
-import type { ChatMessage, ChatTypingUser } from '../../types/chat'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChatMessage, ChatTypingUser, MentionRoleOption } from '../../types/chat'
+import { ChatMessageBubble } from './ChatMessageBubble'
 import { TypingIndicator } from './TypingIndicator'
+import type { MentionStyleLookup } from './MentionContent'
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
   typingUsers: ChatTypingUser[]
   loading: boolean
   currentUserId: string | undefined
+  mentionRoles?: MentionRoleOption[]
+  onReply: (message: ChatMessage) => void
 }
 
-function formatUtcTimestamp(iso: string): string {
-  const date = new Date(iso)
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  const hours = String(date.getUTCHours()).padStart(2, '0')
-  const minutes = String(date.getUTCMinutes()).padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes} UTC`
-}
-
-export function ChatMessageList({ messages, typingUsers, loading, currentUserId }: ChatMessageListProps) {
+export function ChatMessageList({
+  messages,
+  typingUsers,
+  loading,
+  currentUserId,
+  mentionRoles = [],
+  onReply,
+}: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+
+  const mentionStyles = useMemo((): MentionStyleLookup => {
+    const userColors: Record<string, string> = {}
+    const roleColors: Record<string, string> = {}
+
+    for (const message of messages) {
+      const key = message.senderUsername.toLowerCase()
+      if (!userColors[key] && message.senderMessageColor)
+        userColors[key] = message.senderMessageColor
+    }
+
+    for (const role of mentionRoles)
+      roleColors[role.name.toLowerCase()] = role.messageColor
+
+    return { userColors, roleColors }
+  }, [messages, mentionRoles])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, typingUsers])
+
+  function handleJumpToMessage(messageId: string) {
+    const target = containerRef.current?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`)
+    if (!target)
+      return
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightedId(messageId)
+    window.setTimeout(() => {
+      setHighlightedId((current) => (current === messageId ? null : current))
+    }, 1400)
+  }
 
   if (loading) {
     return <p className="chat-messages-status">Loading messages…</p>
   }
 
   return (
-    <div className="chat-messages" role="log" aria-live="polite">
+    <div ref={containerRef} className="chat-messages" role="log" aria-live="polite">
       {messages.length === 0 && typingUsers.length === 0 && (
         <p className="chat-messages-empty">No messages yet. Say hello!</p>
       )}
 
-      {messages.map((message) => {
-        const isOwn = message.senderId === currentUserId
-        return (
-          <article
-            key={message.messageId}
-            className={`chat-bubble ${isOwn ? 'chat-bubble--own' : 'chat-bubble--other'}`}
-          >
-            {!isOwn && message.senderUsername && (
-              <div className="chat-bubble-sender">{message.senderUsername}</div>
-            )}
-            <div className="chat-bubble-content">{message.content}</div>
-            <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
-              {formatUtcTimestamp(message.createdAtUtc)}
-            </time>
-          </article>
-        )
-      })}
+      {messages.map((message) => (
+        <ChatMessageBubble
+          key={message.messageId}
+          message={message}
+          isOwn={message.senderId === currentUserId}
+          highlighted={highlightedId === message.messageId}
+          mentionStyles={mentionStyles}
+          onReply={onReply}
+          onJumpToMessage={handleJumpToMessage}
+        />
+      ))}
 
       {typingUsers.length > 0 && <TypingIndicator typingUsers={typingUsers} />}
 

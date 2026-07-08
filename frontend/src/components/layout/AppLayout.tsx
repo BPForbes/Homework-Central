@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBars, faComments } from '@fortawesome/free-solid-svg-icons'
+import { faBars } from '@fortawesome/free-solid-svg-icons'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
+import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {
   const { user, logout } = useAuth()
@@ -32,7 +33,7 @@ export function AppLayout() {
             <span>Chats</span>
           </button>
           <h1 className="app-title">
-            <FontAwesomeIcon icon={faComments} className="app-title-icon" />
+            <FontAwesomeIcon icon={byPrefixAndName.far.comments} className="app-title-icon" />
             Homework Central
           </h1>
         </div>

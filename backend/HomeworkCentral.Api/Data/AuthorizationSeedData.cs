@@ -73,13 +73,14 @@ public static class AuthorizationSeedData
 
     internal static async Task<bool> IsCatalogCurrentAsync(AppDbContext db, CancellationToken ct)
     {
-        if (await db.Roles.CountAsync(ct) != AuthorizationCatalog.Roles.Count)
+        if (await db.Roles.CountAsync(role => !role.IsCustom, ct) != AuthorizationCatalog.Roles.Count)
             return false;
 
         if (await db.Subjects.CountAsync(ct) != AuthorizationCatalog.Subjects.Count)
             return false;
 
-        if (await db.RolePermissions.CountAsync(ct) != AuthorizationCatalog.TotalRolePermissionTieCount)
+        if (await db.RolePermissions.CountAsync(rolePermission => !rolePermission.Role.IsCustom, ct)
+            != AuthorizationCatalog.TotalRolePermissionTieCount)
             return false;
 
         if (await db.Permissions.CountAsync(ct) != AuthorizationCatalog.Permissions.Count)
@@ -106,6 +107,7 @@ public static class AuthorizationSeedData
                 .ToHashSet();
         HashSet<(Guid RoleId, short PermissionId)> actualRolePermissionTies = (await db.RolePermissions
                 .AsNoTracking()
+                .Where(rolePermission => !rolePermission.Role.IsCustom)
                 .Select(rolePermission => new { rolePermission.RoleId, rolePermission.PermissionId })
                 .ToListAsync(ct))
             .Select(rolePermission => (rolePermission.RoleId, rolePermission.PermissionId))
@@ -117,7 +119,7 @@ public static class AuthorizationSeedData
         // Check every role's masks (not just Owner) so a RoleMaskBuilder regression affecting
         // any single role's PermissionMask/RoleMask/FeatureMask reliably forces a reseed instead
         // of silently persisting under a coincidentally-still-matching Owner check.
-        List<Role> roles = await db.Roles.AsNoTracking().ToListAsync(ct);
+        List<Role> roles = await db.Roles.AsNoTracking().Where(role => !role.IsCustom).ToListAsync(ct);
         Dictionary<Guid, Role> rolesById = roles.ToDictionary(role => role.RoleId);
 
         foreach (AuthorizationCatalog.RoleDefinition roleDefinition in AuthorizationCatalog.Roles)
@@ -264,11 +266,14 @@ public static class AuthorizationSeedData
             role.RoleMask = (System.Collections.BitArray)masks.RoleMask.Clone();
             role.PermissionMask = (System.Collections.BitArray)masks.PermissionMask.Clone();
             role.FeatureMask = (System.Collections.BitArray)masks.FeatureMask.Clone();
+
+            if (string.IsNullOrWhiteSpace(role.MessageColor))
+                role.MessageColor = RoleAppearanceDefaults.ResolvePlatformRoleColor(roleDefinition.Name, null);
         }
 
         HashSet<Guid> validRoleIds = AuthorizationCatalog.Roles.Select(role => role.RoleId).ToHashSet();
         List<Role> staleRoles = await db.Roles
-            .Where(role => !validRoleIds.Contains(role.RoleId))
+            .Where(role => !validRoleIds.Contains(role.RoleId) && !role.IsCustom)
             .ToListAsync(ct);
         if (staleRoles.Count > 0)
             db.Roles.RemoveRange(staleRoles);

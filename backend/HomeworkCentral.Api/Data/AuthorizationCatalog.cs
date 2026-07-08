@@ -12,7 +12,7 @@ namespace HomeworkCentral.Api.Data;
 public static class AuthorizationCatalog
 {
     private static readonly short[] AllModerationPermissions =
-        Enumerable.Range(0, ModerationPermissions.HandleAppeals + 1).Select(i => (short)i).ToArray();
+        Enumerable.Range(0, ModerationPermissions.ManageServerInfrastructure + 1).Select(i => (short)i).ToArray();
 
     public sealed record RoleDefinition(string Name, string Description, short[] PermissionIds)
     {
@@ -54,6 +54,7 @@ public static class AuthorizationCatalog
         new(ModerationPermissions.ModerateResources, "ModerateResources", "Moderate shared resources."),
         new(ModerationPermissions.SuspendAccounts, "SuspendAccounts", "Suspend and restore accounts."),
         new(ModerationPermissions.HandleAppeals, "HandleAppeals", "Handle moderation appeals."),
+        new(ModerationPermissions.ManageServerInfrastructure, "ManageServerInfrastructure", "Manage server infrastructure."),
     ];
 
     public static IReadOnlyList<RoleDefinition> Roles { get; } =
@@ -114,6 +115,7 @@ public static class AuthorizationCatalog
             ModerationPermissions.ViewAuditLogs,
             ModerationPermissions.ManageEvents,
             ModerationPermissions.ManageSeminars,
+            ModerationPermissions.ManageServerInfrastructure,
         ]),
         new("SystemAdministrator", "System administrator.",
         [
@@ -136,6 +138,7 @@ public static class AuthorizationCatalog
             ModerationPermissions.ModerateResources,
             ModerationPermissions.SuspendAccounts,
             ModerationPermissions.HandleAppeals,
+            ModerationPermissions.ManageServerInfrastructure,
         ]),
         new("BoardMember", "Board member.",
         [

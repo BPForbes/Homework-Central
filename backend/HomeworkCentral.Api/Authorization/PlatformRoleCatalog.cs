@@ -36,6 +36,21 @@ public static class PlatformRoleCatalog
     public static bool TryGetRoleBit(string roleName, out short bit) =>
         RoleBits.TryGetValue(roleName, out bit);
 
+    public static bool TryGetRoleNameFromBit(short bit, out string roleName)
+    {
+        foreach (KeyValuePair<string, short> entry in RoleBits)
+        {
+            if (entry.Value == bit)
+            {
+                roleName = entry.Key;
+                return true;
+            }
+        }
+
+        roleName = string.Empty;
+        return false;
+    }
+
     public static bool TryGetCanonicalRoleName(string roleName, out string canonicalName, out short bit)
     {
         if (!RoleBits.TryGetValue(roleName, out bit))
