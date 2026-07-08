@@ -35,14 +35,14 @@ export function ChatMessageBubble({
 }: ChatMessageBubbleProps) {
   const [dragX, setDragX] = useState(0)
   const [copied, setCopied] = useState(false)
-  const dragState = useRef<{ pointerId: number; startX: number; dragging: boolean } | null>(null)
+  const dragState = useRef<{ pointerId: number; startX: number; currentX: number; dragging: boolean } | null>(null)
 
   function handlePointerDown(event: ReactPointerEvent<HTMLElement>) {
     // Swipe-to-reply is only offered on other people's (white) messages — replying to your own
     // message isn't a supported action, matching the hover/reply affordance below.
     if (isOwn || event.pointerType === 'mouse')
       return
-    dragState.current = { pointerId: event.pointerId, startX: event.clientX, dragging: true }
+    dragState.current = { pointerId: event.pointerId, startX: event.clientX, currentX: 0, dragging: true }
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLElement>) {
@@ -54,16 +54,19 @@ export function ChatMessageBubble({
     // Only care about right-to-left swipes; clamp so the bubble never drags further than
     // SWIPE_MAX_PX off its resting position.
     const clamped = Math.max(-SWIPE_MAX_PX, Math.min(0, deltaX))
+    state.currentX = clamped
     setDragX(clamped)
   }
 
-  function endDrag(event: ReactPointerEvent<HTMLElement>) {
+  function endDrag(event: ReactPointerEvent<HTMLElement>, cancelled = false) {
     const state = dragState.current
     if (!state || state.pointerId !== event.pointerId)
       return
 
+    const finalX = state.currentX
     dragState.current = null
-    if (Math.abs(dragX) >= SWIPE_TRIGGER_PX)
+
+    if (!cancelled && Math.abs(finalX) >= SWIPE_TRIGGER_PX)
       onReply(message)
 
     setDragX(0)
@@ -124,8 +127,8 @@ export function ChatMessageBubble({
           style={dragX !== 0 ? { transform: `translateX(${dragX}px)`, transition: 'none' } : undefined}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
+          onPointerUp={(event) => endDrag(event)}
+          onPointerCancel={(event) => endDrag(event, true)}
         >
           {!isOwn && message.senderUsername && (
             <div className="chat-bubble-sender">{message.senderUsername}</div>

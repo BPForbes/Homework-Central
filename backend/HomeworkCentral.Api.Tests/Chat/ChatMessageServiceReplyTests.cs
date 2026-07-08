@@ -1,97 +1,36 @@
-using System.Collections;
-using System.Security.Claims;
-using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
-using HomeworkCentral.Api.Chat.Mentions;
-using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
-using HomeworkCentral.Api.Hubs;
-using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Security;
-using HomeworkCentral.Api.Services;
-using HomeworkCentral.Api.Tenancy;
-using HomeworkCentral.Api.Utilities;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.SignalR;
+using HomeworkCentral.Api.Data;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
+using Xunit;
 
 namespace HomeworkCentral.Api.Tests.Chat;
 
 /// <summary>
 /// Real-Postgres coverage for the reply-to-message feature: reply metadata denormalized onto the
 /// reply row, and the "reply notifies the original sender" tie-in to the mention/inbox system.
-/// Skips gracefully if Postgres isn't reachable, same convention as
-/// <c>CustomChannelPrivacyToggleReproTests</c> and <c>ApiIntegrationTests</c>.
 /// </summary>
+[Collection(nameof(ChatPostgresTestCollection))]
 public class ChatMessageServiceReplyTests : IAsyncLifetime
 {
-    private readonly string _connectionString =
-        Environment.GetEnvironmentVariable("TEST_CHAT_DATABASE_URL")
-        ?? "Host=localhost;Port=5432;Database=homework_central_test_chat;Username=postgres;Password=postgres";
-
+    private readonly string _connectionString = ChatMessageServiceTestSupport.ResolveConnectionString();
     private bool _databaseAvailable;
     private AppDbContext _db = null!;
     private readonly string _roomId = ChatRoomCatalog.GeneralRoom.Id;
 
     public async Task InitializeAsync()
     {
-        _databaseAvailable = CanConnect();
+        _databaseAvailable = ChatMessageServiceTestSupport.CanConnect(_connectionString);
         if (!_databaseAvailable)
             return;
 
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(_connectionString)
-            .Options;
-        _db = new AppDbContext(options, accessScopeAccessor: null);
-        await _db.Database.EnsureDeletedAsync();
-        await _db.Database.MigrateAsync();
+        _db = await ChatMessageServiceTestSupport.CreateMigratedDatabaseAsync(_connectionString);
     }
 
     public async Task DisposeAsync()
     {
         if (_databaseAvailable)
             await _db.DisposeAsync();
-    }
-
-    private bool CanConnect()
-    {
-        try
-        {
-            using NpgsqlConnection connection = new(_connectionString);
-            connection.Open();
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private ChatMessageService BuildService(Guid userId, string username) =>
-        new(
-            _db,
-            new FakeHttpContextAccessor(BuildHttpContext(userId, username)),
-            new AllAccessEffectiveMaskService(),
-            new ChatRoomAccessService(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor()),
-            new HtmlContentSanitizer(),
-            new MentionCooldownTracker(),
-            new NoRecipientsMentionResolver(),
-            new NoOpHubContext());
-
-    private static HttpContext BuildHttpContext(Guid userId, string username)
-    {
-        List<Claim> claims =
-        [
-            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-            new Claim("username", username),
-            new Claim(TenancyConstants.AccountClassClaimName, AccountClass.RealAccount.ToString()),
-        ];
-        DefaultHttpContext httpContext = new()
-        {
-            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")),
-        };
-        return httpContext;
     }
 
     [SkippableFact]
@@ -102,11 +41,11 @@ public class ChatMessageServiceReplyTests : IAsyncLifetime
         Guid alice = Guid.NewGuid();
         Guid bob = Guid.NewGuid();
 
-        ChatMessageDto? original = await BuildService(alice, "alice")
+        ChatMessageDto? original = await ChatMessageServiceTestSupport.BuildService(_db, alice, "alice")
             .SendMessageAsync(_roomId, alice, "Hello from Alice");
         Assert.NotNull(original);
 
-        ChatMessageDto? reply = await BuildService(bob, "bob")
+        ChatMessageDto? reply = await ChatMessageServiceTestSupport.BuildService(_db, bob, "bob")
             .SendMessageAsync(_roomId, bob, "Hi Alice!", original!.MessageId);
 
         Assert.NotNull(reply);
@@ -124,11 +63,11 @@ public class ChatMessageServiceReplyTests : IAsyncLifetime
         Guid alice = Guid.NewGuid();
         Guid bob = Guid.NewGuid();
 
-        ChatMessageDto? original = await BuildService(alice, "alice")
+        ChatMessageDto? original = await ChatMessageServiceTestSupport.BuildService(_db, alice, "alice")
             .SendMessageAsync(_roomId, alice, "Original message");
         Assert.NotNull(original);
 
-        ChatMessageService bobService = BuildService(bob, "bob");
+        ChatMessageService bobService = ChatMessageServiceTestSupport.BuildService(_db, bob, "bob");
         ChatMessageDto? reply = await bobService.SendMessageAsync(
             _roomId, bob, "Replying to you", original!.MessageId);
         Assert.NotNull(reply);
@@ -148,7 +87,7 @@ public class ChatMessageServiceReplyTests : IAsyncLifetime
         Skip.IfNot(_databaseAvailable, "Requires Postgres at TEST_CHAT_DATABASE_URL.");
 
         Guid alice = Guid.NewGuid();
-        ChatMessageService service = BuildService(alice, "alice");
+        ChatMessageService service = ChatMessageServiceTestSupport.BuildService(_db, alice, "alice");
 
         ChatMessageDto? original = await service.SendMessageAsync(_roomId, alice, "First message");
         Assert.NotNull(original);
@@ -167,100 +106,11 @@ public class ChatMessageServiceReplyTests : IAsyncLifetime
         Skip.IfNot(_databaseAvailable, "Requires Postgres at TEST_CHAT_DATABASE_URL.");
 
         Guid alice = Guid.NewGuid();
-        ChatMessageDto? message = await BuildService(alice, "alice")
+        ChatMessageDto? message = await ChatMessageServiceTestSupport.BuildService(_db, alice, "alice")
             .SendMessageAsync(_roomId, alice, "Stale reply target", Guid.NewGuid());
 
         Assert.NotNull(message);
         Assert.Null(message!.ReplyToMessageId);
         Assert.Null(message.ReplyToSenderUsername);
-    }
-
-    private sealed class FakeHttpContextAccessor(HttpContext httpContext) : IHttpContextAccessor
-    {
-        public HttpContext? HttpContext { get; set; } = httpContext;
-    }
-
-    private sealed class NoRecipientsMentionResolver : IMentionRecipientResolver
-    {
-        public Task<HashSet<Guid>> ResolveRecipientsAsync(
-            string roomId,
-            string groupKey,
-            IReadOnlyList<ParsedMention> activeMentions,
-            Guid senderId,
-            AccountClass senderAccountClass,
-            string? senderTenantDatabaseName,
-            CancellationToken ct = default) =>
-            Task.FromResult(new HashSet<Guid>());
-    }
-
-    private sealed class AllAccessEffectiveMaskService : IEffectiveMaskService
-    {
-        public Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default) =>
-            Task.FromResult<UserEffectiveMask?>(Build(userId));
-
-        public Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default) =>
-            Task.FromResult(Build(userId));
-
-        public Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default)
-        {
-            EffectiveMaskDto dto = Build(userId).ToEffectiveMaskDto();
-            dto.CustomRoleIds = [];
-            return Task.FromResult(dto);
-        }
-
-        private static UserEffectiveMask Build(Guid userId)
-        {
-            BitArray roleMask = BitMask.Create(64);
-            BitMask.SetBit(roleMask, PlatformRoles.VerifiedUser);
-
-            BitArray featureMask = BitMask.Create(256);
-            BitMask.SetBit(featureMask, PlatformFeatures.PublicMessages);
-            BitMask.SetBit(featureMask, PlatformFeatures.GroupMessages);
-
-            return new UserEffectiveMask
-            {
-                UserId = userId,
-                EffectiveRoleMask = roleMask,
-                EffectiveModerationMask = BitMask.Create(256),
-                EffectiveFeatureMask = featureMask,
-                GeneralSubjectMask = BitMask.Create(128),
-                StatusMask = BitMask.Create(64),
-                UpdatedAt = DateTime.UtcNow,
-            };
-        }
-    }
-
-    private sealed class NoOpHubContext : IHubContext<ChatHub>
-    {
-        public IHubClients Clients { get; } = new NoOpHubClients();
-        public IGroupManager Groups { get; } = new NoOpGroupManager();
-
-        private sealed class NoOpHubClients : IHubClients
-        {
-            public IClientProxy All => throw new NotSupportedException();
-            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
-            public IClientProxy Client(string connectionId) => throw new NotSupportedException();
-            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new NotSupportedException();
-            public IClientProxy Group(string groupName) => new NoOpClientProxy();
-            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
-            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new NotSupportedException();
-            public IClientProxy User(string userId) => throw new NotSupportedException();
-            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new NotSupportedException();
-        }
-
-        private sealed class NoOpClientProxy : IClientProxy
-        {
-            public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default) =>
-                Task.CompletedTask;
-        }
-
-        private sealed class NoOpGroupManager : IGroupManager
-        {
-            public Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
-                Task.CompletedTask;
-
-            public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
-                Task.CompletedTask;
-        }
     }
 }

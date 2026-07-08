@@ -45,7 +45,10 @@ public sealed class ChatOnlineTracker : IChatOnlineTracker
         if (!_rooms.TryGetValue(groupKey, out ConcurrentDictionary<Guid, ConnectionSet>? room))
             return [];
 
-        return room.Keys.ToArray();
+        return room
+            .Where(entry => !entry.Value.ConnectionIds.IsEmpty)
+            .Select(entry => entry.Key)
+            .ToArray();
     }
 
     private void RemoveConnection(string groupKey, Guid userId, string connectionId)
@@ -57,8 +60,6 @@ public sealed class ChatOnlineTracker : IChatOnlineTracker
             return;
 
         entry.ConnectionIds.TryRemove(connectionId, out _);
-        if (entry.ConnectionIds.IsEmpty)
-            room.TryRemove(userId, out _);
     }
 
     private sealed class ConnectionSet

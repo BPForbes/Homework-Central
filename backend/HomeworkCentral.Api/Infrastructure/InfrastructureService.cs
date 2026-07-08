@@ -5,6 +5,7 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,7 +36,12 @@ public interface IInfrastructureService
     Task<IReadOnlyList<AssignableUserDto>> ListAssignableUsersAsync(Guid actorUserId, Guid roleId, CancellationToken ct = default);
     Task<int> BulkAssignCustomRoleAsync(Guid actorUserId, Guid roleId, BulkAssignCustomRoleRequest request, CancellationToken ct = default);
     Task<bool> AdminAssignCustomRoleAsync(Guid actorUserId, Guid targetUserId, Guid roleId, string? tenantDatabaseName = null, CancellationToken ct = default);
-    Task<bool> AdminRevokeCustomRoleAsync(Guid targetUserId, Guid roleId, string? tenantDatabaseName = null, CancellationToken ct = default);
+    Task<bool> AdminRevokeCustomRoleAsync(
+        Guid actorUserId,
+        Guid targetUserId,
+        Guid roleId,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default);
 }
 
 public sealed class InfrastructureService(
@@ -47,10 +53,10 @@ public sealed class InfrastructureService(
     IChatRoomAccessService chatRoomAccess,
     IAccessScopeAccessor accessScope,
     IChatNavNotifier chatNavNotifier,
-    InfrastructureUserDirectory userDirectory) : IInfrastructureService
+    InfrastructureUserDirectory userDirectory,
+    MasterDbContext masterRegistry,
+    ITenantDbContextFactory tenantFactory) : IInfrastructureService
 {
-    private const int InfoRoomAdminEditDays = 3;
-
     public async Task<IReadOnlyList<CustomRoleDto>> ListCustomRolesAsync(CancellationToken ct = default)
     {
         AccessScope? scope = RequireScope();
@@ -187,13 +193,7 @@ public sealed class InfrastructureService(
 
         await db.SaveChangesAsync(ct);
         await roleMaskService.RebuildRoleMasksAsync(role.RoleId, ct);
-
-        List<Guid> affectedUsers = await db.UserRoles
-            .Where(ur => ur.RoleId == role.RoleId)
-            .Select(ur => ur.UserId)
-            .ToListAsync(ct);
-        foreach (Guid userId in affectedUsers)
-            await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+        await PropagateCustomRoleUpdateAsync(role.RoleId, ct);
 
         await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
 
@@ -386,7 +386,7 @@ public sealed class InfrastructureService(
 
         if (request.InfoContent is not null
             && !string.Equals(request.InfoContent, channel.InfoContent, StringComparison.Ordinal)
-            && !CanEditInfoRoom(mask, channel))
+            && !InfoRoomEditPolicy.CanEditInfoRoom(mask, channel))
         {
             throw new InvalidOperationException(
                 "You cannot edit this info room. Administrators may only edit info rooms within three days of creation; Owner and System Administrator can always edit.");
@@ -421,45 +421,57 @@ public sealed class InfrastructureService(
 
         bool isPrivateNow = channel.IsPrivate;
 
-        if (!isPrivateNow)
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
+            await db.Database.BeginTransactionAsync(ct);
+        try
         {
-            await ClearChannelAccessRulesAsync(channel, ct);
-        }
-        else if (request.AccessRules is not null)
-        {
-            if (request.AccessRules.Count == 0)
+            if (!isPrivateNow)
+            {
+                await ClearChannelAccessRulesAsync(channel, ct);
+            }
+            else if (request.AccessRules is not null)
+            {
+                if (request.AccessRules.Count == 0)
+                {
+                    throw new InvalidOperationException("Private rooms must specify at least one access role.");
+                }
+
+                await ClearChannelAccessRulesAsync(channel, ct);
+                await ApplyAccessRulesAsync(
+                    channel,
+                    request.AccessRules,
+                    isPrivate: true,
+                    request.Password,
+                    actorUserId,
+                    ct);
+            }
+            else if (!wasPrivate)
             {
                 throw new InvalidOperationException("Private rooms must specify at least one access role.");
             }
 
-            await ClearChannelAccessRulesAsync(channel, ct);
-            await ApplyAccessRulesAsync(
-                channel,
-                request.AccessRules,
-                isPrivate: true,
-                request.Password,
-                actorUserId,
-                ct);
+            if (channel.RoomType == CustomRoomType.RoleClaim
+                && channel.IsPrivate
+                && await RoleClaimCycleValidator.WouldBeSelfReferentialAsync(
+                    db,
+                    channel.RoomId,
+                    channel.AccessRules.Where(r => r.CustomRoleId.HasValue).Select(r => r.CustomRoleId!.Value),
+                    ct))
+            {
+                throw new InvalidOperationException(
+                    "This role-claim room would be self-referential: a required access role can only be claimed inside this same room.");
+            }
+
+            channel.UpdatedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
-        else if (!wasPrivate)
+        catch
         {
-            throw new InvalidOperationException("Private rooms must specify at least one access role.");
+            await transaction.RollbackAsync(ct);
+            throw;
         }
 
-        if (channel.RoomType == CustomRoomType.RoleClaim
-            && channel.IsPrivate
-            && await RoleClaimCycleValidator.WouldBeSelfReferentialAsync(
-                db,
-                channel.RoomId,
-                channel.AccessRules.Where(r => r.CustomRoleId.HasValue).Select(r => r.CustomRoleId!.Value),
-                ct))
-        {
-            throw new InvalidOperationException(
-                "This role-claim room would be self-referential: a required access role can only be claimed inside this same room.");
-        }
-
-        channel.UpdatedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
         await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
 
@@ -816,6 +828,7 @@ public sealed class InfrastructureService(
     }
 
     public async Task<bool> AdminRevokeCustomRoleAsync(
+        Guid actorUserId,
         Guid targetUserId,
         Guid roleId,
         string? tenantDatabaseName = null,
@@ -835,6 +848,15 @@ public sealed class InfrastructureService(
 
         try
         {
+            User target = await location.Db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstAsync(u => u.UserId == targetUserId, ct);
+
+            short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(target);
+            if (!PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel))
+                return false;
+
             UserRole? assignment = await location.Db.UserRoles
                 .FirstOrDefaultAsync(ur => ur.UserId == targetUserId && ur.RoleId == roleId, ct);
             if (assignment is null)
@@ -850,6 +872,36 @@ public sealed class InfrastructureService(
         {
             if (location.DisposeDb)
                 await location.Db.DisposeAsync();
+        }
+    }
+
+    private async Task PropagateCustomRoleUpdateAsync(Guid roleId, CancellationToken ct)
+    {
+        List<Guid> affectedUsers = await db.UserRoles
+            .Where(ur => ur.RoleId == roleId)
+            .Select(ur => ur.UserId)
+            .ToListAsync(ct);
+
+        foreach (Guid userId in affectedUsers)
+            await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId, ct);
+
+        List<string> tenantDatabases = await masterRegistry.Tenants
+            .AsNoTracking()
+            .Select(tenant => tenant.DatabaseName)
+            .ToListAsync(ct);
+
+        foreach (string databaseName in tenantDatabases)
+        {
+            await using AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
+            await CustomRoleReplicationService.EnsureRoleSyncedAsync(db, tenantDb, roleId, ct);
+
+            List<Guid> tenantUsers = await tenantDb.UserRoles
+                .Where(ur => ur.RoleId == roleId)
+                .Select(ur => ur.UserId)
+                .ToListAsync(ct);
+
+            foreach (Guid userId in tenantUsers)
+                await EffectiveMaskService.RebuildOnContextAsync(tenantDb, userId, ct);
         }
     }
 
@@ -1107,25 +1159,8 @@ public sealed class InfrastructureService(
         }
     }
 
-    private static bool CanEditInfoRoom(UserEffectiveMask mask, CustomChannel channel)
-    {
-        if (channel.RoomType != CustomRoomType.Info)
-            return true;
-
-        if (HasPlatformRole(mask, PlatformRoles.Owner)
-            || HasPlatformRole(mask, PlatformRoles.SystemAdministrator))
-        {
-            return true;
-        }
-
-        if (HasPlatformRole(mask, PlatformRoles.Administrator)
-            && (DateTime.UtcNow - channel.CreatedAtUtc).TotalDays <= InfoRoomAdminEditDays)
-        {
-            return true;
-        }
-
-        return false;
-    }
+    private static bool CanEditInfoRoom(UserEffectiveMask mask, CustomChannel channel) =>
+        InfoRoomEditPolicy.CanEditInfoRoom(mask, channel);
 
     private static bool HasPlatformRole(UserEffectiveMask mask, short bit) =>
         BitMask.HasBit(mask.EffectiveRoleMask, bit);
@@ -1160,7 +1195,7 @@ public sealed class InfrastructureService(
             TiePlatformRoleBit = channel.TiePlatformRoleBit,
             CreatedAtUtc = channel.CreatedAtUtc,
             UpdatedAtUtc = channel.UpdatedAtUtc,
-            CanEditInfo = CanEditInfoRoom(mask, channel),
+            CanEditInfo = InfoRoomEditPolicy.CanEditInfoRoom(mask, channel),
             AccessRules = channel.AccessRules.Select(rule => new CustomChannelAccessRuleDto
             {
                 CustomRoleId = rule.CustomRoleId,

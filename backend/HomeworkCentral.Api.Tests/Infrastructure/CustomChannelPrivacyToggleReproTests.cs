@@ -125,7 +125,9 @@ public class CustomChannelPrivacyToggleReproTests : IAsyncLifetime
             new ChatRoomAccessService(new NoOpCustomChannelStore(), scopeAccessor),
             scopeAccessor,
             new NoOpChatNavNotifier(),
-            userDirectory);
+            userDirectory,
+            masterRegistry,
+            tenantFactory);
     }
 
     [SkippableFact]

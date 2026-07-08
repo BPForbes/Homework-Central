@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import { useAuth } from '../../context/AuthContext'
@@ -19,11 +19,7 @@ export function GetRolesPanel({ roomId = GET_ROLES_ROOM_ID }: { roomId?: string 
   const [pending, setPending] = useState<string | null>(null)
   const isBuiltIn = roomId === GET_ROLES_ROOM_ID
 
-  useEffect(() => {
-    void load()
-  }, [roomId])
-
-  async function load() {
+  const load = useCallback(async () => {
     try {
       if (isBuiltIn) {
         const [subjectsRes, customRes] = await Promise.all([
@@ -40,7 +36,11 @@ export function GetRolesPanel({ roomId = GET_ROLES_ROOM_ID }: { roomId?: string 
     } catch {
       setError('Could not load roles. Please try again.')
     }
-  }
+  }, [isBuiltIn, roomId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   async function toggleSubject(subject: ClaimableSubject) {
     setPending(subject.name)

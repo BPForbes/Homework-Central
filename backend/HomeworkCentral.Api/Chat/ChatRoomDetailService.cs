@@ -1,11 +1,8 @@
-using System.Collections;
-using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Chat;
@@ -81,7 +78,7 @@ public sealed class ChatRoomDetailService(
             IsPrivate = channel.IsPrivate,
             RoomType = channel.RoomType.ToString(),
             InfoContent = channel.InfoContent,
-            CanEditInfo = CanEditInfoFromMask(masks, channel.RoomType, channel.CreatedAtUtc),
+            CanEditInfo = InfoRoomEditPolicy.CanEditInfoFromMask(masks, channel.RoomType, channel.CreatedAtUtc),
             CustomChannelId = channel.ChannelId,
             IconName = channel.IconName,
         };
@@ -97,24 +94,8 @@ public sealed class ChatRoomDetailService(
             IsPrivate = channel.IsPrivate,
             RoomType = channel.RoomType.ToString(),
             InfoContent = channel.InfoContent,
-            CanEditInfo = CanEditInfoFromMask(masks, channel.RoomType, channel.CreatedAtUtc),
+            CanEditInfo = InfoRoomEditPolicy.CanEditInfoFromMask(masks, channel.RoomType, channel.CreatedAtUtc),
             CustomChannelId = channel.ChannelId,
             IconName = channel.IconName,
         };
-
-    private static bool CanEditInfoFromMask(EffectiveMaskDto masks, CustomRoomType roomType, DateTime createdAtUtc)
-    {
-        if (roomType != CustomRoomType.Info)
-            return false;
-
-        BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
-        if (BitMask.HasBit(roleMask, PlatformRoles.Owner)
-            || BitMask.HasBit(roleMask, PlatformRoles.SystemAdministrator))
-        {
-            return true;
-        }
-
-        return BitMask.HasBit(roleMask, PlatformRoles.Administrator)
-            && (DateTime.UtcNow - createdAtUtc).TotalDays <= 3;
-    }
 }

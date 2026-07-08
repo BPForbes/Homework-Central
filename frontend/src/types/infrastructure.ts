@@ -86,10 +86,21 @@ export const PLATFORM_ROLES: { bit: number; name: string }[] = [
   { bit: 2, name: 'Student' },
   { bit: 3, name: 'Staff' },
   { bit: 4, name: 'Tutor' },
+  { bit: 5, name: 'SeniorTutor' },
+  { bit: 6, name: 'HeadTutor' },
   { bit: 7, name: 'Moderator' },
+  { bit: 8, name: 'SeniorModerator' },
+  { bit: 9, name: 'CommunityManager' },
+  { bit: 10, name: 'EventOrganizer' },
+  { bit: 11, name: 'SeminarHost' },
+  { bit: 12, name: 'VerifiedEducator' },
+  { bit: 13, name: 'Developer' },
+  { bit: 14, name: 'BetaTester' },
   { bit: 15, name: 'Administrator' },
   { bit: 16, name: 'SystemAdministrator' },
+  { bit: 17, name: 'BoardMember' },
   { bit: 18, name: 'Owner' },
+  { bit: 19, name: 'Founder' },
 ]
 
 export const GET_ROLES_ROOM_ID = 'general:get-roles'

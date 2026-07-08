@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import { resolveCustomRoleIcon } from './customRoleIcons'
@@ -29,12 +29,8 @@ export function CustomInfoRoomPanel({ room, onUpdated }: CustomInfoRoomPanelProp
     try {
       const { data } = await infrastructureApi.updateChannel(room.customChannelId, { infoContent: content })
       onUpdated(data.infoContent ?? '')
-    } catch (err: unknown) {
-      const msg =
-        typeof err === 'object' && err !== null && 'response' in err
-          ? (err as { response?: { data?: { message?: string } } }).response?.data?.message
-          : undefined
-      setError(msg ?? 'Could not save info content.')
+    } catch {
+      setError('Could not save info content.')
     } finally {
       setSaving(false)
     }
@@ -73,18 +69,18 @@ export function CustomRoleClaimPanel({ roomId }: { roomId: string }) {
   const [error, setError] = useState('')
   const [pending, setPending] = useState<string | null>(null)
 
-  useEffect(() => {
-    void load()
-  }, [roomId])
-
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const { data } = await infrastructureApi.getClaimableRoles(roomId)
       setRoles(data)
     } catch {
       setError('Could not load claimable roles.')
     }
-  }
+  }, [roomId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   async function toggle(role: ClaimableCustomRole) {
     setPending(role.roleId)

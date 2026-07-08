@@ -44,6 +44,11 @@ public class AddChatMentionNotifications : Migration
             columns: new[] { "RecipientUserId", "ReadAtUtc" });
 
         migrationBuilder.CreateIndex(
+            name: "IX_ChatMentionNotifications_RecipientUserId_CreatedAtUtc",
+            table: "ChatMentionNotifications",
+            columns: new[] { "RecipientUserId", "CreatedAtUtc" });
+
+        migrationBuilder.CreateIndex(
             name: "IX_ChatMentionNotifications_RecipientUserId_CategoryKey",
             table: "ChatMentionNotifications",
             columns: new[] { "RecipientUserId", "CategoryKey" });

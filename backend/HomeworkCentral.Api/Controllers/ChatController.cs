@@ -27,9 +27,6 @@ public class ChatController(
         if (userId is null)
             return Unauthorized();
 
-        UserEffectiveMask? mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId.Value, ct)
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId.Value, ct);
-
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
         return Ok(chatRoomAccess.GetAccessibleNav(masks));
     }

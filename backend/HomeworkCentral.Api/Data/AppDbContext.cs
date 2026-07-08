@@ -231,6 +231,7 @@ public partial class AppDbContext(
                 .IsRequired();
             e.Property(n => n.TenantDatabaseName).HasMaxLength(128);
             e.HasIndex(n => new { n.RecipientUserId, n.ReadAtUtc });
+            e.HasIndex(n => new { n.RecipientUserId, n.CreatedAtUtc });
             e.HasIndex(n => new { n.RecipientUserId, n.CategoryKey });
             e.HasIndex(n => n.MessageId);
         });

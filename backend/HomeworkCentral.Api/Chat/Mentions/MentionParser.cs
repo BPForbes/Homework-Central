@@ -7,15 +7,17 @@ namespace HomeworkCentral.Api.Chat.Mentions;
 /// <summary>
 /// Parses @-mentions in chat messages. Mentions wrapped in double backticks (``@token``) are
 /// rendered as plain text and do not ping. Unauthorized @everyone/@here tokens are replaced
-/// with @null (plain text, no ping).
+/// with @null (plain text, no ping). Role mentions use explicit <c>@role:RoleName</c> syntax so
+/// usernames that match platform role names (e.g. <c>@Tutor</c>) resolve as user mentions.
 /// </summary>
 public static partial class MentionParser
 {
     public const string NullToken = "null";
     public const string EveryoneToken = "everyone";
     public const string HereToken = "here";
+    public const string RolePrefix = "role:";
 
-    [GeneratedRegex(@"@([A-Za-z][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"@(?:role:([\p{L}\p{N}_][\p{L}\p{N}_.-]*)|([\p{L}\p{N}_][\p{L}\p{N}_.-]{2,63}))", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex MentionTokenRegex();
 
     public static MentionParseResult Parse(string rawContent, bool canUseBroadcastMentions)
@@ -61,8 +63,10 @@ public static partial class MentionParser
             containsAnyMentionToken = true;
             display.Append(segment[lastIndex..match.Index]);
 
-            string token = match.Groups[1].Value;
-            MentionKind? kind = ClassifyToken(token);
+            string token = match.Groups[1].Success
+                ? match.Groups[1].Value
+                : match.Groups[2].Value;
+            MentionKind? kind = ClassifyToken(token, isExplicitRoleMention: match.Groups[1].Success);
             int outputStart = display.Length;
 
             if (kind is null)
@@ -87,7 +91,7 @@ public static partial class MentionParser
         display.Append(segment[lastIndex..]);
     }
 
-    private static MentionKind? ClassifyToken(string token)
+    private static MentionKind? ClassifyToken(string token, bool isExplicitRoleMention)
     {
         if (string.Equals(token, EveryoneToken, StringComparison.OrdinalIgnoreCase))
             return MentionKind.Everyone;
@@ -98,7 +102,7 @@ public static partial class MentionParser
         if (string.Equals(token, NullToken, StringComparison.OrdinalIgnoreCase))
             return null;
 
-        if (PlatformRoleCatalog.TryGetRoleBit(token, out _))
+        if (isExplicitRoleMention && PlatformRoleCatalog.TryGetRoleBit(token, out _))
             return MentionKind.Role;
 
         return MentionKind.User;

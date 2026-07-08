@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface PasswordConfirmModalProps {
   open: boolean
@@ -18,6 +18,27 @@ export function PasswordConfirmModal({
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!open)
+      return
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+    inputRef.current?.focus()
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape')
+        onCancel()
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocusRef.current?.focus()
+    }
+  }, [open, onCancel])
 
   if (!open) return null
 
@@ -49,6 +70,7 @@ export function PasswordConfirmModal({
         <form onSubmit={handleSubmit}>
           <label htmlFor="confirm-password">Your password</label>
           <input
+            ref={inputRef}
             id="confirm-password"
             type="password"
             value={password}

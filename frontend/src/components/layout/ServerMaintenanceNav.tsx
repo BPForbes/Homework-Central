@@ -26,6 +26,14 @@ function NavIconLink({ to, label, icon }: { to: string; label: string; icon: Ico
   )
 }
 
+function NavSeparator() {
+  return (
+    <span className="server-nav-separator" aria-hidden="true">
+      |
+    </span>
+  )
+}
+
 export function ServerMaintenanceNav({ title }: ServerMaintenanceNavProps) {
   const { hasPermission } = useAuth()
   const canManageInfrastructure = hasPermission(MANAGE_SERVER_INFRASTRUCTURE_BIT)
@@ -38,23 +46,17 @@ export function ServerMaintenanceNav({ title }: ServerMaintenanceNavProps) {
       </div>
       <div className="server-maintenance-nav-links">
         <NavIconLink to="/chat" label="Chat" icon={byPrefixAndName.far.comments} />
-        <span className="server-nav-separator" aria-hidden="true">
-          |
-        </span>
+        <NavSeparator />
         <NavIconLink to="/inbox" label="Inbox" icon={byPrefixAndName.fas.envelope} />
         {canManageInfrastructure && (
           <>
-            <span className="server-nav-separator" aria-hidden="true">
-              |
-            </span>
+            <NavSeparator />
             <NavIconLink
               to="/user-config"
               label="User Config"
               icon={byPrefixAndName.fas['users-gear']}
             />
-            <span className="server-nav-separator" aria-hidden="true">
-              |
-            </span>
+            <NavSeparator />
             <NavIconLink to="/server" label="Server" icon={byPrefixAndName.fas.server} />
           </>
         )}

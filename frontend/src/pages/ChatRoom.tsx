@@ -19,8 +19,11 @@ import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/ch
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
 
 function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
-  if (room.iconName)
-    return resolveCustomRoomIcon(room.iconName, room.roomType as 'Chat' | 'Info' | 'RoleClaim')
+  if (room.iconName) {
+    const roomType = room.roomType === 'GetRoles' ? 'RoleClaim' : room.roomType
+    if (roomType === 'Chat' || roomType === 'Info' || roomType === 'RoleClaim')
+      return resolveCustomRoomIcon(room.iconName, roomType)
+  }
 
   if (room.categoryKey === 'Staff')
     return getStaffRoomIcon(room.name)
@@ -125,8 +128,8 @@ export function ChatRoom() {
 
   const icon = resolveRoomIcon(room)
   const subtitle = room.isPrivate
-    ? `${room.categoryDisplayName} · private · ${roomType}`
-    : `${room.categoryDisplayName} · public · ${roomType}`
+    ? `${room.categoryDisplayName} · private · ${navTitleForRoomType(roomType)}`
+    : `${room.categoryDisplayName} · public · ${navTitleForRoomType(roomType)}`
 
   return (
     <div className="chat-room-page chat-room-page--active">
