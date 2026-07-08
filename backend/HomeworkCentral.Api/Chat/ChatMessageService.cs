@@ -332,18 +332,12 @@ public sealed class ChatMessageService(
 
     public async Task MarkInboxAllReadAsync(Guid userId, CancellationToken ct = default)
     {
-        List<ChatMentionNotification> unread = await masterDb.ChatMentionNotifications
-            .Where(notification => notification.RecipientUserId == userId && notification.ReadAtUtc == null)
-            .ToListAsync(ct);
-
-        if (unread.Count == 0)
-            return;
-
         DateTime now = DateTime.UtcNow;
-        foreach (ChatMentionNotification notification in unread)
-            notification.ReadAtUtc = now;
-
-        await masterDb.SaveChangesAsync(ct);
+        await masterDb.ChatMentionNotifications
+            .Where(notification => notification.RecipientUserId == userId && notification.ReadAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(notification => notification.ReadAtUtc, now),
+                ct);
     }
 
     public async Task<int> DeleteInboxItemsAsync(

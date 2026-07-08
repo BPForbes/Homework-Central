@@ -63,6 +63,7 @@ export function ServerMaintenance() {
   const [iconName, setIconName] = useState(defaultCustomRoomIcon('Chat'))
   const [categoryKey, setCategoryKey] = useState('')
   const [categoryDisplayName, setCategoryDisplayName] = useState('')
+  const [isNewCategory, setIsNewCategory] = useState(false)
   const [roomType, setRoomType] = useState<CustomRoomType>('Chat')
   const [isPrivate, setIsPrivate] = useState(false)
   const [infoContent, setInfoContent] = useState('')
@@ -120,6 +121,7 @@ export function ServerMaintenance() {
     setIconName(defaultCustomRoomIcon('Chat'))
     setCategoryKey('')
     setCategoryDisplayName('')
+    setIsNewCategory(false)
     setRoomType('Chat')
     setIsPrivate(false)
     setInfoContent('')
@@ -133,6 +135,7 @@ export function ServerMaintenance() {
     setIconName(channel.iconName ?? defaultCustomRoomIcon(channel.roomType))
     setCategoryKey(channel.categoryKey)
     setCategoryDisplayName(channel.categoryDisplayName)
+    setIsNewCategory(false)
     setRoomType(channel.roomType)
     setIsPrivate(channel.isPrivate)
     setInfoContent(channel.infoContent ?? '')
@@ -144,8 +147,11 @@ export function ServerMaintenance() {
     if (cat) {
       setCategoryKey(cat.key)
       setCategoryDisplayName(cat.name)
+      setIsNewCategory(false)
     } else {
       setCategoryKey('')
+      setCategoryDisplayName('')
+      setIsNewCategory(true)
     }
   }
 
@@ -365,7 +371,7 @@ export function ServerMaintenance() {
               <select
                 id="room-category"
                 className="sm-input"
-                value={categoryKey}
+                value={isNewCategory ? '' : categoryKey}
                 onChange={(e) => pickCategory(e.target.value)}
               >
                 <option value="">New / custom category…</option>
@@ -381,7 +387,7 @@ export function ServerMaintenance() {
                 onChange={(e) => setCategoryDisplayName(e.target.value)}
                 placeholder="Display name (e.g. Mathematics)"
               />
-              {!categoryKey && (
+              {isNewCategory && (
                 <input
                   id="custom-cat-key"
                   type="text"

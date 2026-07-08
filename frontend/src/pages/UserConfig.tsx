@@ -139,8 +139,8 @@ export function UserConfig() {
           'No users are available for assignment right now. You can only assign to users whose highest platform role is below yours.',
         )
       }
-    } catch (err: unknown) {
-      showError(axiosMessage(err) ?? 'Could not load users for assignment.')
+    } catch {
+      showError('Could not load users for assignment.')
       resetRoleForm()
     } finally {
       setAssignLoading(false)
@@ -172,8 +172,8 @@ export function UserConfig() {
         setDescription('')
         setPermissionIds([])
       }
-    } catch (err: unknown) {
-      showError(axiosMessage(err) ?? 'Could not save that role.')
+    } catch {
+      showError('Could not save that role.')
     } finally {
       setSaving(false)
     }
@@ -186,8 +186,8 @@ export function UserConfig() {
       setPlacementRoleId(null)
       setPlacementRoomId('')
       await load()
-    } catch (err: unknown) {
-      showError(axiosMessage(err) ?? 'Could not assign role to a claim room.')
+    } catch {
+      showError('Could not assign role to a claim room.')
     }
   }
 
@@ -252,8 +252,8 @@ export function UserConfig() {
           void load()
         },
       )
-    } catch (err: unknown) {
-      showError(axiosMessage(err) ?? 'Could not assign the selected roles.')
+    } catch {
+      showError('Could not assign the selected roles.')
     } finally {
       setAssignLoading(false)
     }
@@ -276,6 +276,23 @@ export function UserConfig() {
 
   const selectableUsers = assignableUsers.filter((user) => user.canAssign && !user.alreadyAssigned)
   const placementRole = placementRoleId ? roles.find((role) => role.roleId === placementRoleId) ?? null : null
+
+  useEffect(() => {
+    if (!dialog && !confirmAssignOpen && !placementRole)
+      return
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape')
+        return
+
+      setDialog(null)
+      setConfirmAssignOpen(false)
+      closePlacementModal()
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [dialog, confirmAssignOpen, placementRole])
 
   return (
     <div className="server-page">
@@ -530,11 +547,4 @@ export function UserConfig() {
       )}
     </div>
   )
-}
-
-function axiosMessage(err: unknown): string | undefined {
-  if (typeof err === 'object' && err !== null && 'response' in err) {
-    return (err as { response?: { data?: { message?: string } } }).response?.data?.message
-  }
-  return undefined
 }

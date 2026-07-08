@@ -48,7 +48,6 @@ public sealed class MentionRecipientResolver(
     {
         HashSet<Guid> recipients = [];
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(senderAccountClass, senderTenantDatabaseName, ct);
-        ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
 
         foreach (ParsedMention mention in activeMentions.Where(m => m.IsActive))
         {
@@ -64,9 +63,8 @@ public sealed class MentionRecipientResolver(
 
                     if (mentionedUser is not null
                         && mentionedUser.UserId != senderId
-                        && room is not null
                         && IsEligibleRecipient(senderAccountClass, senderTenantDatabaseName, mentionedUser)
-                        && chatRoomAccess.CanAccessRoom(mentionedUser.Masks, room))
+                        && chatRoomAccess.CanAccessRoom(mentionedUser.Masks, roomId))
                     {
                         recipients.Add(mentionedUser.UserId);
                     }
@@ -85,7 +83,7 @@ public sealed class MentionRecipientResolver(
                         if (!BitMask.HasBit(snapshot.RoleMask, roleBit))
                             continue;
 
-                        if (room is not null && chatRoomAccess.CanAccessRoom(snapshot.Masks, room))
+                        if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
                             recipients.Add(snapshot.UserId);
                     }
 
@@ -97,7 +95,7 @@ public sealed class MentionRecipientResolver(
                         if (snapshot.UserId == senderId)
                             continue;
 
-                        if (room is not null && chatRoomAccess.CanAccessRoom(snapshot.Masks, room))
+                        if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
                             recipients.Add(snapshot.UserId);
                     }
 

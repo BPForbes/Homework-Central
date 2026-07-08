@@ -53,12 +53,28 @@ public class MentionParserTests
     }
 
     [Fact]
-    public void Role_mention_is_classified()
+    public void Role_mention_requires_explicit_role_prefix()
     {
-        MentionParseResult result = MentionParser.Parse("Hey @Tutor", canUseBroadcastMentions: false);
+        MentionParseResult roleMention = MentionParser.Parse("Hey @role:Tutor", canUseBroadcastMentions: false);
+
+        Assert.Single(roleMention.ActiveMentions);
+        Assert.Equal(MentionKind.Role, roleMention.ActiveMentions[0].Kind);
+        Assert.Equal("Tutor", roleMention.ActiveMentions[0].Token);
+
+        MentionParseResult userMention = MentionParser.Parse("Hey @Tutor", canUseBroadcastMentions: false);
+
+        Assert.Single(userMention.ActiveMentions);
+        Assert.Equal(MentionKind.User, userMention.ActiveMentions[0].Kind);
+        Assert.Equal("Tutor", userMention.ActiveMentions[0].Token);
+    }
+
+    [Fact]
+    public void Usernames_with_digits_or_underscores_are_parsed()
+    {
+        MentionParseResult result = MentionParser.Parse("Ping @2cool_user", canUseBroadcastMentions: false);
 
         Assert.Single(result.ActiveMentions);
-        Assert.Equal(MentionKind.Role, result.ActiveMentions[0].Kind);
-        Assert.Equal("Tutor", result.ActiveMentions[0].Token);
+        Assert.Equal(MentionKind.User, result.ActiveMentions[0].Kind);
+        Assert.Equal("2cool_user", result.ActiveMentions[0].Token);
     }
 }

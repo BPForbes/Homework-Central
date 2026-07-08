@@ -293,7 +293,16 @@ public class InfrastructureController(IInfrastructureService infrastructure) : C
         [FromQuery] string? tenantDatabaseName,
         CancellationToken ct)
     {
-        bool removed = await infrastructure.AdminRevokeCustomRoleAsync(userId, roleId, tenantDatabaseName, ct);
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        bool removed = await infrastructure.AdminRevokeCustomRoleAsync(
+            actorId.Value,
+            userId,
+            roleId,
+            tenantDatabaseName,
+            ct);
         return removed ? NoContent() : NotFound();
     }
 

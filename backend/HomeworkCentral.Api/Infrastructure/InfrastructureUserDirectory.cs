@@ -53,14 +53,11 @@ public sealed class InfrastructureUserDirectory(
         foreach (string databaseName in await ListDevTenantDatabaseNamesAsync(ct))
         {
             AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
-            await using (tenantDb)
-            {
-                if (await tenantDb.Users.AsNoTracking().AnyAsync(u => u.UserId == userId, ct))
-                    return new UserDatabaseLocation(
-                        await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct),
-                        DisposeDb: true,
-                        databaseName);
-            }
+            bool exists = await tenantDb.Users.AsNoTracking().AnyAsync(u => u.UserId == userId, ct);
+            if (exists)
+                return new UserDatabaseLocation(tenantDb, DisposeDb: true, databaseName);
+
+            await tenantDb.DisposeAsync();
         }
 
         return null;
