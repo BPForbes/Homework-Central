@@ -14,6 +14,7 @@
   --color-surface-muted: #f0f2f8;
   --color-border: rgba(59, 91, 219, 0.12);
   --color-error: #e03131;
+  --color-success: #1a7f37;
 
   /* shadcn / Tailwind utility aliases */
   --background: var(--color-neutral);

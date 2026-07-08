@@ -17,7 +17,7 @@ colors:
   error: "#e03131"
   on-error: "#ffffff"
   mention: "#3b5bdb"
-  success: "#2f9e44"
+  success: "#1a7f37"
 typography:
   headline-lg:
     fontFamily: Inter
@@ -78,7 +78,7 @@ components:
     rounded: "{rounded.md}"
     padding: 10px
   button-ghost:
-    backgroundColor: transparent
+    backgroundColor: "{colors.surface}"
     textColor: "{colors.secondary}"
     rounded: "{rounded.md}"
     padding: 8px
@@ -88,6 +88,23 @@ components:
     rounded: "{rounded.md}"
     padding: 12px
     typography: "{typography.body-md}"
+  app-canvas:
+    backgroundColor: "{colors.neutral}"
+  sidebar-group:
+    backgroundColor: "{colors.surface-muted}"
+    rounded: "{rounded.lg}"
+    padding: 12px
+  mention-chip:
+    textColor: "{colors.mention}"
+    typography: "{typography.label-md}"
+  success-badge:
+    backgroundColor: "{colors.success}"
+    textColor: "{colors.on-primary}"
+    rounded: "{rounded.sm}"
+    padding: 4px
+  divider:
+    backgroundColor: "{colors.border}"
+    height: 1px
   card:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.lg}"
@@ -108,7 +125,7 @@ components:
     rounded: "{rounded.md}"
     padding: 8px
   nav-tab-inactive:
-    backgroundColor: transparent
+    backgroundColor: "{colors.surface}"
     textColor: "{colors.secondary}"
     rounded: "{rounded.md}"
     padding: 8px
@@ -121,7 +138,7 @@ components:
     rounded: "{rounded.lg}"
     padding: 24px
   role-tile-active:
-    backgroundColor: "rgba(59, 91, 219, 0.08)"
+    backgroundColor: "{colors.surface-muted}"
     textColor: "{colors.primary}"
 ---
 
@@ -137,7 +154,7 @@ The palette is built around **Scholar Blue** as the single interaction driver, w
 
 - **Primary / Scholar Blue (#3b5bdb):** Primary actions, active navigation, own-message bubbles, links, and mention highlights. Use for one dominant CTA per view.
 - **On-primary (#ffffff):** Text and icons on primary-filled surfaces.
-- **Secondary (#6b7280):** Metadata, subtitles, inactive nav labels, timestamps on light surfaces.
+- **Secondary (#4b5563):** Metadata, subtitles, and timestamps on light surfaces.
 - **Neutral (#eef0f6):** App background — a soft blue-gray that separates cards without harsh contrast.
 - **Surface (#ffffff):** Cards, sidebars, message bubbles from others, input fields.
 - **Surface-muted (#f0f2f8):** Sidebar group headers, hover states, reply-quote backgrounds.
