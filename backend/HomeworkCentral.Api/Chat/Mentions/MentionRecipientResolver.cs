@@ -88,15 +88,12 @@ public sealed class MentionRecipientResolver(
                         ct);
                     if (customRoleId is Guid roleId)
                     {
-                        await AddCustomRoleRecipientsAsync(
+                        AddCustomRoleRecipients(
                             recipients,
                             eligibleUsers,
                             roomId,
                             senderId,
-                            roleId,
-                            senderAccountClass,
-                            senderTenantDatabaseName,
-                            ct);
+                            roleId);
                     }
 
                     break;
@@ -165,103 +162,24 @@ public sealed class MentionRecipientResolver(
         }
     }
 
-    private async Task AddCustomRoleRecipientsAsync(
+    private void AddCustomRoleRecipients(
         HashSet<Guid> recipients,
         List<UserMaskSnapshot> eligibleUsers,
         string roomId,
         Guid senderId,
-        Guid customRoleId,
-        AccountClass senderAccountClass,
-        string? senderTenantDatabaseName,
-        CancellationToken ct)
+        Guid customRoleId)
     {
-        HashSet<Guid> holders = await LoadCustomRoleHolderIdsAsync(
-            customRoleId,
-            senderAccountClass,
-            senderTenantDatabaseName,
-            ct);
-
         foreach (UserMaskSnapshot snapshot in eligibleUsers)
         {
             if (snapshot.UserId == senderId)
                 continue;
 
-            if (!holders.Contains(snapshot.UserId))
+            if (!snapshot.Masks.CustomRoleIds.Contains(customRoleId))
                 continue;
 
             if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
                 recipients.Add(snapshot.UserId);
         }
-    }
-
-    private async Task<HashSet<Guid>> LoadCustomRoleHolderIdsAsync(
-        Guid customRoleId,
-        AccountClass senderAccountClass,
-        string? senderTenantDatabaseName,
-        CancellationToken ct)
-    {
-        if (senderAccountClass == AccountClass.RealAccount)
-        {
-            List<Guid> userIds = await masterDb.UserRoles
-                .AsNoTracking()
-                .Where(userRole => userRole.RoleId == customRoleId)
-                .Select(userRole => userRole.UserId)
-                .ToListAsync(ct);
-
-            return userIds.ToHashSet();
-        }
-
-        if (senderAccountClass == AccountClass.DeveloperAccount
-            && !string.IsNullOrEmpty(senderTenantDatabaseName))
-        {
-            await using AppDbContext tenantDb =
-                await tenantFactory.CreateForRegisteredTenantAsync(senderTenantDatabaseName, ct);
-
-            List<Guid> userIds = await tenantDb.UserRoles
-                .AsNoTracking()
-                .Where(userRole => userRole.RoleId == customRoleId)
-                .Select(userRole => userRole.UserId)
-                .ToListAsync(ct);
-
-            return userIds.ToHashSet();
-        }
-
-        if (senderAccountClass == AccountClass.DevAdmin)
-        {
-            HashSet<Guid> holders = [];
-            List<string> tenantDatabases = await masterRegistry.Tenants
-                .AsNoTracking()
-                .Select(tenant => tenant.DatabaseName)
-                .ToListAsync(ct);
-
-            foreach (string databaseName in tenantDatabases)
-            {
-                await using AppDbContext tenantDb =
-                    await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
-
-                List<Guid> userIds = await tenantDb.UserRoles
-                    .AsNoTracking()
-                    .Where(userRole => userRole.RoleId == customRoleId)
-                    .Select(userRole => userRole.UserId)
-                    .ToListAsync(ct);
-
-                foreach (Guid userId in userIds)
-                    holders.Add(userId);
-            }
-
-            List<Guid> masterUserIds = await masterDb.UserRoles
-                .AsNoTracking()
-                .Where(userRole => userRole.RoleId == customRoleId)
-                .Select(userRole => userRole.UserId)
-                .ToListAsync(ct);
-
-            foreach (Guid userId in masterUserIds)
-                holders.Add(userId);
-
-            return holders;
-        }
-
-        return [];
     }
 
     private static bool IsEligibleRecipient(
@@ -372,8 +290,23 @@ public sealed class MentionRecipientResolver(
             devAdmin.Username,
             AccountClass.DevAdmin,
             null,
-            mask.ToEffectiveMaskDto(),
+            await BuildMaskDtoWithCustomRolesAsync(masterDb, devAdmin.UserId, mask, ct),
             mask.EffectiveRoleMask);
+    }
+
+    private static async Task<EffectiveMaskDto> BuildMaskDtoWithCustomRolesAsync(
+        AppDbContext db,
+        Guid userId,
+        UserEffectiveMask mask,
+        CancellationToken ct)
+    {
+        EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+        Dictionary<Guid, List<Guid>> customRoleIdsByUser =
+            await LoadCustomRoleIdsByUserAsync(db, [userId], ct);
+        if (customRoleIdsByUser.TryGetValue(userId, out List<Guid>? customRoleIds))
+            dto.CustomRoleIds = customRoleIds;
+
+        return dto;
     }
 
     private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
@@ -389,6 +322,13 @@ public sealed class MentionRecipientResolver(
             .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
 
         List<UserMaskSnapshot> snapshots = [];
+        HashSet<Guid> userIds = masks
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Select(mask => mask.UserId)
+            .ToHashSet();
+        Dictionary<Guid, List<Guid>> customRoleIdsByUser =
+            await LoadCustomRoleIdsByUserAsync(masterDb, userIds, ct);
+
         foreach (UserEffectiveMask mask in masks)
         {
             if (!usernames.TryGetValue(mask.UserId, out string? username))
@@ -399,13 +339,12 @@ public sealed class MentionRecipientResolver(
                 continue;
 
             AccountClass accountClass = isDevAdmin ? AccountClass.DevAdmin : AccountClass.RealAccount;
-            snapshots.Add(new UserMaskSnapshot(
-                mask.UserId,
+            snapshots.Add(CreateSnapshot(
+                mask,
                 username,
                 accountClass,
                 null,
-                mask.ToEffectiveMaskDto(),
-                mask.EffectiveRoleMask));
+                customRoleIdsByUser));
         }
 
         return snapshots;
@@ -427,16 +366,75 @@ public sealed class MentionRecipientResolver(
             .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))
             .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
 
+        HashSet<Guid> userIds = masks
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Select(mask => mask.UserId)
+            .ToHashSet();
+        Dictionary<Guid, List<Guid>> customRoleIdsByUser =
+            await LoadCustomRoleIdsByUserAsync(db, userIds, ct);
+
         return masks
             .Where(mask => usernames.ContainsKey(mask.UserId))
-            .Select(mask => new UserMaskSnapshot(
-                mask.UserId,
+            .Select(mask => CreateSnapshot(
+                mask,
                 usernames[mask.UserId],
                 accountClass,
                 tenantDatabaseName,
-                mask.ToEffectiveMaskDto(),
-                mask.EffectiveRoleMask))
+                customRoleIdsByUser))
             .ToList();
+    }
+
+    private static async Task<Dictionary<Guid, List<Guid>>> LoadCustomRoleIdsByUserAsync(
+        AppDbContext db,
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken ct)
+    {
+        if (userIds.Count == 0)
+            return [];
+
+        List<(Guid UserId, Guid RoleId)> assignments = await db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userIds.Contains(userRole.UserId))
+            .Join(
+                db.Roles.AsNoTracking().Where(role => role.IsCustom),
+                userRole => userRole.RoleId,
+                role => role.RoleId,
+                (userRole, role) => new ValueTuple<Guid, Guid>(userRole.UserId, role.RoleId))
+            .ToListAsync(ct);
+
+        Dictionary<Guid, List<Guid>> byUser = [];
+        foreach ((Guid userId, Guid roleId) in assignments)
+        {
+            if (!byUser.TryGetValue(userId, out List<Guid>? roleIds))
+            {
+                roleIds = [];
+                byUser[userId] = roleIds;
+            }
+
+            roleIds.Add(roleId);
+        }
+
+        return byUser;
+    }
+
+    private static UserMaskSnapshot CreateSnapshot(
+        UserEffectiveMask mask,
+        string username,
+        AccountClass accountClass,
+        string? tenantDatabaseName,
+        Dictionary<Guid, List<Guid>> customRoleIdsByUser)
+    {
+        EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+        if (customRoleIdsByUser.TryGetValue(mask.UserId, out List<Guid>? customRoleIds))
+            dto.CustomRoleIds = customRoleIds;
+
+        return new UserMaskSnapshot(
+            mask.UserId,
+            username,
+            accountClass,
+            tenantDatabaseName,
+            dto,
+            mask.EffectiveRoleMask);
     }
 
     private sealed record UserMaskSnapshot(

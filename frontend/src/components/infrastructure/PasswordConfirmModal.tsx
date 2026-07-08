@@ -37,6 +37,15 @@ export function PasswordConfirmModal({
     previousFocusRef.current = document.activeElement as HTMLElement | null
     inputRef.current?.focus()
 
+    return () => {
+      previousFocusRef.current?.focus()
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open)
+      return
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -64,10 +73,7 @@ export function PasswordConfirmModal({
     }
 
     document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      previousFocusRef.current?.focus()
-    }
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [open, onCancel])
 
   if (!open) return null
