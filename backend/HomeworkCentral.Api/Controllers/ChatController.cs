@@ -185,6 +185,33 @@ public class ChatController(
         return NoContent();
     }
 
+    [HttpPost("inbox/delete")]
+    public async Task<IActionResult> DeleteInboxItems(
+        [FromBody] DeleteInboxItemsRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        if (request.NotificationIds is null || request.NotificationIds.Count == 0)
+            return BadRequest(new { message = "Select at least one inbox item to delete." });
+
+        await chatMessageService.DeleteInboxItemsAsync(userId.Value, request.NotificationIds, ct);
+        return NoContent();
+    }
+
+    [HttpDelete("inbox")]
+    public async Task<IActionResult> DeleteInboxAll(CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        await chatMessageService.DeleteInboxAllAsync(userId.Value, ct);
+        return NoContent();
+    }
+
     private Guid? GetUserId()
     {
         string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value

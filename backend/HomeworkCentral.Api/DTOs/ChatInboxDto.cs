@@ -29,6 +29,11 @@ public class ChatInboxSummaryDto
     public IReadOnlyList<ChatInboxSummaryItemDto> Categories { get; set; } = [];
 }
 
+public class DeleteInboxItemsRequest
+{
+    public IReadOnlyList<Guid> NotificationIds { get; set; } = [];
+}
+
 public class SendChatMessageErrorResponse
 {
     public string Message { get; set; } = null!;
