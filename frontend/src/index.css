@@ -1426,6 +1426,13 @@ a {
   font-size: 1rem;
 }
 
+/* Key overlay marking a private room — layered onto the room icon by <ChatRoomIcon>. Amber so it
+ * stays readable on both the muted sidebar icons and the solid teal hero/header tiles. */
+.chat-room-key-overlay {
+  color: var(--color-accent);
+  filter: drop-shadow(0 1px 1px rgba(43, 38, 32, 0.45));
+}
+
 .chat-room-hero-layered {
   font-size: 1rem;
 }
