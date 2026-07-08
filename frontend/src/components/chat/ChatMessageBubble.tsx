@@ -81,6 +81,7 @@ export function ChatMessageBubble({
   }
 
   const swipeProgress = Math.min(1, Math.abs(dragX) / SWIPE_TRIGGER_PX)
+  const hasReply = Boolean(message.replyToMessageId)
 
   return (
     <div className={`chat-bubble-row ${isOwn ? 'chat-bubble-row--own' : 'chat-bubble-row--other'}`}>
@@ -93,64 +94,74 @@ export function ChatMessageBubble({
           <FontAwesomeIcon icon={faReply} />
         </span>
       )}
-      <article
-        data-message-id={message.messageId}
-        className={`chat-bubble ${isOwn ? 'chat-bubble--own' : 'chat-bubble--other'} ${highlighted ? 'chat-bubble--highlighted' : ''}`}
-        style={dragX !== 0 ? { transform: `translateX(${dragX}px)`, transition: 'none' } : undefined}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+      <div
+        className={`chat-message-thread ${isOwn ? 'chat-message-thread--own' : 'chat-message-thread--other'} ${hasReply ? 'chat-message-thread--has-reply' : ''}`}
       >
-        {!isOwn && message.senderUsername && (
-          <div className="chat-bubble-sender">{message.senderUsername}</div>
+        {hasReply && (
+          <>
+            <button
+              type="button"
+              className="chat-reply-quote-bubble"
+              onClick={() => onJumpToMessage(message.replyToMessageId!)}
+            >
+              <FontAwesomeIcon icon={faReply} className="chat-reply-quote-bubble-icon" />
+              <span className="chat-reply-quote-bubble-text">
+                <span className="chat-reply-quote-bubble-sender">
+                  {message.replyToSenderUsername ?? 'Unknown'}
+                </span>
+                <span className="chat-reply-quote-bubble-content">
+                  {message.replyToContentSnippet ?? ''}
+                </span>
+              </span>
+            </button>
+            <span className="chat-reply-connector" aria-hidden="true" />
+          </>
         )}
 
-        {message.replyToMessageId && (
-          <button
-            type="button"
-            className="chat-bubble-reply-quote"
-            onClick={() => onJumpToMessage(message.replyToMessageId!)}
-          >
-            <span className="chat-bubble-reply-quote-sender">
-              {message.replyToSenderUsername ?? 'Unknown'}
-            </span>
-            <span className="chat-bubble-reply-quote-content">
-              {message.replyToContentSnippet ?? ''}
-            </span>
-          </button>
-        )}
+        <article
+          data-message-id={message.messageId}
+          className={`chat-bubble ${isOwn ? 'chat-bubble--own' : 'chat-bubble--other'} ${highlighted ? 'chat-bubble--highlighted' : ''}`}
+          style={dragX !== 0 ? { transform: `translateX(${dragX}px)`, transition: 'none' } : undefined}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        >
+          {!isOwn && message.senderUsername && (
+            <div className="chat-bubble-sender">{message.senderUsername}</div>
+          )}
 
-        <div className="chat-bubble-content">
-          <MentionContent content={message.content} />
-        </div>
-        <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
-          {formatUtcTimestamp(message.createdAtUtc)}
-        </time>
+          <div className="chat-bubble-content">
+            <MentionContent content={message.content} />
+          </div>
+          <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
+            {formatUtcTimestamp(message.createdAtUtc)}
+          </time>
 
-        <div className="chat-bubble-actions" role="toolbar" aria-label="Message actions">
-          {!isOwn && (
+          <div className="chat-bubble-actions" role="toolbar" aria-label="Message actions">
+            {!isOwn && (
+              <button
+                type="button"
+                className="chat-bubble-action-btn"
+                onClick={() => onReply(message)}
+                title="Reply"
+                aria-label="Reply to this message"
+              >
+                <FontAwesomeIcon icon={faReply} />
+              </button>
+            )}
             <button
               type="button"
               className="chat-bubble-action-btn"
-              onClick={() => onReply(message)}
-              title="Reply"
-              aria-label="Reply to this message"
+              onClick={() => void handleCopy()}
+              title={copied ? 'Copied!' : 'Copy message'}
+              aria-label="Copy message content"
             >
-              <FontAwesomeIcon icon={faReply} />
+              <FontAwesomeIcon icon={faCopy} />
             </button>
-          )}
-          <button
-            type="button"
-            className="chat-bubble-action-btn"
-            onClick={() => void handleCopy()}
-            title={copied ? 'Copied!' : 'Copy message'}
-            aria-label="Copy message content"
-          >
-            <FontAwesomeIcon icon={faCopy} />
-          </button>
-        </div>
-      </article>
+          </div>
+        </article>
+      </div>
     </div>
   )
 }

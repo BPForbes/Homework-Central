@@ -40,4 +40,16 @@ public class ChatReplySnippetTests
         Assert.False(snippet.Contains(" …", StringComparison.Ordinal));
         Assert.Equal(new string('a', 159) + "…", snippet);
     }
+
+    [Fact]
+    public void Default_max_length_is_100_characters()
+    {
+        string longContent = new string('a', 150);
+
+        string snippet = ChatReplySnippet.Build(longContent);
+
+        Assert.Equal(101, snippet.Length);
+        Assert.EndsWith("…", snippet);
+        Assert.StartsWith(new string('a', 100), snippet);
+    }
 }

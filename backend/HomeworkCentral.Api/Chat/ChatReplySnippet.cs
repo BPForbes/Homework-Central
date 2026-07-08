@@ -7,7 +7,7 @@ namespace HomeworkCentral.Api.Chat;
 /// </summary>
 public static class ChatReplySnippet
 {
-    public const int MaxLength = 160;
+    public const int MaxLength = 100;
 
     public static string Build(string content, int maxLength = MaxLength)
     {
