@@ -8,6 +8,8 @@ import { useAuth } from '../context/AuthContext'
 import { authApi } from '../api/authApi'
 import type { DevDeveloperOption, DevStatus } from '../types/devAuth'
 
+import { Button } from '../components/ui/button'
+import { Label } from '../components/ui/label'
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
 export function DevLogin() {
@@ -142,27 +144,28 @@ export function DevLogin() {
   const loginDisabled = isLoadingOptions || isSubmitting || Boolean(setupError) || developers.length === 0
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <h1>Homework Central</h1>
-        <h2>Developer sign in</h2>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="bg-card rounded-lg shadow-sm border border-border p-10 w-full max-w-[420px]">
+        <p className="text-sm font-medium text-primary mb-1">Homework Central</p>
+        <h1 className="text-2xl font-semibold text-foreground mb-7">Developer sign in</h1>
 
         {personaStatus && personaStatus.personasReady === false && personaStatus.personasTotal && (
-          <p className="dev-persona-status">
+          <p className="text-sm text-muted-foreground mb-4">
             Loading dev personas ({personaStatus.personasProvisioned ?? 0}/{personaStatus.personasTotal})…
           </p>
         )}
 
-        {setupError && <p className="error">{setupError}</p>}
+        {setupError && <p className="text-sm text-destructive mb-4">{setupError}</p>}
 
-        <form onSubmit={handleSubmit}>
-          <div className="field">
-            <label htmlFor="developer">Developer account</label>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="developer">Developer account</Label>
             <select
               id="developer"
               value={developerUserId}
               onChange={(e) => setDeveloperUserId(e.target.value)}
               disabled={loginDisabled}
+              className="flex h-10 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
             >
               {developers.length === 0 && <option value="">No developers found</option>}
               {developers.map((dev) => (
@@ -173,8 +176,8 @@ export function DevLogin() {
             </select>
           </div>
 
-          <div className="field">
-            <label htmlFor="targetUser">Sign in as user (optional)</label>
+          <div className="space-y-1.5">
+            <Label htmlFor="targetUser">Sign in as user (optional)</Label>
             <select
               id="targetUser"
               value={targetUserId ? `${tenantDatabaseName}:${targetUserId}` : ''}
@@ -185,12 +188,12 @@ export function DevLogin() {
                   setTenantDatabaseName('')
                   return
                 }
-
                 const separatorIndex = value.indexOf(':')
                 setTenantDatabaseName(value.slice(0, separatorIndex))
                 setTargetUserId(value.slice(separatorIndex + 1))
               }}
               disabled={loginDisabled || availableUsers.length === 0}
+              className="flex h-10 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
             >
               <option value="">—</option>
               {availableUsers.map((user) => (
@@ -201,11 +204,11 @@ export function DevLogin() {
             </select>
           </div>
 
-          {error && <p className="error">{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <button type="submit" className="btn-primary" disabled={loginDisabled}>
+          <Button type="submit" className="w-full" disabled={loginDisabled}>
             {isSubmitting ? 'Signing in…' : isLoadingOptions ? 'Loading…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

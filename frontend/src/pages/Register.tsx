@@ -3,6 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
 
 export function Register() {
   const { register } = useAuth()
@@ -78,15 +81,15 @@ export function Register() {
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <h1>Homework Central</h1>
-        <h2>Create account</h2>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="bg-card rounded-lg shadow-sm border border-border p-10 w-full max-w-[420px]">
+        <p className="text-sm font-medium text-primary mb-1">Homework Central</p>
+        <h1 className="text-2xl font-semibold text-foreground mb-7">Create account</h1>
 
-        <form onSubmit={handleSubmit}>
-          <div className="field">
-            <label htmlFor="email">Email</label>
-            <input
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input
               id="email"
               type="email"
               autoComplete="email"
@@ -96,9 +99,9 @@ export function Register() {
               disabled={isSubmitting}
             />
           </div>
-          <div className="field">
-            <label htmlFor="username">Username</label>
-            <input
+          <div className="space-y-1.5">
+            <Label htmlFor="username">Username</Label>
+            <Input
               id="username"
               type="text"
               autoComplete="username"
@@ -110,9 +113,9 @@ export function Register() {
               disabled={isSubmitting}
             />
           </div>
-          <div className="field">
-            <label htmlFor="password">Password</label>
-            <input
+          <div className="space-y-1.5">
+            <Label htmlFor="password">Password</Label>
+            <Input
               id="password"
               type="password"
               autoComplete="new-password"
@@ -123,9 +126,9 @@ export function Register() {
               disabled={isSubmitting}
             />
           </div>
-          <div className="field">
-            <label htmlFor="confirm">Confirm password</label>
-            <input
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm">Confirm password</Label>
+            <Input
               id="confirm"
               type="password"
               autoComplete="new-password"
@@ -135,17 +138,22 @@ export function Register() {
               disabled={isSubmitting}
             />
           </div>
-          <div className="field">
-            <label htmlFor="captcha-answer">Verify you're human (optional — get Verified status immediately)</label>
+          <div className="space-y-1.5">
+            <Label htmlFor="captcha-answer">
+              Verify you&apos;re human (optional — get Verified status immediately)
+            </Label>
             <Captcha captcha={captcha} inputId="captcha-answer" disabled={isSubmitting} />
           </div>
-          {error && <p className="error">{error}</p>}
-          <button type="submit" className="btn-primary" disabled={isSubmitting || captcha.assessing}>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button type="submit" className="w-full" disabled={isSubmitting || captcha.assessing}>
             {isSubmitting ? 'Creating account…' : 'Create account'}
-          </button>
+          </Button>
         </form>
-        <p className="auth-footer">
-          Already have an account? <Link to="/login">Sign in</Link>
+        <p className="text-center text-sm text-muted-foreground mt-5">
+          Already have an account?{' '}
+          <Link to="/login" className="text-primary font-medium hover:underline">
+            Sign in
+          </Link>
         </p>
       </div>
     </div>

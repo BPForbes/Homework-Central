@@ -18,7 +18,6 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { chatApi } from '../api/chatApi'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ModerationRiskModal } from '../components/infrastructure/ModerationRiskModal'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
@@ -259,8 +258,6 @@ export function ServerMaintenance() {
 
   return (
     <div className="server-page sm-page">
-      <ServerMaintenanceNav title="Server Maintenance" />
-
       <header className="sm-hero">
         <div className="sm-hero-icon">
           <FontAwesomeIcon icon={byPrefixAndName.fas.server} />

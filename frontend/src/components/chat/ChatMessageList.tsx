@@ -58,13 +58,13 @@ export function ChatMessageList({
   }
 
   if (loading) {
-    return <p className="chat-messages-status">Loading messages…</p>
+    return <p className="text-center text-sm text-muted-foreground py-8">Loading messages…</p>
   }
 
   return (
-    <div ref={containerRef} className="chat-messages" role="log" aria-live="polite">
+    <div ref={containerRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-3" role="log" aria-live="polite">
       {messages.length === 0 && typingUsers.length === 0 && (
-        <p className="chat-messages-empty">No messages yet. Say hello!</p>
+        <p className="text-center text-sm text-muted-foreground py-8">No messages yet. Say hello!</p>
       )}
 
       {messages.map((message) => (

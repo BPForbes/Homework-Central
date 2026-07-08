@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faShieldHalved } from '@fortawesome/free-solid-svg-icons'
+import { MessageSquare, Shield } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
@@ -9,8 +8,7 @@ import { captchaApi } from '../api/captchaApi'
 import { subjectsApi } from '../api/subjectsApi'
 import { inboxApi } from '../api/inboxApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
-import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { Button } from '../components/ui/button'
 import type { ChatInboxSummaryItem } from '../types/inbox'
 
 export function Dashboard() {
@@ -68,22 +66,24 @@ export function Dashboard() {
   }
 
   return (
-    <div className="dashboard-content">
-      <ServerMaintenanceNav title="Dashboard" />
-
-      <h2>Welcome, {user?.username}!</h2>
-      <p className="dashboard-hint">
-        Open the <strong>Chats</strong> menu on the left to browse subject and staff rooms you can access.
-      </p>
+    <div className="max-w-3xl mx-auto space-y-6">
+      <div>
+        <h2 className="text-2xl font-semibold text-foreground">Welcome, {user?.username}!</h2>
+        <p className="text-muted-foreground mt-2">
+          Open <Link to="/chat" className="text-primary font-medium hover:underline">Chat</Link> to browse subject and staff rooms.
+        </p>
+      </div>
 
       {inboxSummary.length > 0 && (
-        <section className="dashboard-inbox-summary">
-          <h3>New messages</h3>
-          <ul className="dashboard-inbox-list">
+        <section className="bg-card border border-border rounded-lg p-5">
+          <h3 className="font-semibold text-foreground mb-3">New messages</h3>
+          <ul className="space-y-2">
             {inboxSummary.map((item) => (
               <li key={item.categoryKey}>
-                <Link to="/inbox" className="dashboard-inbox-link">
-                  <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} className="dashboard-inbox-icon" />
+                <Link
+                  to="/inbox"
+                  className="block px-4 py-2.5 rounded-lg bg-amber-50 text-amber-900 font-medium text-sm hover:bg-amber-100 transition-colors"
+                >
                   New Message ({item.categoryDisplayName}): {item.unreadCount}
                 </Link>
               </li>
@@ -92,58 +92,68 @@ export function Dashboard() {
         </section>
       )}
 
-      <section className="dashboard-card">
-        <div className="dashboard-card-icon">
-          <FontAwesomeIcon icon={byPrefixAndName.far.comments} />
+      <section className="flex gap-4 bg-card border border-border rounded-lg p-5">
+        <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+          <MessageSquare size={20} />
         </div>
         <div>
-          <h3>Chat rooms</h3>
-          <p>Use the sliding panel to pick a room — for example Calculus under Mathematics or Biology under Science.</p>
+          <h3 className="font-semibold text-foreground">Chat rooms</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Pick a channel from the sidebar — for example Calculus under Mathematics or Biology under Science.
+          </p>
         </div>
       </section>
 
       {isGuest && (
-        <section className="dashboard-card verify-card">
-          <div className="dashboard-card-icon">
-            <FontAwesomeIcon icon={faShieldHalved} />
+        <section className="flex gap-4 bg-card border border-border rounded-lg p-5">
+          <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Shield size={20} />
           </div>
-          <div className="verify-card-body">
-            <h3>Verify your account</h3>
-            <p>Solve the challenge below to become a Verified User.</p>
-            <form onSubmit={handleVerify}>
+          <div className="flex-1">
+            <h3 className="font-semibold text-foreground">Verify your account</h3>
+            <p className="text-sm text-muted-foreground mt-1 mb-3">Solve the challenge below to become a Verified User.</p>
+            <form onSubmit={handleVerify} className="space-y-3">
               <Captcha captcha={captcha} disabled={verifying} />
-              {verifyError && <p className="error">{verifyError}</p>}
-              <button type="submit" className="btn-primary" disabled={verifying || !captcha.canSubmit}>
+              {verifyError && <p className="text-sm text-destructive">{verifyError}</p>}
+              <Button type="submit" disabled={verifying || !captcha.canSubmit}>
                 {verifying ? 'Verifying…' : 'Verify'}
-              </button>
+              </Button>
             </form>
           </div>
         </section>
       )}
 
-      <section className="roles-section">
-        <h3>Your roles</h3>
+      <section>
+        <h3 className="font-semibold text-foreground mb-2">Your roles</h3>
         {user?.roles?.length ? (
-          <ul>
+          <ul className="flex flex-wrap gap-2">
             {user.roles.map((r) => (
-              <li key={r}>{r}</li>
+              <li key={r} className="px-3 py-1 rounded-full bg-secondary text-primary text-sm font-medium">
+                {r}
+              </li>
             ))}
           </ul>
         ) : (
-          <p>No platform roles assigned.</p>
+          <p className="text-sm text-muted-foreground">No platform roles assigned.</p>
         )}
         {claimedSubjects.length > 0 && (
-          <>
-            <h4>Subject interests</h4>
-            <ul>
+          <div className="mt-4">
+            <h4 className="text-sm font-semibold text-foreground mb-2">Subject interests</h4>
+            <ul className="flex flex-wrap gap-2">
               {claimedSubjects.map((name) => (
-                <li key={name}>{name}</li>
+                <li key={name} className="px-3 py-1 rounded-full bg-muted text-foreground text-sm">
+                  {name}
+                </li>
               ))}
             </ul>
-          </>
+          </div>
         )}
-        <p className="dashboard-hint">
-          Claim more subject interests from <Link to="/get-roles">Get Roles</Link>.
+        <p className="text-sm text-muted-foreground mt-3">
+          Claim more subject interests from{' '}
+          <Link to="/get-roles" className="text-primary font-medium hover:underline">
+            Get Roles
+          </Link>
+          .
         </p>
       </section>
     </div>

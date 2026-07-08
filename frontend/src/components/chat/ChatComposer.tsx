@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowUp, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { AtSign, CornerUpLeft, Send, X } from 'lucide-react'
 import type { ChatMessage, MentionRoleOption } from '../../types/chat'
 import {
   buildMentionCandidates,
@@ -9,6 +8,7 @@ import {
   insertMention,
   type MentionCandidate,
 } from './mentionAutocomplete'
+import { cn } from '../../lib/utils'
 
 interface ChatComposerProps {
   disabled?: boolean
@@ -58,7 +58,6 @@ export function ChatComposer({
   function applyMention(candidate: MentionCandidate) {
     if (!mentionQuery || !textareaRef.current)
       return
-
     const cursorPos = textareaRef.current.selectionStart ?? draft.length
     const { nextDraft, nextCursor } = insertMention(draft, mentionQuery.start, cursorPos, candidate)
     setDraft(nextDraft)
@@ -77,7 +76,6 @@ export function ChatComposer({
     event?.preventDefault()
     if (!draft.trim() || disabled || sending)
       return
-
     const content = draft
     setDraft('')
     setMentionQuery(null)
@@ -86,7 +84,6 @@ export function ChatComposer({
       setDraft(content)
       onTyping()
     }
-
     textareaRef.current?.focus()
   }
 
@@ -97,26 +94,22 @@ export function ChatComposer({
         setMentionIndex((prev) => (prev + 1) % mentionCandidates.length)
         return
       }
-
       if (event.key === 'ArrowUp') {
         event.preventDefault()
         setMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length)
         return
       }
-
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         applyMention(mentionCandidates[mentionIndex])
         return
       }
-
       if (event.key === 'Escape') {
         event.preventDefault()
         setMentionQuery(null)
         return
       }
     }
-
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void handleSubmit()
@@ -133,89 +126,100 @@ export function ChatComposer({
       onStopTyping()
   }
 
-  function handleBlur() {
-    if (!draft.trim())
-      onStopTyping()
-    window.setTimeout(() => setMentionQuery(null), 120)
-  }
-
-  function handleSelect() {
-    const cursorPos = textareaRef.current?.selectionStart ?? draft.length
-    updateMentionState(draft, cursorPos)
-  }
-
   return (
-    <div className="chat-composer-wrap">
+    <div className="px-6 py-4 border-t border-border bg-card shrink-0 relative">
+      {mentionCandidates.length > 0 && mentionQuery && (
+        <div className="absolute bottom-full left-6 mb-2 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-20 min-w-[200px]">
+          {mentionCandidates.map((candidate, index) => (
+            <button
+              key={`${candidate.kind}-${candidate.name}`}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                applyMention(candidate)
+              }}
+              className={cn(
+                'w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted/60 transition-colors text-left text-sm',
+                index === mentionIndex && 'bg-muted/60',
+              )}
+            >
+              <span className="font-medium text-foreground">@{candidate.name}</span>
+              {candidate.kind === 'role' && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {candidate.isCustom ? 'custom role' : 'role'}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
       {replyTarget && (
-        <div className="chat-reply-preview">
-          <FontAwesomeIcon icon={faReply} className="chat-reply-preview-icon" />
-          <div className="chat-reply-preview-body">
-            <span className="chat-reply-preview-sender">Replying to {replyTarget.senderUsername}</span>
-            <span className="chat-reply-preview-content">{replyTarget.content}</span>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 mb-2 bg-secondary/50 rounded-xl border border-border/60 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <CornerUpLeft size={11} className="text-primary shrink-0" />
+            <span className="font-semibold text-primary">{replyTarget.senderUsername}</span>
+            <span className="truncate">{replyTarget.content}</span>
           </div>
           <button
             type="button"
-            className="chat-reply-preview-cancel"
             onClick={onCancelReply}
+            className="shrink-0 hover:text-foreground transition-colors"
             aria-label="Cancel reply"
-            title="Cancel reply"
           >
-            <FontAwesomeIcon icon={faXmark} />
+            <X size={12} />
           </button>
         </div>
       )}
-      <form className="chat-composer" onSubmit={handleSubmit}>
-        <div className="chat-composer-input-wrap">
-          {mentionCandidates.length > 0 && mentionQuery && (
-            <ul className="chat-mention-autocomplete" role="listbox" aria-label="Mention suggestions">
-              {mentionCandidates.map((candidate, index) => (
-                <li key={`${candidate.kind}-${candidate.name}`} role="presentation">
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={index === mentionIndex}
-                    className={`chat-mention-autocomplete-item ${index === mentionIndex ? 'selected' : ''}`}
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      applyMention(candidate)
-                    }}
-                  >
-                    <span className="chat-mention-autocomplete-at" style={{ color: candidate.color }}>@</span>
-                    <span className="chat-mention-autocomplete-name" style={{ color: candidate.color }}>
-                      {candidate.name}
-                    </span>
-                    {candidate.kind === 'role' && (
-                      <span className="chat-mention-autocomplete-kind">
-                        {candidate.isCustom ? 'custom role' : 'role'}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <textarea
-            ref={textareaRef}
-            className="chat-composer-input"
-            value={draft}
-            onChange={(event) => handleChange(event.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleBlur}
-            onSelect={handleSelect}
-            onClick={handleSelect}
-            placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
-            rows={1}
-            disabled={disabled || sending}
-            aria-label="Message"
-          />
-        </div>
+
+      <form
+        onSubmit={handleSubmit}
+        className="flex items-end gap-3 bg-card border border-border rounded-2xl px-4 py-3 focus-within:border-primary/40 transition-colors"
+      >
+        <button
+          type="button"
+          className="mb-0.5 text-muted-foreground hover:text-primary transition-colors"
+          onClick={() => {
+            const pos = draft.length
+            setDraft(`${draft}@`)
+            setMentionQuery({ query: '', start: pos })
+            setTimeout(() => textareaRef.current?.focus(), 0)
+          }}
+          aria-label="Mention someone"
+        >
+          <AtSign size={16} />
+        </button>
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(event) => handleChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => {
+            if (!draft.trim())
+              onStopTyping()
+            window.setTimeout(() => setMentionQuery(null), 120)
+          }}
+          onSelect={() => {
+            const cursorPos = textareaRef.current?.selectionStart ?? draft.length
+            updateMentionState(draft, cursorPos)
+          }}
+          onClick={() => {
+            const cursorPos = textareaRef.current?.selectionStart ?? draft.length
+            updateMentionState(draft, cursorPos)
+          }}
+          placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
+          rows={1}
+          disabled={disabled || sending}
+          aria-label="Message"
+          className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none leading-relaxed max-h-[120px]"
+        />
         <button
           type="submit"
-          className="chat-send-btn"
           disabled={disabled || sending || !draft.trim()}
+          className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center disabled:opacity-30 hover:opacity-80 transition-opacity shrink-0 mb-0.5"
           aria-label="Send message"
         >
-          <FontAwesomeIcon icon={faArrowUp} />
+          <Send size={13} />
         </button>
       </form>
     </div>

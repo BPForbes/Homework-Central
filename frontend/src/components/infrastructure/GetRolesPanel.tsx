@@ -81,27 +81,31 @@ export function GetRolesPanel({ roomId = GET_ROLES_ROOM_ID }: { roomId?: string 
   }
 
   return (
-    <div className="get-roles-panel">
+    <div>
       {isBuiltIn && (
-        <p className="get-roles-hint">
+        <p className="text-sm text-muted-foreground mb-6">
           Click a subject to claim it as one of your roles. Click a claimed subject to drop it.
         </p>
       )}
-      {error && <p className="error">{error}</p>}
+      {error && <p className="text-sm text-destructive mb-4">{error}</p>}
 
       {isBuiltIn && (
-        <div className="get-roles-grid">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {subjects?.map((subject) => (
             <button
               key={subject.name}
               type="button"
-              className={`get-roles-button ${subject.claimed ? 'claimed' : ''}`}
+              className={`flex flex-col items-center justify-center gap-3 px-4 py-6 rounded-2xl border transition-all text-sm font-semibold select-none ${
+                subject.claimed
+                  ? 'border-primary bg-primary/8 text-primary shadow-sm'
+                  : 'border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary/40'
+              }`}
               onClick={() => void toggleSubject(subject)}
               disabled={pending !== null}
             >
-              <FontAwesomeIcon icon={getCategoryIcon(subject.name.replace(/\s/g, ''))} className="get-roles-button-icon" />
+              <FontAwesomeIcon icon={getCategoryIcon(subject.name.replace(/\s/g, ''))} className="text-primary text-2xl" />
               <span>{subject.name}</span>
-              {subject.claimed && <FontAwesomeIcon icon={faCheck} className="get-roles-claimed-icon" />}
+              {subject.claimed && <FontAwesomeIcon icon={faCheck} className="text-green-600 text-sm" />}
             </button>
           ))}
         </div>
@@ -109,19 +113,23 @@ export function GetRolesPanel({ roomId = GET_ROLES_ROOM_ID }: { roomId?: string 
 
       {customRoles.length > 0 && (
         <>
-          {isBuiltIn && <h3 className="get-roles-section-title">Custom roles</h3>}
-          <div className="get-roles-grid">
+          {isBuiltIn && <h3 className="text-base font-semibold text-foreground mt-6 mb-3">Custom roles</h3>}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {customRoles.map((role) => (
               <button
                 key={role.roleId}
                 type="button"
-                className={`get-roles-button ${role.claimed ? 'claimed' : ''}`}
+                className={`flex flex-col items-center justify-center gap-3 px-4 py-6 rounded-2xl border transition-all text-sm font-semibold select-none ${
+                  role.claimed
+                    ? 'border-primary bg-primary/8 text-primary shadow-sm'
+                    : 'border-border bg-card text-foreground hover:border-primary/40 hover:bg-secondary/40'
+                }`}
                 onClick={() => void toggleCustom(role)}
                 disabled={pending !== null}
               >
-                <FontAwesomeIcon icon={resolveCustomRoleIcon(role.iconName)} className="get-roles-button-icon" />
+                <FontAwesomeIcon icon={resolveCustomRoleIcon(role.iconName)} className="text-primary text-2xl" />
                 <span>{role.name}</span>
-                {role.claimed && <FontAwesomeIcon icon={faCheck} className="get-roles-claimed-icon" />}
+                {role.claimed && <FontAwesomeIcon icon={faCheck} className="text-green-600 text-sm" />}
               </button>
             ))}
           </div>

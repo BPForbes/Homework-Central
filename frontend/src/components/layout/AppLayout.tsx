@@ -1,55 +1,36 @@
-import { useCallback, useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBars } from '@fortawesome/free-solid-svg-icons'
+import { useCallback } from 'react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
-import { byPrefixAndName } from '../../icons/byPrefixAndName'
+import { AppTopNav } from './AppTopNav'
+import { cn } from '../../lib/utils'
 
 export function AppLayout() {
-  const { user, logout } = useAuth()
+  const { logout } = useAuth()
   const navigate = useNavigate()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+  const location = useLocation()
+  const isChatRoute = location.pathname.startsWith('/chat')
 
-  async function handleLogout() {
+  const handleLogout = useCallback(async () => {
     await logout()
     navigate('/login')
-  }
+  }, [logout, navigate])
 
   return (
-    <div className="app-layout">
-      <ChatSidebar open={sidebarOpen} onClose={closeSidebar} />
+    <div className="h-screen w-screen flex flex-col overflow-hidden">
+      <AppTopNav onSignOut={() => void handleLogout()} />
 
-      <header className="app-header">
-        <div className="app-header-start">
-          <button
-            type="button"
-            className="chat-menu-toggle"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open chats"
-          >
-            <FontAwesomeIcon icon={faBars} />
-            <span>Chats</span>
-          </button>
-          <h1 className="app-title">
-            <FontAwesomeIcon icon={byPrefixAndName.far.comments} className="app-title-icon" />
-            Homework Central
-          </h1>
-        </div>
-        <div className="user-info">
-          <span>
-            {user?.username} ({user?.email})
-          </span>
-          <button type="button" onClick={handleLogout} className="btn-secondary">
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <main className="app-main">
-        <Outlet />
-      </main>
+      <div className="flex-1 flex min-h-0">
+        {isChatRoute && <ChatSidebar variant="persistent" />}
+        <main
+          className={cn(
+            'flex-1 flex flex-col min-h-0 min-w-0 overflow-auto',
+            !isChatRoute && 'p-6',
+          )}
+        >
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
+import { ArrowLeft } from 'lucide-react'
 import { chatApi } from '../api/chatApi'
 import type { ChatRoomDetail, MentionRoleOption } from '../types/chat'
 import { useAuth } from '../context/AuthContext'
@@ -14,9 +13,9 @@ import {
   CustomRoleClaimPanel,
 } from '../components/infrastructure/CustomRoomPanels'
 import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
+import { cn } from '../lib/utils'
 
 function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
   if (room.iconName) {
@@ -127,20 +126,21 @@ export function ChatRoom() {
 
   if (roomLoading) {
     return (
-      <div className="chat-room-page">
-        <p className="chat-room-status">Loading…</p>
+      <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+        Loading…
       </div>
     )
   }
 
   if (!room) {
     return (
-      <div className="chat-room-page">
-        <p className="chat-room-error">
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
+        <p className="text-destructive text-sm">
           {accessDenied ? 'You do not have access to this room.' : 'This room is not available.'}
         </p>
-        <Link to="/dashboard" className="chat-room-back">
-          <FontAwesomeIcon icon={faArrowLeft} /> Back to dashboard
+        <Link to="/chat" className="inline-flex items-center gap-2 text-primary font-medium text-sm hover:underline">
+          <ArrowLeft size={16} />
+          Back to channels
         </Link>
       </div>
     )
@@ -151,41 +151,54 @@ export function ChatRoom() {
     ? `${room.categoryDisplayName} · private · ${navTitleForRoomType(roomType)}`
     : `${room.categoryDisplayName} · public · ${navTitleForRoomType(roomType)}`
 
-  return (
-    <div className="chat-room-page chat-room-page--active">
-      <ServerMaintenanceNav title={navTitleForRoomType(roomType)} />
+  const isRoleClaim = roomType === 'RoleClaim' || roomType === 'GetRoles'
 
-      <header className="chat-room-header">
-        <Link to="/dashboard" className="chat-room-header-back" aria-label="Back to dashboard" title="Back to dashboard">
-          <FontAwesomeIcon icon={faArrowLeft} />
+  return (
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background">
+      <header className="px-6 py-3 border-b border-border bg-card flex items-center gap-3 shrink-0">
+        <Link
+          to="/chat"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+          aria-label="Back to channels"
+        >
+          <ArrowLeft size={16} />
         </Link>
-        <div className="chat-room-hero-icon chat-room-hero-icon--compact">
-          <ChatRoomIcon icon={icon} isPrivate={room.isPrivate} layeredClassName="chat-room-hero-layered" />
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white shrink-0">
+          <ChatRoomIcon icon={icon} isPrivate={room.isPrivate} className="text-white" />
         </div>
-        <div>
-          <h2>{room.name}</h2>
-          <p className="chat-room-subtitle">{subtitle}</p>
+        <div className="min-w-0">
+          <div className="font-semibold text-foreground text-base truncate">{room.name}</div>
+          <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
         </div>
       </header>
 
       {roomType === 'Info' && (
-        <CustomInfoRoomPanel
-          room={room}
-          onUpdated={(content) => setRoom((prev) => (prev ? { ...prev, infoContent: content } : prev))}
-        />
+        <div className="flex-1 overflow-y-auto p-6">
+          <CustomInfoRoomPanel
+            room={room}
+            onUpdated={(content) => setRoom((prev) => (prev ? { ...prev, infoContent: content } : prev))}
+          />
+        </div>
       )}
 
-      {(roomType === 'RoleClaim' || roomType === 'GetRoles') &&
-        (roomType === 'GetRoles' ? (
-          <GetRolesPanel roomId={decodedRoomId} />
-        ) : (
-          <CustomRoleClaimPanel roomId={decodedRoomId} />
-        ))}
+      {isRoleClaim && (
+        <div className={cn('flex-1 overflow-y-auto', isRoleClaim && 'px-8 py-7')}>
+          {roomType === 'GetRoles' ? (
+            <GetRolesPanel roomId={decodedRoomId} />
+          ) : (
+            <CustomRoleClaimPanel roomId={decodedRoomId} />
+          )}
+        </div>
+      )}
 
       {isChatRoom && (
         <>
-          {messagesError && <p className="chat-room-error chat-room-error--inline">{messagesError}</p>}
-          <div className="chat-room-panel">
+          {messagesError && (
+            <p className="text-sm text-destructive px-6 py-2 bg-destructive/5 border-b border-destructive/20">
+              {messagesError}
+            </p>
+          )}
+          <div className="flex-1 flex flex-col min-h-0 relative">
             <ChatMessageList
               messages={messages}
               typingUsers={typingUsers}
@@ -195,8 +208,8 @@ export function ChatRoom() {
               onReply={startReply}
             />
             {room.isPrivate && (
-              <div className="chat-key-badge" aria-hidden="true">
-                <ChatRoomIcon icon={icon} isPrivate layeredClassName="chat-key-badge-layered" />
+              <div className="absolute bottom-24 right-6 opacity-90 pointer-events-none" aria-hidden="true">
+                <ChatRoomIcon icon={icon} isPrivate className="text-3xl" />
               </div>
             )}
             <ChatComposer

@@ -1,41 +1,16 @@
-import { Navigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
-import { chatApi } from '../api/chatApi'
+import { MessageSquare } from 'lucide-react'
 
-/** Redirects to the first available chat room, or dashboard if none. */
+/** Empty state when no channel is selected at /chat. */
 export function ChatIndex() {
-  const [target, setTarget] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-
-    const load = async () => {
-      try {
-        const { data } = await chatApi.getNav()
-        if (cancelled)
-          return
-
-        const generalRoom = data.categories.find((c) => c.key === 'General')?.rooms[0]
-        const firstRoom = generalRoom ?? data.categories.flatMap((c) => c.rooms)[0]
-        setTarget(firstRoom ? `/chat/${encodeURIComponent(firstRoom.id)}` : '/dashboard')
-      } catch {
-        if (!cancelled)
-          setTarget('/dashboard')
-      } finally {
-        if (!cancelled)
-          setLoading(false)
-      }
-    }
-
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (loading)
-    return <p className="chat-room-status">Loading chats…</p>
-
-  return <Navigate to={target ?? '/dashboard'} replace />
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center bg-background text-center px-8">
+      <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+        <MessageSquare size={28} className="text-primary" />
+      </div>
+      <p className="text-lg font-semibold text-foreground">Select a channel</p>
+      <p className="text-sm text-muted-foreground mt-1">
+        Choose a channel from the sidebar to start chatting
+      </p>
+    </div>
+  )
 }
