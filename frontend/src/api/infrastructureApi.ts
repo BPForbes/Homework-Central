@@ -7,6 +7,7 @@ import type {
   InfrastructureUserLookup,
   AssignableUser,
   ModerationRiskWarning,
+  RoleAppearance,
 } from '../types/infrastructure'
 
 const api = axios.create({ baseURL: '/api/infrastructure' })
@@ -26,6 +27,9 @@ export const infrastructureApi = {
   setRolePlacement: (roleId: string, body: { claimHostRoomId?: string | null; password?: string }) =>
     api.put(`/roles/${roleId}/placement`, body),
   deleteRole: (roleId: string) => api.delete(`/roles/${roleId}`),
+  listRoleAppearance: () => api.get<RoleAppearance[]>('/role-appearance'),
+  updateRoleAppearance: (roleId: string, body: { messageColor?: string; isMentionableByUsers?: boolean }) =>
+    api.put<RoleAppearance>(`/roles/${roleId}/appearance`, body),
   previewAccessRisk: (roleId: string, isPublicRoom: boolean) =>
     api.get<ModerationRiskWarning>(`/roles/${roleId}/access-risk`, { params: { isPublicRoom } }),
 

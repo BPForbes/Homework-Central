@@ -28,6 +28,8 @@ public class ChatMessage : ISanitizableContent, IShareableScopedResource
     public string RoomId { get; set; } = null!;
     public Guid SenderId { get; set; }
     public string SenderUsername { get; set; } = null!;
+    /// <summary>Denormalized hex color from the sender's highest platform role at send time.</summary>
+    public string? SenderMessageColor { get; set; }
     public string RawContent { get; set; } = null!;
     public string? SanitizedContent { get; set; }
     public DateTime CreatedAtUtc { get; set; }

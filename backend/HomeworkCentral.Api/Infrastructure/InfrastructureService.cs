@@ -1173,6 +1173,8 @@ public sealed class InfrastructureService(
             Description = role.Description,
             IconName = role.IconName,
             ClaimHostRoomId = role.ClaimHostRoomId,
+            MessageColor = role.MessageColor,
+            IsMentionableByUsers = role.IsMentionableByUsers,
             PermissionIds = role.RolePermissions.Select(rp => rp.PermissionId).OrderBy(id => id).ToList(),
             CreatedAtUtc = role.CreatedAtUtc,
         };

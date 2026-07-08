@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowUp, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
-import type { ChatMessage } from '../../types/chat'
+import type { ChatMessage, MentionRoleOption } from '../../types/chat'
+import {
+  buildMentionCandidates,
+  getActiveMentionQuery,
+  insertMention,
+  type MentionCandidate,
+} from './mentionAutocomplete'
 
 interface ChatComposerProps {
   disabled?: boolean
   sending?: boolean
   replyTarget?: ChatMessage | null
+  messages?: ChatMessage[]
+  mentionRoles?: MentionRoleOption[]
   onSend: (content: string) => Promise<boolean>
   onTyping: () => void
   onStopTyping: () => void
@@ -18,18 +26,52 @@ export function ChatComposer({
   disabled = false,
   sending = false,
   replyTarget = null,
+  messages = [],
+  mentionRoles = [],
   onSend,
   onTyping,
   onStopTyping,
   onCancelReply,
 }: ChatComposerProps) {
   const [draft, setDraft] = useState('')
+  const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const mentionCandidates = mentionQuery
+    ? buildMentionCandidates(messages, mentionRoles, mentionQuery.query)
+    : []
 
   useEffect(() => {
     if (replyTarget)
       textareaRef.current?.focus()
   }, [replyTarget])
+
+  useEffect(() => {
+    setMentionIndex(0)
+  }, [mentionQuery?.query, mentionCandidates.length])
+
+  function updateMentionState(value: string, cursorPos: number) {
+    setMentionQuery(getActiveMentionQuery(value, cursorPos))
+  }
+
+  function applyMention(candidate: MentionCandidate) {
+    if (!mentionQuery || !textareaRef.current)
+      return
+
+    const cursorPos = textareaRef.current.selectionStart ?? draft.length
+    const { nextDraft, nextCursor } = insertMention(draft, mentionQuery.start, cursorPos, candidate)
+    setDraft(nextDraft)
+    setMentionQuery(null)
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(nextCursor, nextCursor)
+    })
+    if (nextDraft.trim())
+      onTyping()
+    else
+      onStopTyping()
+  }
 
   async function handleSubmit(event?: FormEvent) {
     event?.preventDefault()
@@ -38,11 +80,9 @@ export function ChatComposer({
 
     const content = draft
     setDraft('')
+    setMentionQuery(null)
     const sent = await onSend(content)
     if (!sent) {
-      // Restore the draft so the user doesn't lose what they typed, and re-notify typing so
-      // the indicator matches the composer being non-empty again — onSend's own stopTyping()
-      // call already cleared it optimistically before the send was known to fail.
       setDraft(content)
       onTyping()
     }
@@ -51,8 +91,32 @@ export function ChatComposer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    // Enter during IME composition (e.g. selecting a candidate while typing Japanese/Chinese/
-    // Korean) confirms the composition, it isn't the user asking to send the message.
+    if (mentionCandidates.length > 0 && mentionQuery) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setMentionIndex((prev) => (prev + 1) % mentionCandidates.length)
+        return
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length)
+        return
+      }
+
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        applyMention(mentionCandidates[mentionIndex])
+        return
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMentionQuery(null)
+        return
+      }
+    }
+
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void handleSubmit()
@@ -61,18 +125,23 @@ export function ChatComposer({
 
   function handleChange(value: string) {
     setDraft(value)
+    const cursorPos = textareaRef.current?.selectionStart ?? value.length
+    updateMentionState(value, cursorPos)
     if (value.trim())
       onTyping()
     else
       onStopTyping()
   }
 
-  // The typing indicator should persist for as long as there's text in the composer, even if
-  // it loses focus (e.g. the user switches tabs to check something else), so blur only clears
-  // it when the composer is actually empty.
   function handleBlur() {
     if (!draft.trim())
       onStopTyping()
+    window.setTimeout(() => setMentionQuery(null), 120)
+  }
+
+  function handleSelect() {
+    const cursorPos = textareaRef.current?.selectionStart ?? draft.length
+    updateMentionState(draft, cursorPos)
   }
 
   return (
@@ -96,18 +165,50 @@ export function ChatComposer({
         </div>
       )}
       <form className="chat-composer" onSubmit={handleSubmit}>
-        <textarea
-          ref={textareaRef}
-          className="chat-composer-input"
-          value={draft}
-          onChange={(event) => handleChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
-          rows={1}
-          disabled={disabled || sending}
-          aria-label="Message"
-        />
+        <div className="chat-composer-input-wrap">
+          {mentionCandidates.length > 0 && mentionQuery && (
+            <ul className="chat-mention-autocomplete" role="listbox" aria-label="Mention suggestions">
+              {mentionCandidates.map((candidate, index) => (
+                <li key={`${candidate.kind}-${candidate.name}`} role="presentation">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === mentionIndex}
+                    className={`chat-mention-autocomplete-item ${index === mentionIndex ? 'selected' : ''}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      applyMention(candidate)
+                    }}
+                  >
+                    <span className="chat-mention-autocomplete-at" style={{ color: candidate.color }}>@</span>
+                    <span className="chat-mention-autocomplete-name" style={{ color: candidate.color }}>
+                      {candidate.name}
+                    </span>
+                    {candidate.kind === 'role' && (
+                      <span className="chat-mention-autocomplete-kind">
+                        {candidate.isCustom ? 'custom role' : 'role'}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <textarea
+            ref={textareaRef}
+            className="chat-composer-input"
+            value={draft}
+            onChange={(event) => handleChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            onSelect={handleSelect}
+            onClick={handleSelect}
+            placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
+            rows={1}
+            disabled={disabled || sending}
+            aria-label="Message"
+          />
+        </div>
         <button
           type="submit"
           className="chat-send-btn"

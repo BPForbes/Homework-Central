@@ -1445,6 +1445,94 @@ body {
   color: #b45309;
 }
 
+.chat-composer-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-mention-autocomplete {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.35rem);
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.chat-mention-autocomplete-item {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #e2e8f0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-mention-autocomplete-item.selected,
+.chat-mention-autocomplete-item:hover {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.chat-mention-autocomplete-at {
+  font-weight: 700;
+}
+
+.chat-mention-autocomplete-name {
+  font-weight: 600;
+}
+
+.chat-mention-autocomplete-kind {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.role-appearance-list {
+  gap: 0.75rem;
+}
+
+.role-appearance-row {
+  align-items: flex-start;
+}
+
+.role-appearance-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.role-appearance-color {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.role-appearance-hex {
+  width: 7rem;
+}
+
+.role-appearance-mentionable {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 /* Chat room page */
 .chat-room-page {
   animation: fade-in 0.25s ease;

@@ -84,6 +84,7 @@ builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
 builder.Services.AddScoped<IChatRoomDetailService, ChatRoomDetailService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
+builder.Services.AddScoped<IRoleAppearanceService, RoleAppearanceService>();
 builder.Services.AddSingleton<ICustomChannelStore, CustomChannelStore>();
 builder.Services.AddSingleton<IChatNavNotifier, ChatNavNotifier>();
 builder.Services.AddScoped<InfrastructureUserDirectory>();

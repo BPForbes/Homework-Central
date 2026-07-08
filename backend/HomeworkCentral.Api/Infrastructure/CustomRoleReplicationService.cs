@@ -49,6 +49,8 @@ public static class CustomRoleReplicationService
             OwnerAccountClass = masterRole.OwnerAccountClass,
             ClaimHostRoomId = masterRole.ClaimHostRoomId,
             IconName = masterRole.IconName,
+            MessageColor = masterRole.MessageColor,
+            IsMentionableByUsers = masterRole.IsMentionableByUsers,
             RoleMask = (System.Collections.BitArray)masterRole.RoleMask.Clone(),
             PermissionMask = (System.Collections.BitArray)masterRole.PermissionMask.Clone(),
             FeatureMask = (System.Collections.BitArray)masterRole.FeatureMask.Clone(),
@@ -75,6 +77,8 @@ public static class CustomRoleReplicationService
         targetRole.OwnerAccountClass = masterRole.OwnerAccountClass;
         targetRole.ClaimHostRoomId = masterRole.ClaimHostRoomId;
         targetRole.IconName = masterRole.IconName;
+        targetRole.MessageColor = masterRole.MessageColor;
+        targetRole.IsMentionableByUsers = masterRole.IsMentionableByUsers;
         targetRole.RoleMask = (System.Collections.BitArray)masterRole.RoleMask.Clone();
         targetRole.PermissionMask = (System.Collections.BitArray)masterRole.PermissionMask.Clone();
         targetRole.FeatureMask = (System.Collections.BitArray)masterRole.FeatureMask.Clone();

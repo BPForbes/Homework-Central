@@ -67,6 +67,7 @@ public class ChatMessageServiceTests
             new HtmlContentSanitizer(),
             new MentionCooldownTracker(),
             new FakeMentionRecipientResolver(),
+            new FakeRoleAppearanceService(),
             new FakeHubContext());
     }
 
@@ -132,6 +133,33 @@ public class ChatMessageServiceTests
             string? senderTenantDatabaseName,
             CancellationToken ct = default) =>
             Task.FromResult(new HashSet<Guid>());
+    }
+
+    private sealed class FakeRoleAppearanceService : IRoleAppearanceService
+    {
+        public Task<string> ResolveSenderColorAsync(BitArray roleMask, CancellationToken ct = default) =>
+            Task.FromResult(RoleAppearanceDefaults.FallbackColor);
+
+        public Task<IReadOnlyList<MentionRoleOptionDto>> GetMentionableRolesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<MentionRoleOptionDto>>([]);
+
+        public Task<IReadOnlyList<RoleAppearanceDto>> ListRoleAppearanceAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<RoleAppearanceDto>>([]);
+
+        public Task<RoleAppearanceDto?> UpdateRoleAppearanceAsync(
+            Guid roleId,
+            UpdateRoleAppearanceRequest request,
+            CancellationToken ct = default) =>
+            Task.FromResult<RoleAppearanceDto?>(null);
+
+        public Task<bool> IsMentionablePlatformRoleAsync(string roleName, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
+        public Task<Guid?> TryGetMentionableCustomRoleIdAsync(string roleName, CancellationToken ct = default) =>
+            Task.FromResult<Guid?>(null);
+
+        public Task PropagateCustomRoleAppearanceAsync(Guid roleId, CancellationToken ct = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class FakeEffectiveMaskService(UserEffectiveMask mask) : IEffectiveMaskService

@@ -42,12 +42,19 @@ export interface ChatMessage {
   roomId: string
   senderId: string
   senderUsername: string
+  senderMessageColor?: string | null
   content: string
   createdAtUtc: string
   replyToMessageId?: string | null
   replyToSenderId?: string | null
   replyToSenderUsername?: string | null
   replyToContentSnippet?: string | null
+}
+
+export interface MentionRoleOption {
+  name: string
+  messageColor: string
+  isCustom: boolean
 }
 
 export interface ChatTypingUser {

@@ -13,6 +13,7 @@ import {
   type AssignableUser,
   type CustomChannel,
   type CustomRole,
+  type RoleAppearance,
 } from '../types/infrastructure'
 
 type ViewMode = 'form' | 'assign'
@@ -34,6 +35,8 @@ interface DialogState {
 
 export function UserConfig() {
   const [roles, setRoles] = useState<CustomRole[]>([])
+  const [roleAppearance, setRoleAppearance] = useState<RoleAppearance[]>([])
+  const [appearanceSavingId, setAppearanceSavingId] = useState<string | null>(null)
   const [channels, setChannels] = useState<CustomChannel[]>([])
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [name, setName] = useState('')
@@ -77,11 +80,13 @@ export function UserConfig() {
 
   const load = useCallback(async () => {
     try {
-      const [rolesRes, channelsRes] = await Promise.all([
+      const [rolesRes, channelsRes, appearanceRes] = await Promise.all([
         infrastructureApi.listRoles(),
         infrastructureApi.listChannels(),
+        infrastructureApi.listRoleAppearance(),
       ])
       setRoles(rolesRes.data)
+      setRoleAppearance(appearanceRes.data)
       setChannels(channelsRes.data.filter((c: CustomChannel) => c.roomType === 'RoleClaim'))
     } catch {
       showError('Could not load custom roles.')
@@ -269,6 +274,28 @@ export function UserConfig() {
     setPlacementRoomId('')
   }
 
+  function updateAppearanceDraft(roleId: string, patch: Partial<Pick<RoleAppearance, 'messageColor' | 'isMentionableByUsers'>>) {
+    setRoleAppearance((prev) =>
+      prev.map((role) => (role.roleId === roleId ? { ...role, ...patch } : role)),
+    )
+  }
+
+  async function saveAppearance(role: RoleAppearance) {
+    setAppearanceSavingId(role.roleId)
+    setDialog(null)
+    try {
+      const { data } = await infrastructureApi.updateRoleAppearance(role.roleId, {
+        messageColor: role.messageColor,
+        isMentionableByUsers: role.isMentionableByUsers,
+      })
+      setRoleAppearance((prev) => prev.map((item) => (item.roleId === data.roleId ? data : item)))
+    } catch {
+      showError('Could not save role appearance.')
+    } finally {
+      setAppearanceSavingId(null)
+    }
+  }
+
   const claimRoomOptions = [
     { id: GET_ROLES_ROOM_ID, label: 'Get Roles (built-in)' },
     ...channels.map((c) => ({ id: c.roomId, label: c.displayName })),
@@ -287,7 +314,8 @@ export function UserConfig() {
 
       setDialog(null)
       setConfirmAssignOpen(false)
-      closePlacementModal()
+      setPlacementRoleId(null)
+      setPlacementRoomId('')
     }
 
     document.addEventListener('keydown', handleKeyDown)
@@ -409,6 +437,57 @@ export function UserConfig() {
           </form>
         </section>
       )}
+
+      <section className="server-page-card">
+        <h3>Role appearance &amp; mentions</h3>
+        <p className="server-page-subtitle">
+          Set chat message colors and choose which roles standard users can @mention.
+        </p>
+        {roleAppearance.length === 0 && <p className="server-page-subtitle">No roles loaded.</p>}
+        <ul className="infra-list role-appearance-list">
+          {roleAppearance.map((role) => (
+            <li key={role.roleId} className="infra-list-item role-appearance-row">
+              <div className="role-appearance-name">
+                <strong style={{ color: role.messageColor }}>{role.name}</strong>
+                <span className="infra-meta">{role.isCustom ? 'Custom role' : 'Platform role'}</span>
+              </div>
+              <div className="role-appearance-controls">
+                <label className="role-appearance-color">
+                  Color
+                  <input
+                    type="color"
+                    value={role.messageColor}
+                    onChange={(e) => updateAppearanceDraft(role.roleId, { messageColor: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    className="sm-input role-appearance-hex"
+                    value={role.messageColor}
+                    onChange={(e) => updateAppearanceDraft(role.roleId, { messageColor: e.target.value })}
+                    pattern="^#[0-9A-Fa-f]{6}$"
+                  />
+                </label>
+                <label className="role-appearance-mentionable">
+                  <input
+                    type="checkbox"
+                    checked={role.isMentionableByUsers}
+                    onChange={(e) => updateAppearanceDraft(role.roleId, { isMentionableByUsers: e.target.checked })}
+                  />
+                  Mentionable by users
+                </label>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={appearanceSavingId === role.roleId}
+                  onClick={() => void saveAppearance(role)}
+                >
+                  {appearanceSavingId === role.roleId ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section className="server-page-card">
         <h3>Custom roles</h3>
