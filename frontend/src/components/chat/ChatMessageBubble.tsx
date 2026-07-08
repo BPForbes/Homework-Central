@@ -100,8 +100,8 @@ export function ChatMessageBubble({
   const senderInitials = message.senderUsername ? initialsFromUsername(message.senderUsername) : '?'
 
   return (
-    <div className={cn('flex', isOwn ? 'justify-end' : 'justify-start')}>
-      <div className={cn('max-w-[62%] flex flex-col gap-0.5', isOwn ? 'items-end' : 'items-start')}>
+    <div className={cn('flex w-full min-w-0', isOwn ? 'justify-end' : 'justify-start')}>
+      <div className={cn('max-w-[min(75%,28rem)] min-w-0 flex flex-col gap-0.5', isOwn ? 'items-end' : 'items-start')}>
         {hasReply && (
           <button
             type="button"
@@ -134,7 +134,7 @@ export function ChatMessageBubble({
           <article
             data-message-id={message.messageId}
             className={cn(
-              'relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words transition-shadow',
+              'relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full min-w-0 transition-shadow',
               isOwn
                 ? 'bg-primary text-white rounded-br-md'
                 : 'bg-card text-foreground rounded-bl-md shadow-sm border border-border/40',

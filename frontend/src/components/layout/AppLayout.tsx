@@ -17,15 +17,15 @@ export function AppLayout() {
   }, [logout, navigate])
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden">
+    <div className="h-dvh w-screen flex flex-col overflow-hidden">
       <AppTopNav onSignOut={() => void handleLogout()} />
 
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {isChatRoute && <ChatSidebar variant="persistent" />}
         <main
           className={cn(
-            'flex-1 flex flex-col min-h-0 min-w-0 overflow-auto',
-            !isChatRoute && 'p-6',
+            'flex-1 flex flex-col min-h-0 min-w-0',
+            isChatRoute ? 'overflow-hidden' : 'overflow-auto p-6',
           )}
         >
           <Outlet />

@@ -141,7 +141,7 @@ export function ChatSidebar({ variant = 'persistent', open = true, onClose }: Ch
   }
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col bg-card border-r border-border">
+    <aside className="w-72 shrink-0 flex flex-col min-h-0 bg-card border-r border-border">
       {sidebarContent}
     </aside>
   )
@@ -172,7 +172,7 @@ function CategorySection({
           <ChatRoomIcon
             icon={getCategoryIcon(category.key)}
             isPrivate={category.isPrivateCategory}
-            className="text-primary w-4 h-4"
+            className="text-primary text-base w-[1.15rem]"
           />
           <span className="font-semibold text-sm text-foreground">{category.name}</span>
         </div>
@@ -203,14 +203,14 @@ function CategorySection({
                 key={room.id}
                 to={roomPath}
                 className={cn(
-                  'w-full flex items-center gap-3 px-4 py-2.5 transition-colors text-left',
+                  'w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors text-left',
                   isActive
                     ? 'bg-secondary/70 text-primary'
                     : 'hover:bg-muted/60 text-foreground',
                 )}
               >
-                <ChatRoomIcon icon={baseIcon} isPrivate={room.isPrivate} className="text-primary w-[18px]" />
-                <span className="text-sm font-medium truncate">{room.name}</span>
+                <ChatRoomIcon icon={baseIcon} isPrivate={room.isPrivate} className="text-primary text-base w-4 shrink-0" />
+                <span className="text-[0.9rem] font-medium truncate">{room.name}</span>
               </NavLink>
             )
           })}

@@ -1,11 +1,13 @@
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faKey } from '@fortawesome/free-solid-svg-icons'
+import { cn } from '../../lib/utils'
 
 interface ChatRoomIconProps {
   icon: IconDefinition
   isPrivate?: boolean
   className?: string
+  /** @deprecated Layering is handled internally; kept for call-site compatibility. */
   layeredClassName?: string
 }
 
@@ -14,18 +16,18 @@ export function ChatRoomIcon({
   icon,
   isPrivate = false,
   className,
-  layeredClassName = 'chat-room-icon-layered',
+  layeredClassName: _layeredClassName,
 }: ChatRoomIconProps) {
   if (!isPrivate) {
-    return <FontAwesomeIcon icon={icon} className={className} />
+    return <FontAwesomeIcon icon={icon} className={cn('shrink-0', className)} />
   }
 
   return (
-    <span className={`fa-layers fa-fw ${layeredClassName} ${className ?? ''}`.trim()}>
+    <span className={cn('relative inline-flex shrink-0 items-center justify-center', className)}>
       <FontAwesomeIcon icon={icon} />
       <FontAwesomeIcon
         icon={faKey}
-        transform="shrink-8 down-10 left-10"
+        className="absolute -bottom-0.5 -right-1 text-[0.55em]"
         style={{ color: '#ffcc00' }}
       />
     </span>

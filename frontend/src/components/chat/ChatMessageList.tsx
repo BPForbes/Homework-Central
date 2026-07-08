@@ -58,11 +58,15 @@ export function ChatMessageList({
   }
 
   if (loading) {
-    return <p className="text-center text-sm text-muted-foreground py-8">Loading messages…</p>
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-0">
+        <p className="text-center text-sm text-muted-foreground py-8">Loading messages…</p>
+      </div>
+    )
   }
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-3" role="log" aria-live="polite">
+    <div ref={containerRef} className="flex-1 overflow-y-auto min-h-0 px-6 pt-4 pb-5 space-y-3" role="log" aria-live="polite">
       {messages.length === 0 && typingUsers.length === 0 && (
         <p className="text-center text-sm text-muted-foreground py-8">No messages yet. Say hello!</p>
       )}

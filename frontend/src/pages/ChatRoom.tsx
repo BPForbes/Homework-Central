@@ -163,8 +163,8 @@ export function ChatRoom() {
         >
           <ArrowLeft size={16} />
         </Link>
-        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white shrink-0">
-          <ChatRoomIcon icon={icon} isPrivate={room.isPrivate} className="text-white" />
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white shrink-0 text-base">
+          <ChatRoomIcon icon={icon} isPrivate={room.isPrivate} className="text-white text-base" />
         </div>
         <div className="min-w-0">
           <div className="font-semibold text-foreground text-base truncate">{room.name}</div>
