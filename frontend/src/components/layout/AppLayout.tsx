@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBars } from '@fortawesome/free-solid-svg-icons'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
+import { ThemeToggle } from '../ThemeToggle'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {
@@ -38,6 +39,7 @@ export function AppLayout() {
           </h1>
         </div>
         <div className="user-info">
+          <ThemeToggle />
           <span>
             {user?.username} ({user?.email})
           </span>

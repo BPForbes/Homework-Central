@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { ThemeToggle } from '../components/ThemeToggle'
 
 export function Login() {
   const { login } = useAuth()
@@ -44,6 +45,7 @@ export function Login() {
 
   return (
     <div className="auth-page">
+      <ThemeToggle className="theme-toggle--auth" />
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Sign in</h2>

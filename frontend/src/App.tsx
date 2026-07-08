@@ -3,6 +3,7 @@
  */
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
 import { BackendGate } from './components/BackendGate'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
@@ -23,55 +24,57 @@ const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
 export default function App() {
   return (
-    <BackendGate>
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-          {/* Root redirects authenticated users to dashboard, others to login */}
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Navigate to="/dashboard" replace />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/login" element={<Login />} />
-          {DEV_BYPASS_ENABLED && <Route path="/devlogin" element={<DevLogin />} />}
-          <Route path="/register" element={<Register />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/inbox" element={<Inbox />} />
-            <Route path="/chat" element={<ChatIndex />} />
-            <Route path="/chat/:roomId" element={<ChatRoom />} />
-            <Route path="/get-roles" element={<GetRoles />} />
-            <Route
-              path="/user-config"
-              element={
-                <PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}>
-                  <UserConfig />
-                </PermissionRoute>
-              }
-            />
-            <Route
-              path="/server"
-              element={
-                <PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}>
-                  <ServerMaintenance />
-                </PermissionRoute>
-              }
-            />
-          </Route>
-          <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
-    </BackendGate>
+    <ThemeProvider>
+      <BackendGate>
+        <BrowserRouter>
+          <AuthProvider>
+            <Routes>
+              {/* Root redirects authenticated users to dashboard, others to login */}
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <Navigate to="/dashboard" replace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/login" element={<Login />} />
+              {DEV_BYPASS_ENABLED && <Route path="/devlogin" element={<DevLogin />} />}
+              <Route path="/register" element={<Register />} />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <AppLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/inbox" element={<Inbox />} />
+                <Route path="/chat" element={<ChatIndex />} />
+                <Route path="/chat/:roomId" element={<ChatRoom />} />
+                <Route path="/get-roles" element={<GetRoles />} />
+                <Route
+                  path="/user-config"
+                  element={
+                    <PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}>
+                      <UserConfig />
+                    </PermissionRoute>
+                  }
+                />
+                <Route
+                  path="/server"
+                  element={
+                    <PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}>
+                      <ServerMaintenance />
+                    </PermissionRoute>
+                  }
+                />
+              </Route>
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      </BackendGate>
+    </ThemeProvider>
   )
 }
