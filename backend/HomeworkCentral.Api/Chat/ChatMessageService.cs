@@ -41,6 +41,13 @@ public interface IChatMessageService
     Task<bool> MarkInboxReadAsync(Guid userId, Guid notificationId, CancellationToken ct = default);
 
     Task MarkInboxAllReadAsync(Guid userId, CancellationToken ct = default);
+
+    Task<int> DeleteInboxItemsAsync(
+        Guid userId,
+        IReadOnlyCollection<Guid> notificationIds,
+        CancellationToken ct = default);
+
+    Task<int> DeleteInboxAllAsync(Guid userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -338,6 +345,26 @@ public sealed class ChatMessageService(
 
         await masterDb.SaveChangesAsync(ct);
     }
+
+    public async Task<int> DeleteInboxItemsAsync(
+        Guid userId,
+        IReadOnlyCollection<Guid> notificationIds,
+        CancellationToken ct = default)
+    {
+        if (notificationIds.Count == 0)
+            return 0;
+
+        return await masterDb.ChatMentionNotifications
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && notificationIds.Contains(notification.NotificationId))
+            .ExecuteDeleteAsync(ct);
+    }
+
+    public async Task<int> DeleteInboxAllAsync(Guid userId, CancellationToken ct = default) =>
+        await masterDb.ChatMentionNotifications
+            .Where(notification => notification.RecipientUserId == userId)
+            .ExecuteDeleteAsync(ct);
 
     private async Task<EffectiveMaskDto> GetMasksAsync(Guid userId, CancellationToken ct) =>
         await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);

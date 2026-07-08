@@ -10,4 +10,9 @@ export const inboxApi = {
     api.post(`/chat/inbox/${notificationId}/read`),
 
   markAllRead: () => api.post('/chat/inbox/read-all'),
+
+  deleteItems: (notificationIds: string[]) =>
+    api.post('/chat/inbox/delete', { notificationIds }),
+
+  deleteAll: () => api.delete('/chat/inbox'),
 }

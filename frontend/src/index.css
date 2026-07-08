@@ -1264,6 +1264,76 @@ body {
   color: #dc2626;
 }
 
+.inbox-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.inbox-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #475569;
+  cursor: pointer;
+  user-select: none;
+}
+
+.inbox-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.inbox-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.inbox-toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inbox-toolbar-btn--danger {
+  border: 1px solid #dc2626;
+  background: #dc2626;
+  color: #fff;
+}
+
+.inbox-toolbar-btn--danger:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.inbox-toolbar-btn--danger-outline {
+  border: 1px solid #fca5a5;
+  background: #fff;
+  color: #b91c1c;
+}
+
+.inbox-toolbar-btn--danger-outline:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
 .inbox-list {
   list-style: none;
   display: flex;
@@ -1272,10 +1342,32 @@ body {
 }
 
 .inbox-item {
+  display: flex;
+  align-items: stretch;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
+}
+
+.inbox-item--selected {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+.inbox-item-checkbox {
+  display: flex;
+  align-items: flex-start;
+  padding: 1rem 0 1rem 1rem;
+  cursor: pointer;
+}
+
+.inbox-item-checkbox input {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.15rem;
+  accent-color: #2563eb;
+  cursor: pointer;
 }
 
 .inbox-item--read {
@@ -1284,7 +1376,9 @@ body {
 
 .inbox-item-link {
   display: block;
-  padding: 1rem 1.1rem;
+  flex: 1;
+  min-width: 0;
+  padding: 1rem 1.1rem 1rem 0.65rem;
   text-decoration: none;
   color: inherit;
 }
