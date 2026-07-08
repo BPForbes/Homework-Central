@@ -3,12 +3,13 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCopy, faReply } from '@fortawesome/free-solid-svg-icons'
 import type { ChatMessage } from '../../types/chat'
-import { MentionContent } from './MentionContent'
+import { MentionContent, type MentionStyleLookup } from './MentionContent'
 
 interface ChatMessageBubbleProps {
   message: ChatMessage
   isOwn: boolean
   highlighted?: boolean
+  mentionStyles?: MentionStyleLookup
   onReply: (message: ChatMessage) => void
   onJumpToMessage: (messageId: string) => void
 }
@@ -30,6 +31,7 @@ export function ChatMessageBubble({
   message,
   isOwn,
   highlighted = false,
+  mentionStyles,
   onReply,
   onJumpToMessage,
 }: ChatMessageBubbleProps) {
@@ -131,11 +133,16 @@ export function ChatMessageBubble({
           onPointerCancel={(event) => endDrag(event, true)}
         >
           {!isOwn && message.senderUsername && (
-            <div className="chat-bubble-sender">{message.senderUsername}</div>
+            <div
+              className="chat-bubble-sender"
+              style={message.senderMessageColor ? { color: message.senderMessageColor } : undefined}
+            >
+              {message.senderUsername}
+            </div>
           )}
 
           <div className="chat-bubble-content">
-            <MentionContent content={message.content} />
+            <MentionContent content={message.content} mentionStyles={mentionStyles} />
           </div>
           <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
             {formatUtcTimestamp(message.createdAtUtc)}

@@ -7,8 +7,32 @@ public class CustomRoleDto
     public string? Description { get; set; }
     public string? IconName { get; set; }
     public string? ClaimHostRoomId { get; set; }
+    public string? MessageColor { get; set; }
+    public bool IsMentionableByUsers { get; set; }
     public List<short> PermissionIds { get; set; } = [];
     public DateTime CreatedAtUtc { get; set; }
+}
+
+public class RoleAppearanceDto
+{
+    public Guid RoleId { get; set; }
+    public string Name { get; set; } = null!;
+    public bool IsCustom { get; set; }
+    public string MessageColor { get; set; } = null!;
+    public bool IsMentionableByUsers { get; set; }
+}
+
+public class UpdateRoleAppearanceRequest
+{
+    public string? MessageColor { get; set; }
+    public bool? IsMentionableByUsers { get; set; }
+}
+
+public class MentionRoleOptionDto
+{
+    public string Name { get; set; } = null!;
+    public string MessageColor { get; set; } = null!;
+    public bool IsCustom { get; set; }
 }
 
 public class CreateCustomRoleRequest

@@ -7,8 +7,18 @@ export interface CustomRole {
   description?: string
   iconName?: string | null
   claimHostRoomId?: string | null
+  messageColor?: string | null
+  isMentionableByUsers?: boolean
   permissionIds: number[]
   createdAtUtc: string
+}
+
+export interface RoleAppearance {
+  roleId: string
+  name: string
+  isCustom: boolean
+  messageColor: string
+  isMentionableByUsers: boolean
 }
 
 export interface CustomChannelAccessRule {

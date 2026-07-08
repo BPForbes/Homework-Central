@@ -15,6 +15,7 @@ public class ChatMessageDto
     public string RoomId { get; set; } = null!;
     public Guid SenderId { get; set; }
     public string SenderUsername { get; set; } = null!;
+    public string? SenderMessageColor { get; set; }
     public string Content { get; set; } = null!;
     public DateTime CreatedAtUtc { get; set; }
 

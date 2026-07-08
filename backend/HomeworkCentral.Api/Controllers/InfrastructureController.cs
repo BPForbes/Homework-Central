@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -9,7 +10,9 @@ namespace HomeworkCentral.Api.Controllers;
 [ApiController]
 [Route("api/infrastructure")]
 [Authorize]
-public class InfrastructureController(IInfrastructureService infrastructure) : ControllerBase
+public class InfrastructureController(
+    IInfrastructureService infrastructure,
+    IRoleAppearanceService roleAppearanceService) : ControllerBase
 {
     [HttpGet("roles")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
@@ -84,6 +87,29 @@ public class InfrastructureController(IInfrastructureService infrastructure) : C
     {
         bool deleted = await infrastructure.DeleteCustomRoleAsync(roleId, ct);
         return deleted ? NoContent() : NotFound();
+    }
+
+    [HttpGet("role-appearance")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<IReadOnlyList<RoleAppearanceDto>>> ListRoleAppearance(CancellationToken ct) =>
+        Ok(await roleAppearanceService.ListRoleAppearanceAsync(ct));
+
+    [HttpPut("roles/{roleId:guid}/appearance")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<RoleAppearanceDto>> UpdateRoleAppearance(
+        Guid roleId,
+        [FromBody] UpdateRoleAppearanceRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            RoleAppearanceDto? updated = await roleAppearanceService.UpdateRoleAppearanceAsync(roleId, request, ct);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("channels")]

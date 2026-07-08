@@ -8,6 +8,14 @@ interface PasswordConfirmModalProps {
   onCancel: () => void
 }
 
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  )
+}
+
 export function PasswordConfirmModal({
   open,
   title,
@@ -19,6 +27,7 @@ export function PasswordConfirmModal({
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
@@ -29,8 +38,29 @@ export function PasswordConfirmModal({
     inputRef.current?.focus()
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape')
+      if (event.key === 'Escape') {
+        event.preventDefault()
         onCancel()
+        return
+      }
+
+      if (event.key !== 'Tab' || !panelRef.current)
+        return
+
+      const focusable = getFocusableElements(panelRef.current)
+      if (focusable.length === 0)
+        return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
 
     document.addEventListener('keydown', handleKeyDown)
@@ -59,6 +89,7 @@ export function PasswordConfirmModal({
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <div
+        ref={panelRef}
         className="modal-panel"
         role="dialog"
         aria-modal="true"

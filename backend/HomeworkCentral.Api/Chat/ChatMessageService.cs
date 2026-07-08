@@ -67,6 +67,7 @@ public sealed class ChatMessageService(
     IContentSanitizer contentSanitizer,
     IMentionCooldownTracker mentionCooldownTracker,
     IMentionRecipientResolver mentionRecipientResolver,
+    IRoleAppearanceService roleAppearanceService,
     IHubContext<ChatHub> hubContext) : IChatMessageService
 {
     private const int MaxMessageLength = 4000;
@@ -180,6 +181,7 @@ public sealed class ChatMessageService(
             RoomId = roomId,
             SenderId = userId,
             SenderUsername = senderUsername,
+            SenderMessageColor = await roleAppearanceService.ResolveSenderColorAsync(roleMask, ct),
             RawContent = parsed.DisplayContent,
             SanitizedContent = sanitized,
             CreatedAtUtc = DateTime.UtcNow,
@@ -402,6 +404,7 @@ public sealed class ChatMessageService(
             RoomId = message.RoomId,
             SenderId = message.SenderId,
             SenderUsername = message.SenderUsername,
+            SenderMessageColor = message.SenderMessageColor,
             Content = message.SanitizedContent ?? message.RawContent,
             CreatedAtUtc = message.CreatedAtUtc,
             ReplyToMessageId = message.ReplyToMessageId,

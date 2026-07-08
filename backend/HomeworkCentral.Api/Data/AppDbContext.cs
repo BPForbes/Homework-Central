@@ -67,6 +67,8 @@ public partial class AppDbContext(
             e.Property(r => r.CreatedAtUtc).IsRequired();
             e.Property(r => r.ClaimHostRoomId).HasMaxLength(128);
             e.Property(r => r.IconName).HasMaxLength(64);
+            e.Property(r => r.MessageColor).HasMaxLength(7);
+            e.Property(r => r.IsMentionableByUsers).HasDefaultValue(false);
             e.Property(r => r.OwnerAccountClass)
                 .HasConversion<string>()
                 .HasMaxLength(32)
@@ -199,6 +201,7 @@ public partial class AppDbContext(
             e.Property(m => m.MessageId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(m => m.RoomId).HasMaxLength(128).IsRequired();
             e.Property(m => m.SenderUsername).HasMaxLength(64).IsRequired();
+            e.Property(m => m.SenderMessageColor).HasMaxLength(7);
             e.Property(m => m.RawContent).IsRequired();
             e.Property(m => m.CreatedAtUtc).IsRequired();
             e.Property(m => m.OwnerAccountClass)

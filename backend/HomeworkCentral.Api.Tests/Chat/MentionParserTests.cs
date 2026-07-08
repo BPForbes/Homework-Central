@@ -53,14 +53,8 @@ public class MentionParserTests
     }
 
     [Fact]
-    public void Role_mention_requires_explicit_role_prefix()
+    public void Platform_role_name_parses_as_user_mention_for_resolver_disambiguation()
     {
-        MentionParseResult roleMention = MentionParser.Parse("Hey @role:Tutor", canUseBroadcastMentions: false);
-
-        Assert.Single(roleMention.ActiveMentions);
-        Assert.Equal(MentionKind.Role, roleMention.ActiveMentions[0].Kind);
-        Assert.Equal("Tutor", roleMention.ActiveMentions[0].Token);
-
         MentionParseResult userMention = MentionParser.Parse("Hey @Tutor", canUseBroadcastMentions: false);
 
         Assert.Single(userMention.ActiveMentions);

@@ -1,5 +1,5 @@
 import api from './authApi'
-import type { ChatMessage, ChatNav, ChatRoomDetail } from '../types/chat'
+import type { ChatMessage, ChatNav, ChatRoomDetail, MentionRoleOption } from '../types/chat'
 
 export const chatApi = {
   getNav: () => api.get<ChatNav>('/chat/nav'),
@@ -15,4 +15,6 @@ export const chatApi = {
       content,
       replyToMessageId: replyToMessageId ?? undefined,
     }),
+
+  getMentionRoles: () => api.get<MentionRoleOption[]>('/chat/mention-roles'),
 }

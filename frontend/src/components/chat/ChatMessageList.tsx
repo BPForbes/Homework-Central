@@ -1,20 +1,45 @@
-import { useEffect, useRef, useState } from 'react'
-import type { ChatMessage, ChatTypingUser } from '../../types/chat'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChatMessage, ChatTypingUser, MentionRoleOption } from '../../types/chat'
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { TypingIndicator } from './TypingIndicator'
+import type { MentionStyleLookup } from './MentionContent'
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
   typingUsers: ChatTypingUser[]
   loading: boolean
   currentUserId: string | undefined
+  mentionRoles?: MentionRoleOption[]
   onReply: (message: ChatMessage) => void
 }
 
-export function ChatMessageList({ messages, typingUsers, loading, currentUserId, onReply }: ChatMessageListProps) {
+export function ChatMessageList({
+  messages,
+  typingUsers,
+  loading,
+  currentUserId,
+  mentionRoles = [],
+  onReply,
+}: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
+
+  const mentionStyles = useMemo((): MentionStyleLookup => {
+    const userColors: Record<string, string> = {}
+    const roleColors: Record<string, string> = {}
+
+    for (const message of messages) {
+      const key = message.senderUsername.toLowerCase()
+      if (!userColors[key] && message.senderMessageColor)
+        userColors[key] = message.senderMessageColor
+    }
+
+    for (const role of mentionRoles)
+      roleColors[role.name.toLowerCase()] = role.messageColor
+
+    return { userColors, roleColors }
+  }, [messages, mentionRoles])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -48,6 +73,7 @@ export function ChatMessageList({ messages, typingUsers, loading, currentUserId,
           message={message}
           isOwn={message.senderId === currentUserId}
           highlighted={highlightedId === message.messageId}
+          mentionStyles={mentionStyles}
           onReply={onReply}
           onJumpToMessage={handleJumpToMessage}
         />

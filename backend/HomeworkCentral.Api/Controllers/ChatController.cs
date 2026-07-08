@@ -17,7 +17,8 @@ public class ChatController(
     IChatRoomAccessService chatRoomAccess,
     IEffectiveMaskService effectiveMaskService,
     IChatMessageService chatMessageService,
-    IChatRoomDetailService chatRoomDetailService) : ControllerBase
+    IChatRoomDetailService chatRoomDetailService,
+    IRoleAppearanceService roleAppearanceService) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
     [HttpGet("nav")]
@@ -72,6 +73,17 @@ public class ChatController(
             limit,
             ct);
         return Ok(messages);
+    }
+
+    /// <summary>Returns mentionable roles (name + color) for @ autocomplete in chat.</summary>
+    [HttpGet("mention-roles")]
+    public async Task<ActionResult<IReadOnlyList<MentionRoleOptionDto>>> GetMentionRoles(CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        return Ok(await roleAppearanceService.GetMentionableRolesAsync(ct));
     }
 
     /// <summary>Sends a message to a chat room.</summary>

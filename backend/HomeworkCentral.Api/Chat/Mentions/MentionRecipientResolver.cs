@@ -35,7 +35,8 @@ public sealed class MentionRecipientResolver(
     MasterDbContext masterRegistry,
     ITenantDbContextFactory tenantFactory,
     IChatRoomAccessService chatRoomAccess,
-    IChatOnlineTracker onlineTracker) : IMentionRecipientResolver
+    IChatOnlineTracker onlineTracker,
+    IRoleAppearanceService roleAppearanceService) : IMentionRecipientResolver
 {
     public async Task<HashSet<Guid>> ResolveRecipientsAsync(
         string roomId,
@@ -67,6 +68,35 @@ public sealed class MentionRecipientResolver(
                         && chatRoomAccess.CanAccessRoom(mentionedUser.Masks, roomId))
                     {
                         recipients.Add(mentionedUser.UserId);
+                        break;
+                    }
+
+                    if (await roleAppearanceService.IsMentionablePlatformRoleAsync(mention.Token, ct)
+                        && PlatformRoleCatalog.TryGetRoleBit(mention.Token, out short platformBit))
+                    {
+                        AddPlatformRoleRecipients(
+                            recipients,
+                            eligibleUsers,
+                            roomId,
+                            senderId,
+                            platformBit);
+                        break;
+                    }
+
+                    Guid? customRoleId = await roleAppearanceService.TryGetMentionableCustomRoleIdAsync(
+                        mention.Token,
+                        ct);
+                    if (customRoleId is Guid roleId)
+                    {
+                        await AddCustomRoleRecipientsAsync(
+                            recipients,
+                            eligibleUsers,
+                            roomId,
+                            senderId,
+                            roleId,
+                            senderAccountClass,
+                            senderTenantDatabaseName,
+                            ct);
                     }
 
                     break;
@@ -75,17 +105,15 @@ public sealed class MentionRecipientResolver(
                     if (!PlatformRoleCatalog.TryGetRoleBit(mention.Token, out short roleBit))
                         break;
 
-                    foreach (UserMaskSnapshot snapshot in eligibleUsers)
-                    {
-                        if (snapshot.UserId == senderId)
-                            continue;
+                    if (!await roleAppearanceService.IsMentionablePlatformRoleAsync(mention.Token, ct))
+                        break;
 
-                        if (!BitMask.HasBit(snapshot.RoleMask, roleBit))
-                            continue;
-
-                        if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                            recipients.Add(snapshot.UserId);
-                    }
+                    AddPlatformRoleRecipients(
+                        recipients,
+                        eligibleUsers,
+                        roomId,
+                        senderId,
+                        roleBit);
 
                     break;
 
@@ -115,6 +143,125 @@ public sealed class MentionRecipientResolver(
         }
 
         return recipients;
+    }
+
+    private void AddPlatformRoleRecipients(
+        HashSet<Guid> recipients,
+        List<UserMaskSnapshot> eligibleUsers,
+        string roomId,
+        Guid senderId,
+        short roleBit)
+    {
+        foreach (UserMaskSnapshot snapshot in eligibleUsers)
+        {
+            if (snapshot.UserId == senderId)
+                continue;
+
+            if (!BitMask.HasBit(snapshot.RoleMask, roleBit))
+                continue;
+
+            if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+                recipients.Add(snapshot.UserId);
+        }
+    }
+
+    private async Task AddCustomRoleRecipientsAsync(
+        HashSet<Guid> recipients,
+        List<UserMaskSnapshot> eligibleUsers,
+        string roomId,
+        Guid senderId,
+        Guid customRoleId,
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
+        CancellationToken ct)
+    {
+        HashSet<Guid> holders = await LoadCustomRoleHolderIdsAsync(
+            customRoleId,
+            senderAccountClass,
+            senderTenantDatabaseName,
+            ct);
+
+        foreach (UserMaskSnapshot snapshot in eligibleUsers)
+        {
+            if (snapshot.UserId == senderId)
+                continue;
+
+            if (!holders.Contains(snapshot.UserId))
+                continue;
+
+            if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+                recipients.Add(snapshot.UserId);
+        }
+    }
+
+    private async Task<HashSet<Guid>> LoadCustomRoleHolderIdsAsync(
+        Guid customRoleId,
+        AccountClass senderAccountClass,
+        string? senderTenantDatabaseName,
+        CancellationToken ct)
+    {
+        if (senderAccountClass == AccountClass.RealAccount)
+        {
+            List<Guid> userIds = await masterDb.UserRoles
+                .AsNoTracking()
+                .Where(userRole => userRole.RoleId == customRoleId)
+                .Select(userRole => userRole.UserId)
+                .ToListAsync(ct);
+
+            return userIds.ToHashSet();
+        }
+
+        if (senderAccountClass == AccountClass.DeveloperAccount
+            && !string.IsNullOrEmpty(senderTenantDatabaseName))
+        {
+            await using AppDbContext tenantDb =
+                await tenantFactory.CreateForRegisteredTenantAsync(senderTenantDatabaseName, ct);
+
+            List<Guid> userIds = await tenantDb.UserRoles
+                .AsNoTracking()
+                .Where(userRole => userRole.RoleId == customRoleId)
+                .Select(userRole => userRole.UserId)
+                .ToListAsync(ct);
+
+            return userIds.ToHashSet();
+        }
+
+        if (senderAccountClass == AccountClass.DevAdmin)
+        {
+            HashSet<Guid> holders = [];
+            List<string> tenantDatabases = await masterRegistry.Tenants
+                .AsNoTracking()
+                .Select(tenant => tenant.DatabaseName)
+                .ToListAsync(ct);
+
+            foreach (string databaseName in tenantDatabases)
+            {
+                await using AppDbContext tenantDb =
+                    await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
+
+                List<Guid> userIds = await tenantDb.UserRoles
+                    .AsNoTracking()
+                    .Where(userRole => userRole.RoleId == customRoleId)
+                    .Select(userRole => userRole.UserId)
+                    .ToListAsync(ct);
+
+                foreach (Guid userId in userIds)
+                    holders.Add(userId);
+            }
+
+            List<Guid> masterUserIds = await masterDb.UserRoles
+                .AsNoTracking()
+                .Where(userRole => userRole.RoleId == customRoleId)
+                .Select(userRole => userRole.UserId)
+                .ToListAsync(ct);
+
+            foreach (Guid userId in masterUserIds)
+                holders.Add(userId);
+
+            return holders;
+        }
+
+        return [];
     }
 
     private static bool IsEligibleRecipient(

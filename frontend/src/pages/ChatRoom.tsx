@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../api/chatApi'
-import type { ChatRoomDetail } from '../types/chat'
+import type { ChatRoomDetail, MentionRoleOption } from '../types/chat'
 import { useAuth } from '../context/AuthContext'
 import { useChatRoom } from '../hooks/useChatRoom'
 import { ChatComposer } from '../components/chat/ChatComposer'
@@ -57,6 +57,7 @@ export function ChatRoom() {
   const [room, setRoom] = useState<ChatRoomDetail | null>(null)
   const [roomLoading, setRoomLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
+  const [mentionRoles, setMentionRoles] = useState<MentionRoleOption[]>([])
 
   const roomType = room?.roomType ?? 'Chat'
   const isChatRoom = roomType === 'Chat'
@@ -104,6 +105,25 @@ export function ChatRoom() {
       cancelled = true
     }
   }, [decodedRoomId])
+
+  useEffect(() => {
+    if (!isChatRoom)
+      return
+
+    let cancelled = false
+    void chatApi
+      .getMentionRoles()
+      .then(({ data }) => {
+        if (!cancelled) setMentionRoles(data)
+      })
+      .catch(() => {
+        if (!cancelled) setMentionRoles([])
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [decodedRoomId, isChatRoom])
 
   if (roomLoading) {
     return (
@@ -171,6 +191,7 @@ export function ChatRoom() {
               typingUsers={typingUsers}
               loading={messagesLoading}
               currentUserId={user?.userId}
+              mentionRoles={mentionRoles}
               onReply={startReply}
             />
             {room.isPrivate && (
@@ -182,6 +203,8 @@ export function ChatRoom() {
               disabled={messagesLoading}
               sending={sending}
               replyTarget={replyTarget}
+              messages={messages}
+              mentionRoles={mentionRoles}
               onSend={sendMessage}
               onTyping={notifyTyping}
               onStopTyping={stopTyping}

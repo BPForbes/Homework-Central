@@ -266,6 +266,9 @@ public static class AuthorizationSeedData
             role.RoleMask = (System.Collections.BitArray)masks.RoleMask.Clone();
             role.PermissionMask = (System.Collections.BitArray)masks.PermissionMask.Clone();
             role.FeatureMask = (System.Collections.BitArray)masks.FeatureMask.Clone();
+
+            if (string.IsNullOrWhiteSpace(role.MessageColor))
+                role.MessageColor = RoleAppearanceDefaults.ResolvePlatformRoleColor(roleDefinition.Name, null);
         }
 
         HashSet<Guid> validRoleIds = AuthorizationCatalog.Roles.Select(role => role.RoleId).ToHashSet();
