@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowUp, faEye, faPen, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { faArrowUp, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
 import type { ChatMessage, MentionRoleOption } from '../../types/chat'
 import {
   buildMentionCandidates,
@@ -12,6 +12,7 @@ import {
 } from './mentionAutocomplete'
 import { RichTextToolbar } from '../../richtext/RichTextToolbar'
 import { RichContent } from '../../richtext/RichContent'
+import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 
 interface ChatComposerProps {
   disabled?: boolean
@@ -39,7 +40,7 @@ export function ChatComposer({
   const [draft, setDraft] = useState('')
   const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
-  const [previewMode, setPreviewMode] = useState(false)
+  const [showFormatting, setShowFormatting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const mentionCandidates = mentionQuery
@@ -90,7 +91,7 @@ export function ChatComposer({
     const content = draft
     setDraft('')
     setMentionQuery(null)
-    setPreviewMode(false)
+    setShowFormatting(false)
     const sent = await onSend(content)
     if (!sent) {
       setDraft(content)
@@ -175,22 +176,18 @@ export function ChatComposer({
         </div>
       )}
       <div className="chat-composer-toolbar-row">
-        {!previewMode && (
+        {!showFormatting && (
           <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={handleChange} compact />
         )}
-        <button
-          type="button"
-          className={`rich-preview-toggle ${previewMode ? 'active' : ''}`}
-          onClick={() => setPreviewMode((prev) => !prev)}
+        <FormattingToggleButton
+          active={showFormatting}
+          onToggle={() => setShowFormatting((prev) => !prev)}
           disabled={disabled}
-        >
-          <FontAwesomeIcon icon={previewMode ? faPen : faEye} />
-          {previewMode ? 'Edit' : 'Preview'}
-        </button>
+        />
       </div>
       <form className="chat-composer" onSubmit={handleSubmit}>
         <div className="chat-composer-input-wrap">
-          {!previewMode && mentionCandidates.length > 0 && mentionQuery && (
+          {!showFormatting && mentionCandidates.length > 0 && mentionQuery && (
             <ul className="chat-mention-autocomplete" role="listbox" aria-label="Mention suggestions">
               {mentionCandidates.map((candidate, index) => (
                 <li key={`${candidate.kind}-${candidate.name}`} role="presentation">
@@ -218,7 +215,7 @@ export function ChatComposer({
               ))}
             </ul>
           )}
-          {previewMode ? (
+          {showFormatting ? (
             <div className="rich-preview-pane chat-composer-preview-pane">
               {draft.trim() ? (
                 <RichContent content={draft} mentionStyles={mentionStyles} />

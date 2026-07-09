@@ -4,6 +4,7 @@ import { faEye, faPen, faPlus } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../../api/infrastructureApi'
 import { RichTextToolbar } from '../../richtext/RichTextToolbar'
 import { RichContent } from '../../richtext/RichContent'
+import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 import type { InfoEntryFeed } from '../../types/infrastructure'
 
 interface InfoEntriesFeedProps {
@@ -33,23 +34,16 @@ interface InfoEntryEditorProps {
 
 function InfoEntryEditor({ initialContent, saving, error, submitLabel, onSave, onCancel }: InfoEntryEditorProps) {
   const [content, setContent] = useState(initialContent)
-  const [previewMode, setPreviewMode] = useState(false)
+  const [showFormatting, setShowFormatting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   return (
     <div className="info-entry-editor">
       <div className="chat-composer-toolbar-row">
-        {!previewMode && <RichTextToolbar textareaRef={textareaRef} value={content} onChange={setContent} />}
-        <button
-          type="button"
-          className={`rich-preview-toggle ${previewMode ? 'active' : ''}`}
-          onClick={() => setPreviewMode((prev) => !prev)}
-        >
-          <FontAwesomeIcon icon={previewMode ? faPen : faEye} />
-          {previewMode ? 'Edit' : 'Preview'}
-        </button>
+        {!showFormatting && <RichTextToolbar textareaRef={textareaRef} value={content} onChange={setContent} />}
+        <FormattingToggleButton active={showFormatting} onToggle={() => setShowFormatting((prev) => !prev)} />
       </div>
-      {previewMode ? (
+      {showFormatting ? (
         <div className="rich-preview-pane">
           {content.trim() ? <RichContent content={content} /> : <p className="chat-messages-empty">Nothing to preview yet.</p>}
         </div>

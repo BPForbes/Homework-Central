@@ -83,7 +83,10 @@ export function ChannelBuilder() {
                 onClick={() => setMode('edit')}
               >
                 <FontAwesomeIcon icon={faPen} />
-                <span>Edit</span>
+                <span>
+                  Edit
+                  <small>Change configuration</small>
+                </span>
               </button>
               <button
                 type="button"
@@ -91,7 +94,10 @@ export function ChannelBuilder() {
                 onClick={() => setMode('preview')}
               >
                 <FontAwesomeIcon icon={faEye} />
-                <span>Preview</span>
+                <span>
+                  Preview
+                  <small>Try it with mock accounts</small>
+                </span>
               </button>
             </div>
           </header>

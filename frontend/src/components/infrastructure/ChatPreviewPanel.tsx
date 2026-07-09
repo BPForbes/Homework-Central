@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowUp, faEye, faPen } from '@fortawesome/free-solid-svg-icons'
+import { faArrowUp } from '@fortawesome/free-solid-svg-icons'
 import type { MockAccount } from './mockAccounts'
 import { RichTextToolbar } from '../../richtext/RichTextToolbar'
 import { RichContent } from '../../richtext/RichContent'
+import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 
 interface MockMessage {
   id: string
@@ -28,7 +29,7 @@ let mockMessageSeq = 0
 export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockId }: ChatPreviewPanelProps) {
   const [messages, setMessages] = useState<MockMessage[]>([])
   const [draft, setDraft] = useState('')
-  const [previewMode, setPreviewMode] = useState(false)
+  const [showFormatting, setShowFormatting] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -42,7 +43,7 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
       { id: `mock-msg-${mockMessageSeq}`, accountId: activeMockId, content: draft, createdAt: Date.now() },
     ])
     setDraft('')
-    setPreviewMode(false)
+    setShowFormatting(false)
     window.requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }))
   }
 
@@ -92,22 +93,18 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
       </div>
 
       <div className="chat-composer-toolbar-row">
-        {!previewMode && (
+        {!showFormatting && (
           <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} compact />
         )}
-        <button
-          type="button"
-          className={`rich-preview-toggle ${previewMode ? 'active' : ''}`}
-          onClick={() => setPreviewMode((prev) => !prev)}
+        <FormattingToggleButton
+          active={showFormatting}
+          onToggle={() => setShowFormatting((prev) => !prev)}
           disabled={!activeAccount}
-        >
-          <FontAwesomeIcon icon={previewMode ? faPen : faEye} />
-          {previewMode ? 'Edit' : 'Preview'}
-        </button>
+        />
       </div>
       <form className="chat-composer" onSubmit={handleSubmit}>
         <div className="chat-composer-input-wrap">
-          {previewMode ? (
+          {showFormatting ? (
             <div className="rich-preview-pane chat-composer-preview-pane">
               {draft.trim() ? <RichContent content={draft} /> : <p className="chat-messages-empty">Nothing to preview yet.</p>}
             </div>
