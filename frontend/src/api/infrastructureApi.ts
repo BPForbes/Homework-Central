@@ -49,6 +49,11 @@ export const infrastructureApi = {
     api.post(`/roles/${roleId}/claim`, null, { params: { roomId } }),
   unclaimRole: (roleId: string) => api.delete(`/roles/${roleId}/claim`),
 
+  listClaimRolesForRoom: (roomId: string) =>
+    api.get<CustomRole[]>(`/channels/by-room/${encodeURIComponent(roomId)}/claim-roles`),
+  reorderClaimRoles: (roomId: string, orderedRoleIds: string[]) =>
+    api.put(`/channels/by-room/${encodeURIComponent(roomId)}/claim-order`, { orderedRoleIds }),
+
   searchUsers: (q: string) =>
     api.get<InfrastructureUserLookup[]>('/users/search', { params: { q } }),
   getUser: (userId: string, tenantDatabaseName?: string | null) =>

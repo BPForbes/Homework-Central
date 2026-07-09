@@ -183,6 +183,32 @@ public class InfrastructureController(
         return Ok(await infrastructure.GetClaimableRolesAsync(userId.Value, Uri.UnescapeDataString(roomId), ct));
     }
 
+    [HttpGet("channels/by-room/{roomId}/claim-roles")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<IReadOnlyList<CustomRoleDto>>> ListClaimRolesForRoom(string roomId, CancellationToken ct) =>
+        Ok(await infrastructure.ListClaimRolesForRoomAsync(Uri.UnescapeDataString(roomId), ct));
+
+    [HttpPut("channels/by-room/{roomId}/claim-order")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<IActionResult> ReorderClaimRoles(
+        string roomId,
+        [FromBody] ReorderClaimRolesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            bool updated = await infrastructure.ReorderClaimRolesAsync(
+                Uri.UnescapeDataString(roomId),
+                request.OrderedRoleIds,
+                ct);
+            return updated ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("roles/{roleId:guid}/claim")]
     public async Task<IActionResult> ClaimRole(Guid roleId, [FromQuery] string roomId, CancellationToken ct)
     {

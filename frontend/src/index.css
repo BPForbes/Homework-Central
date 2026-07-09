@@ -3639,3 +3639,185 @@ a {
   background: var(--color-danger-soft);
   color: var(--color-danger-hover);
 }
+
+/* ==========================================================================
+   Channel builder — per-channel edit/preview page
+   ========================================================================== */
+
+.channel-builder-page {
+  animation: rise-in var(--duration-base) var(--ease-out);
+}
+
+.channel-builder-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  color: var(--color-ink-secondary);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.channel-builder-back:hover {
+  color: var(--color-primary-hover);
+}
+
+.channel-builder-hero {
+  align-items: center;
+}
+
+.channel-builder-mode-toggle {
+  grid-template-columns: repeat(2, 1fr);
+  flex-shrink: 0;
+  min-width: 12rem;
+}
+
+.channel-builder-panel {
+  padding: 1.5rem;
+}
+
+.channel-builder-chat-edit-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.mock-account-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.mock-account-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-ink-secondary);
+}
+
+.mock-account-count-input {
+  width: 4rem;
+}
+
+.mock-account-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mock-account-switcher-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-ink-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mock-account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+}
+
+.mock-account-chip:hover {
+  transform: translateY(-1px);
+}
+
+.mock-account-chip.active {
+  background: var(--color-primary-soft);
+}
+
+.mock-account-chip-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.role-claim-order-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.role-claim-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: grab;
+  transition: border-color var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
+}
+
+.role-claim-order-item.dragging {
+  opacity: 0.5;
+  border-color: var(--color-primary);
+}
+
+.role-claim-order-handle {
+  color: var(--color-ink-tertiary);
+}
+
+.role-claim-order-icon {
+  color: var(--color-primary);
+}
+
+.role-claim-order-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.role-claim-order-controls {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.chat-preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-preview-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 8rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.custom-info-panel--preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}

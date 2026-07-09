@@ -17,6 +17,7 @@ import { GetRoles } from './pages/GetRoles'
 import { Inbox } from './pages/Inbox'
 import { UserConfig } from './pages/UserConfig'
 import { ServerMaintenance } from './pages/ServerMaintenance'
+import { ChannelBuilder } from './pages/ChannelBuilder'
 import { PermissionRoute } from './components/PermissionRoute'
 import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from './constants/permissions'
 
@@ -66,6 +67,14 @@ export default function App() {
                   element={
                     <PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}>
                       <ServerMaintenance />
+                    </PermissionRoute>
+                  }
+                />
+                <Route
+                  path="/server/channels/:channelId"
+                  element={
+                    <PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}>
+                      <ChannelBuilder />
                     </PermissionRoute>
                   }
                 />

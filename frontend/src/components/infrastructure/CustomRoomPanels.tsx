@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCheck } from '@fortawesome/free-solid-svg-icons'
+import { faCheck, faEye } from '@fortawesome/free-solid-svg-icons'
 import { resolveCustomRoleIcon } from './customRoleIcons'
 import { infrastructureApi } from '../../api/infrastructureApi'
 import { useAuth } from '../../context/AuthContext'
@@ -59,6 +59,21 @@ export function CustomInfoRoomPanel({ room, onUpdated }: CustomInfoRoomPanelProp
           This info room is older than three days. Only Owner or System Administrator can edit it now.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Read-only rendering of an info room's content, from the perspective of a member who cannot
+ * edit it — used by the channel builder's Preview mode regardless of the real viewer's permissions.
+ */
+export function CustomInfoPreviewPanel({ content }: { content?: string | null }) {
+  return (
+    <div className="custom-info-panel custom-info-panel--preview">
+      <p className="dashboard-hint">
+        <FontAwesomeIcon icon={faEye} /> Previewing as a member who cannot edit this page.
+      </p>
+      <div className="custom-info-content">{content || 'No content yet.'}</div>
     </div>
   )
 }

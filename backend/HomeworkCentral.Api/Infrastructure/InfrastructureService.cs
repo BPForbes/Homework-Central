@@ -19,6 +19,10 @@ public interface IInfrastructureService
     Task<bool> SetRoleClaimPlacementAsync(Guid actorUserId, Guid roleId, SetRoleClaimPlacementRequest request, CancellationToken ct = default);
     Task<bool> DeleteCustomRoleAsync(Guid roleId, CancellationToken ct = default);
 
+    /// <summary>Admin-facing listing of the custom roles claimable in a room, for the channel builder page. Unlike <see cref="GetClaimableRolesAsync"/>, this does not require the caller to have chat access to the room.</summary>
+    Task<IReadOnlyList<CustomRoleDto>> ListClaimRolesForRoomAsync(string roomId, CancellationToken ct = default);
+    Task<bool> ReorderClaimRolesAsync(string roomId, List<Guid> orderedRoleIds, CancellationToken ct = default);
+
     Task<IReadOnlyList<CustomChannelDto>> ListCustomChannelsAsync(Guid actorUserId, CancellationToken ct = default);
     Task<CustomChannelDto> CreateCustomChannelAsync(Guid actorUserId, CreateCustomChannelRequest request, CancellationToken ct = default);
     Task<CustomChannelDto?> UpdateCustomChannelAsync(Guid actorUserId, Guid channelId, UpdateCustomChannelRequest request, CancellationToken ct = default);
@@ -242,6 +246,53 @@ public sealed class InfrastructureService(
         role.ClaimHostRoomId = hostRoomId;
         await db.SaveChangesAsync(ct);
         await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
+        return true;
+    }
+
+    public async Task<IReadOnlyList<CustomRoleDto>> ListClaimRolesForRoomAsync(string roomId, CancellationToken ct = default)
+    {
+        AccessScope scope = RequireScope();
+        List<Role> roles = await db.Roles
+            .AsNoTracking()
+            .Include(r => r.RolePermissions)
+            .Where(r => r.IsCustom && r.ClaimHostRoomId == roomId)
+            .OrderBy(r => r.ClaimDisplayOrder)
+            .ThenBy(r => r.Name)
+            .ToListAsync(ct);
+
+        return roles
+            .Where(role => InfrastructureAccountScope.CanViewInfrastructure(scope, role.OwnerAccountClass))
+            .Select(MapRole)
+            .ToList();
+    }
+
+    public async Task<bool> ReorderClaimRolesAsync(string roomId, List<Guid> orderedRoleIds, CancellationToken ct = default)
+    {
+        AccessScope scope = RequireScope();
+        List<Role> roles = await db.Roles
+            .Where(r => r.IsCustom && r.ClaimHostRoomId == roomId)
+            .ToListAsync(ct);
+
+        if (roles.Count == 0)
+            return false;
+
+        if (roles.Any(r => !InfrastructureAccountScope.CanViewInfrastructure(scope, r.OwnerAccountClass)))
+            return false;
+
+        HashSet<Guid> existingIds = roles.Select(r => r.RoleId).ToHashSet();
+        if (orderedRoleIds.Count != existingIds.Count || !orderedRoleIds.ToHashSet().SetEquals(existingIds))
+        {
+            throw new InvalidOperationException(
+                "The provided role order must contain exactly the roles claimable in this room.");
+        }
+
+        for (int i = 0; i < orderedRoleIds.Count; i++)
+        {
+            Role role = roles.First(r => r.RoleId == orderedRoleIds[i]);
+            role.ClaimDisplayOrder = i;
+        }
+
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
@@ -512,7 +563,8 @@ public sealed class InfrastructureService(
         List<Role> roles = await db.Roles
             .AsNoTracking()
             .Where(r => r.IsCustom && r.ClaimHostRoomId == roomId)
-            .OrderBy(r => r.Name)
+            .OrderBy(r => r.ClaimDisplayOrder)
+            .ThenBy(r => r.Name)
             .ToListAsync(ct);
 
         AccessScope? scope = accessScope.ResolveCurrent();

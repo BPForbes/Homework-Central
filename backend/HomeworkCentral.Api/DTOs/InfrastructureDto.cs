@@ -57,6 +57,11 @@ public class SetRoleClaimPlacementRequest
     public string? Password { get; set; }
 }
 
+public class ReorderClaimRolesRequest
+{
+    public List<Guid> OrderedRoleIds { get; set; } = [];
+}
+
 public class CustomChannelAccessRuleDto
 {
     public Guid? CustomRoleId { get; set; }

@@ -14,6 +14,7 @@ import {
   faPlus,
   faTrashCan,
   faUserShield,
+  faWandMagicSparkles,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
@@ -561,6 +562,13 @@ export function ServerMaintenance() {
                 <div className="sm-room-card-actions">
                   <Link to={`/chat/${encodeURIComponent(channel.roomId)}`} className="sm-icon-btn" title="Open room">
                     <FontAwesomeIcon icon={faComments} />
+                  </Link>
+                  <Link
+                    to={`/server/channels/${channel.channelId}`}
+                    className="sm-icon-btn"
+                    title="Build & preview"
+                  >
+                    <FontAwesomeIcon icon={faWandMagicSparkles} />
                   </Link>
                   <button type="button" className="sm-icon-btn" onClick={() => startEdit(channel)} title="Edit room">
                     <FontAwesomeIcon icon={faPen} />

@@ -13,6 +13,8 @@ public class Role
     public AccountClass OwnerAccountClass { get; set; }
     /// <summary>Room id where this custom role can be claimed (e.g. general:get-roles or custom:guid).</summary>
     public string? ClaimHostRoomId { get; set; }
+    /// <summary>Sort position among the other roles claimable in the same room (drag-and-drop order).</summary>
+    public int ClaimDisplayOrder { get; set; }
     /// <summary>Font Awesome icon id, e.g. fas:shield-halved.</summary>
     public string? IconName { get; set; }
     /// <summary>Hex color (#RRGGBB) used for chat messages and @mentions for this role.</summary>
