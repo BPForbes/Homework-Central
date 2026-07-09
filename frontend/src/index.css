@@ -1868,12 +1868,53 @@ a {
 
 .role-appearance-color {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
 }
 
+.role-appearance-color-label {
+  font-size: 0.85rem;
+  color: var(--color-ink-secondary);
+}
+
 .role-appearance-hex {
   width: 7rem;
+}
+
+.role-appearance-swatch-preview {
+  display: inline-block;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.role-appearance-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: 14rem;
+}
+
+.role-appearance-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.role-appearance-swatch:hover {
+  transform: translateY(-1px);
+}
+
+.role-appearance-swatch.selected {
+  box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary);
 }
 
 .role-appearance-mentionable {
