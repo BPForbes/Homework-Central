@@ -1110,28 +1110,74 @@ a {
   gap: 0.5rem;
 }
 
-.custom-info-panel {
+.info-entries-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.info-entry-new-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.info-entries-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.info-entry-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: 1.25rem;
+  padding: 1.1rem 1.25rem;
 }
 
-.custom-info-content {
-  white-space: pre-wrap;
-  line-height: 1.55;
+.info-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--color-ink-tertiary);
+}
+
+.info-entry-author {
+  font-weight: 700;
   color: var(--color-ink-secondary);
 }
 
-.custom-info-editor {
+.info-entry-edited {
+  font-style: italic;
+}
+
+.info-entry-edit-btn {
+  margin-left: auto;
+}
+
+.info-entry-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.info-entry-textarea {
   width: 100%;
+  min-height: 10rem;
   padding: 0.75rem;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  font-family: inherit;
-  margin-bottom: 0.75rem;
+  font-family: 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.9rem;
   background: var(--color-surface);
   color: var(--color-ink);
+  resize: vertical;
 }
 
 .get-roles-section-title {
@@ -2395,6 +2441,25 @@ a {
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   flex-shrink: 0;
+}
+
+.chat-composer-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem 0;
+}
+
+.chat-composer-toolbar-row .rich-toolbar {
+  flex: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.chat-composer-preview-pane {
+  width: 100%;
+  min-height: 2.5rem;
 }
 
 .chat-reply-preview {
@@ -3816,8 +3881,304 @@ a {
   background: var(--color-surface-alt);
 }
 
-.custom-info-panel--preview {
+/* ==========================================================================
+   Shared rich-text renderer (Markdown + LaTeX) — chat messages and info entries
+   ========================================================================== */
+
+.rich-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  margin-bottom: 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+}
+
+.rich-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.rich-toolbar-btn:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.rich-toolbar-text-btn {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.rich-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.15rem 0.15rem;
+  background: var(--color-border-strong);
+}
+
+.rich-toolbar-select-wrap {
+  display: inline-flex;
+}
+
+.rich-toolbar-select {
+  height: 1.9rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  font-size: 0.75rem;
+  font-family: inherit;
+  padding: 0 0.3rem;
+}
+
+.rich-toolbar-colors {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.15rem;
+}
+
+.rich-toolbar-color {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-strong);
+  cursor: pointer;
+}
+
+.rich-toolbar-color:hover {
+  transform: scale(1.15);
+}
+
+.rich-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.rich-preview-toggle.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.rich-preview-pane {
+  min-height: 3rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1.5px dashed var(--color-border-strong);
+  background: var(--color-surface-alt);
+}
+
+/* Markdown output itself — shared by chat bubbles, the mock chat preview, and info entries */
+.rich-content {
+  overflow-wrap: anywhere;
+}
+
+.rich-content > *:first-child {
+  margin-top: 0;
+}
+
+.rich-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.rich-content h1,
+.rich-content h2,
+.rich-content h3,
+.rich-content h4,
+.rich-content h5,
+.rich-content h6 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.rich-content h1 { font-size: 1.5em; }
+.rich-content h2 { font-size: 1.3em; }
+.rich-content h3 { font-size: 1.15em; }
+.rich-content h4,
+.rich-content h5,
+.rich-content h6 { font-size: 1em; }
+
+.rich-content p {
+  margin: 0.5em 0;
+}
+
+.rich-content ul,
+.rich-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.rich-content li {
+  margin: 0.2em 0;
+}
+
+.rich-content .task-list-item {
+  list-style: none;
+  margin-left: -1.4em;
+  padding-left: 1.4em;
+}
+
+.rich-content .task-list-item-checkbox {
+  margin-right: 0.4em;
+}
+
+.rich-content blockquote {
+  margin: 0.6em 0;
+  padding: 0.3em 0.9em;
+  border-left: 3px solid var(--color-primary-soft-strong);
+  color: var(--color-ink-secondary);
+  background: var(--color-primary-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.rich-content hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1.5px solid var(--color-border-strong);
+}
+
+.rich-content a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--color-primary-soft-strong);
+}
+
+.rich-content img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.rich-content mark {
+  background: var(--color-accent-soft);
+  color: var(--color-on-accent);
+  border-radius: 3px;
+  padding: 0 0.15em;
+}
+
+.rich-content sub,
+.rich-content sup {
+  font-size: 0.75em;
+}
+
+.rich-content code {
+  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: var(--color-surface-sunken);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.rich-content .hc-code-block {
+  margin: 0.6em 0;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.rich-content .hc-code-block code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.rich-content table {
+  margin: 0.6em 0;
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.rich-content th,
+.rich-content td {
+  border: 1px solid var(--color-border-strong);
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+
+.rich-content th {
+  background: var(--color-surface-alt);
+  font-weight: 700;
+}
+
+.rich-content .katex-display {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Custom syntax-highlight theme mapped to design tokens (no canned hljs theme import) */
+.rich-content .hljs-comment,
+.rich-content .hljs-quote {
+  color: var(--color-ink-tertiary);
+  font-style: italic;
+}
+
+.rich-content .hljs-keyword,
+.rich-content .hljs-selector-tag,
+.rich-content .hljs-tag {
+  color: var(--hue-plum);
+  font-weight: 600;
+}
+
+.rich-content .hljs-string,
+.rich-content .hljs-attr,
+.rich-content .hljs-regexp,
+.rich-content .hljs-addition {
+  color: var(--color-primary);
+}
+
+.rich-content .hljs-number,
+.rich-content .hljs-literal {
+  color: var(--hue-coral);
+}
+
+.rich-content .hljs-title,
+.rich-content .hljs-title.function_,
+.rich-content .hljs-title.class_ {
+  color: var(--hue-sky);
+}
+
+.rich-content .hljs-built_in,
+.rich-content .hljs-type,
+.rich-content .hljs-class {
+  color: var(--hue-violet);
+}
+
+.rich-content .hljs-meta,
+.rich-content .hljs-symbol,
+.rich-content .hljs-bullet {
+  color: var(--color-accent);
+}
+
+.rich-content .hljs-deletion {
+  color: var(--color-danger);
 }

@@ -62,6 +62,34 @@ public class ReorderClaimRolesRequest
     public List<Guid> OrderedRoleIds { get; set; } = [];
 }
 
+public class InfoEntryDto
+{
+    public Guid EntryId { get; set; }
+    public Guid ChannelId { get; set; }
+    public string AuthorUsername { get; set; } = null!;
+    public string Content { get; set; } = null!;
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+    public bool CanEdit { get; set; }
+}
+
+public class InfoEntryFeedDto
+{
+    public List<InfoEntryDto> Entries { get; set; } = [];
+    /// <summary>Whether the caller can add a new entry right now (new entries are never subject to the edit-window lock).</summary>
+    public bool CanCreate { get; set; }
+}
+
+public class CreateInfoEntryRequest
+{
+    public string Content { get; set; } = null!;
+}
+
+public class UpdateInfoEntryRequest
+{
+    public string Content { get; set; } = null!;
+}
+
 public class CustomChannelAccessRuleDto
 {
     public Guid? CustomRoleId { get; set; }

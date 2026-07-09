@@ -57,7 +57,6 @@ export function ServerMaintenance() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingChannel, setEditingChannel] = useState<CustomChannel | null>(null)
   const [search, setSearch] = useState('')
 
   const [displayName, setDisplayName] = useState('')
@@ -67,7 +66,6 @@ export function ServerMaintenance() {
   const [isNewCategory, setIsNewCategory] = useState(false)
   const [roomType, setRoomType] = useState<CustomRoomType>('Chat')
   const [isPrivate, setIsPrivate] = useState(false)
-  const [infoContent, setInfoContent] = useState('')
   const [accessRules, setAccessRules] = useState<CustomChannelAccessRuleInput[]>([])
   const [selectedCustomRoleId, setSelectedCustomRoleId] = useState('')
   const [selectedPlatformBit, setSelectedPlatformBit] = useState('')
@@ -117,7 +115,6 @@ export function ServerMaintenance() {
 
   function resetForm() {
     setEditingId(null)
-    setEditingChannel(null)
     setDisplayName('')
     setIconName(defaultCustomRoomIcon('Chat'))
     setCategoryKey('')
@@ -125,13 +122,11 @@ export function ServerMaintenance() {
     setIsNewCategory(false)
     setRoomType('Chat')
     setIsPrivate(false)
-    setInfoContent('')
     setAccessRules([])
   }
 
   function startEdit(channel: CustomChannel) {
     setEditingId(channel.channelId)
-    setEditingChannel(channel)
     setDisplayName(channel.displayName)
     setIconName(channel.iconName ?? defaultCustomRoomIcon(channel.roomType))
     setCategoryKey(channel.categoryKey)
@@ -139,7 +134,6 @@ export function ServerMaintenance() {
     setIsNewCategory(false)
     setRoomType(channel.roomType)
     setIsPrivate(channel.isPrivate)
-    setInfoContent(channel.infoContent ?? '')
     setAccessRules(rulesFromChannel(channel))
   }
 
@@ -187,12 +181,6 @@ export function ServerMaintenance() {
     }
     if (isPrivate) {
       payload.accessRules = buildAccessRulesPayload()
-    }
-    if (roomType === 'Info') {
-      const originalContent = editingChannel?.infoContent ?? ''
-      if (!editingId || infoContent !== originalContent) {
-        payload.infoContent = infoContent
-      }
     }
     if (password) payload.password = password
     return payload
@@ -427,18 +415,11 @@ export function ServerMaintenance() {
               </div>
             </div>
 
-            {roomType === 'Info' && (
-              <div className="sm-field">
-                <label htmlFor="info-content" className="sm-label">Info content</label>
-                <textarea
-                  id="info-content"
-                  className="sm-textarea"
-                  rows={5}
-                  value={infoContent}
-                  onChange={(e) => setInfoContent(e.target.value)}
-                  placeholder="Write the static content shown on this info page…"
-                />
-              </div>
+            {roomType === 'Info' && !editingId && (
+              <p className="dashboard-hint">
+                Info content is authored as dated entries after the room is created — open it from the list below
+                to add the first entry.
+              </p>
             )}
 
             {isPrivate && (

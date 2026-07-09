@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowUp } from '@fortawesome/free-solid-svg-icons'
+import { faArrowUp, faEye, faPen } from '@fortawesome/free-solid-svg-icons'
 import type { MockAccount } from './mockAccounts'
+import { RichTextToolbar } from '../../richtext/RichTextToolbar'
+import { RichContent } from '../../richtext/RichContent'
 
 interface MockMessage {
   id: string
@@ -26,7 +28,9 @@ let mockMessageSeq = 0
 export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockId }: ChatPreviewPanelProps) {
   const [messages, setMessages] = useState<MockMessage[]>([])
   const [draft, setDraft] = useState('')
+  const [previewMode, setPreviewMode] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const activeAccount = mockAccounts.find((a) => a.id === activeMockId) ?? null
 
@@ -38,6 +42,7 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
       { id: `mock-msg-${mockMessageSeq}`, accountId: activeMockId, content: draft, createdAt: Date.now() },
     ])
     setDraft('')
+    setPreviewMode(false)
     window.requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }))
   }
 
@@ -75,7 +80,9 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
                   <div className="chat-bubble-sender" style={sender ? { color: sender.color } : undefined}>
                     {sender?.label ?? 'Unknown mock account'}
                   </div>
-                  <div className="chat-bubble-content">{message.content}</div>
+                  <div className="chat-bubble-content">
+                    <RichContent content={message.content} />
+                  </div>
                 </article>
               </div>
             </div>
@@ -84,17 +91,38 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
         <div ref={bottomRef} />
       </div>
 
+      <div className="chat-composer-toolbar-row">
+        {!previewMode && (
+          <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} compact />
+        )}
+        <button
+          type="button"
+          className={`rich-preview-toggle ${previewMode ? 'active' : ''}`}
+          onClick={() => setPreviewMode((prev) => !prev)}
+          disabled={!activeAccount}
+        >
+          <FontAwesomeIcon icon={previewMode ? faPen : faEye} />
+          {previewMode ? 'Edit' : 'Preview'}
+        </button>
+      </div>
       <form className="chat-composer" onSubmit={handleSubmit}>
         <div className="chat-composer-input-wrap">
-          <textarea
-            className="chat-composer-input"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={activeAccount ? `Message as ${activeAccount.label}…` : 'Add a mock account above to chat'}
-            rows={1}
-            disabled={!activeAccount}
-          />
+          {previewMode ? (
+            <div className="rich-preview-pane chat-composer-preview-pane">
+              {draft.trim() ? <RichContent content={draft} /> : <p className="chat-messages-empty">Nothing to preview yet.</p>}
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              className="chat-composer-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={activeAccount ? `Message as ${activeAccount.label}…` : 'Add a mock account above to chat'}
+              rows={1}
+              disabled={!activeAccount}
+            />
+          )}
         </div>
         <button type="submit" className="chat-send-btn" disabled={!activeAccount || !draft.trim()} aria-label="Send message">
           <FontAwesomeIcon icon={faArrowUp} />

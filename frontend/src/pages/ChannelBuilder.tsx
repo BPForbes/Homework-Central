@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft, faComments, faEye, faPen } from '@fortawesome/free-solid-svg-icons'
@@ -6,13 +6,12 @@ import { infrastructureApi } from '../api/infrastructureApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
-import { CustomInfoRoomPanel, CustomInfoPreviewPanel } from '../components/infrastructure/CustomRoomPanels'
+import { InfoEntriesFeed } from '../components/infrastructure/InfoEntriesFeed'
 import { RoleClaimBuilder } from '../components/infrastructure/RoleClaimBuilder'
 import { ChatPreviewPanel } from '../components/infrastructure/ChatPreviewPanel'
 import { MockAccountBar } from '../components/infrastructure/MockAccountBar'
 import { useMockAccounts } from '../components/infrastructure/mockAccounts'
 import type { CustomChannel } from '../types/infrastructure'
-import type { ChatRoomDetail } from '../types/chat'
 
 type BuilderMode = 'edit' | 'preview'
 
@@ -47,23 +46,6 @@ export function ChannelBuilder() {
       cancelled = true
     }
   }, [channelId])
-
-  const infoRoomDetail = useMemo<ChatRoomDetail | null>(() => {
-    if (!channel) return null
-    return {
-      id: channel.roomId,
-      name: channel.displayName,
-      categoryKey: channel.categoryKey,
-      categoryDisplayName: channel.categoryDisplayName,
-      categoryKind: 'Custom',
-      isPrivate: channel.isPrivate,
-      roomType: channel.roomType,
-      infoContent: channel.infoContent,
-      canEditInfo: channel.canEditInfo,
-      customChannelId: channel.channelId,
-      iconName: channel.iconName,
-    }
-  }, [channel])
 
   const showMockAccountBar = channel && mode === 'preview' && (channel.roomType === 'RoleClaim' || channel.roomType === 'Chat')
 
@@ -142,15 +124,8 @@ export function ChannelBuilder() {
               />
             )}
 
-            {channel.roomType === 'Info' && infoRoomDetail && (
-              mode === 'edit' ? (
-                <CustomInfoRoomPanel
-                  room={infoRoomDetail}
-                  onUpdated={(content) => setChannel((prev) => (prev ? { ...prev, infoContent: content } : prev))}
-                />
-              ) : (
-                <CustomInfoPreviewPanel content={channel.infoContent} />
-              )
+            {channel.roomType === 'Info' && (
+              <InfoEntriesFeed roomId={channel.roomId} readOnly={mode === 'preview'} />
             )}
           </section>
         </>

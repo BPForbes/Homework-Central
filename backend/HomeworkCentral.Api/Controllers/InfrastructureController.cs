@@ -12,7 +12,8 @@ namespace HomeworkCentral.Api.Controllers;
 [Authorize]
 public class InfrastructureController(
     IInfrastructureService infrastructure,
-    IRoleAppearanceService roleAppearanceService) : ControllerBase
+    IRoleAppearanceService roleAppearanceService,
+    IInfoEntryService infoEntries) : ControllerBase
 {
     [HttpGet("roles")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
@@ -249,6 +250,69 @@ public class InfrastructureController(
         return channel is null ? NotFound() : Ok(channel);
     }
 
+    [HttpGet("channels/by-room/{roomId}/info-entries")]
+    public async Task<ActionResult<InfoEntryFeedDto>> ListInfoEntries(string roomId, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        InfoEntryFeedDto? feed = await infoEntries.ListEntriesAsync(
+            userId.Value,
+            Uri.UnescapeDataString(roomId),
+            ct);
+        return feed is null ? NotFound() : Ok(feed);
+    }
+
+    [HttpPost("channels/by-room/{roomId}/info-entries")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<InfoEntryDto>> CreateInfoEntry(
+        string roomId,
+        [FromBody] CreateInfoEntryRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            InfoEntryDto? entry = await infoEntries.CreateEntryAsync(
+                userId.Value,
+                GetUsername() ?? "Unknown",
+                Uri.UnescapeDataString(roomId),
+                request,
+                ct);
+            return entry is null ? NotFound() : Ok(entry);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("info-entries/{entryId:guid}")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<InfoEntryDto>> UpdateInfoEntry(
+        Guid entryId,
+        [FromBody] UpdateInfoEntryRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            InfoEntryDto? entry = await infoEntries.UpdateEntryAsync(userId.Value, entryId, request, ct);
+            return entry is null ? NotFound() : Ok(entry);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("roles/{roleId:guid}/access-risk")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
     public async Task<ActionResult<ModerationRiskWarningDto>> PreviewAccessRisk(
@@ -367,4 +431,6 @@ public class InfrastructureController(
             ? userId
             : null;
     }
+
+    private string? GetUsername() => User.FindFirst("username")?.Value;
 }
