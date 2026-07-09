@@ -1,4 +1,5 @@
 import type { ChatMessage, MentionRoleOption } from '../../types/chat'
+import type { MentionStyleLookup } from '../../richtext/markdown'
 
 export type MentionCandidate =
   | { kind: 'user'; name: string; color: string }
@@ -59,6 +60,23 @@ export function buildMentionCandidates(
     }))
 
   return [...users, ...roles]
+}
+
+/** Colors for @mention highlighting inside rendered Markdown — shared by the message list and composer preview. */
+export function buildMentionStyleLookup(messages: ChatMessage[], mentionRoles: MentionRoleOption[]): MentionStyleLookup {
+  const userColors: Record<string, string> = {}
+  const roleColors: Record<string, string> = {}
+
+  for (const message of messages) {
+    const key = message.senderUsername.toLowerCase()
+    if (!userColors[key] && message.senderMessageColor)
+      userColors[key] = message.senderMessageColor
+  }
+
+  for (const role of mentionRoles)
+    roleColors[role.name.toLowerCase()] = role.messageColor
+
+  return { userColors, roleColors }
 }
 
 export function insertMention(

@@ -16,6 +16,14 @@ import {
   type RoleAppearance,
 } from '../types/infrastructure'
 
+const ROLE_COLOR_SWATCHES = [
+  '#e63946', '#f3722c', '#f8961e', '#f9c74f', '#90be6d', '#43aa8b',
+  '#4d908e', '#277da1', '#577590', '#3a86ff', '#8338ec', '#c9184a',
+  '#d62828', '#7209b7', '#2b2118', '#6c757d',
+]
+
+const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/
+
 type ViewMode = 'form' | 'assign'
 
 function userSelectionKey(user: AssignableUser): string {
@@ -452,12 +460,12 @@ export function UserConfig() {
                 <span className="infra-meta">{role.isCustom ? 'Custom role' : 'Platform role'}</span>
               </div>
               <div className="role-appearance-controls">
-                <label className="role-appearance-color">
-                  Color
-                  <input
-                    type="color"
-                    value={role.messageColor}
-                    onChange={(e) => updateAppearanceDraft(role.roleId, { messageColor: e.target.value })}
+                <div className="role-appearance-color">
+                  <span className="role-appearance-color-label">Color</span>
+                  <span
+                    className="role-appearance-swatch-preview"
+                    style={{ backgroundColor: HEX_COLOR_PATTERN.test(role.messageColor) ? role.messageColor : undefined }}
+                    aria-hidden="true"
                   />
                   <input
                     type="text"
@@ -465,8 +473,22 @@ export function UserConfig() {
                     value={role.messageColor}
                     onChange={(e) => updateAppearanceDraft(role.roleId, { messageColor: e.target.value })}
                     pattern="^#[0-9A-Fa-f]{6}$"
+                    placeholder="#RRGGBB"
                   />
-                </label>
+                  <div className="role-appearance-swatch-grid" role="group" aria-label={`Preset colors for ${role.name}`}>
+                    {ROLE_COLOR_SWATCHES.map((swatch) => (
+                      <button
+                        key={swatch}
+                        type="button"
+                        className={`role-appearance-swatch ${role.messageColor.toLowerCase() === swatch ? 'selected' : ''}`}
+                        style={{ backgroundColor: swatch }}
+                        title={swatch}
+                        aria-label={`Use color ${swatch}`}
+                        onClick={() => updateAppearanceDraft(role.roleId, { messageColor: swatch })}
+                      />
+                    ))}
+                  </div>
+                </div>
                 <label className="role-appearance-mentionable">
                   <input
                     type="checkbox"

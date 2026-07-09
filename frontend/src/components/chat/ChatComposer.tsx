@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowUp, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
 import type { ChatMessage, MentionRoleOption } from '../../types/chat'
 import {
   buildMentionCandidates,
+  buildMentionStyleLookup,
   getActiveMentionQuery,
   insertMention,
   type MentionCandidate,
 } from './mentionAutocomplete'
+import { RichTextToolbar } from '../../richtext/RichTextToolbar'
+import { RichContent } from '../../richtext/RichContent'
+import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 
 interface ChatComposerProps {
   disabled?: boolean
@@ -36,11 +40,17 @@ export function ChatComposer({
   const [draft, setDraft] = useState('')
   const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [showFormatting, setShowFormatting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const mentionCandidates = mentionQuery
     ? buildMentionCandidates(messages, mentionRoles, mentionQuery.query)
     : []
+
+  const mentionStyles = useMemo(
+    () => buildMentionStyleLookup(messages, mentionRoles),
+    [messages, mentionRoles],
+  )
 
   useEffect(() => {
     if (replyTarget)
@@ -81,6 +91,7 @@ export function ChatComposer({
     const content = draft
     setDraft('')
     setMentionQuery(null)
+    setShowFormatting(false)
     const sent = await onSend(content)
     if (!sent) {
       setDraft(content)
@@ -164,9 +175,19 @@ export function ChatComposer({
           </button>
         </div>
       )}
+      <div className="chat-composer-toolbar-row">
+        {!showFormatting && (
+          <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={handleChange} compact />
+        )}
+        <FormattingToggleButton
+          active={showFormatting}
+          onToggle={() => setShowFormatting((prev) => !prev)}
+          disabled={disabled}
+        />
+      </div>
       <form className="chat-composer" onSubmit={handleSubmit}>
         <div className="chat-composer-input-wrap">
-          {mentionCandidates.length > 0 && mentionQuery && (
+          {!showFormatting && mentionCandidates.length > 0 && mentionQuery && (
             <ul className="chat-mention-autocomplete" role="listbox" aria-label="Mention suggestions">
               {mentionCandidates.map((candidate, index) => (
                 <li key={`${candidate.kind}-${candidate.name}`} role="presentation">
@@ -194,20 +215,30 @@ export function ChatComposer({
               ))}
             </ul>
           )}
-          <textarea
-            ref={textareaRef}
-            className="chat-composer-input"
-            value={draft}
-            onChange={(event) => handleChange(event.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleBlur}
-            onSelect={handleSelect}
-            onClick={handleSelect}
-            placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
-            rows={1}
-            disabled={disabled || sending}
-            aria-label="Message"
-          />
+          {showFormatting ? (
+            <div className="rich-preview-pane chat-composer-preview-pane">
+              {draft.trim() ? (
+                <RichContent content={draft} mentionStyles={mentionStyles} />
+              ) : (
+                <p className="chat-messages-empty">Nothing to preview yet.</p>
+              )}
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              className="chat-composer-input"
+              value={draft}
+              onChange={(event) => handleChange(event.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={handleBlur}
+              onSelect={handleSelect}
+              onClick={handleSelect}
+              placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
+              rows={1}
+              disabled={disabled || sending}
+              aria-label="Message"
+            />
+          )}
         </div>
         <button
           type="submit"

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faAt, faReply, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
-import { MentionContent } from '../components/chat/MentionContent'
+import { RichContent } from '../richtext/RichContent'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import type { ChatInboxItem } from '../types/inbox'
@@ -213,7 +213,7 @@ export function Inbox() {
                   )}
                 </div>
                 <div className="inbox-item-message">
-                  <MentionContent content={item.messageContent} />
+                  <RichContent content={item.messageContent} />
                 </div>
               </Link>
             </li>

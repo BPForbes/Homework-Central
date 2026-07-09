@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCopy, faReply } from '@fortawesome/free-solid-svg-icons'
 import type { ChatMessage } from '../../types/chat'
-import { MentionContent, type MentionStyleLookup } from './MentionContent'
+import { RichContent } from '../../richtext/RichContent'
+import type { MentionStyleLookup } from '../../richtext/markdown'
 
 interface ChatMessageBubbleProps {
   message: ChatMessage
@@ -142,7 +143,7 @@ export function ChatMessageBubble({
           )}
 
           <div className="chat-bubble-content">
-            <MentionContent content={message.content} mentionStyles={mentionStyles} />
+            <RichContent content={message.content} mentionStyles={mentionStyles} />
           </div>
           <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
             {formatUtcTimestamp(message.createdAtUtc)}

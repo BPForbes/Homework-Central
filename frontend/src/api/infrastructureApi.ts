@@ -4,6 +4,8 @@ import type {
   CustomChannel,
   CustomChannelAccessRuleInput,
   CustomRole,
+  InfoEntry,
+  InfoEntryFeed,
   InfrastructureUserLookup,
   AssignableUser,
   ModerationRiskWarning,
@@ -48,6 +50,18 @@ export const infrastructureApi = {
   claimRole: (roleId: string, roomId: string) =>
     api.post(`/roles/${roleId}/claim`, null, { params: { roomId } }),
   unclaimRole: (roleId: string) => api.delete(`/roles/${roleId}/claim`),
+
+  listClaimRolesForRoom: (roomId: string) =>
+    api.get<CustomRole[]>(`/channels/by-room/${encodeURIComponent(roomId)}/claim-roles`),
+  reorderClaimRoles: (roomId: string, orderedRoleIds: string[]) =>
+    api.put(`/channels/by-room/${encodeURIComponent(roomId)}/claim-order`, { orderedRoleIds }),
+
+  listInfoEntries: (roomId: string) =>
+    api.get<InfoEntryFeed>(`/channels/by-room/${encodeURIComponent(roomId)}/info-entries`),
+  createInfoEntry: (roomId: string, content: string) =>
+    api.post<InfoEntry>(`/channels/by-room/${encodeURIComponent(roomId)}/info-entries`, { content }),
+  updateInfoEntry: (entryId: string, content: string) =>
+    api.put<InfoEntry>(`/info-entries/${entryId}`, { content }),
 
   searchUsers: (q: string) =>
     api.get<InfrastructureUserLookup[]>('/users/search', { params: { q } }),

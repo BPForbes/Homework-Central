@@ -36,6 +36,7 @@ public partial class AppDbContext(
     public DbSet<ChatMentionNotification> ChatMentionNotifications => Set<ChatMentionNotification>();
     public DbSet<CustomChannel> CustomChannels => Set<CustomChannel>();
     public DbSet<CustomChannelAccessRule> CustomChannelAccessRules => Set<CustomChannelAccessRule>();
+    public DbSet<InfoEntry> InfoEntries => Set<InfoEntry>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -66,6 +67,7 @@ public partial class AppDbContext(
             e.Property(r => r.IsCustom).HasDefaultValue(false);
             e.Property(r => r.CreatedAtUtc).IsRequired();
             e.Property(r => r.ClaimHostRoomId).HasMaxLength(128);
+            e.Property(r => r.ClaimDisplayOrder).HasDefaultValue(0);
             e.Property(r => r.IconName).HasMaxLength(64);
             e.Property(r => r.MessageColor).HasMaxLength(7);
             e.Property(r => r.IsMentionableByUsers).HasDefaultValue(false);
@@ -280,6 +282,21 @@ public partial class AppDbContext(
                 .HasForeignKey(r => r.CustomRoleId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => r.ChannelId);
+        });
+
+        mb.Entity<InfoEntry>(e =>
+        {
+            e.HasKey(i => i.EntryId);
+            e.Property(i => i.EntryId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(i => i.AuthorUsername).HasMaxLength(64).IsRequired();
+            e.Property(i => i.Content).IsRequired();
+            e.Property(i => i.CreatedAtUtc).IsRequired();
+            e.Property(i => i.UpdatedAtUtc).IsRequired();
+            e.HasOne(i => i.Channel)
+                .WithMany()
+                .HasForeignKey(i => i.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(i => i.ChannelId);
         });
 
         mb.ApplyScopedResourceFilters(this);
