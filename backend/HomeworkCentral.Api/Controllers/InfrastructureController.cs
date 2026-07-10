@@ -380,6 +380,81 @@ public class InfrastructureController(
         return user is null ? NotFound() : Ok(user);
     }
 
+    [HttpGet("users/{userId:guid}/role-management")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<InfrastructureUserLookupDto>> GetUserRoleManagement(
+        Guid userId,
+        [FromQuery] string? tenantDatabaseName,
+        CancellationToken ct)
+    {
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        InfrastructureUserLookupDto? user = await infrastructure.GetUserRoleManagementAsync(
+            actorId.Value,
+            userId,
+            tenantDatabaseName,
+            ct);
+        return user is null ? NotFound() : Ok(user);
+    }
+
+    [HttpPost("users/{userId:guid}/platform-roles/{roleName}")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<IActionResult> AssignPlatformRole(
+        Guid userId,
+        string roleName,
+        [FromQuery] string? tenantDatabaseName,
+        CancellationToken ct)
+    {
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        try
+        {
+            bool assigned = await infrastructure.AdminAssignPlatformRoleAsync(
+                actorId.Value,
+                userId,
+                roleName,
+                tenantDatabaseName,
+                ct);
+            return assigned ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("users/{userId:guid}/platform-roles/{roleName}")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<IActionResult> RevokePlatformRole(
+        Guid userId,
+        string roleName,
+        [FromQuery] string? tenantDatabaseName,
+        CancellationToken ct)
+    {
+        Guid? actorId = GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        try
+        {
+            bool revoked = await infrastructure.AdminRevokePlatformRoleAsync(
+                actorId.Value,
+                userId,
+                roleName,
+                tenantDatabaseName,
+                ct);
+            return revoked ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("users/{userId:guid}/roles/{roleId:guid}")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
     public async Task<IActionResult> AssignRoleToUser(

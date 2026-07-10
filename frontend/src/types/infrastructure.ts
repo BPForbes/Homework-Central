@@ -138,6 +138,16 @@ export interface InfrastructureUserLookup {
   highestPlatformRoleBit: number
   highestPlatformRoleName: string
   customRoles: CustomRole[]
+  platformRoles: PlatformRoleAssignment[]
+  effectivePermissionIds: number[]
+}
+
+export interface PlatformRoleAssignment {
+  name: string
+  bit: number
+  isAssigned: boolean
+  canGrant: boolean
+  canRevoke: boolean
 }
 
 export interface AssignableUser {
