@@ -6,7 +6,6 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
@@ -64,7 +63,6 @@ public sealed class ChatMessageService(
     IHttpContextAccessor httpContextAccessor,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
-    IContentSanitizer contentSanitizer,
     IMentionCooldownTracker mentionCooldownTracker,
     IMentionRecipientResolver mentionRecipientResolver,
     IRoleAppearanceService roleAppearanceService,
@@ -163,7 +161,6 @@ public sealed class ChatMessageService(
         // Users table — keeping this service entirely master-db-only.
         string senderUsername = ResolveUsername(userId);
         (AccountClass accountClass, string? tenantDatabaseName) = ResolveScope();
-        string sanitized = contentSanitizer.Sanitize(parsed.DisplayContent);
 
         // The IShareableScopedResource query filter already confines this lookup to messages the
         // sender's account class may see, so a reply target in a different room, a different
@@ -183,16 +180,13 @@ public sealed class ChatMessageService(
             SenderUsername = senderUsername,
             SenderMessageColor = await roleAppearanceService.ResolveSenderColorAsync(roleMask, ct),
             RawContent = parsed.DisplayContent,
-            SanitizedContent = sanitized,
             CreatedAtUtc = DateTime.UtcNow,
             OwnerAccountClass = accountClass,
             TenantDatabaseName = tenantDatabaseName,
             ReplyToMessageId = replyTarget?.MessageId,
             ReplyToSenderId = replyTarget?.SenderId,
             ReplyToSenderUsername = replyTarget?.SenderUsername,
-            ReplyToContentSnippet = replyTarget is null
-                ? null
-                : ChatReplySnippet.Build(replyTarget.SanitizedContent ?? replyTarget.RawContent),
+            ReplyToContentSnippet = replyTarget is null ? null : ChatReplySnippet.Build(replyTarget.RawContent),
         };
 
         masterDb.ChatMessages.Add(message);
@@ -239,7 +233,7 @@ public sealed class ChatMessageService(
                     RoomDisplayName = roomDisplayName,
                     CategoryKey = categoryKey,
                     CategoryDisplayName = categoryDisplayName,
-                    MessageContent = sanitized,
+                    MessageContent = message.RawContent,
                     MentionKind = mentionKind,
                     CreatedAtUtc = message.CreatedAtUtc,
                     OwnerAccountClass = accountClass,
@@ -267,7 +261,7 @@ public sealed class ChatMessageService(
                 RoomDisplayName = roomDisplayName,
                 CategoryKey = categoryKey,
                 CategoryDisplayName = categoryDisplayName,
-                MessageContent = sanitized,
+                MessageContent = message.RawContent,
                 MentionKind = "Reply",
                 CreatedAtUtc = message.CreatedAtUtc,
                 OwnerAccountClass = accountClass,
@@ -405,7 +399,7 @@ public sealed class ChatMessageService(
             SenderId = message.SenderId,
             SenderUsername = message.SenderUsername,
             SenderMessageColor = message.SenderMessageColor,
-            Content = message.SanitizedContent ?? message.RawContent,
+            Content = message.RawContent,
             CreatedAtUtc = message.CreatedAtUtc,
             ReplyToMessageId = message.ReplyToMessageId,
             ReplyToSenderId = message.ReplyToSenderId,
