@@ -20,12 +20,14 @@ import { ServerMaintenance } from './pages/ServerMaintenance'
 import { ChannelBuilder } from './pages/ChannelBuilder'
 import { PermissionRoute } from './components/PermissionRoute'
 import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from './constants/permissions'
+import { ApiRippleLayer } from './components/ApiRippleLayer'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 
 export default function App() {
   return (
     <ThemeProvider>
+      <ApiRippleLayer />
       <BackendGate>
         <BrowserRouter>
           <AuthProvider>

@@ -32,6 +32,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const toggleTheme = useCallback(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+      return
+    }
+
     document.documentElement.classList.add('theme-transitioning')
     if (transitionTimerRef.current !== null)
       window.clearTimeout(transitionTimerRef.current)
