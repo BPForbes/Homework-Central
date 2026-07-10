@@ -14,8 +14,10 @@ async function requestRefresh(): Promise<AuthResponse> {
 }
 
 function runRefreshLocked(): Promise<AuthResponse> {
-  if ('locks' in navigator)
-    return navigator.locks.request<AuthResponse>('hc-auth-refresh', async () => await requestRefresh())
+  if ('locks' in navigator) {
+    const locked = navigator.locks.request<Promise<AuthResponse>>('hc-auth-refresh', () => requestRefresh())
+    return locked.then((response) => response)
+  }
   return requestRefresh()
 }
 
