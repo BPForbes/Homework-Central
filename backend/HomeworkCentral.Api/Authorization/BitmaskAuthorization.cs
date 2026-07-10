@@ -1,5 +1,4 @@
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Authorization;

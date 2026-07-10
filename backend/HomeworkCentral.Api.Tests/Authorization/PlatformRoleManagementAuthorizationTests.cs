@@ -23,7 +23,7 @@ public class PlatformRoleManagementAuthorizationTests
             [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
             authenticationType: "test")));
 
-        await handler.HandleAsync(context, new PlatformRoleManagementRequirement());
+        await handler.HandleAsync(context);
 
         Assert.True(context.HasSucceeded);
         Assert.Equal(0, maskService.GetCalls);
@@ -48,7 +48,7 @@ public class PlatformRoleManagementAuthorizationTests
             [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
             authenticationType: "test")));
 
-        await handler.HandleAsync(context, new PlatformRoleManagementRequirement());
+        await handler.HandleAsync(context);
 
         Assert.True(context.HasSucceeded);
     }
