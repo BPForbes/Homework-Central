@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faMagnifyingGlass, faPalette, faPlus, faShieldHalved, faUsersGear } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
@@ -73,6 +73,7 @@ export function UserConfig() {
   const [selectedUser, setSelectedUser] = useState<InfrastructureUserLookup | null>(null)
   const [userSearchLoading, setUserSearchLoading] = useState(false)
   const [userRoleSaving, setUserRoleSaving] = useState<string | null>(null)
+  const assignRequestInFlight = useRef(false)
 
   const showError = useCallback((message: string) => {
     setDialog({
@@ -147,6 +148,9 @@ export function UserConfig() {
   }
 
   async function openAssignFlow(role: CustomRole) {
+    if (assignRequestInFlight.current)
+      return
+    assignRequestInFlight.current = true
     setActiveSection('manage')
     setDialog(null)
     setAssignLoading(true)
@@ -169,6 +173,7 @@ export function UserConfig() {
       showError('Could not load users for assignment.')
       resetRoleForm()
     } finally {
+      assignRequestInFlight.current = false
       setAssignLoading(false)
     }
   }
