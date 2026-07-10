@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faPalette } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
@@ -7,6 +8,7 @@ import {
   CUSTOM_ROLE_ICON_OPTIONS,
   resolveCustomRoleIcon,
 } from '../components/infrastructure/customRoleIcons'
+import { ColorWheelPicker } from '../components/infrastructure/ColorWheelPicker'
 import {
   GET_ROLES_ROOM_ID,
   MODERATION_PERMISSIONS,
@@ -45,6 +47,7 @@ export function UserConfig() {
   const [roles, setRoles] = useState<CustomRole[]>([])
   const [roleAppearance, setRoleAppearance] = useState<RoleAppearance[]>([])
   const [appearanceSavingId, setAppearanceSavingId] = useState<string | null>(null)
+  const [colorWheelRoleId, setColorWheelRoleId] = useState<string | null>(null)
   const [channels, setChannels] = useState<CustomChannel[]>([])
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [name, setName] = useState('')
@@ -488,6 +491,20 @@ export function UserConfig() {
                       />
                     ))}
                   </div>
+                  <button
+                    type="button"
+                    className="btn-secondary role-appearance-wheel-toggle"
+                    onClick={() => setColorWheelRoleId((prev) => (prev === role.roleId ? null : role.roleId))}
+                  >
+                    <FontAwesomeIcon icon={faPalette} />
+                    {colorWheelRoleId === role.roleId ? 'Hide color wheel' : 'More colors'}
+                  </button>
+                  {colorWheelRoleId === role.roleId && (
+                    <ColorWheelPicker
+                      value={HEX_COLOR_PATTERN.test(role.messageColor) ? role.messageColor : '#000000'}
+                      onChange={(hex) => updateAppearanceDraft(role.roleId, { messageColor: hex })}
+                    />
+                  )}
                 </div>
                 <label className="role-appearance-mentionable">
                   <input

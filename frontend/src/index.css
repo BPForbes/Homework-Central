@@ -1963,6 +1963,101 @@ a {
   box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary);
 }
 
+.role-appearance-wheel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.color-wheel-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 12rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.color-wheel-square {
+  position: relative;
+  width: 100%;
+  height: 8rem;
+  border-radius: var(--radius-sm);
+  background-image:
+    linear-gradient(to top, #000, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.color-wheel-square-thumb {
+  position: absolute;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: var(--radius-full);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), var(--shadow-sm);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-wheel-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.color-wheel-hue {
+  position: relative;
+  flex: 1;
+  height: 0.9rem;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%
+  );
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.color-wheel-hue-thumb {
+  position: absolute;
+  top: 50%;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: var(--radius-full);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), var(--shadow-sm);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-wheel-eyedropper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+
+.color-wheel-eyedropper:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
 .role-appearance-mentionable {
   display: flex;
   align-items: center;
@@ -2160,7 +2255,13 @@ a {
 
 .chat-bubble {
   position: relative;
+  /* Flex items default to min-width:auto, which lets an unbreakable child (a long code line, a
+     wide equation) force the bubble past max-width instead of respecting it — min-width:0 makes
+     the cap actually stick, so overflow is handled by the specific child's own scroll container
+     (.hc-code-block, .katex-display) instead of spilling past the bubble's rounded background. */
+  min-width: 0;
   max-width: min(75%, 28rem);
+  width: fit-content;
   padding: 0.6rem 0.85rem;
   border-radius: var(--radius-lg);
   line-height: 1.45;
@@ -2250,6 +2351,7 @@ a {
 .chat-message-thread {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   max-width: min(75%, 28rem);
 }
 
@@ -4098,6 +4200,7 @@ a {
 .rich-content .hc-code-block {
   margin: 0.6em 0;
   padding: 0.75em 0.9em;
+  max-width: 100%;
   overflow-x: auto;
   border-radius: var(--radius-md);
   background: var(--color-surface-sunken);
@@ -4131,8 +4234,16 @@ a {
 
 .rich-content .katex-display {
   margin: 0.6em 0;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* Belt-and-suspenders: katex.css already sets nowrap on `.katex-display > .katex`, but inline
+   math ($...$) renders a bare `.katex` with no such ancestor rule, so a long inline formula could
+   still wrap mid-symbol without this. */
+.rich-content .katex {
+  white-space: nowrap;
 }
 
 /* Custom syntax-highlight theme mapped to design tokens (no canned hljs theme import) */
