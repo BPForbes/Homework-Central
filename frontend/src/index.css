@@ -6,31 +6,38 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces */
-  --color-bg: #faf8f4;
-  --color-bg-elevated: #fffdf9;
-  --color-surface: #ffffff;
-  --color-surface-alt: #f4f1e9;
-  --color-surface-sunken: #f1ece1;
-  --color-border: #e5dfd0;
-  --color-border-strong: #d3cab5;
+  /* Day-lake surfaces: translucent layers over the animated water field */
+  --color-bg: #eaf8ff;
+  --color-bg-elevated: rgba(247, 253, 255, 0.82);
+  --color-surface: rgba(255, 255, 255, 0.68);
+  --color-surface-alt: rgba(219, 242, 251, 0.76);
+  --color-surface-sunken: rgba(191, 229, 243, 0.6);
+  --color-border: rgba(255, 255, 255, 0.72);
+  --color-border-strong: rgba(46, 143, 184, 0.32);
+  --color-backdrop: rgba(8, 37, 54, 0.42);
+  --color-glass-highlight: rgba(255, 255, 255, 0.78);
+  --color-water-reflection: rgba(255, 255, 255, 0.34);
+  --water-day-opacity: 1;
+  --water-night-opacity: 0;
+  --glass-blur: 16px;
+  --glass-saturate: 125%;
 
   /* Ink */
-  --color-ink: #2b2620;
-  --color-ink-secondary: #6b6255;
-  --color-ink-tertiary: #948a7a;
+  --color-ink: #173848;
+  --color-ink-secondary: #456879;
+  --color-ink-tertiary: #688899;
 
-  /* Brand: deep teal primary, warm amber accent */
-  --color-primary: #0d7a6a;
-  --color-primary-hover: #0a6357;
-  --color-primary-soft: #e2f2ee;
-  --color-primary-soft-strong: #c7e8e0;
+  /* Brand: deep water primary and sunlit-cyan accent */
+  --color-primary: #176f91;
+  --color-primary-hover: #105a77;
+  --color-primary-soft: rgba(124, 205, 232, 0.22);
+  --color-primary-soft-strong: rgba(124, 205, 232, 0.38);
   --color-on-primary: #ffffff;
 
-  --color-accent: #e0942e;
-  --color-accent-hover: #c67f22;
-  --color-accent-soft: #fbead0;
-  --color-on-accent: #4a2f0d;
+  --color-accent: #2e8fb8;
+  --color-accent-hover: #217a9f;
+  --color-accent-soft: rgba(124, 205, 232, 0.24);
+  --color-on-accent: #ffffff;
 
   --color-danger: #c1392b;
   --color-danger-hover: #a52f22;
@@ -39,7 +46,7 @@
   --color-success: #2f8f5b;
   --color-success-soft: #ddf0e3;
 
-  --color-focus-ring: rgba(13, 122, 106, 0.32);
+  --color-focus-ring: rgba(46, 143, 184, 0.34);
 
   /* Subject/category hues — rotate across rooms so the palette earns its keep semantically */
   --hue-violet: #7c5cbf;
@@ -51,12 +58,17 @@
   --hue-plum: #93467a;
   --hue-plum-soft: #f5e3ee;
 
-  /* Shadows (tinted with ink, not neutral black; inset hairline reads like a paper edge) */
-  --shadow-sm: 0 1px 2px rgba(43, 38, 32, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  --shadow-md: 0 6px 16px rgba(43, 38, 32, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  --shadow-lg: 0 16px 40px rgba(43, 38, 32, 0.16);
-  --shadow-primary: 0 6px 18px rgba(13, 122, 106, 0.28);
-  --shadow-accent: 0 6px 18px rgba(224, 148, 46, 0.32);
+  /* Reflective elevation: soft depth plus a bright waterline on the top edge */
+  --shadow-sm: 0 2px 5px rgba(23, 56, 72, 0.08), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-md: 0 8px 22px rgba(23, 56, 72, 0.13), 0 2px 7px rgba(23, 56, 72, 0.08),
+    inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-lg: 0 20px 48px rgba(23, 56, 72, 0.2), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-primary: 0 8px 22px rgba(46, 143, 184, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  --shadow-accent: 0 8px 22px rgba(124, 205, 232, 0.32);
+  --shadow-hover: 0 10px 26px rgba(23, 56, 72, 0.15), 0 3px 8px rgba(23, 56, 72, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  --shadow-selected: 0 8px 24px rgba(46, 143, 184, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
   /* Radii */
   --radius-sm: 7px;
@@ -74,6 +86,7 @@
   --duration-base: 220ms;
   --duration-slow: 320ms;
   --duration-slower: 450ms;
+  --duration-theme: 700ms;
 
   /* Type */
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -82,28 +95,34 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --color-bg: #1b1916;
-  --color-bg-elevated: #211e1a;
-  --color-surface: #262320;
-  --color-surface-alt: #2f2b25;
-  --color-surface-sunken: #17150f;
-  --color-border: #3c362d;
-  --color-border-strong: #4c443a;
+  --color-bg: #081521;
+  --color-bg-elevated: rgba(10, 26, 40, 0.78);
+  --color-surface: rgba(12, 37, 54, 0.72);
+  --color-surface-alt: rgba(16, 49, 69, 0.7);
+  --color-surface-sunken: rgba(4, 16, 25, 0.76);
+  --color-border: rgba(99, 211, 255, 0.18);
+  --color-border-strong: rgba(99, 211, 255, 0.3);
+  --color-backdrop: rgba(1, 8, 14, 0.7);
+  --color-glass-highlight: rgba(99, 211, 255, 0.18);
+  --color-water-reflection: rgba(99, 211, 255, 0.16);
+  --water-day-opacity: 0;
+  --water-night-opacity: 1;
+  --glass-saturate: 135%;
 
-  --color-ink: #f2ede4;
-  --color-ink-secondary: #b7ad9c;
-  --color-ink-tertiary: #8a8071;
+  --color-ink: #eaf9ff;
+  --color-ink-secondary: #afd5e5;
+  --color-ink-tertiary: #7fa5b6;
 
-  --color-primary: #1f8f79;
-  --color-primary-hover: #24a68d;
-  --color-primary-soft: rgba(63, 191, 168, 0.16);
-  --color-primary-soft-strong: rgba(63, 191, 168, 0.28);
+  --color-primary: #1682ad;
+  --color-primary-hover: #49c5ff;
+  --color-primary-soft: rgba(73, 197, 255, 0.14);
+  --color-primary-soft-strong: rgba(73, 197, 255, 0.25);
   --color-on-primary: #ffffff;
 
-  --color-accent: #d99a3d;
-  --color-accent-hover: #e6ac52;
-  --color-accent-soft: rgba(240, 184, 85, 0.16);
-  --color-on-accent: #2b1c05;
+  --color-accent: #63d3ff;
+  --color-accent-hover: #8adeff;
+  --color-accent-soft: rgba(99, 211, 255, 0.15);
+  --color-on-accent: #041019;
 
   --color-danger: #cf5546;
   --color-danger-hover: #db6e5f;
@@ -112,7 +131,7 @@
   --color-success: #3d9c68;
   --color-success-soft: rgba(95, 189, 133, 0.18);
 
-  --color-focus-ring: rgba(63, 191, 168, 0.4);
+  --color-focus-ring: rgba(73, 197, 255, 0.42);
 
   --hue-violet: #a58ee0;
   --hue-violet-soft: rgba(165, 142, 224, 0.16);
@@ -123,11 +142,15 @@
   --hue-plum: #c97dae;
   --hue-plum-soft: rgba(201, 125, 174, 0.16);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.36);
-  --shadow-lg: 0 20px 46px rgba(0, 0, 0, 0.55);
-  --shadow-primary: 0 6px 18px rgba(31, 143, 121, 0.4);
-  --shadow-accent: 0 6px 18px rgba(217, 154, 61, 0.35);
+  --shadow-sm: 0 3px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.38), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-lg: 0 24px 56px rgba(0, 0, 0, 0.58), 0 0 28px rgba(73, 197, 255, 0.08);
+  --shadow-primary: 0 8px 24px rgba(73, 197, 255, 0.3), 0 0 22px rgba(73, 197, 255, 0.2);
+  --shadow-accent: 0 8px 24px rgba(99, 211, 255, 0.26), 0 0 20px rgba(99, 211, 255, 0.18);
+  --shadow-hover: 0 10px 30px rgba(0, 0, 0, 0.42), 0 0 24px rgba(73, 197, 255, 0.24),
+    inset 0 1px 0 rgba(99, 211, 255, 0.24);
+  --shadow-selected: 0 8px 28px rgba(0, 0, 0, 0.34), 0 0 24px rgba(73, 197, 255, 0.28),
+    0 0 0 1px rgba(99, 211, 255, 0.24);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -151,14 +174,84 @@
 
 html {
   scroll-behavior: smooth;
+  min-height: 100%;
+  background: var(--color-bg);
+  transition: background-color var(--duration-theme) var(--ease-in-out);
+}
+
+html::before,
+html::after {
+  content: '';
+  position: fixed;
+  inset: -8%;
+  pointer-events: none;
+  z-index: -2;
+  transition: opacity var(--duration-theme) var(--ease-in-out);
+}
+
+html::before {
+  opacity: var(--water-day-opacity);
+  background:
+    radial-gradient(ellipse at 18% 12%, rgba(255, 255, 255, 0.92) 0%, transparent 34%),
+    radial-gradient(ellipse at 78% 18%, rgba(124, 205, 232, 0.44) 0%, transparent 42%),
+    linear-gradient(165deg, #eaf8ff 0%, #cbefff 45%, #7ccde8 100%);
+  animation: water-drift 24s ease-in-out infinite alternate;
+}
+
+html::after {
+  opacity: var(--water-night-opacity);
+  background:
+    radial-gradient(ellipse at 74% 10%, rgba(99, 211, 255, 0.2) 0%, transparent 30%),
+    radial-gradient(ellipse at 22% 82%, rgba(73, 197, 255, 0.1) 0%, transparent 34%),
+    linear-gradient(165deg, #081521 0%, #0c2536 52%, #041019 100%);
+  animation: water-drift 30s ease-in-out infinite alternate-reverse;
 }
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-bg);
+  position: relative;
+  z-index: 0;
+  background: transparent;
   color: var(--color-ink);
   min-height: 100vh;
-  transition: background var(--duration-slow) var(--ease-in-out), color var(--duration-slow) var(--ease-in-out);
+  transition: color var(--duration-theme) var(--ease-in-out);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background:
+    repeating-radial-gradient(ellipse at 52% 115%, transparent 0 28px, var(--color-water-reflection) 30px 31px,
+      transparent 33px 58px),
+    linear-gradient(105deg, transparent 10%, var(--color-water-reflection) 46%, transparent 62%);
+  background-size: 140% 120%, 180% 100%;
+  animation: water-ripple 18s ease-in-out infinite alternate;
+  transition: background var(--duration-theme) var(--ease-in-out), opacity var(--duration-theme) var(--ease-in-out);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+:root.theme-transitioning *,
+:root.theme-transitioning *::before,
+:root.theme-transitioning *::after {
+  transition-duration: var(--duration-theme) !important;
+  transition-timing-function: var(--ease-in-out) !important;
+}
+
+@keyframes water-drift {
+  from { transform: translate3d(-1.5%, -1%, 0) scale(1.02); }
+  to { transform: translate3d(1.5%, 1%, 0) scale(1.05); }
+}
+
+@keyframes water-ripple {
+  from { background-position: 0 0, 0 0; transform: translate3d(-1%, 0, 0); }
+  to { background-position: 4% 3%, -7% 0; transform: translate3d(1%, -0.5%, 0); }
 }
 
 ::selection {
@@ -608,6 +701,14 @@ a {
 .app-layout {
   min-height: 100vh;
   display: flex;
+  align-items: stretch;
+}
+
+.app-content {
+  min-width: 0;
+  min-height: 100vh;
+  flex: 1;
+  display: flex;
   flex-direction: column;
 }
 
@@ -622,7 +723,10 @@ a {
   position: sticky;
   top: 0;
   z-index: 40;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 1px 0 var(--color-glass-highlight);
+  transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out),
+    box-shadow var(--duration-theme) var(--ease-in-out), color var(--duration-theme) var(--ease-in-out);
 }
 
 .app-header-start {
@@ -855,7 +959,7 @@ a {
 .confirm-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(20, 18, 14, 0.5);
+  background: var(--color-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1051,7 +1155,7 @@ a {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(20, 18, 14, 0.55);
+  background: var(--color-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1252,78 +1356,32 @@ a {
   padding: 1.25rem;
 }
 
-.chat-menu-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 0.9rem;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  font-family: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: var(--shadow-primary);
-  transition: transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast) var(--ease-out),
-    background var(--duration-fast) var(--ease-out);
-}
-
-.chat-menu-toggle:hover {
-  background: var(--color-primary-hover);
-  transform: translateY(-1px);
-}
-
-.chat-menu-toggle:active {
-  transform: scale(0.96);
-}
-
-/* Sliding chat sidebar */
-.chat-sidebar-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 18, 14, 0.5);
-  border: none;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-slow) var(--ease-out);
-  z-index: 90;
-  cursor: pointer;
-}
-
-.chat-sidebar-backdrop.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
+/* Persistent chat rail */
 .chat-sidebar {
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 0;
-  width: min(320px, 88vw);
-  height: 100%;
+  width: clamp(11rem, 23vw, 20rem);
+  height: 100vh;
+  height: 100dvh;
+  flex: 0 0 clamp(11rem, 23vw, 20rem);
   background: var(--color-bg-elevated);
   border-right: 1px solid var(--color-border);
   box-shadow: var(--shadow-lg);
-  transform: translateX(-100%);
-  transition: transform var(--duration-slow) var(--ease-out);
-  z-index: 100;
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out),
+    box-shadow var(--duration-theme) var(--ease-in-out);
+  z-index: 50;
   display: flex;
   flex-direction: column;
-}
-
-.chat-sidebar.open {
-  transform: translateX(0);
 }
 
 .chat-sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 1rem 1.1rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
+  box-shadow: inset 0 1px 0 var(--color-glass-highlight);
 }
 
 .chat-sidebar-header h2 {
@@ -1337,30 +1395,6 @@ a {
 
 .chat-sidebar-title-icon {
   color: var(--color-primary);
-}
-
-.chat-sidebar-close {
-  width: 2rem;
-  height: 2rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-alt);
-  color: var(--color-ink-tertiary);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-spring);
-}
-
-.chat-sidebar-close:hover {
-  background: var(--color-border);
-  color: var(--color-ink);
-}
-
-.chat-sidebar-close:active {
-  transform: scale(0.9);
 }
 
 .chat-sidebar-body {
@@ -1481,10 +1515,6 @@ a {
 
 .chat-room-hero-layered {
   font-size: 1rem;
-}
-
-.chat-key-badge-layered {
-  font-size: 28px;
 }
 
 .chat-room-link.active .chat-room-icon,
@@ -2177,6 +2207,7 @@ a {
   padding: 0.85rem 1.25rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
 }
 
@@ -2544,6 +2575,7 @@ a {
   flex-direction: column;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
 }
 
@@ -2559,6 +2591,11 @@ a {
   flex: 1;
   margin-bottom: 0;
   min-width: 0;
+}
+
+.chat-composer-toolbar-row .rich-preview-toggle {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .chat-composer-preview-pane {
@@ -2685,17 +2722,6 @@ a {
 .chat-send-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.chat-key-badge {
-  position: absolute;
-  bottom: 5.25rem;
-  right: 1.25rem;
-  font-size: 28px;
-  opacity: 0.9;
-  pointer-events: none;
-  filter: drop-shadow(0 2px 4px rgba(43, 38, 32, 0.16));
-  z-index: 2;
 }
 
 /* Captcha widget (signup + dashboard verify) — label row + content only; no outer box so the
@@ -4082,6 +4108,9 @@ a {
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring), background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .rich-preview-toggle.active {
@@ -4096,6 +4125,20 @@ a {
   border-radius: var(--radius-md);
   border: 1.5px dashed var(--color-border-strong);
   background: var(--color-surface-alt);
+}
+
+/* Keep the source mounted so toolbar actions retain the last text selection while previewing. */
+.rich-editor-source--preview-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 /* Markdown output itself — shared by chat bubbles, the mock chat preview, and info entries */
@@ -4303,4 +4346,201 @@ a {
 
 .rich-content .hljs-deletion {
   color: var(--color-danger);
+}
+
+/* ==========================================================================
+   Water material, theme-aware interaction lighting, and responsive rail
+   ========================================================================== */
+
+.auth-card,
+.dashboard-card,
+.dashboard-inbox-summary,
+.server-page-card,
+.get-roles-panel,
+.modal-panel,
+.confirm-modal,
+.sm-panel,
+.sm-room-card,
+.info-entry-card,
+.infra-list-item,
+.inbox-item,
+.chat-category,
+.chat-bubble,
+.typing-bubble,
+.rich-toolbar,
+.rich-preview-pane {
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out),
+    color var(--duration-theme) var(--ease-in-out), box-shadow var(--duration-theme) var(--ease-in-out);
+}
+
+.theme-toggle,
+.btn-primary,
+.btn-secondary,
+.server-nav-link,
+.dashboard-card,
+.dashboard-inbox-link,
+.inbox-item,
+.inbox-item-link,
+.infra-list-item,
+.custom-role-icon-option,
+.chat-category-toggle,
+.chat-room-link,
+.chat-bubble,
+.chat-bubble-action-btn,
+.chat-reply-quote-bubble,
+.chat-send-btn,
+.get-roles-button,
+.sm-segmented-option,
+.sm-icon-option,
+.sm-room-card,
+.sm-icon-btn,
+.mock-account-chip,
+.rich-toolbar-btn,
+.rich-toolbar-color,
+.rich-preview-toggle {
+  transform-origin: center;
+  transition: transform var(--duration-fast) var(--ease-out), filter var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+:root[data-theme='light'] :is(
+  .theme-toggle,
+  .btn-primary,
+  .btn-secondary,
+  .server-nav-link,
+  .dashboard-card,
+  .dashboard-inbox-link,
+  .inbox-item,
+  .inbox-item-link,
+  .infra-list-item,
+  .custom-role-icon-option,
+  .chat-category-toggle,
+  .chat-room-link,
+  .chat-bubble,
+  .chat-bubble-action-btn,
+  .chat-reply-quote-bubble,
+  .chat-send-btn,
+  .get-roles-button,
+  .sm-segmented-option,
+  .sm-icon-option,
+  .sm-room-card,
+  .sm-icon-btn,
+  .mock-account-chip,
+  .rich-toolbar-btn,
+  .rich-toolbar-color,
+  .rich-preview-toggle
+):hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02);
+  filter: brightness(1.04) saturate(1.04);
+  box-shadow: var(--shadow-hover);
+}
+
+:root[data-theme='dark'] :is(
+  .theme-toggle,
+  .btn-primary,
+  .btn-secondary,
+  .server-nav-link,
+  .dashboard-card,
+  .dashboard-inbox-link,
+  .inbox-item,
+  .inbox-item-link,
+  .infra-list-item,
+  .custom-role-icon-option,
+  .chat-category-toggle,
+  .chat-room-link,
+  .chat-bubble,
+  .chat-bubble-action-btn,
+  .chat-reply-quote-bubble,
+  .chat-send-btn,
+  .get-roles-button,
+  .sm-segmented-option,
+  .sm-icon-option,
+  .sm-room-card,
+  .sm-icon-btn,
+  .mock-account-chip,
+  .rich-toolbar-btn,
+  .rich-toolbar-color,
+  .rich-preview-toggle
+):hover:not(:disabled) {
+  transform: scale(1.02);
+  filter: saturate(1.08);
+  box-shadow: var(--shadow-hover);
+}
+
+:is(
+  .chat-room-link.active,
+  .inbox-item--selected,
+  .custom-role-icon-option.selected,
+  .role-appearance-swatch.selected,
+  .maze-unsolvable-btn.active,
+  .get-roles-button.claimed,
+  .sm-segmented-option.active,
+  .sm-icon-option.selected,
+  .mock-account-chip.active,
+  .rich-preview-toggle.active
+) {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-selected);
+}
+
+@media (max-width: 700px) {
+  .chat-sidebar {
+    width: 10.5rem;
+    flex-basis: 10.5rem;
+  }
+
+  .chat-sidebar-body {
+    padding: 0.4rem;
+  }
+
+  .chat-sidebar-header {
+    padding-inline: 0.75rem;
+  }
+
+  .chat-category-toggle {
+    padding-inline: 0.65rem;
+  }
+
+  .chat-room-link {
+    gap: 0.45rem;
+    padding-inline: 0.55rem;
+  }
+
+  .app-header {
+    padding-inline: 0.75rem;
+  }
+
+  .app-title {
+    font-size: 0.95rem;
+  }
+
+  .user-info > span {
+    display: none;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+
+  .chat-room-page--active {
+    margin: -1rem;
+  }
+
+  .chat-composer-toolbar-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding-inline: 0.65rem;
+  }
+
+  .chat-composer-toolbar-row .rich-toolbar {
+    flex-basis: 100%;
+    order: 2;
+  }
+
+  .chat-composer-toolbar-row .rich-preview-toggle {
+    order: 1;
+    margin-left: auto;
+  }
 }

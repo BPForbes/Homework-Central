@@ -176,9 +176,7 @@ export function ChatComposer({
         </div>
       )}
       <div className="chat-composer-toolbar-row">
-        {!showFormatting && (
-          <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={handleChange} compact />
-        )}
+        <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={handleChange} compact />
         <FormattingToggleButton
           active={showFormatting}
           onToggle={() => setShowFormatting((prev) => !prev)}
@@ -215,7 +213,7 @@ export function ChatComposer({
               ))}
             </ul>
           )}
-          {showFormatting ? (
+          {showFormatting && (
             <div className="rich-preview-pane chat-composer-preview-pane">
               {draft.trim() ? (
                 <RichContent content={draft} mentionStyles={mentionStyles} />
@@ -223,22 +221,24 @@ export function ChatComposer({
                 <p className="chat-messages-empty">Nothing to preview yet.</p>
               )}
             </div>
-          ) : (
-            <textarea
-              ref={textareaRef}
-              className="chat-composer-input"
-              value={draft}
-              onChange={(event) => handleChange(event.target.value)}
-              onKeyDown={handleKeyDown}
-              onBlur={handleBlur}
-              onSelect={handleSelect}
-              onClick={handleSelect}
-              placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
-              rows={1}
-              disabled={disabled || sending}
-              aria-label="Message"
-            />
           )}
+          <textarea
+            ref={textareaRef}
+            className={`chat-composer-input ${showFormatting ? 'rich-editor-source--preview-hidden' : ''}`}
+            value={draft}
+            onChange={(event) => handleChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            onSelect={handleSelect}
+            onClick={handleSelect}
+            placeholder={replyTarget ? `Reply to ${replyTarget.senderUsername}…` : 'Message'}
+            rows={1}
+            disabled={disabled || sending}
+            readOnly={showFormatting}
+            tabIndex={showFormatting ? -1 : 0}
+            aria-hidden={showFormatting || undefined}
+            aria-label="Message"
+          />
         </div>
         <button
           type="submit"

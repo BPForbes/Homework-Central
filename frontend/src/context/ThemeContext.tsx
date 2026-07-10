@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 type Theme = 'light' | 'dark'
@@ -19,14 +19,27 @@ function readInitialTheme(): Theme {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
+  const transitionTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem(STORAGE_KEY, theme)
   }, [theme])
 
+  useEffect(() => () => {
+    if (transitionTimerRef.current !== null)
+      window.clearTimeout(transitionTimerRef.current)
+  }, [])
+
   const toggleTheme = useCallback(() => {
+    document.documentElement.classList.add('theme-transitioning')
+    if (transitionTimerRef.current !== null)
+      window.clearTimeout(transitionTimerRef.current)
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+    transitionTimerRef.current = window.setTimeout(() => {
+      document.documentElement.classList.remove('theme-transitioning')
+      transitionTimerRef.current = null
+    }, 750)
   }, [])
 
   const value = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme])
