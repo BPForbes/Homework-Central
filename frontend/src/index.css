@@ -4487,8 +4487,8 @@ a {
 
 @media (max-width: 700px) {
   .chat-sidebar {
-    width: 10.5rem;
-    flex-basis: 10.5rem;
+    width: 9.5rem;
+    flex-basis: 9.5rem;
   }
 
   .chat-sidebar-body {
@@ -4516,8 +4516,21 @@ a {
     font-size: 0.95rem;
   }
 
+  .app-title-text {
+    display: none;
+  }
+
   .user-info > span {
     display: none;
+  }
+
+  .user-info {
+    gap: 0.45rem;
+  }
+
+  .user-info .btn-secondary {
+    padding-inline: 0.6rem;
+    white-space: nowrap;
   }
 
   .app-main {

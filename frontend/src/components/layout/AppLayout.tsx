@@ -23,7 +23,7 @@ export function AppLayout() {
           <div className="app-header-start">
             <h1 className="app-title">
               <FontAwesomeIcon icon={byPrefixAndName.far.comments} className="app-title-icon" />
-              Homework Central
+              <span className="app-title-text">Homework Central</span>
             </h1>
           </div>
           <div className="user-info">
