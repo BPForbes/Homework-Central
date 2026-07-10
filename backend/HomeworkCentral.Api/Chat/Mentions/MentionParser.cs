@@ -5,7 +5,9 @@ namespace HomeworkCentral.Api.Chat.Mentions;
 
 /// <summary>
 /// Parses @-mentions in chat messages. Mentions wrapped in double backticks (``@token``) are
-/// rendered as plain text and do not ping. Unauthorized @everyone/@here tokens are replaced
+/// rendered as plain text and do not ping. Content inside any other Markdown backtick code
+/// delimiter (`inline code`, ```fences```) is kept verbatim — the frontend Markdown renderer
+/// owns its presentation — and never pings. Unauthorized @everyone/@here tokens are replaced
 /// with @null (plain text, no ping). User vs role disambiguation for tokens that match both a
 /// username and a mentionable role happens at recipient resolution time (user match first).
 /// </summary>
@@ -23,16 +25,16 @@ public static partial class MentionParser
         if (string.IsNullOrEmpty(rawContent))
             return new MentionParseResult(rawContent, [], false);
 
-        List<(int Start, int End)> escapedRanges = FindEscapedRanges(rawContent);
+        List<EscapedRange> escapedRanges = FindEscapedRanges(rawContent);
         StringBuilder display = new(rawContent.Length);
         List<ParsedMention> activeMentions = [];
         bool containsAnyMentionToken = false;
         int cursor = 0;
 
-        foreach ((int start, int end) in escapedRanges)
+        foreach ((int start, int end, bool stripDelimiters) in escapedRanges)
         {
             ProcessPlainSegment(rawContent, cursor, start, canUseBroadcastMentions, display, activeMentions, ref containsAnyMentionToken);
-            display.Append(rawContent[(start + 2)..(end - 2)]);
+            display.Append(stripDelimiters ? rawContent[(start + 2)..(end - 2)] : rawContent[start..end]);
             cursor = end;
         }
 
@@ -101,26 +103,64 @@ public static partial class MentionParser
         return MentionKind.User;
     }
 
-    private static List<(int Start, int End)> FindEscapedRanges(string content)
+    private readonly record struct EscapedRange(int Start, int End, bool StripDelimiters);
+
+    /// <summary>
+    /// Finds backtick-delimited spans, pairing each opening backtick run with the next run of
+    /// exactly the same length (Markdown code-span semantics — so a ```fence``` is one span and
+    /// a `` opener can never latch onto the first two backticks of a fence, which used to
+    /// destroy fenced code blocks). Double-backtick spans are mention escapes whose delimiters
+    /// get stripped; every other matched span is Markdown code and is kept verbatim.
+    /// </summary>
+    private static List<EscapedRange> FindEscapedRanges(string content)
     {
-        List<(int Start, int End)> ranges = [];
+        List<EscapedRange> ranges = [];
         int index = 0;
-        while (index < content.Length - 3)
+        while (index < content.Length)
         {
-            if (content[index] == '`' && content[index + 1] == '`')
+            if (content[index] != '`')
             {
-                int close = content.IndexOf("``", index + 2, StringComparison.Ordinal);
-                if (close > index + 2)
-                {
-                    ranges.Add((index, close + 2));
-                    index = close + 2;
-                    continue;
-                }
+                index++;
+                continue;
             }
 
-            index++;
+            int runStart = index;
+            while (index < content.Length && content[index] == '`')
+                index++;
+            int runLength = index - runStart;
+
+            int close = FindClosingRun(content, index, runLength);
+            if (close < 0)
+                continue;
+
+            ranges.Add(new EscapedRange(runStart, close + runLength, StripDelimiters: runLength == 2));
+            index = close + runLength;
         }
 
         return ranges;
+    }
+
+    private static int FindClosingRun(string content, int searchFrom, int runLength)
+    {
+        string delimiter = new('`', runLength);
+        int search = searchFrom;
+        while (search < content.Length)
+        {
+            int close = content.IndexOf(delimiter, search, StringComparison.Ordinal);
+            if (close < 0)
+                return -1;
+
+            int runEnd = close;
+            while (runEnd < content.Length && content[runEnd] == '`')
+                runEnd++;
+
+            // Only a run of exactly the opening length closes the span.
+            if (runEnd - close == runLength && close > searchFrom)
+                return close;
+
+            search = runEnd;
+        }
+
+        return -1;
     }
 }
