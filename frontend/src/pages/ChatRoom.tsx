@@ -12,7 +12,6 @@ import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { CustomRoleClaimPanel } from '../components/infrastructure/CustomRoomPanels'
 import { InfoEntriesFeed } from '../components/infrastructure/InfoEntriesFeed'
 import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
 
@@ -151,8 +150,6 @@ export function ChatRoom() {
 
   return (
     <div className="chat-room-page chat-room-page--active">
-      <ServerMaintenanceNav title={navTitleForRoomType(roomType)} />
-
       <header className="chat-room-header">
         <Link to="/dashboard" className="chat-room-header-back" aria-label="Back to dashboard" title="Back to dashboard">
           <FontAwesomeIcon icon={faArrowLeft} />

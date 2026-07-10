@@ -400,7 +400,7 @@ public class InfrastructureController(
     }
 
     [HttpPost("users/{userId:guid}/platform-roles/{roleName}")]
-    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    [Authorize(Policy = AuthorizationPolicyNames.ManagePlatformRoles)]
     public async Task<IActionResult> AssignPlatformRole(
         Guid userId,
         string roleName,
@@ -428,7 +428,7 @@ public class InfrastructureController(
     }
 
     [HttpDelete("users/{userId:guid}/platform-roles/{roleName}")]
-    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    [Authorize(Policy = AuthorizationPolicyNames.ManagePlatformRoles)]
     public async Task<IActionResult> RevokePlatformRole(
         Guid userId,
         string roleName,

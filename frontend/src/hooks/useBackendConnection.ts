@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { checkBackendHealth } from '../utils/healthCheck'
+import { checkBackendHealth, delay } from '../utils/healthCheck'
 
 const DEFAULT_POLL_MS = 1000
 const DEFAULT_MAX_ATTEMPTS = 60 // ~1 minute at the default poll interval
@@ -14,12 +14,15 @@ export function useBackendConnection(pollIntervalMs = DEFAULT_POLL_MS, maxAttemp
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
 
     async function pollUntilReady() {
-      for (let attempt = 1; !cancelled; attempt++) {
-        const result = await checkBackendHealth()
-        if (cancelled)
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (controller.signal.aborted)
+          return
+
+        const result = await checkBackendHealth(undefined, controller.signal)
+        if (controller.signal.aborted)
           return
         if (result) {
           setIsConnected(true)
@@ -30,15 +33,18 @@ export function useBackendConnection(pollIntervalMs = DEFAULT_POLL_MS, maxAttemp
           setError('Could not reach the backend API. Check that it is running and reachable, then reload the page.')
           return
         }
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+
+        try {
+          await delay(pollIntervalMs, controller.signal)
+        } catch {
+          return
+        }
       }
     }
 
     setError(null)
     void pollUntilReady()
-    return () => {
-      cancelled = true
-    }
+    return () => controller.abort()
   }, [pollIntervalMs, maxAttempts])
 
   return { isConnected, error }

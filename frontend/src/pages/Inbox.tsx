@@ -4,7 +4,6 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faAt, faReply, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
 import { RichContent } from '../richtext/RichContent'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import type { ChatInboxItem } from '../types/inbox'
 
@@ -122,8 +121,6 @@ export function Inbox() {
 
   return (
     <div className="inbox-page">
-      <ServerMaintenanceNav title="Inbox" />
-
       <header className="inbox-header">
         <div className="inbox-header-icon">
           <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} />
