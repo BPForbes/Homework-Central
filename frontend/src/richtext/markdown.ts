@@ -68,6 +68,17 @@ export interface MentionStyleLookup {
   roleColors: Record<string, string>
 }
 
+/**
+ * Render-time state threaded through markdownRenderer.render(source, env). `mathFragments`
+ * collects KaTeX HTML out-of-band: math tokens render to U+E000-delimited index placeholders and
+ * push their real markup here, so render.ts can sanitize user HTML strictly while giving KaTeX's
+ * layout styles (top/height/vertical-align/…) a wider style allowlist in a second pass.
+ */
+export interface RichContentEnv {
+  mentionStyles?: MentionStyleLookup
+  mathFragments?: string[]
+}
+
 const BROADCAST_TOKENS = new Set(['everyone', 'here'])
 const NULL_MENTION_TOKEN = 'null'
 const MENTION_START_CHAR_CODE = 0x40 // '@'
@@ -130,3 +141,33 @@ const renderMention: RenderRule = (tokens, idx, _options, env: { mentionStyles?:
 }
 
 markdownRenderer.renderer.rules.mention = renderMention
+
+const MATH_PLACEHOLDER_CHAR = '\uE000'
+
+function renderMathToken(tex: string, displayMode: boolean, env: RichContentEnv): string {
+  let html: string
+  try {
+    html = katex.renderToString(tex, { throwOnError: false, strict: false, displayMode })
+  } catch {
+    html = escapeHtml(tex)
+  }
+  // Without a fragment stash (someone calling markdownRenderer.render directly) fall back to
+  // inlining the markup — it still goes through the strict sanitize pass, so it's safe, just laid
+  // out poorly.
+  if (!env?.mathFragments)
+    return html
+  const index = env.mathFragments.push(html) - 1
+  return `${MATH_PLACEHOLDER_CHAR}${index}${MATH_PLACEHOLDER_CHAR}`
+}
+
+// Replace markdown-it-texmath's renderer rules (registered by .use(texmath, …) above) so KaTeX
+// markup is stashed on env.mathFragments instead of being inlined — see RichContentEnv. Parsing
+// (delimiter recognition) still belongs to texmath; only the final HTML emission changes.
+markdownRenderer.renderer.rules.math_inline = (tokens, idx, _options, env: RichContentEnv) =>
+  renderMathToken(tokens[idx].content, false, env)
+markdownRenderer.renderer.rules.math_inline_double = (tokens, idx, _options, env: RichContentEnv) =>
+  renderMathToken(tokens[idx].content, true, env)
+markdownRenderer.renderer.rules.math_block = (tokens, idx, _options, env: RichContentEnv) =>
+  `<section>${renderMathToken(tokens[idx].content, true, env)}</section>\n`
+markdownRenderer.renderer.rules.math_block_eqno = (tokens, idx, _options, env: RichContentEnv) =>
+  `<section class="eqno">${renderMathToken(tokens[idx].content, true, env)}<span>(${escapeHtml(tokens[idx].info)})</span></section>\n`
