@@ -7,6 +7,18 @@ const REFRESH_SKEW_MS = 60_000
 
 let refreshPromise: Promise<AuthResponse> | null = null
 
+async function requestRefresh(): Promise<AuthResponse> {
+  const { data } = await axios.post<AuthResponse>('/api/auth/refresh', null, { withCredentials: true })
+  setAuthSession(data)
+  return data
+}
+
+function runRefreshLocked(): Promise<AuthResponse> {
+  if ('locks' in navigator)
+    return navigator.locks.request('hc-auth-refresh', () => requestRefresh())
+  return requestRefresh()
+}
+
 export function getAccessToken(): string | null {
   return sessionStorage.getItem(TOKEN_KEY)
 }
@@ -43,12 +55,7 @@ function tokenNeedsRefresh(): boolean {
 
 export function refreshSession(): Promise<AuthResponse> {
   if (!refreshPromise) {
-    refreshPromise = axios
-      .post<AuthResponse>('/api/auth/refresh', null, { withCredentials: true })
-      .then(({ data }) => {
-        setAuthSession(data)
-        return data
-      })
+    refreshPromise = runRefreshLocked()
       .catch((error: unknown) => {
         clearAuthSession()
         document.dispatchEvent(new CustomEvent('hc:auth-expired'))

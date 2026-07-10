@@ -10,6 +10,10 @@ export function configureApiClient(api: AxiosInstance, authPaths: string[] = [])
   api.interceptors.request.use(async (config) => {
     emitApiMutation(config.method, config.url)
 
+    const url = config.url ?? ''
+    if (authPaths.some((path) => url.endsWith(path)))
+      return config
+
     const current = getAccessToken()
     if (current) {
       const token = await getFreshAccessToken(false)

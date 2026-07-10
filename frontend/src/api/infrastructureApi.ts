@@ -13,7 +13,7 @@ import type {
   RoleAppearance,
 } from '../types/infrastructure'
 
-const api = axios.create({ baseURL: '/api/infrastructure', withCredentials: true, timeout: 15_000 })
+const api = axios.create({ baseURL: '/api/infrastructure', withCredentials: true })
 configureApiClient(api)
 
 export const infrastructureApi = {

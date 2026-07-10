@@ -4,7 +4,7 @@ import type { DevLoginOptions, DevLoginRequest } from '../types/devAuth'
 import { configureApiClient } from './configureApiClient'
 
 /** Auth endpoints excluded from the automatic 401 refresh retry loop. */
-const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login']
+const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login', '/auth/logout']
 
 const api = axios.create({
   baseURL: '/api',
