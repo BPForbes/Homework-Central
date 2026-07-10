@@ -2260,7 +2260,9 @@ a {
      the cap actually stick, so overflow is handled by the specific child's own scroll container
      (.hc-code-block, .katex-display) instead of spilling past the bubble's rounded background. */
   min-width: 0;
-  max-width: min(75%, 28rem);
+  /* The 75%/28rem cap lives on .chat-message-thread (the bubble's always-present wrapper);
+     repeating it here would compound to 56% of the row (75% of 75%). */
+  max-width: 100%;
   width: fit-content;
   padding: 0.6rem 0.85rem;
   border-radius: var(--radius-lg);
@@ -4099,6 +4101,15 @@ a {
 /* Markdown output itself — shared by chat bubbles, the mock chat preview, and info entries */
 .rich-content {
   overflow-wrap: anywhere;
+  /* Markdown emits real block tags (<p>, <ul>, <pre>) with newlines between them; without this,
+     a pre-wrap ancestor (.chat-bubble) renders those inter-tag newlines as phantom blank lines.
+     Author line breaks are preserved as <br> by the renderer (breaks: true), not by whitespace. */
+  white-space: normal;
+  /* Last-resort containment for wide content with no scroll container of its own — chiefly long
+     inline KaTeX, which cannot line-break — so it scrolls inside the bubble instead of bleeding
+     past it. Code blocks, tables, and display math still scroll themselves first. */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .rich-content > *:first-child {
