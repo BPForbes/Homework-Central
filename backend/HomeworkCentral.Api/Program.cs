@@ -12,7 +12,6 @@ using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.ScrapingDetection;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -95,10 +94,6 @@ builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
 builder.Services.AddScoped<IMentionRecipientResolver, MentionRecipientResolver>();
-// HtmlContentSanitizer wraps a single immutable HtmlSanitizer whose Sanitize method is safe to
-// call concurrently (its allow-lists are configured once at construction and never mutated), so
-// one shared instance is sufficient — no need to allocate a new HtmlSanitizer per request.
-builder.Services.AddSingleton<IContentSanitizer, HtmlContentSanitizer>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, ResourceVisibilityHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
