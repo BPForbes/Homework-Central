@@ -46,6 +46,10 @@ Never hardcode a hex value in a component; add or reuse a token instead.
 `--glass-blur` and `--glass-saturate` define the shared material. Blur is applied to major
 surfaces, not every nested element, to avoid stacking expensive GPU filters.
 
+Interactive rows use `--color-interactive-fill`; chat messages use
+`--color-bubble-own` / `--color-interactive-fill`. Menu shells remain translucent so the
+water field is visible, while controls inside them remain filled and readable.
+
 ### Text
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -80,8 +84,12 @@ to the other three hues and was replaced with `--hue-plum`.)
 
 ### Water field and shadows
 The viewport water field uses fixed day and night gradient layers plus a low-opacity ripple
-layer. Theme changes cross-fade the day/night layers; water motion uses transforms and
-background-position only. A static frame remains complete when reduced motion is enabled.
+layer. Theme changes cross-fade the day/night layers; water motion uses transforms only.
+A static frame remains complete when reduced motion is enabled.
+
+Only the currently visible day/night layer animates. Ripple movement is transform-only;
+never animate gradient positions or place `backdrop-filter` on repeated children such as
+chat bubbles, room categories, or list rows. Glass blur belongs on major chrome only.
 
 Light shadows combine soft blue-gray depth with a bright inset top edge, making glass appear
 to reflect daylight and lift toward the viewer. Dark shadows combine normal depth with a
@@ -109,6 +117,7 @@ apply negative tracking to body text — it hurts readability below ~18px.
 | `--duration-slow` | 320ms | Sidebar slide, backdrop fades |
 | `--duration-slower` | 450ms | Modal/overlay entrances only |
 | `--duration-theme` | 700ms | Day/night water and material cross-fade |
+| `--duration-droplet` | 520ms | Backend mutation droplet and ripple |
 
 | Easing | Curve | Use |
 |---|---|---|
@@ -133,6 +142,9 @@ Rules of thumb, learned from the Fable 5 review and worth preserving:
   rather than animated, but nothing gets stuck mid-transition or invisible.
 - **Skeletons only for loads that might exceed ~300ms.** A shimmer on something that
   resolves in 80ms just adds a flash of unnecessary motion.
+- **Backend mutation droplet.** User-triggered POST/PUT/PATCH/DELETE requests emit one
+  decorative droplet event, coalesced to avoid bursts. GET polling, refresh-token rotation,
+  and SignalR keepalives never trigger it. The effect uses transform and opacity only.
 
 ## Chat bubbles
 
@@ -164,6 +176,10 @@ Light/dark is driven by `data-theme="light"|"dark"` on `<html>`, set by:
 lets theme-dependent backgrounds, borders, text, shadows, glass opacity, and water
 reflections interpolate over `--duration-theme`. The class must be removed after the
 transition and the reduced-motion rule must continue collapsing it to an instant change.
+
+Theme transitions are explicitly scoped to major surfaces, menus, and interactive controls.
+Never restore a universal `.theme-transitioning *` rule: it creates hundreds of simultaneous
+paint animations and makes the app visibly lag on chat-heavy screens.
 
 ### Theme environments
 
