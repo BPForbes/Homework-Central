@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faMagnifyingGlass, faPalette, faPlus, faShieldHalved, faUsersGear } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import {
   CUSTOM_ROLE_ICON_OPTIONS,
@@ -411,8 +410,6 @@ export function UserConfig() {
 
   return (
     <div className="server-page">
-      <ServerMaintenanceNav title="User Config" />
-
       <header className="server-page-header">
         <div className="server-page-header-icon">
           <FontAwesomeIcon icon={byPrefixAndName.fas['users-gear']} />

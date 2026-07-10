@@ -1,13 +1,16 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
 import { ThemeToggle } from '../ThemeToggle'
+import { AppRail, shouldShowChatSidebar } from './AppRail'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const showChatSidebar = shouldShowChatSidebar(location.pathname)
 
   async function handleLogout() {
     await logout()
@@ -16,7 +19,8 @@ export function AppLayout() {
 
   return (
     <div className="app-layout">
-      <ChatSidebar />
+      <AppRail />
+      {showChatSidebar && <ChatSidebar />}
 
       <div className="app-content">
         <header className="app-header">
