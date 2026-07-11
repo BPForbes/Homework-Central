@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faMagnifyingGlass, faPalette, faPlus, faShieldHalved, faUsersGear } from '@fortawesome/free-solid-svg-icons'
+import { faMagnifyingGlass, faPalette } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { useUserConfigNavSection } from '../hooks/useInfrastructureNav'
 import {
   CUSTOM_ROLE_ICON_OPTIONS,
   resolveCustomRoleIcon,
@@ -27,7 +29,6 @@ const ROLE_COLOR_SWATCHES = [
 const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/
 
 type ViewMode = 'form' | 'assign'
-type UserConfigSection = 'create' | 'manage' | 'permissions' | 'users'
 
 function userSelectionKey(user: AssignableUser): string {
   return `${user.userId}:${user.tenantDatabaseName ?? 'master'}`
@@ -45,7 +46,7 @@ interface DialogState {
 }
 
 export function UserConfig() {
-  const [activeSection, setActiveSection] = useState<UserConfigSection>('create')
+  const [activeSection, setActiveSection] = useUserConfigNavSection()
   const [roles, setRoles] = useState<CustomRole[]>([])
   const [roleAppearance, setRoleAppearance] = useState<RoleAppearance[]>([])
   const [appearanceSavingId, setAppearanceSavingId] = useState<string | null>(null)
@@ -410,6 +411,8 @@ export function UserConfig() {
 
   return (
     <div className="server-page">
+      <ServerMaintenanceNav title="User Config" />
+
       <header className="server-page-header">
         <div className="server-page-header-icon">
           <FontAwesomeIcon icon={byPrefixAndName.fas['users-gear']} />
@@ -422,23 +425,6 @@ export function UserConfig() {
         </div>
       </header>
 
-      <div className="infra-area-layout">
-        <aside className="infra-area-sidebar" aria-label="User configuration sections">
-          <button type="button" className={activeSection === 'create' ? 'active' : ''} onClick={() => setActiveSection('create')}>
-            <FontAwesomeIcon icon={faPlus} /> Create Roles
-          </button>
-          <button type="button" className={activeSection === 'manage' ? 'active' : ''} onClick={() => setActiveSection('manage')}>
-            <FontAwesomeIcon icon={faUsersGear} /> Manage Roles
-          </button>
-          <button type="button" className={activeSection === 'permissions' ? 'active' : ''} onClick={() => setActiveSection('permissions')}>
-            <FontAwesomeIcon icon={faShieldHalved} /> Roles &amp; Permissions
-          </button>
-          <button type="button" className={activeSection === 'users' ? 'active' : ''} onClick={() => setActiveSection('users')}>
-            <FontAwesomeIcon icon={faMagnifyingGlass} /> User Search
-          </button>
-        </aside>
-
-        <div className="infra-area-content">
       {activeSection === 'manage' && viewMode === 'assign' && assignRole && (
         <section className="server-page-card">
           <h3>Assign “{assignRole.name}”</h3>
@@ -760,8 +746,6 @@ export function UserConfig() {
           )}
         </section>
       )}
-        </div>
-      </div>
 
       {confirmAssignOpen && assignRole && (
         <div className="confirm-modal-backdrop" role="presentation" onClick={() => setConfirmAssignOpen(false)}>

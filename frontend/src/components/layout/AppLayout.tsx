@@ -3,7 +3,11 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
 import { ThemeToggle } from '../ThemeToggle'
-import { AppRail, shouldShowChatSidebar } from './AppRail'
+import {
+  InfrastructureSidebar,
+  shouldShowChatSidebar,
+  shouldShowInfrastructureSidebar,
+} from './InfrastructureSidebar'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {
@@ -11,6 +15,7 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const showChatSidebar = shouldShowChatSidebar(location.pathname)
+  const showInfrastructureSidebar = shouldShowInfrastructureSidebar(location.pathname)
 
   async function handleLogout() {
     await logout()
@@ -19,7 +24,7 @@ export function AppLayout() {
 
   return (
     <div className="app-layout">
-      <AppRail />
+      {showInfrastructureSidebar && <InfrastructureSidebar />}
       {showChatSidebar && <ChatSidebar />}
 
       <div className="app-content">

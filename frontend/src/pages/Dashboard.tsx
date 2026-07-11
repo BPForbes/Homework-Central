@@ -10,6 +10,7 @@ import { subjectsApi } from '../api/subjectsApi'
 import { inboxApi } from '../api/inboxApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import type { ChatInboxSummaryItem } from '../types/inbox'
 
 export function Dashboard() {
@@ -68,6 +69,8 @@ export function Dashboard() {
 
   return (
     <div className="dashboard-content">
+      <ServerMaintenanceNav title="Dashboard" />
+
       <h2>Welcome, {user?.username}!</h2>
       <p className="dashboard-hint">
         Use the <strong>Chats</strong> sidebar on the left to browse subject and staff rooms you can access.

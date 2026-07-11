@@ -19,6 +19,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { chatApi } from '../api/chatApi'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ModerationRiskModal } from '../components/infrastructure/ModerationRiskModal'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
@@ -35,6 +36,11 @@ import {
   type CustomRoomType,
 } from '../types/infrastructure'
 import type { ChatNavCategory } from '../types/chat'
+import {
+  roomTypeToServerSection,
+  serverSectionToRoomType,
+  useServerNavSection,
+} from '../hooks/useInfrastructureNav'
 
 const ROOM_TYPES: { value: CustomRoomType; label: string; hint: string; icon: typeof faComments }[] = [
   { value: 'Chat', label: 'Chat', hint: 'Live messaging', icon: faComments },
@@ -50,7 +56,8 @@ function rulesFromChannel(channel: CustomChannel): CustomChannelAccessRuleInput[
 }
 
 export function ServerMaintenance() {
-  const [serverSection, setServerSection] = useState<CustomRoomType | 'rooms'>('Chat')
+  const [navSection, setNavSection] = useServerNavSection()
+  const serverSection = serverSectionToRoomType(navSection)
   const [channels, setChannels] = useState<CustomChannel[]>([])
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([])
   const [navCategories, setNavCategories] = useState<ChatNavCategory[]>([])
@@ -93,6 +100,24 @@ export function ServerMaintenance() {
     void load()
   }, [])
 
+  useEffect(() => {
+    if (editingId)
+      return
+
+    if (navSection === 'rooms') {
+      resetForm()
+      return
+    }
+
+    const type = serverSectionToRoomType(navSection)
+    if (type === 'rooms')
+      return
+
+    resetForm()
+    setRoomType(type)
+    setIconName(defaultCustomRoomIcon(type))
+  }, [navSection, editingId])
+
   const stats = useMemo(
     () => ({
       total: channels.length,
@@ -126,7 +151,7 @@ export function ServerMaintenance() {
   }
 
   function startEdit(channel: CustomChannel) {
-    setServerSection(channel.roomType)
+    setNavSection(roomTypeToServerSection(channel.roomType))
     setEditingId(channel.channelId)
     setDisplayName(channel.displayName)
     setIconName(channel.iconName ?? defaultCustomRoomIcon(channel.roomType))
@@ -136,13 +161,6 @@ export function ServerMaintenance() {
     setRoomType(channel.roomType)
     setIsPrivate(channel.isPrivate)
     setAccessRules(rulesFromChannel(channel))
-  }
-
-  function selectCreationSection(type: CustomRoomType) {
-    resetForm()
-    setRoomType(type)
-    setIconName(defaultCustomRoomIcon(type))
-    setServerSection(type)
   }
 
   function pickCategory(key: string) {
@@ -256,6 +274,8 @@ export function ServerMaintenance() {
 
   return (
     <div className="server-page sm-page">
+      <ServerMaintenanceNav title="Server Maintenance" />
+
       <header className="sm-hero">
         <div className="sm-hero-icon">
           <FontAwesomeIcon icon={byPrefixAndName.fas.server} />
@@ -287,23 +307,6 @@ export function ServerMaintenance() {
 
       {error && <p className="error sm-error">{error}</p>}
 
-      <div className="infra-area-layout">
-        <aside className="infra-area-sidebar" aria-label="Server configuration sections">
-          <button type="button" className={serverSection === 'Chat' ? 'active' : ''} onClick={() => selectCreationSection('Chat')}>
-            <FontAwesomeIcon icon={faComments} /> Create Chat Room
-          </button>
-          <button type="button" className={serverSection === 'RoleClaim' ? 'active' : ''} onClick={() => selectCreationSection('RoleClaim')}>
-            <FontAwesomeIcon icon={faIdBadge} /> Create Role Claim
-          </button>
-          <button type="button" className={serverSection === 'Info' ? 'active' : ''} onClick={() => selectCreationSection('Info')}>
-            <FontAwesomeIcon icon={faCircleInfo} /> Create Info Page
-          </button>
-          <button type="button" className={serverSection === 'rooms' ? 'active' : ''} onClick={() => { resetForm(); setServerSection('rooms') }}>
-            <FontAwesomeIcon icon={faLayerGroup} /> All Rooms
-          </button>
-        </aside>
-
-        <div className="infra-area-content">
       <div className="sm-layout sm-layout--single">
         {serverSection !== 'rooms' && (
         <section className="sm-panel sm-form-panel">
@@ -342,7 +345,7 @@ export function ServerMaintenance() {
                       onClick={() => {
                         setRoomType(t.value)
                         setIconName(defaultCustomRoomIcon(t.value))
-                        setServerSection(t.value)
+                        setNavSection(roomTypeToServerSection(t.value))
                       }}
                     >
                       <FontAwesomeIcon icon={t.icon} />
@@ -595,8 +598,6 @@ export function ServerMaintenance() {
           </ul>
         </section>
         )}
-      </div>
-        </div>
       </div>
 
       <ModerationRiskModal
