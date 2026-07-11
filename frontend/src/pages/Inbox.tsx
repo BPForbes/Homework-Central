@@ -5,6 +5,7 @@ import { faAt, faReply, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
 import { RichContent } from '../richtext/RichContent'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import type { ChatInboxItem } from '../types/inbox'
 
 function formatUtcTimestamp(iso: string): string {
@@ -121,6 +122,8 @@ export function Inbox() {
 
   return (
     <div className="inbox-page">
+      <ServerMaintenanceNav title="Inbox" />
+
       <header className="inbox-header">
         <div className="inbox-header-icon">
           <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} />

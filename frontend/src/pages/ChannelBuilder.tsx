@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft, faComments, faEye, faPen } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
 import { InfoEntriesFeed } from '../components/infrastructure/InfoEntriesFeed'
@@ -50,6 +51,8 @@ export function ChannelBuilder() {
 
   return (
     <div className="server-page sm-page channel-builder-page">
+      <ServerMaintenanceNav title="Server Maintenance" />
+
       <Link to="/server" className="channel-builder-back">
         <FontAwesomeIcon icon={faArrowLeft} /> Back to Server Maintenance
       </Link>

@@ -270,8 +270,8 @@ body::after {
   .chat-sidebar,
   .chat-sidebar-header,
   .chat-category,
-  .app-rail,
-  .app-rail-link,
+  .server-maintenance-nav,
+  .server-nav-link,
   .chat-room-link,
   .server-page-card,
   .sm-panel,
@@ -776,72 +776,6 @@ a {
   align-items: stretch;
 }
 
-.app-rail {
-  position: sticky;
-  top: 0;
-  z-index: 55;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.45rem;
-  width: 4.35rem;
-  flex: 0 0 4.35rem;
-  min-height: 100vh;
-  min-height: 100dvh;
-  padding: 0.85rem 0.45rem;
-  background: var(--color-bg-elevated);
-  border-right: 1px solid var(--color-border);
-  box-shadow: var(--shadow-lg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
-.app-rail-link {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.2rem;
-  width: 100%;
-  padding: 0.55rem 0.25rem;
-  border-radius: var(--radius-md);
-  color: var(--color-ink-secondary);
-  text-decoration: none;
-  font-size: 0.62rem;
-  font-weight: 700;
-  line-height: 1.1;
-  text-align: center;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
-}
-
-.app-rail-link svg {
-  font-size: 1.05rem;
-}
-
-.app-rail-link:hover {
-  color: var(--color-primary-hover);
-  transform: scale(1.04);
-  box-shadow: var(--shadow-hover);
-}
-
-.app-rail-link--active {
-  background: var(--color-primary-soft-strong);
-  color: var(--color-primary-hover);
-  box-shadow: var(--shadow-selected);
-}
-
-.app-rail-context {
-  margin-top: auto;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-ink-tertiary);
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  opacity: 0.72;
-}
-
 .app-content {
   min-width: 0;
   min-height: 100vh;
@@ -897,7 +831,78 @@ a {
   width: 100%;
 }
 
-/* Legacy server-maintenance-nav removed — see .app-rail */
+/* Discord-style server nav bar (icons + gated admin links) */
+.server-maintenance-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  padding: 0.65rem 0.85rem;
+  background: color-mix(in srgb, var(--color-surface-alt) 58%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.server-maintenance-nav-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 700;
+  color: var(--color-ink);
+  font-size: 0.95rem;
+}
+
+.server-maintenance-nav-title-icon {
+  color: var(--color-ink-tertiary);
+  font-size: 0.9rem;
+}
+
+.server-maintenance-nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.server-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-secondary);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.server-nav-link:hover {
+  background: var(--color-border);
+  color: var(--color-ink);
+}
+
+.server-nav-link--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.server-nav-link-label {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .server-nav-link-label {
+    display: inline;
+  }
+}
+
+.server-nav-separator {
+  color: var(--color-border-strong);
+  user-select: none;
+  font-weight: 300;
+}
 
 .dashboard-inbox-icon {
   margin-right: 0.35rem;
@@ -1574,6 +1579,19 @@ a {
   background: var(--color-primary-soft-strong);
   color: var(--color-primary-hover);
   font-weight: 700;
+}
+
+.infra-sidebar-link {
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-room-list .infra-sidebar-link .chat-room-icon {
+  width: 1.1rem;
+  flex-shrink: 0;
 }
 
 .chat-room-icon {
