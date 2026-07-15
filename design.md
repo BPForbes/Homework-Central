@@ -37,7 +37,7 @@ Never hardcode a hex value in a component; add or reuse a token instead.
 ### Surfaces
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--color-bg` | `#faf8f4` | `#1b1916` | Page background |
+| `--color-bg` | `#a8d8f0` | `#1a4d5c` | Page background (water blue; see "Water background") |
 | `--color-bg-elevated` | `#fffdf9` | `#211e1a` | Sticky header, composer bar |
 | `--color-surface` | `#ffffff` | `#262320` | Cards, panels, modals |
 | `--color-surface-alt` | `#f4f1e9` | `#2f2b25` | Secondary surface, input fills, hover backgrounds |
@@ -87,6 +87,39 @@ in light mode. `--shadow-sm` and `--shadow-md` also carry a 1px inset white hair
 card read like a cut paper edge rather than a flat rectangle. Dark mode shadows drop the
 inset and use plain black at higher opacity, since the highlight trick only works against
 a light surface.
+
+## Water background
+
+Every page — auth and logged-in alike — sits on an animated "pond" made of two
+fixed, pointer-transparent layers behind all content:
+
+1. **Base gradient** (`body::before`, z-index −2): an oversized linear gradient over
+   the `--water-base-1…4` tokens whose `background-position` drifts on a 40s loop
+   (`water-base-drift`), so the water's color shifts gradually with no seams.
+   Light mode is a light-blue family, dark mode a deep blue one.
+2. **Scene canvas** (`.water-scene`, z-index −1): `frontend/src/components/background/`
+   `WaterBackground.tsx` draws the living elements. Because both layers are below
+   z-index 0, nothing here can ever cover form inputs or content.
+
+Scene elements are **event-based**: each spawns on a random timer with a random
+lifespan. When an element drifts fully off one edge it re-enters at the antipodal
+point, computed with the standard 2-D rotation matrix R(θ) at θ = π (R(π) = −I) about
+the viewport center — unless its lifespan has expired, in which case it is simply not
+respawned. Element inventory:
+
+| Element | Themes | Behavior |
+|---|---|---|
+| Reflections | both | broad soft light patches, slow drift; additive blend in dark mode |
+| Lily pads | both | green (`--water-lily*`), float above the water, slight wobble |
+| Fish | both | grey (`--water-fish`), blurred, linear motion under the water |
+| Droplets | both | ripple rings; spawned randomly **and** whenever the API layer sends data (`utils/waterEvents.ts`); API ripples avoid the center band where forms live |
+| Fog | dark only | large drifting mist banks (`--water-fog`) |
+| Fireflies | dark only | sporadic random-walk flight with darts; gold bloom (`--water-firefly`) that flares with speed, additively mixed into the water |
+
+All canvas colors are read at runtime from the `--water-*` tokens (light + dark
+variants in `index.css`), so the scene follows the theme with no hardcoded hexes.
+`prefers-reduced-motion: reduce` disables the canvas scene entirely and freezes the
+base gradient via the global media query.
 
 ## Typography
 

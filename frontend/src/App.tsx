@@ -4,6 +4,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { WaterBackground } from './components/background/WaterBackground'
 import { BackendGate } from './components/BackendGate'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
@@ -26,6 +27,7 @@ const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
 export default function App() {
   return (
     <ThemeProvider>
+      <WaterBackground />
       <BackendGate>
         <BrowserRouter>
           <AuthProvider>
