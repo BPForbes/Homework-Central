@@ -43,29 +43,42 @@ function SidebarSectionLink({
   )
 }
 
-function ServerSidebar() {
-  const [section, setSection] = useServerNavSection()
+interface SidebarItem<T extends string> {
+  id: T
+  label: string
+  icon: typeof faComments
+}
 
-  const items: { id: ServerNavSection; label: string; icon: typeof faComments }[] = [
-    { id: 'chat', label: 'Create Chat Room', icon: faComments },
-    { id: 'roleclaim', label: 'Create Role Claim', icon: faIdBadge },
-    { id: 'info', label: 'Create Info Page', icon: faCircleInfo },
-    { id: 'rooms', label: 'All Rooms', icon: faLayerGroup },
-  ]
+interface ConfigurationSidebarProps<T extends string> {
+  ariaLabel: string
+  title: string
+  titleIcon: typeof faComments
+  items: SidebarItem<T>[]
+  section: T
+  setSection: (section: T) => void
+}
 
+function ConfigurationSidebar<T extends string>({
+  ariaLabel,
+  title,
+  titleIcon,
+  items,
+  section,
+  setSection,
+}: ConfigurationSidebarProps<T>) {
   return (
-    <aside className="chat-sidebar" aria-label="Server configuration">
+    <aside className="chat-sidebar" aria-label={ariaLabel}>
       <div className="chat-sidebar-header">
         <h2>
-          <FontAwesomeIcon icon={faServer} className="chat-sidebar-title-icon" />
-          Server
+          <FontAwesomeIcon icon={titleIcon} className="chat-sidebar-title-icon" />
+          {title}
         </h2>
       </div>
       <div className="chat-sidebar-body">
         <section className="chat-category chat-category--public">
           <div className="chat-category-label-row">
             <span className="chat-category-label">
-              <FontAwesomeIcon icon={faLayerGroup} className="chat-category-icon" />
+              <FontAwesomeIcon icon={titleIcon} className="chat-category-icon" />
               Configuration
             </span>
           </div>
@@ -83,6 +96,28 @@ function ServerSidebar() {
         </section>
       </div>
     </aside>
+  )
+}
+
+function ServerSidebar() {
+  const [section, setSection] = useServerNavSection()
+
+  const items: { id: ServerNavSection; label: string; icon: typeof faComments }[] = [
+    { id: 'chat', label: 'Create Chat Room', icon: faComments },
+    { id: 'roleclaim', label: 'Create Role Claim', icon: faIdBadge },
+    { id: 'info', label: 'Create Info Page', icon: faCircleInfo },
+    { id: 'rooms', label: 'All Rooms', icon: faLayerGroup },
+  ]
+
+  return (
+    <ConfigurationSidebar
+      ariaLabel="Server configuration"
+      title="Server"
+      titleIcon={faServer}
+      items={items}
+      section={section}
+      setSection={setSection}
+    />
   )
 }
 
@@ -97,35 +132,14 @@ function UserConfigSidebar() {
   ]
 
   return (
-    <aside className="chat-sidebar" aria-label="User configuration">
-      <div className="chat-sidebar-header">
-        <h2>
-          <FontAwesomeIcon icon={faUsersGear} className="chat-sidebar-title-icon" />
-          User Config
-        </h2>
-      </div>
-      <div className="chat-sidebar-body">
-        <section className="chat-category chat-category--public">
-          <div className="chat-category-label-row">
-            <span className="chat-category-label">
-              <FontAwesomeIcon icon={faUsersGear} className="chat-category-icon" />
-              Configuration
-            </span>
-          </div>
-          <ul className="chat-room-list">
-            {items.map((item) => (
-              <SidebarSectionLink
-                key={item.id}
-                active={section === item.id}
-                label={item.label}
-                icon={item.icon}
-                onClick={() => setSection(item.id)}
-              />
-            ))}
-          </ul>
-        </section>
-      </div>
-    </aside>
+    <ConfigurationSidebar
+      ariaLabel="User configuration"
+      title="User Config"
+      titleIcon={faUsersGear}
+      items={items}
+      section={section}
+      setSection={setSection}
+    />
   )
 }
 
@@ -138,15 +152,4 @@ export function InfrastructureSidebar() {
     return <ServerSidebar />
 
   return null
-}
-
-export function shouldShowInfrastructureSidebar(pathname: string): boolean {
-  return pathname.startsWith('/user-config') || pathname.startsWith('/server')
-}
-
-export function shouldShowChatSidebar(pathname: string): boolean {
-  return pathname.startsWith('/chat')
-    || pathname.startsWith('/inbox')
-    || pathname === '/dashboard'
-    || pathname.startsWith('/get-roles')
 }

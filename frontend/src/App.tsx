@@ -1,28 +1,38 @@
 /**
  * Application routes. Registers /devlogin only when VITE_HC_DEV_BYPASS is set by dev scripts.
  */
+import { lazy, Suspense, type ComponentType } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { WaterBackground } from './components/background/WaterBackground'
+import { BackendConnectingLoader } from './components/BackendConnectingLoader'
 import { BackendGate } from './components/BackendGate'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
-import { Login } from './pages/Login'
-import { DevLogin } from './pages/DevLogin'
-import { Register } from './pages/Register'
-import { Dashboard } from './pages/Dashboard'
-import { ChatRoom } from './pages/ChatRoom'
-import { ChatIndex } from './pages/ChatIndex'
-import { GetRoles } from './pages/GetRoles'
-import { Inbox } from './pages/Inbox'
-import { UserConfig } from './pages/UserConfig'
-import { ServerMaintenance } from './pages/ServerMaintenance'
-import { ChannelBuilder } from './pages/ChannelBuilder'
 import { PermissionRoute } from './components/PermissionRoute'
 import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from './constants/permissions'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
+
+function lazyPage(load: () => Promise<Record<string, unknown>>, exportName: string) {
+  return lazy(async () => {
+    const module = await load()
+    return { default: module[exportName] as ComponentType }
+  })
+}
+
+const Login = lazyPage(() => import('./pages/Login'), 'Login')
+const DevLogin = lazyPage(() => import('./pages/DevLogin'), 'DevLogin')
+const Register = lazyPage(() => import('./pages/Register'), 'Register')
+const Dashboard = lazyPage(() => import('./pages/Dashboard'), 'Dashboard')
+const ChatRoom = lazyPage(() => import('./pages/ChatRoom'), 'ChatRoom')
+const ChatIndex = lazyPage(() => import('./pages/ChatIndex'), 'ChatIndex')
+const GetRoles = lazyPage(() => import('./pages/GetRoles'), 'GetRoles')
+const Inbox = lazyPage(() => import('./pages/Inbox'), 'Inbox')
+const UserConfig = lazyPage(() => import('./pages/UserConfig'), 'UserConfig')
+const ServerMaintenance = lazyPage(() => import('./pages/ServerMaintenance'), 'ServerMaintenance')
+const ChannelBuilder = lazyPage(() => import('./pages/ChannelBuilder'), 'ChannelBuilder')
 
 export default function App() {
   return (
@@ -31,7 +41,8 @@ export default function App() {
       <BackendGate>
         <BrowserRouter>
           <AuthProvider>
-            <Routes>
+            <Suspense fallback={<BackendConnectingLoader message="Loading page…" />}>
+              <Routes>
               {/* Root redirects authenticated users to dashboard, others to login */}
               <Route
                 path="/"
@@ -82,7 +93,8 @@ export default function App() {
                 />
               </Route>
               <Route path="*" element={<Navigate to="/login" replace />} />
-            </Routes>
+              </Routes>
+            </Suspense>
           </AuthProvider>
         </BrowserRouter>
       </BackendGate>

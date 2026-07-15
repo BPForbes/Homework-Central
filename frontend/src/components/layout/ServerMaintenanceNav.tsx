@@ -59,18 +59,7 @@ export function ServerMaintenanceNav({ title }: ServerMaintenanceNavProps) {
               end={false}
             />
             <NavSeparator />
-            <NavLink
-              to="/server"
-              end={false}
-              className={({ isActive }) =>
-                isActive ? 'server-nav-link server-nav-link--active' : 'server-nav-link'
-              }
-              title="Server"
-              aria-label="Server"
-            >
-              <FontAwesomeIcon icon={byPrefixAndName.fas.server} />
-              <span className="server-nav-link-label">Server</span>
-            </NavLink>
+            <NavIconLink to="/server" label="Server" icon={byPrefixAndName.fas.server} end={false} />
           </>
         )}
       </div>

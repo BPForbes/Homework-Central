@@ -225,15 +225,16 @@ html::before,
 html::after {
   content: '';
   position: fixed;
-  inset: -8%;
+  inset: -12%;
   pointer-events: none;
   z-index: -2;
+  will-change: transform, opacity;
   transition: opacity var(--duration-theme) var(--ease-in-out);
 }
 
 /*
- * Day/night water bases. Oversized gradients whose background-position drifts
- * slowly, so the water's color gradually shifts with no seams; theme changes
+ * Day/night water bases. Oversized gradients drift on compositor transforms,
+ * so the water's color gradually shifts with no seams or full-layer repaints; theme changes
  * cross-fade the two layers via the --water-*-opacity tokens. The moving
  * highlights (reflections, lily pads, fish, fog, fireflies) are drawn by the
  * .water-scene canvas, where they wrap antipodally instead of escaping.
@@ -247,7 +248,7 @@ html::before {
     var(--water-day-4) 68%,
     var(--water-day-3) 100%
   );
-  background-size: 220% 220%;
+  background-size: 100% 100%;
   animation: water-base-drift 40s ease-in-out infinite alternate;
 }
 
@@ -260,7 +261,7 @@ html::after {
     var(--water-night-3) 68%,
     var(--water-night-4) 100%
   );
-  background-size: 220% 220%;
+  background-size: 100% 100%;
   animation: water-base-drift 52s ease-in-out infinite alternate-reverse;
 }
 
@@ -327,9 +328,9 @@ body {
 }
 
 @keyframes water-base-drift {
-  0% { background-position: 0% 0%; }
-  45% { background-position: 70% 40%; }
-  100% { background-position: 100% 100%; }
+  0% { transform: translate3d(-2.5%, -1.5%, 0) scale(1.04); }
+  45% { transform: translate3d(2%, -0.5%, 0) scale(1.08); }
+  100% { transform: translate3d(1.5%, 2.5%, 0) scale(1.05); }
 }
 
 ::selection {
@@ -498,36 +499,6 @@ a {
   cursor: not-allowed;
 }
 
-.api-unavailable {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  background: var(--color-danger-soft);
-  border-radius: var(--radius-full);
-  padding: 0.55rem 1rem;
-  margin-bottom: 1rem;
-  color: var(--color-danger);
-  font-size: 0.9rem;
-  font-weight: 600;
-  animation: rise-in var(--duration-base) var(--ease-out);
-}
-
-.api-unavailable-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.35rem;
-  height: 1.35rem;
-  border-radius: 50%;
-  border: 2px solid var(--color-danger);
-  flex-shrink: 0;
-}
-
-.api-unavailable-x {
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1;
-}
 
 .error {
   color: var(--color-danger);
@@ -606,29 +577,8 @@ a {
 }
 
 /* ==========================================================================
-   Dashboard (legacy full-page header, kept for any standalone usage)
+   Shared app-shell and role-summary elements
    ========================================================================== */
-
-.dashboard {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.dashboard-header {
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  padding: 1rem 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.dashboard-header h1 {
-  font-size: 1.25rem;
-  color: var(--color-primary);
-  font-weight: 700;
-}
 
 .user-info {
   display: flex;
@@ -638,17 +588,6 @@ a {
   color: var(--color-ink-secondary);
 }
 
-.dashboard-main {
-  padding: 2rem;
-  max-width: 900px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.dashboard-main h2 {
-  font-size: 1.5rem;
-  margin-bottom: 1.5rem;
-}
 
 .roles-section h3 {
   font-size: 1rem;
@@ -1120,9 +1059,6 @@ a {
   accent-color: var(--color-primary);
 }
 
-.server-form-wide {
-  max-width: 36rem;
-}
 
 .permission-grid {
   border: 1px solid var(--color-border);
@@ -1179,54 +1115,6 @@ a {
   gap: 0.5rem;
 }
 
-.infra-inline-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.access-rules-fieldset {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 0.75rem;
-}
-
-.access-rule-add {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.access-rule-list {
-  list-style: none;
-  font-size: 0.9rem;
-}
-
-.access-rule-list li {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.25rem 0;
-}
-
-.btn-link {
-  background: none;
-  border: none;
-  color: var(--color-danger);
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-family: inherit;
-  padding: 0;
-  transition: color var(--duration-fast) var(--ease-out);
-}
-
-.btn-link:hover {
-  color: var(--color-danger-hover);
-}
 
 .modal-backdrop {
   position: fixed;
@@ -1260,11 +1148,6 @@ a {
   margin-bottom: 0.75rem;
 }
 
-.modal-hint {
-  font-size: 0.8rem;
-  color: var(--color-ink-tertiary);
-  margin-bottom: 0.75rem;
-}
 
 .modal-panel label {
   display: block;
@@ -1365,60 +1248,6 @@ a {
   font-size: 1rem;
 }
 
-.user-lookup-form {
-  max-width: 36rem;
-}
-
-.user-lookup-row {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.user-lookup-row input {
-  flex: 1;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  font-family: inherit;
-  background: var(--color-surface);
-  color: var(--color-ink);
-}
-
-.user-lookup-results {
-  list-style: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  margin-bottom: 1rem;
-}
-
-.user-lookup-result {
-  width: 100%;
-  text-align: left;
-  padding: 0.65rem 0.85rem;
-  border: none;
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-family: inherit;
-  cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
-}
-
-.user-lookup-result:hover {
-  background: var(--color-surface-alt);
-}
-
-.user-lookup-selected {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.user-lookup-selected h4 {
-  font-size: 0.95rem;
-  margin: 0.75rem 0 0.35rem;
-}
 
 .get-roles-hint {
   color: var(--color-ink-tertiary);
@@ -1511,27 +1340,6 @@ a {
   color: var(--color-ink-secondary);
 }
 
-.chat-category-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.75rem 0.9rem;
-  border: none;
-  background: var(--color-interactive-fill);
-  cursor: pointer;
-  text-align: left;
-  font-size: 0.9rem;
-  font-family: inherit;
-  font-weight: 700;
-  color: var(--color-ink-secondary);
-  transition: background var(--duration-fast) var(--ease-out);
-}
-
-.chat-category-toggle:hover {
-  background: var(--color-border);
-}
 
 .chat-category-label {
   display: flex;
@@ -1546,12 +1354,6 @@ a {
   flex-shrink: 0;
 }
 
-.chat-category-chevron {
-  font-size: 0.75rem;
-  color: var(--color-ink-tertiary);
-  flex-shrink: 0;
-  transition: transform var(--duration-fast) var(--ease-out);
-}
 
 .chat-room-list {
   list-style: none;
@@ -1689,19 +1491,6 @@ a {
   line-height: 1.45;
 }
 
-.dashboard-footer-link {
-  margin-top: 1rem;
-}
-
-.dashboard-footer-link a {
-  color: var(--color-primary);
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.dashboard-footer-link a:hover {
-  text-decoration: underline;
-}
 
 .dashboard-inbox-summary {
   background: var(--color-surface);
@@ -2261,20 +2050,6 @@ a {
   font-size: 0.9rem;
 }
 
-.chat-room-placeholder {
-  background: var(--color-surface);
-  border: 1px dashed var(--color-border-strong);
-  border-radius: var(--radius-lg);
-  padding: 2.5rem 1.5rem;
-  text-align: center;
-  color: var(--color-ink-tertiary);
-}
-
-.chat-room-placeholder-icon {
-  font-size: 2rem;
-  color: var(--color-primary-soft-strong);
-  margin-bottom: 0.75rem;
-}
 
 .chat-room-status {
   color: var(--color-ink-tertiary);
@@ -3156,23 +2931,6 @@ a {
 }
 
 /* Get Roles page */
-.get-roles-page {
-  animation: rise-in var(--duration-base) var(--ease-out);
-}
-
-.get-roles-header {
-  margin-bottom: 1.5rem;
-}
-
-.get-roles-header h2 {
-  font-size: 1.5rem;
-  margin: 0.75rem 0 0.35rem;
-  letter-spacing: -0.01em;
-}
-
-.get-roles-header p {
-  color: var(--color-ink-tertiary);
-}
 
 .get-roles-grid {
   display: grid;
@@ -4482,7 +4240,6 @@ a {
 .inbox-item-link,
 .infra-list-item,
 .custom-role-icon-option,
-.chat-category-toggle,
 .chat-room-link,
 .chat-bubble,
 .chat-bubble-action-btn,
@@ -4514,7 +4271,6 @@ a {
   .inbox-item-link,
   .infra-list-item,
   .custom-role-icon-option,
-  .chat-category-toggle,
   .chat-room-link,
   .chat-bubble,
   .chat-bubble-action-btn,
@@ -4545,7 +4301,6 @@ a {
   .inbox-item-link,
   .infra-list-item,
   .custom-role-icon-option,
-  .chat-category-toggle,
   .chat-room-link,
   .chat-bubble,
   .chat-bubble-action-btn,
@@ -4581,61 +4336,6 @@ a {
   box-shadow: var(--shadow-selected);
 }
 
-.infra-area-layout {
-  display: grid;
-  grid-template-columns: minmax(11rem, 13rem) minmax(0, 1fr);
-  gap: 1rem;
-  align-items: start;
-}
-
-.infra-area-sidebar {
-  position: sticky;
-  top: 5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.55rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--color-surface-alt) 42%, transparent);
-}
-
-.infra-area-sidebar button {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  padding: 0.7rem 0.75rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: var(--color-interactive-fill);
-  color: var(--color-ink-secondary);
-  font: inherit;
-  font-size: 0.84rem;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-  transition: transform var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out),
-    border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
-}
-
-.infra-area-sidebar button:hover {
-  transform: scale(1.02);
-  color: var(--color-primary-hover);
-  box-shadow: var(--shadow-hover);
-}
-
-.infra-area-sidebar button.active {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft-strong);
-  color: var(--color-primary-hover);
-  box-shadow: var(--shadow-selected);
-}
-
-.infra-area-content {
-  min-width: 0;
-}
 
 .sm-layout--single {
   grid-template-columns: minmax(0, 1fr);
@@ -4771,9 +4471,6 @@ a {
     padding-inline: 0.75rem;
   }
 
-  .chat-category-toggle {
-    padding-inline: 0.65rem;
-  }
 
   .chat-room-link {
     gap: 0.45rem;
@@ -4829,13 +4526,4 @@ a {
     margin-left: auto;
   }
 
-  .infra-area-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .infra-area-sidebar {
-    position: static;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }

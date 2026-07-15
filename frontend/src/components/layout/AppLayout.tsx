@@ -3,11 +3,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
 import { ThemeToggle } from '../ThemeToggle'
-import {
-  InfrastructureSidebar,
-  shouldShowChatSidebar,
-  shouldShowInfrastructureSidebar,
-} from './InfrastructureSidebar'
+import { InfrastructureSidebar } from './InfrastructureSidebar'
+import { shouldShowChatSidebar, shouldShowInfrastructureSidebar } from './sidebarVisibility'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {

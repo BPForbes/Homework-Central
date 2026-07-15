@@ -95,8 +95,8 @@ pointer-transparent layers behind all content:
 
 1. **Day/night bases** (`html::before` / `html::after`, z-index −2): oversized linear
    gradients over the static `--water-day-1…4` / `--water-night-1…4` tokens whose
-   `background-position` drifts slowly (`water-base-drift`), so the water's color
-   gradually shifts with no seams. Theme changes cross-fade the two layers via
+   compositor-only `transform` drifts slowly (`water-base-drift`), so the water's
+   color gradually shifts without repainting the full viewport. Theme changes cross-fade via
    `--water-day-opacity` / `--water-night-opacity` over `--duration-theme`; the hidden
    layer's animation is paused. There are deliberately no repeating ring/line
    overlays — the water stays smooth, and all texture comes from the scene canvas.
@@ -105,11 +105,14 @@ pointer-transparent layers behind all content:
    Because every layer is below z-index 0, nothing here can ever cover form inputs
    or content.
 
-Scene elements are **event-based**: each spawns on a random timer with a random
-lifespan. When an element drifts fully off one edge it re-enters at the antipodal
-point, computed with the standard 2-D rotation matrix R(θ) at θ = π (R(π) = −I) about
-the viewport center — unless its lifespan has expired, in which case it is simply not
-respawned. Element inventory:
+Scene elements are **event-based** on a fixed 30 FPS simulation. Blue-noise intervals
+(minimum gap plus an exponential tail), density feedback, and bounded burst queues keep
+arrivals natural without clustering or exceeding each kind's cap. Spawn positions use
+spatial weighting to favor deeper outer water and avoid interactive foreground surfaces.
+Lifespans are randomized in frames; expiry tags an entity for a kind-specific
+despawn (fish dive, lily pads sink, fog and fireflies fade). A retiring entity is removed
+immediately if its center reaches a foreground interaction surface or viewport edge.
+Live entities that leave the viewport wrap to the antipodal point. Element inventory:
 
 | Element | Themes | Behavior |
 |---|---|---|
@@ -125,8 +128,9 @@ variants in `index.css`), so the scene follows the theme with no hardcoded hexes
 `prefers-reduced-motion: reduce` disables the canvas scene entirely and freezes the
 CSS layers via the global media query.
 
-Performance rules: gradient-position animation is confined to the two full-viewport
-base layers; all other background motion lives on the canvas. Never place
+Performance rules: the two full-viewport base layers animate only compositor transforms.
+The canvas uses a fixed 30 FPS step, an adaptive DPR/pixel budget, cached gradient sprites
+and fish geometry, coalesced resize work, and pauses while the document is hidden. Never place
 `backdrop-filter` on repeated children such as chat bubbles, room categories, or list
 rows — glass blur belongs on major chrome only.
 

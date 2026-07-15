@@ -1,4 +1,12 @@
-export function BackendConnectingLoader({ errorMessage }: { errorMessage?: string }) {
+const LOADING_BAR_INDEXES = Array.from({ length: 8 }, (_, index) => index + 1)
+
+export function BackendConnectingLoader({
+  errorMessage,
+  message = 'UI connecting to backend.',
+}: {
+  errorMessage?: string
+  message?: string
+}) {
   return (
     <div
       className="backend-connecting-screen"
@@ -9,18 +17,13 @@ export function BackendConnectingLoader({ errorMessage }: { errorMessage?: strin
       <div className="backend-connecting-content">
         {!errorMessage && (
           <div className="backend-connecting-bars" aria-hidden="true">
-            <div className="bar bar1" />
-            <div className="bar bar2" />
-            <div className="bar bar3" />
-            <div className="bar bar4" />
-            <div className="bar bar5" />
-            <div className="bar bar6" />
-            <div className="bar bar7" />
-            <div className="bar bar8" />
+            {LOADING_BAR_INDEXES.map((index) => (
+              <div key={index} className={`bar bar${index}`} />
+            ))}
           </div>
         )}
         <p className="backend-connecting-message">
-          {errorMessage ?? 'UI connecting to backend.'}
+          {errorMessage ?? message}
         </p>
       </div>
     </div>
