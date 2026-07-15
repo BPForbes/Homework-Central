@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
+import { ThemeToggle } from '../components/ThemeToggle'
 
 export function Register() {
   const { register } = useAuth()
@@ -79,6 +80,7 @@ export function Register() {
 
   return (
     <div className="auth-page">
+      <ThemeToggle className="theme-toggle--auth" />
       <div className="auth-card">
         <h1>Homework Central</h1>
         <h2>Create account</h2>

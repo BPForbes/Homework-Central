@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { chatApi } from '../api/chatApi'
 import type { ChatMessage, ChatTypingUser } from '../types/chat'
+import type { SendChatMessageError } from '../types/inbox'
+import { isAxiosError } from 'axios'
+import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
 export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -10,6 +13,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [sending, setSending] = useState(false)
   const [typingUsers, setTypingUsers] = useState<ChatTypingUser[]>([])
   const [connected, setConnected] = useState(false)
+  const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null)
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const isTypingRef = useRef(false)
@@ -27,6 +31,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     setLoading(true)
     setError(null)
     setMessages([])
+    setReplyTarget(null)
 
     const load = async () => {
       try {
@@ -63,12 +68,13 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   }, [roomId])
 
   useEffect(() => {
-    const token = sessionStorage.getItem('accessToken')
-    if (!token)
+    if (!getAccessToken())
       return
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`/hubs/chat?access_token=${encodeURIComponent(token)}`)
+      .withUrl('/hubs/chat', {
+        accessTokenFactory: () => getFreshAccessToken(),
+      })
       .withAutomaticReconnect()
       .build()
 
@@ -173,20 +179,34 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     if (!trimmed || sending)
       return false
 
+    const replyToMessageId = replyTarget?.messageId
     setSending(true)
     stopTyping()
     try {
-      const { data } = await chatApi.sendMessage(roomId, trimmed)
+      const { data } = await chatApi.sendMessage(roomId, trimmed, replyToMessageId)
       addMessage(data)
+      setReplyTarget(null)
       return true
-    } catch {
-      setError('Failed to send message.')
+    } catch (err) {
+      if (isAxiosError<SendChatMessageError>(err) && err.response?.data?.message) {
+        setError(err.response.data.message)
+      } else {
+        setError('Failed to send message.')
+      }
       notifyTyping()
       return false
     } finally {
       setSending(false)
     }
-  }, [roomId, sending, addMessage, stopTyping, notifyTyping])
+  }, [roomId, sending, replyTarget, addMessage, stopTyping, notifyTyping])
+
+  const startReply = useCallback((message: ChatMessage) => {
+    setReplyTarget(message)
+  }, [])
+
+  const cancelReply = useCallback(() => {
+    setReplyTarget(null)
+  }, [])
 
   return {
     messages,
@@ -195,8 +215,11 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     sending,
     typingUsers,
     connected,
+    replyTarget,
     sendMessage,
     notifyTyping,
     stopTyping,
+    startReply,
+    cancelReply,
   }
 }

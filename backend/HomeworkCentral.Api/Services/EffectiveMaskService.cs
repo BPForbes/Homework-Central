@@ -13,6 +13,7 @@ public interface IEffectiveMaskService
 {
     Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default);
     Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default);
+    Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default);
 }
 
 public class EffectiveMaskService(
@@ -31,6 +32,27 @@ public class EffectiveMaskService(
             .AsNoTracking()
             .Include(m => m.SubjectExpertiseMasks)
             .FirstOrDefaultAsync(m => m.UserId == userId, ct);
+    }
+
+    public async Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default)
+    {
+        (AppDbContext db, _) = await GetContextAsync(ct);
+        UserEffectiveMask mask = await GetUserEffectiveMaskAsync(userId, ct)
+            ?? await RebuildUserEffectiveMaskAsync(userId, ct);
+
+        List<Guid> customRoleIds = await db.UserRoles
+            .AsNoTracking()
+            .Where(ur => ur.UserId == userId)
+            .Join(
+                db.Roles.Where(r => r.IsCustom),
+                ur => ur.RoleId,
+                role => role.RoleId,
+                (ur, role) => role.RoleId)
+            .ToListAsync(ct);
+
+        EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+        dto.CustomRoleIds = customRoleIds;
+        return dto;
     }
 
     public async Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
@@ -94,7 +116,15 @@ public class EffectiveMaskService(
         foreach (UserRole userRole in user.UserRoles)
         {
             if (!PlatformRoleCatalog.TryGetRoleBit(userRole.Role.Name, out short directBit))
+            {
+                if (userRole.Role.IsCustom)
+                {
+                    moderationMask = BitMask.Or(moderationMask, userRole.Role.PermissionMask);
+                    featureMask = BitMask.Or(featureMask, userRole.Role.FeatureMask);
+                }
+
                 continue;
+            }
 
             foreach (short bit in RoleHierarchy.ExpandRoleBits(directBit))
             {
@@ -109,16 +139,8 @@ public class EffectiveMaskService(
 
         roleMask = roleMaskService.ExpandRoleIdentityMask(roleMask);
 
-        System.Collections.BitArray generalSubjectMask = BitMask.Create(128);
-        Dictionary<string, System.Collections.BitArray> expertiseMasks = SubjectExpertiseCatalog.Categories
-            .ToDictionary(c => c.ExpertiseMaskName, _ => BitMask.Create(128), StringComparer.Ordinal);
-
-        Dictionary<Guid, Subject> subjectsById = await db.Subjects
-            .AsNoTracking()
-            .ToDictionaryAsync(s => s.SubjectId, ct);
-
-        foreach (UserSubject userSubject in user.UserSubjects)
-            ApplySubjectHierarchy(userSubject.Subject, subjectsById, generalSubjectMask, expertiseMasks);
+        (System.Collections.BitArray generalSubjectMask, Dictionary<string, System.Collections.BitArray> expertiseMasks) =
+            BuildSubjectMasks(user.UserSubjects.Select(us => us.Subject));
 
         System.Collections.BitArray statusMask = BuildDefaultStatusMask();
 
@@ -188,28 +210,24 @@ public class EffectiveMaskService(
         return mask;
     }
 
-    private static void ApplySubjectHierarchy(
-        Subject subject,
-        IReadOnlyDictionary<Guid, Subject> subjectsById,
-        System.Collections.BitArray generalSubjectMask,
-        Dictionary<string, System.Collections.BitArray> expertiseMasks)
+    /// <summary>
+    /// Sets exactly one bit per assigned subject: the general bit for a top-level subject, or the
+    /// expertise bit for a course. Deliberately does NOT walk up to the parent subject — a course
+    /// grant (e.g. Biology) must not set the parent's general bit (Science), because the general
+    /// bit unlocks every room in that subject via <c>ChatRoomAccessService.HasSubjectExpertise</c>'s
+    /// whole-subject fallback. Whole-subject access comes only from claiming the subject itself.
+    /// </summary>
+    public static (System.Collections.BitArray GeneralSubjectMask, Dictionary<string, System.Collections.BitArray> ExpertiseMasks)
+        BuildSubjectMasks(IEnumerable<Subject> assignedSubjects)
     {
-        Subject current = subject;
-        HashSet<Guid> visited = new();
+        System.Collections.BitArray generalSubjectMask = BitMask.Create(128);
+        Dictionary<string, System.Collections.BitArray> expertiseMasks = SubjectExpertiseCatalog.Categories
+            .ToDictionary(c => c.ExpertiseMaskName, _ => BitMask.Create(128), StringComparer.Ordinal);
 
-        while (true)
-        {
-            if (!visited.Add(current.SubjectId))
-                break;
+        foreach (Subject subject in assignedSubjects)
+            ApplySubjectBit(subject, generalSubjectMask, expertiseMasks);
 
-            ApplySubjectBit(current, generalSubjectMask, expertiseMasks);
-
-            if (current.ParentSubjectId is null ||
-                !subjectsById.TryGetValue(current.ParentSubjectId.Value, out Subject? parent))
-                break;
-
-            current = parent;
-        }
+        return (generalSubjectMask, expertiseMasks);
     }
 
     private static void ApplySubjectBit(

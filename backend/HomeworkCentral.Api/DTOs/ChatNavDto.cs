@@ -21,4 +21,6 @@ public class ChatNavRoomDto
     public bool IsPrivate { get; set; }
     public string CategoryKey { get; set; } = null!;
     public string CategoryKind { get; set; } = null!;
+    public string RoomType { get; set; } = "Chat";
+    public string? IconName { get; set; }
 }

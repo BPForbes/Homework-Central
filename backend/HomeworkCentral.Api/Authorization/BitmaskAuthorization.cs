@@ -24,20 +24,42 @@ public sealed class BitmaskRequirement(MaskType maskType, short bit, string? sub
 }
 
 public class BitmaskAuthorizationHandler(
-    IEffectiveMaskService effectiveMaskService) : AuthorizationHandler<BitmaskRequirement>
+    IEffectiveMaskService effectiveMaskService,
+    IAccessScopeAccessor accessScopeAccessor) : AuthorizationHandler<BitmaskRequirement>
 {
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         BitmaskRequirement requirement)
     {
+        AccessScope? scope = accessScopeAccessor.ResolveCurrent();
+        if (scope?.AccountClass == AccountClass.DevAdmin)
+        {
+            context.Succeed(requirement);
+            return;
+        }
+
         string? userIdClaim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? context.User.FindFirst("sub")?.Value;
 
         if (userIdClaim is null || !Guid.TryParse(userIdClaim, out Guid userId))
             return;
 
-        UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId)
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
+        if (await HasRequiredBitAsync(userId, requirement))
+        {
+            context.Succeed(requirement);
+            return;
+        }
+
+        await effectiveMaskService.RebuildUserEffectiveMaskAsync(userId);
+        if (await HasRequiredBitAsync(userId, requirement))
+            context.Succeed(requirement);
+    }
+
+    private async Task<bool> HasRequiredBitAsync(Guid userId, BitmaskRequirement requirement)
+    {
+        UserEffectiveMask? mask = await effectiveMaskService.GetUserEffectiveMaskAsync(userId);
+        if (mask is null)
+            return false;
 
         System.Collections.BitArray? bitArray = requirement.MaskType switch
         {
@@ -51,14 +73,15 @@ public class BitmaskAuthorizationHandler(
             _ => null,
         };
 
-        if (bitArray is not null && BitMask.HasBit(bitArray, requirement.Bit))
-            context.Succeed(requirement);
+        return bitArray is not null && BitMask.HasBit(bitArray, requirement.Bit);
     }
 }
 
 public static class AuthorizationPolicyNames
 {
     public const string ResourceVisibility = "ResourceVisibility";
+    public const string ManageServerInfrastructure = "mask:Moderation:20";
+    public const string ManagePlatformRoles = "ManagePlatformRoles";
 
     public static string For(MaskType maskType, short bit, string? subjectCategory = null) =>
         subjectCategory is null

@@ -1,5 +1,4 @@
 using HomeworkCentral.Api.Authorization;
-using HomeworkCentral.Api.Security;
 
 namespace HomeworkCentral.Api.Models;
 
@@ -22,15 +21,28 @@ namespace HomeworkCentral.Api.Models;
 /// is stored denormalized precisely so no cross-database join is ever needed to render a
 /// message.
 /// </summary>
-public class ChatMessage : ISanitizableContent, IShareableScopedResource
+public class ChatMessage : IShareableScopedResource
 {
     public Guid MessageId { get; set; }
     public string RoomId { get; set; } = null!;
     public Guid SenderId { get; set; }
     public string SenderUsername { get; set; } = null!;
+    /// <summary>Denormalized hex color from the sender's highest platform role at send time.</summary>
+    public string? SenderMessageColor { get; set; }
+    /// <summary>Raw Markdown (with embedded LaTeX and, where used, inline HTML) — the frontend renders and sanitizes it; never store an HTML-sanitized copy here, since running an HTML sanitizer over Markdown source corrupts valid syntax (angle brackets in code, etc.).</summary>
     public string RawContent { get; set; } = null!;
-    public string? SanitizedContent { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public AccountClass OwnerAccountClass { get; set; }
     public string? TenantDatabaseName { get; set; }
+
+    /// <summary>
+    /// The message this one is replying to, if any. Sender/content are denormalized onto the
+    /// reply itself (rather than requiring a join back to the parent row) so the quoted preview
+    /// still renders correctly even if the parent message is ever deleted or falls outside a
+    /// paginated history window.
+    /// </summary>
+    public Guid? ReplyToMessageId { get; set; }
+    public Guid? ReplyToSenderId { get; set; }
+    public string? ReplyToSenderUsername { get; set; }
+    public string? ReplyToContentSnippet { get; set; }
 }

@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authorization;
@@ -26,6 +28,7 @@ namespace HomeworkCentral.Api.Hubs;
 public sealed class ChatHub(
     IChatMessageService chatMessageService,
     IChatTypingTracker typingTracker,
+    IChatOnlineTracker onlineTracker,
     IHttpContextAccessor httpContextAccessor) : Hub
 {
     public async Task JoinRoom(string roomId)
@@ -37,6 +40,7 @@ public sealed class ChatHub(
 
         string groupKey = ChatRoomGroupKey.Build(Context.User!, roomId);
         await Groups.AddToGroupAsync(Context.ConnectionId, groupKey);
+        onlineTracker.UserJoined(groupKey, Context.ConnectionId, userId);
 
         // Live UserTyping events are broadcast only to OthersInGroup, so a user who joins (or
         // reconnects and re-joins) after someone started typing would otherwise miss them until
@@ -52,6 +56,7 @@ public sealed class ChatHub(
         if (cleared is not null && cleared.Value.GroupKey == groupKey)
             await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
 
+        onlineTracker.UserLeft(groupKey, Context.ConnectionId, GetUserId());
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupKey);
     }
 
@@ -82,6 +87,13 @@ public sealed class ChatHub(
             await Clients.OthersInGroup(groupKey).SendAsync("UserStoppedTyping", userId);
     }
 
+    public override async Task OnConnectedAsync()
+    {
+        AccountClass accountClass = ResolveAccountClass(Context.User);
+        await Groups.AddToGroupAsync(Context.ConnectionId, ChatNavGroupKey.Build(accountClass));
+        await base.OnConnectedAsync();
+    }
+
     // Typing state has no server-side timeout (the indicator is meant to persist for as long
     // as the client reports text in the composer), so an abrupt disconnect must explicitly
     // clear it — otherwise a dropped connection would leave a "stuck" typing indicator for
@@ -92,7 +104,21 @@ public sealed class ChatHub(
         if (cleared is not null)
             await Clients.OthersInGroup(cleared.Value.GroupKey).SendAsync("UserStoppedTyping", cleared.Value.UserId);
 
+        onlineTracker.UserDisconnected(Context.ConnectionId);
+
         await base.OnDisconnectedAsync(exception);
+    }
+
+    private static AccountClass ResolveAccountClass(ClaimsPrincipal? user)
+    {
+        string? accountClassClaim = user?.FindFirst(TenancyConstants.AccountClassClaimName)?.Value;
+        if (!string.IsNullOrWhiteSpace(accountClassClaim)
+            && Enum.TryParse(accountClassClaim, ignoreCase: false, out AccountClass parsed))
+        {
+            return parsed;
+        }
+
+        return AccountClass.RealAccount;
     }
 
     /// <summary>See the class-level remarks: makes IHttpContextAccessor-dependent services

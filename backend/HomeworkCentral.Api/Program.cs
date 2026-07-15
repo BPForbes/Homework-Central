@@ -5,12 +5,13 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Captcha.FCaptcha;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Hubs;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.ScrapingDetection;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -80,13 +81,21 @@ builder.Services.AddSingleton<IIdentityRiskProfileService, IdentityRiskProfileSe
 builder.Services.AddSingleton<IRiskEngine, RiskEngine>();
 builder.Services.AddScoped<IAccessScopeAccessor, AccessScopeAccessor>();
 builder.Services.AddScoped<IChatRoomAccessService, ChatRoomAccessService>();
+builder.Services.AddScoped<IChatRoomDetailService, ChatRoomDetailService>();
 builder.Services.AddScoped<IChatMessageService, ChatMessageService>();
+builder.Services.AddScoped<IRoleAppearanceService, RoleAppearanceService>();
+builder.Services.AddSingleton<ICustomChannelStore, CustomChannelStore>();
+builder.Services.AddSingleton<IChatNavNotifier, ChatNavNotifier>();
+builder.Services.AddScoped<InfrastructureUserDirectory>();
+builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();
+builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
+builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
-// HtmlContentSanitizer wraps a single immutable HtmlSanitizer whose Sanitize method is safe to
-// call concurrently (its allow-lists are configured once at construction and never mutated), so
-// one shared instance is sufficient — no need to allocate a new HtmlSanitizer per request.
-builder.Services.AddSingleton<IContentSanitizer, HtmlContentSanitizer>();
+builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
+builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
+builder.Services.AddScoped<IMentionRecipientResolver, MentionRecipientResolver>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, PlatformRoleManagementAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, ResourceVisibilityHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
 
@@ -122,8 +131,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization(opts =>
+{
     opts.AddPolicy(AuthorizationPolicyNames.ResourceVisibility,
-        policy => policy.AddRequirements(new ResourceVisibilityRequirement())));
+        policy => policy.AddRequirements(new ResourceVisibilityRequirement()));
+    opts.AddPolicy(AuthorizationPolicyNames.ManagePlatformRoles,
+        policy => policy.AddRequirements(new PlatformRoleManagementRequirement()));
+});
 builder.Services.AddSignalR();
 builder.Services.AddControllers();
 
@@ -242,6 +255,19 @@ using (IServiceScope seedScope = app.Services.CreateScope())
     ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await AuthorizationSeedData.SeedAsync(seedDb);
+    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
+    await roleMaskService.RebuildAllRoleMasksAsync();
+
+    List<Guid> customRoleUserIds = await seedDb.UserRoles
+        .Where(ur => ur.Role.IsCustom)
+        .Select(ur => ur.UserId)
+        .Distinct()
+        .ToListAsync();
+    foreach (Guid userId in customRoleUserIds)
+        await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
+
+    ICustomChannelStore channelStore = seedScope.ServiceProvider.GetRequiredService<ICustomChannelStore>();
+    await channelStore.RefreshAsync();
     if (devBypassEnabled)
     {
         await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);

@@ -39,6 +39,13 @@ public class RoleMaskService(AppDbContext db) : IRoleMaskService
             role.PermissionMask = (BitArray)masks.PermissionMask.Clone();
             role.FeatureMask = (BitArray)masks.FeatureMask.Clone();
         }
+        else if (role.IsCustom)
+        {
+            role.PermissionMask = RoleMaskBuilder.BuildPermissionMask(
+                role.RolePermissions.Select(rp => rp.PermissionId));
+            role.RoleMask = BitMask.Create(64);
+            role.FeatureMask = RoleMaskBuilder.BuildFeatureMask("Guest");
+        }
         else
         {
             role.PermissionMask = RoleMaskBuilder.BuildPermissionMask(

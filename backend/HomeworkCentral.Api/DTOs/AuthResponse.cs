@@ -30,4 +30,5 @@ public class EffectiveMaskDto
     public string GeneralSubjectMask { get; set; } = null!;
     public Dictionary<string, string> SubjectExpertiseMasks { get; set; } = [];
     public string StatusMask { get; set; } = null!;
+    public List<Guid> CustomRoleIds { get; set; } = [];
 }

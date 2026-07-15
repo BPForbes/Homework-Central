@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faComments, faShieldHalved } from '@fortawesome/free-solid-svg-icons'
-import { useAuth } from '../context/AuthContext'
+import { faShieldHalved } from '@fortawesome/free-solid-svg-icons'
+import { useAuth } from '../context/useAuth'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
 import { captchaApi } from '../api/captchaApi'
 import { subjectsApi } from '../api/subjectsApi'
+import { inboxApi } from '../api/inboxApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
+import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
+import type { ChatInboxSummaryItem } from '../types/inbox'
 
 export function Dashboard() {
   const { user, hasRole, refreshUser } = useAuth()
@@ -15,6 +19,7 @@ export function Dashboard() {
   const [verifying, setVerifying] = useState(false)
   const [verifyError, setVerifyError] = useState('')
   const [claimedSubjects, setClaimedSubjects] = useState<string[]>([])
+  const [inboxSummary, setInboxSummary] = useState<ChatInboxSummaryItem[]>([])
 
   const isGuest = hasRole(GUEST_ROLE_BIT)
 
@@ -23,6 +28,15 @@ export function Dashboard() {
       .getGeneral()
       .then(({ data }) => setClaimedSubjects(data.filter((subject) => subject.claimed).map((subject) => subject.name)))
       .catch(() => setClaimedSubjects([]))
+  }, [user?.userId])
+
+  useEffect(() => {
+    void inboxApi
+      .getSummary()
+      .then(({ data }) =>
+        setInboxSummary(data.categories.filter((category) => category.unreadCount > 0))
+      )
+      .catch(() => setInboxSummary([]))
   }, [user?.userId])
 
   async function handleVerify(e: React.FormEvent) {
@@ -57,18 +71,39 @@ export function Dashboard() {
 
   return (
     <div className="dashboard-content">
+      <ServerMaintenanceNav title="Dashboard" />
+
       <h2>Welcome, {user?.username}!</h2>
       <p className="dashboard-hint">
-        Open the <strong>Chats</strong> menu on the left to browse subject and staff rooms you can access.
+        Use the <strong>Chats</strong> sidebar on the left to browse subject and staff rooms you can access.
       </p>
+
+      {inboxSummary.length > 0 && (
+        <section className="dashboard-inbox-summary">
+          <h3>New messages</h3>
+          <ul className="dashboard-inbox-list">
+            {inboxSummary.map((item) => (
+              <li key={item.categoryKey}>
+                <Link
+                  to={'/inbox?category=' + encodeURIComponent(item.categoryKey)}
+                  className="dashboard-inbox-link"
+                >
+                  <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} className="dashboard-inbox-icon" />
+                  New Message ({item.categoryDisplayName}): {item.unreadCount}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="dashboard-card">
         <div className="dashboard-card-icon">
-          <FontAwesomeIcon icon={faComments} />
+          <FontAwesomeIcon icon={byPrefixAndName.far.comments} />
         </div>
         <div>
           <h3>Chat rooms</h3>
-          <p>Use the sliding panel to pick a room — for example Calculus under Mathematics or Biology under Science.</p>
+          <p>Pick a room from the sidebar — for example Calculus under Mathematics or Biology under Science.</p>
         </div>
       </section>
 
@@ -116,10 +151,6 @@ export function Dashboard() {
           Claim more subject interests from <Link to="/get-roles">Get Roles</Link>.
         </p>
       </section>
-
-      <p className="dashboard-footer-link">
-        <Link to="/chat">Browse chats</Link>
-      </p>
     </div>
   )
 }
