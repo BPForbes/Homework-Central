@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
+import { LoadingBars } from './LoadingBars'
 
 interface Props {
   children: ReactNode
@@ -12,7 +13,7 @@ export function ProtectedRoute({ children }: Props) {
   if (isLoading) {
     return (
       <div className="loading-screen">
-        <div className="spinner" />
+        <LoadingBars message="Loading account…" />
       </div>
     )
   }

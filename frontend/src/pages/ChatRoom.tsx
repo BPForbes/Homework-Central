@@ -4,19 +4,18 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../api/chatApi'
 import type { ChatRoomDetail, MentionRoleOption } from '../types/chat'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useChatRoom } from '../hooks/useChatRoom'
 import { ChatComposer } from '../components/chat/ChatComposer'
 import { ChatMessageList } from '../components/chat/ChatMessageList'
 import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
-import {
-  CustomInfoRoomPanel,
-  CustomRoleClaimPanel,
-} from '../components/infrastructure/CustomRoomPanels'
+import { CustomRoleClaimPanel } from '../components/infrastructure/CustomRoomPanels'
+import { InfoEntriesFeed } from '../components/infrastructure/InfoEntriesFeed'
 import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
+import { LoadingBars } from '../components/LoadingBars'
 
 function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
   if (room.iconName) {
@@ -128,7 +127,7 @@ export function ChatRoom() {
   if (roomLoading) {
     return (
       <div className="chat-room-page">
-        <p className="chat-room-status">Loading…</p>
+        <LoadingBars message="Loading room…" />
       </div>
     )
   }
@@ -168,12 +167,7 @@ export function ChatRoom() {
         </div>
       </header>
 
-      {roomType === 'Info' && (
-        <CustomInfoRoomPanel
-          room={room}
-          onUpdated={(content) => setRoom((prev) => (prev ? { ...prev, infoContent: content } : prev))}
-        />
-      )}
+      {roomType === 'Info' && <InfoEntriesFeed roomId={decodedRoomId} />}
 
       {(roomType === 'RoleClaim' || roomType === 'GetRoles') &&
         (roomType === 'GetRoles' ? (
@@ -194,11 +188,6 @@ export function ChatRoom() {
               mentionRoles={mentionRoles}
               onReply={startReply}
             />
-            {room.isPrivate && (
-              <div className="chat-key-badge" aria-hidden="true">
-                <ChatRoomIcon icon={icon} isPrivate layeredClassName="chat-key-badge-layered" />
-              </div>
-            )}
             <ChatComposer
               disabled={messagesLoading}
               sending={sending}

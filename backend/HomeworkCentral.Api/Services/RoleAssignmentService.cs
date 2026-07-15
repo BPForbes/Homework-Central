@@ -1,5 +1,6 @@
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
@@ -51,17 +52,22 @@ public class RoleAssignmentService(
                 ?? throw new InvalidOperationException($"Role '{canonicalRoleName}' is not configured.");
 
             User targetUser = await db.Users
-                .Include(u => u.UserRoles)
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
                 .FirstOrDefaultAsync(u => u.UserId == targetUserId, ct)
                 ?? throw new InvalidOperationException("Target user was not found.");
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(targetUser);
+            if (targetUserId == granterUserId || !PlatformRoleCatalog.CanGrantRole(granterLevel, targetLevel))
+                throw new UnauthorizedAccessException("You can only manage users below your own level.");
 
-            bool guestRemoved = false;
+            bool conflictingRoleRemoved = false;
             if (string.Equals(canonicalRoleName, "VerifiedUser", StringComparison.Ordinal))
-                guestRemoved = await RemoveRoleAsync(db, targetUser, "Guest", ct);
+                conflictingRoleRemoved = await RemoveRoleAsync(db, targetUser, "Guest", ct);
+            else if (string.Equals(canonicalRoleName, "Guest", StringComparison.Ordinal))
+                conflictingRoleRemoved = await RemoveRoleAsync(db, targetUser, "VerifiedUser", ct);
 
             if (targetUser.UserRoles.Any(ur => ur.RoleId == role.RoleId))
             {
-                if (!guestRemoved)
+                if (!conflictingRoleRemoved)
                     return;
 
                 await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction cleanupTransaction =
@@ -115,6 +121,9 @@ public class RoleAssignmentService(
                 .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
                 .FirstOrDefaultAsync(u => u.UserId == targetUserId, ct)
                 ?? throw new InvalidOperationException("Target user was not found.");
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(targetUser);
+            if (targetUserId == granterUserId || !PlatformRoleCatalog.CanGrantRole(granterLevel, targetLevel))
+                throw new UnauthorizedAccessException("You can only manage users below your own level.");
 
             UserRole? assignment = targetUser.UserRoles.FirstOrDefault(ur =>
                 string.Equals(ur.Role.Name, canonicalRoleName, StringComparison.Ordinal));
@@ -123,6 +132,18 @@ public class RoleAssignmentService(
                 return;
 
             db.UserRoles.Remove(assignment);
+            if (string.Equals(canonicalRoleName, "VerifiedUser", StringComparison.Ordinal)
+                && !targetUser.UserRoles.Any(ur => string.Equals(ur.Role.Name, "Guest", StringComparison.Ordinal)))
+            {
+                Role guest = await db.Roles.FirstAsync(r => r.Name == "Guest", ct);
+                db.UserRoles.Add(new UserRole
+                {
+                    UserId = targetUserId,
+                    RoleId = guest.RoleId,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = granterUserId,
+                });
+            }
             await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
             await db.SaveChangesAsync(ct);
             await EffectiveMaskService.RebuildOnContextAsync(db, targetUserId, ct);

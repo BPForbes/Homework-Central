@@ -1,22 +1,20 @@
 import axios from 'axios'
+import { configureApiClient } from './configureApiClient'
 import type {
   ClaimableCustomRole,
   CustomChannel,
   CustomChannelAccessRuleInput,
   CustomRole,
+  InfoEntry,
+  InfoEntryFeed,
   InfrastructureUserLookup,
   AssignableUser,
   ModerationRiskWarning,
   RoleAppearance,
 } from '../types/infrastructure'
 
-const api = axios.create({ baseURL: '/api/infrastructure' })
-
-api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('accessToken')
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
+const api = axios.create({ baseURL: '/api/infrastructure', withCredentials: true })
+configureApiClient(api)
 
 export const infrastructureApi = {
   listRoles: () => api.get<CustomRole[]>('/roles'),
@@ -49,10 +47,34 @@ export const infrastructureApi = {
     api.post(`/roles/${roleId}/claim`, null, { params: { roomId } }),
   unclaimRole: (roleId: string) => api.delete(`/roles/${roleId}/claim`),
 
+  listClaimRolesForRoom: (roomId: string) =>
+    api.get<CustomRole[]>(`/channels/by-room/${encodeURIComponent(roomId)}/claim-roles`),
+  reorderClaimRoles: (roomId: string, orderedRoleIds: string[]) =>
+    api.put(`/channels/by-room/${encodeURIComponent(roomId)}/claim-order`, { orderedRoleIds }),
+
+  listInfoEntries: (roomId: string) =>
+    api.get<InfoEntryFeed>(`/channels/by-room/${encodeURIComponent(roomId)}/info-entries`),
+  createInfoEntry: (roomId: string, content: string) =>
+    api.post<InfoEntry>(`/channels/by-room/${encodeURIComponent(roomId)}/info-entries`, { content }),
+  updateInfoEntry: (entryId: string, content: string) =>
+    api.put<InfoEntry>(`/info-entries/${entryId}`, { content }),
+
   searchUsers: (q: string) =>
     api.get<InfrastructureUserLookup[]>('/users/search', { params: { q } }),
   getUser: (userId: string, tenantDatabaseName?: string | null) =>
     api.get<InfrastructureUserLookup>(`/users/${userId}`, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  getUserRoleManagement: (userId: string, tenantDatabaseName?: string | null) =>
+    api.get<InfrastructureUserLookup>(`/users/${userId}/role-management`, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  assignPlatformRole: (userId: string, roleName: string, tenantDatabaseName?: string | null) =>
+    api.post(`/users/${userId}/platform-roles/${encodeURIComponent(roleName)}`, null, {
+      params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
+    }),
+  revokePlatformRole: (userId: string, roleName: string, tenantDatabaseName?: string | null) =>
+    api.delete(`/users/${userId}/platform-roles/${encodeURIComponent(roleName)}`, {
       params: tenantDatabaseName ? { tenantDatabaseName } : undefined,
     }),
   listAssignableUsers: (roleId: string) =>

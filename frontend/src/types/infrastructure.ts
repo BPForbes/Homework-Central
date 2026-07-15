@@ -61,6 +61,21 @@ export interface ModerationRiskWarning {
   riskyPermissions: string[]
 }
 
+export interface InfoEntry {
+  entryId: string
+  channelId: string
+  authorUsername: string
+  content: string
+  createdAtUtc: string
+  updatedAtUtc: string
+  canEdit: boolean
+}
+
+export interface InfoEntryFeed {
+  entries: InfoEntry[]
+  canCreate: boolean
+}
+
 export interface CustomChannelAccessRuleInput {
   customRoleId?: string | null
   platformRoleBit?: number | null
@@ -123,6 +138,16 @@ export interface InfrastructureUserLookup {
   highestPlatformRoleBit: number
   highestPlatformRoleName: string
   customRoles: CustomRole[]
+  platformRoles: PlatformRoleAssignment[]
+  effectivePermissionIds: number[]
+}
+
+export interface PlatformRoleAssignment {
+  name: string
+  bit: number
+  isAssigned: boolean
+  canGrant: boolean
+  canRevoke: boolean
 }
 
 export interface AssignableUser {

@@ -2,7 +2,10 @@ import api from './authApi'
 import type { ChatInboxItem, ChatInboxSummary } from '../types/inbox'
 
 export const inboxApi = {
-  getInbox: () => api.get<ChatInboxItem[]>('/chat/inbox'),
+  getInbox: (categoryKey?: string | null) =>
+    api.get<ChatInboxItem[]>('/chat/inbox', {
+      params: categoryKey ? { categoryKey } : undefined,
+    }),
 
   getSummary: () => api.get<ChatInboxSummary>('/chat/inbox/summary'),
 
@@ -14,5 +17,8 @@ export const inboxApi = {
   deleteItems: (notificationIds: string[]) =>
     api.post('/chat/inbox/delete', { notificationIds }),
 
-  deleteAll: () => api.delete('/chat/inbox'),
+  deleteAll: (categoryKey?: string | null) =>
+    api.delete('/chat/inbox', {
+      params: categoryKey ? { categoryKey } : undefined,
+    }),
 }

@@ -1,20 +1,34 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faMagnifyingGlass, faPalette } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { useUserConfigNavSection } from '../hooks/useInfrastructureNav'
 import {
   CUSTOM_ROLE_ICON_OPTIONS,
   resolveCustomRoleIcon,
 } from '../components/infrastructure/customRoleIcons'
+import { ColorWheelPicker } from '../components/infrastructure/ColorWheelPicker'
+import { ConfirmModal, type ConfirmModalAction } from '../components/infrastructure/ConfirmModal'
+import { LoadingBars } from '../components/LoadingBars'
 import {
   GET_ROLES_ROOM_ID,
   MODERATION_PERMISSIONS,
   type AssignableUser,
   type CustomChannel,
   type CustomRole,
+  type InfrastructureUserLookup,
   type RoleAppearance,
 } from '../types/infrastructure'
+
+const ROLE_COLOR_SWATCHES = [
+  '#e63946', '#f3722c', '#f8961e', '#f9c74f', '#90be6d', '#43aa8b',
+  '#4d908e', '#277da1', '#577590', '#3a86ff', '#8338ec', '#c9184a',
+  '#d62828', '#7209b7', '#2b2118', '#6c757d',
+]
+
+const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/
 
 type ViewMode = 'form' | 'assign'
 
@@ -25,18 +39,15 @@ function userSelectionKey(user: AssignableUser): string {
 interface DialogState {
   title: string
   message: string
-  actions: Array<{
-    label: string
-    variant: 'primary' | 'secondary'
-    onClick: () => void
-    disabled?: boolean
-  }>
+  actions: ConfirmModalAction[]
 }
 
 export function UserConfig() {
+  const [activeSection, setActiveSection] = useUserConfigNavSection()
   const [roles, setRoles] = useState<CustomRole[]>([])
   const [roleAppearance, setRoleAppearance] = useState<RoleAppearance[]>([])
   const [appearanceSavingId, setAppearanceSavingId] = useState<string | null>(null)
+  const [colorWheelRoleId, setColorWheelRoleId] = useState<string | null>(null)
   const [channels, setChannels] = useState<CustomChannel[]>([])
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [name, setName] = useState('')
@@ -54,6 +65,12 @@ export function UserConfig() {
   const [selectedUserKeys, setSelectedUserKeys] = useState<Set<string>>(new Set())
   const [assignLoading, setAssignLoading] = useState(false)
   const [confirmAssignOpen, setConfirmAssignOpen] = useState(false)
+  const [userQuery, setUserQuery] = useState('')
+  const [userResults, setUserResults] = useState<InfrastructureUserLookup[]>([])
+  const [selectedUser, setSelectedUser] = useState<InfrastructureUserLookup | null>(null)
+  const [userSearchLoading, setUserSearchLoading] = useState(false)
+  const [userRoleSaving, setUserRoleSaving] = useState<string | null>(null)
+  const assignRequestInFlight = useRef(false)
 
   const showError = useCallback((message: string) => {
     setDialog({
@@ -117,6 +134,7 @@ export function UserConfig() {
   }
 
   function startEditRole(role: CustomRole) {
+    setActiveSection('create')
     setEditingRoleId(role.roleId)
     setName(role.name)
     setDescription(role.description ?? '')
@@ -127,6 +145,10 @@ export function UserConfig() {
   }
 
   async function openAssignFlow(role: CustomRole) {
+    if (assignRequestInFlight.current)
+      return
+    assignRequestInFlight.current = true
+    setActiveSection('manage')
     setDialog(null)
     setAssignLoading(true)
     setAssignRole(role)
@@ -148,6 +170,7 @@ export function UserConfig() {
       showError('Could not load users for assignment.')
       resetRoleForm()
     } finally {
+      assignRequestInFlight.current = false
       setAssignLoading(false)
     }
   }
@@ -296,6 +319,67 @@ export function UserConfig() {
     }
   }
 
+  async function searchUsers() {
+    if (userQuery.trim().length < 2)
+      return
+    setUserSearchLoading(true)
+    setSelectedUser(null)
+    try {
+      const { data } = await infrastructureApi.searchUsers(userQuery.trim())
+      setUserResults(data)
+    } catch {
+      showError('Could not search users.')
+    } finally {
+      setUserSearchLoading(false)
+    }
+  }
+
+  async function selectUser(user: InfrastructureUserLookup) {
+    setUserSearchLoading(true)
+    try {
+      const { data } = await infrastructureApi.getUserRoleManagement(user.userId, user.tenantDatabaseName)
+      setSelectedUser(data)
+    } catch {
+      showError('Could not load that user’s roles and permissions.')
+    } finally {
+      setUserSearchLoading(false)
+    }
+  }
+
+  async function changePlatformRole(roleName: string, grant: boolean) {
+    if (!selectedUser)
+      return
+    setUserRoleSaving(`platform:${roleName}`)
+    try {
+      if (grant)
+        await infrastructureApi.assignPlatformRole(selectedUser.userId, roleName, selectedUser.tenantDatabaseName)
+      else
+        await infrastructureApi.revokePlatformRole(selectedUser.userId, roleName, selectedUser.tenantDatabaseName)
+      await selectUser(selectedUser)
+    } catch {
+      showError(`Could not ${grant ? 'grant' : 'revoke'} that platform role.`)
+    } finally {
+      setUserRoleSaving(null)
+    }
+  }
+
+  async function changeCustomRole(role: CustomRole, grant: boolean) {
+    if (!selectedUser)
+      return
+    setUserRoleSaving(`custom:${role.roleId}`)
+    try {
+      if (grant)
+        await infrastructureApi.assignRoleToUser(selectedUser.userId, role.roleId, selectedUser.tenantDatabaseName)
+      else
+        await infrastructureApi.revokeRoleFromUser(selectedUser.userId, role.roleId, selectedUser.tenantDatabaseName)
+      await selectUser(selectedUser)
+    } catch {
+      showError(`Could not ${grant ? 'grant' : 'revoke'} that custom role.`)
+    } finally {
+      setUserRoleSaving(null)
+    }
+  }
+
   const claimRoomOptions = [
     { id: GET_ROLES_ROOM_ID, label: 'Get Roles (built-in)' },
     ...channels.map((c) => ({ id: c.roomId, label: c.displayName })),
@@ -304,23 +388,6 @@ export function UserConfig() {
   const selectableUsers = assignableUsers.filter((user) => user.canAssign && !user.alreadyAssigned)
   const placementRole = placementRoleId ? roles.find((role) => role.roleId === placementRoleId) ?? null : null
 
-  useEffect(() => {
-    if (!dialog && !confirmAssignOpen && !placementRole)
-      return
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape')
-        return
-
-      setDialog(null)
-      setConfirmAssignOpen(false)
-      setPlacementRoleId(null)
-      setPlacementRoomId('')
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [dialog, confirmAssignOpen, placementRole])
 
   return (
     <div className="server-page">
@@ -338,14 +405,14 @@ export function UserConfig() {
         </div>
       </header>
 
-      {viewMode === 'assign' && assignRole && (
+      {activeSection === 'manage' && viewMode === 'assign' && assignRole && (
         <section className="server-page-card">
           <h3>Assign “{assignRole.name}”</h3>
           <p className="server-page-subtitle">
             Select users who may receive this role. You can only assign to users whose highest platform role is below yours.
           </p>
 
-          {assignLoading && <p className="chat-sidebar-status">Loading users…</p>}
+          {assignLoading && <LoadingBars message="Loading users…" />}
 
           {!assignLoading && selectableUsers.length > 0 && (
             <div className="assignable-user-scroll">
@@ -392,7 +459,7 @@ export function UserConfig() {
         </section>
       )}
 
-      {viewMode === 'form' && (
+      {activeSection === 'create' && viewMode === 'form' && (
         <section className="server-page-card">
           <h3>{editingRoleId ? 'Edit custom role' : 'Create custom role'}</h3>
           <form className="server-stub-form" onSubmit={handleSaveRole}>
@@ -438,7 +505,7 @@ export function UserConfig() {
         </section>
       )}
 
-      <section className="server-page-card">
+      {activeSection === 'permissions' && <section className="server-page-card">
         <h3>Role appearance &amp; mentions</h3>
         <p className="server-page-subtitle">
           Set chat message colors and choose which roles standard users can @mention.
@@ -452,12 +519,12 @@ export function UserConfig() {
                 <span className="infra-meta">{role.isCustom ? 'Custom role' : 'Platform role'}</span>
               </div>
               <div className="role-appearance-controls">
-                <label className="role-appearance-color">
-                  Color
-                  <input
-                    type="color"
-                    value={role.messageColor}
-                    onChange={(e) => updateAppearanceDraft(role.roleId, { messageColor: e.target.value })}
+                <div className="role-appearance-color">
+                  <span className="role-appearance-color-label">Color</span>
+                  <span
+                    className="role-appearance-swatch-preview"
+                    style={{ backgroundColor: HEX_COLOR_PATTERN.test(role.messageColor) ? role.messageColor : undefined }}
+                    aria-hidden="true"
                   />
                   <input
                     type="text"
@@ -465,8 +532,36 @@ export function UserConfig() {
                     value={role.messageColor}
                     onChange={(e) => updateAppearanceDraft(role.roleId, { messageColor: e.target.value })}
                     pattern="^#[0-9A-Fa-f]{6}$"
+                    placeholder="#RRGGBB"
                   />
-                </label>
+                  <div className="role-appearance-swatch-grid" role="group" aria-label={`Preset colors for ${role.name}`}>
+                    {ROLE_COLOR_SWATCHES.map((swatch) => (
+                      <button
+                        key={swatch}
+                        type="button"
+                        className={`role-appearance-swatch ${role.messageColor.toLowerCase() === swatch ? 'selected' : ''}`}
+                        style={{ backgroundColor: swatch }}
+                        title={swatch}
+                        aria-label={`Use color ${swatch}`}
+                        onClick={() => updateAppearanceDraft(role.roleId, { messageColor: swatch })}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary role-appearance-wheel-toggle"
+                    onClick={() => setColorWheelRoleId((prev) => (prev === role.roleId ? null : role.roleId))}
+                  >
+                    <FontAwesomeIcon icon={faPalette} />
+                    {colorWheelRoleId === role.roleId ? 'Hide color wheel' : 'More colors'}
+                  </button>
+                  {colorWheelRoleId === role.roleId && (
+                    <ColorWheelPicker
+                      value={HEX_COLOR_PATTERN.test(role.messageColor) ? role.messageColor : '#000000'}
+                      onChange={(hex) => updateAppearanceDraft(role.roleId, { messageColor: hex })}
+                    />
+                  )}
+                </div>
                 <label className="role-appearance-mentionable">
                   <input
                     type="checkbox"
@@ -487,9 +582,9 @@ export function UserConfig() {
             </li>
           ))}
         </ul>
-      </section>
+      </section>}
 
-      <section className="server-page-card">
+      {activeSection === 'manage' && viewMode === 'form' && <section className="server-page-card">
         <h3>Custom roles</h3>
         {roles.length === 0 && <p className="server-page-subtitle">No custom roles yet.</p>}
         <ul className="infra-list">
@@ -520,109 +615,165 @@ export function UserConfig() {
             </li>
           ))}
         </ul>
-      </section>
+      </section>}
+
+      {activeSection === 'users' && (
+        <section className="server-page-card user-role-management">
+          <h3>User roles &amp; collective permissions</h3>
+          <p className="server-page-subtitle">
+            Search for a user, then grant or revoke roles below your own highest platform role.
+          </p>
+          <form
+            className="user-role-search"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void searchUsers()
+            }}
+          >
+            <input
+              type="search"
+              className="sm-input"
+              value={userQuery}
+              onChange={(event) => setUserQuery(event.target.value)}
+              placeholder="Username or email"
+              minLength={2}
+            />
+            <button type="submit" className="btn-primary" disabled={userSearchLoading || userQuery.trim().length < 2}>
+              <FontAwesomeIcon icon={faMagnifyingGlass} /> Search
+            </button>
+          </form>
+
+          {userResults.length > 0 && (
+            <ul className="user-role-search-results">
+              {userResults.map((user) => (
+                <li key={`${user.userId}:${user.tenantDatabaseName ?? 'master'}`}>
+                  <button type="button" onClick={() => void selectUser(user)}>
+                    <strong>{user.username}</strong>
+                    <span>{user.email} · {user.highestPlatformRoleName}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {selectedUser && (
+            <div className="user-role-detail">
+              <header>
+                <div>
+                  <h4>{selectedUser.username}</h4>
+                  <p>{selectedUser.email}</p>
+                </div>
+                <span className="sm-badge sm-badge--public">{selectedUser.highestPlatformRoleName}</span>
+              </header>
+
+              <h4>Platform roles</h4>
+              <ul className="user-role-grid">
+                {selectedUser.platformRoles.map((role) => (
+                  <li key={role.name} className={role.isAssigned ? 'assigned' : ''}>
+                    <span>{role.name} <small>bit {role.bit}</small></span>
+                    {role.isAssigned ? (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={!role.canRevoke || userRoleSaving === `platform:${role.name}`}
+                        onClick={() => void changePlatformRole(role.name, false)}
+                      >
+                        Revoke
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={!role.canGrant || userRoleSaving === `platform:${role.name}`}
+                        onClick={() => void changePlatformRole(role.name, true)}
+                      >
+                        Grant
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              <h4>Custom roles</h4>
+              <ul className="user-role-grid">
+                {roles.map((role) => {
+                  const assigned = selectedUser.customRoles.some((item) => item.roleId === role.roleId)
+                  return (
+                    <li key={role.roleId} className={assigned ? 'assigned' : ''}>
+                      <span>{role.name}</span>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={userRoleSaving === `custom:${role.roleId}`}
+                        onClick={() => void changeCustomRole(role, !assigned)}
+                      >
+                        {assigned ? 'Revoke' : 'Grant'}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+
+              <h4>Effective permissions from all roles</h4>
+              <div className="permission-grid user-effective-permissions">
+                {MODERATION_PERMISSIONS.map((permission) => (
+                  <span key={permission.id} className={selectedUser.effectivePermissionIds.includes(permission.id) ? 'active' : ''}>
+                    {permission.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {confirmAssignOpen && assignRole && (
-        <div className="confirm-modal-backdrop" role="presentation" onClick={() => setConfirmAssignOpen(false)}>
-          <div
-            className="confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-assign-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 id="confirm-assign-title" className="confirm-modal-title">Confirm assignment</h4>
-            <p>
-              Assign <strong>{assignRole.name}</strong> to {selectedUserKeys.size} user
-              {selectedUserKeys.size === 1 ? '' : 's'}?
-            </p>
-            <div className="confirm-modal-actions">
-              <button
-                type="button"
-                className="btn-secondary confirm-modal-button"
-                disabled={assignLoading}
-                onClick={() => setConfirmAssignOpen(false)}
-              >
-                No
-              </button>
-              <button
-                type="button"
-                className="btn-primary confirm-modal-button"
-                disabled={assignLoading}
-                onClick={() => void confirmAssignments()}
-              >
-                Yes
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          title="Confirm assignment"
+          onClose={() => setConfirmAssignOpen(false)}
+          actions={[
+            { label: 'No', variant: 'secondary', disabled: assignLoading, onClick: () => setConfirmAssignOpen(false) },
+            { label: 'Yes', variant: 'primary', disabled: assignLoading, onClick: () => void confirmAssignments() },
+          ]}
+        >
+          <p>
+            Assign <strong>{assignRole.name}</strong> to {selectedUserKeys.size} user
+            {selectedUserKeys.size === 1 ? '' : 's'}?
+          </p>
+        </ConfirmModal>
       )}
 
       {placementRole && (
-        <div className="confirm-modal-backdrop" role="presentation" onClick={closePlacementModal}>
-          <div
-            className="confirm-modal confirm-modal-wide"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="placement-modal-title"
-            onClick={(e) => e.stopPropagation()}
+        <ConfirmModal
+          title="Set claim room"
+          wide
+          onClose={closePlacementModal}
+          actions={[
+            { label: 'Cancel', variant: 'secondary', onClick: closePlacementModal },
+            { label: 'Save', variant: 'primary', onClick: () => void savePlacement(placementRole.roleId) },
+          ]}
+        >
+          <p className="server-page-subtitle">
+            Choose where users can claim “{placementRole.name}”.
+          </p>
+          <select
+            className="confirm-modal-select"
+            value={placementRoomId}
+            onChange={(event) => setPlacementRoomId(event.target.value)}
+            aria-label="Claim room"
           >
-            <h4 id="placement-modal-title" className="confirm-modal-title">Set claim room</h4>
-            <p className="server-page-subtitle">
-              Choose where users can claim “{placementRole.name}”.
-            </p>
-            <select
-              className="confirm-modal-select"
-              value={placementRoomId}
-              onChange={(e) => setPlacementRoomId(e.target.value)}
-            >
-              <option value="">Not on any claim page</option>
-              {claimRoomOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-            <div className="confirm-modal-actions">
-              <button type="button" className="btn-secondary confirm-modal-button" onClick={closePlacementModal}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn-primary confirm-modal-button"
-                onClick={() => void savePlacement(placementRole.roleId)}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+            <option value="">Not on any claim page</option>
+            {claimRoomOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </ConfirmModal>
       )}
 
       {dialog && (
-        <div className="confirm-modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
-          <div
-            className="confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="dialog-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 id="dialog-title" className="confirm-modal-title">{dialog.title}</h4>
-            <p>{dialog.message}</p>
-            <div className={`confirm-modal-actions ${dialog.actions.length > 1 ? '' : 'confirm-modal-actions-single'}`}>
-              {dialog.actions.map((action) => (
-                <button
-                  key={action.label}
-                  type="button"
-                  className={`${action.variant === 'primary' ? 'btn-primary' : 'btn-secondary'} confirm-modal-button`}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <ConfirmModal title={dialog.title} actions={dialog.actions} onClose={() => setDialog(null)}>
+          <p>{dialog.message}</p>
+        </ConfirmModal>
       )}
     </div>
   )

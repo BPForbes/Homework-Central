@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { subjectsApi } from '../../api/subjectsApi'
 import { infrastructureApi } from '../../api/infrastructureApi'
 import { GET_ROLES_ROOM_ID } from '../../types/chat'

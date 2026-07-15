@@ -6,7 +6,6 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
@@ -34,7 +33,10 @@ public interface IChatMessageService
 
     Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(
+        Guid userId,
+        string? categoryKey = null,
+        CancellationToken ct = default);
 
     Task<ChatInboxSummaryDto> GetInboxSummaryAsync(Guid userId, CancellationToken ct = default);
 
@@ -48,6 +50,11 @@ public interface IChatMessageService
         CancellationToken ct = default);
 
     Task<int> DeleteInboxAllAsync(Guid userId, CancellationToken ct = default);
+
+    Task<int> DeleteInboxCategoryAsync(
+        Guid userId,
+        string categoryKey,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -64,7 +71,6 @@ public sealed class ChatMessageService(
     IHttpContextAccessor httpContextAccessor,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
-    IContentSanitizer contentSanitizer,
     IMentionCooldownTracker mentionCooldownTracker,
     IMentionRecipientResolver mentionRecipientResolver,
     IRoleAppearanceService roleAppearanceService,
@@ -163,7 +169,6 @@ public sealed class ChatMessageService(
         // Users table — keeping this service entirely master-db-only.
         string senderUsername = ResolveUsername(userId);
         (AccountClass accountClass, string? tenantDatabaseName) = ResolveScope();
-        string sanitized = contentSanitizer.Sanitize(parsed.DisplayContent);
 
         // The IShareableScopedResource query filter already confines this lookup to messages the
         // sender's account class may see, so a reply target in a different room, a different
@@ -183,16 +188,13 @@ public sealed class ChatMessageService(
             SenderUsername = senderUsername,
             SenderMessageColor = await roleAppearanceService.ResolveSenderColorAsync(roleMask, ct),
             RawContent = parsed.DisplayContent,
-            SanitizedContent = sanitized,
             CreatedAtUtc = DateTime.UtcNow,
             OwnerAccountClass = accountClass,
             TenantDatabaseName = tenantDatabaseName,
             ReplyToMessageId = replyTarget?.MessageId,
             ReplyToSenderId = replyTarget?.SenderId,
             ReplyToSenderUsername = replyTarget?.SenderUsername,
-            ReplyToContentSnippet = replyTarget is null
-                ? null
-                : ChatReplySnippet.Build(replyTarget.SanitizedContent ?? replyTarget.RawContent),
+            ReplyToContentSnippet = replyTarget is null ? null : ChatReplySnippet.Build(replyTarget.RawContent),
         };
 
         masterDb.ChatMessages.Add(message);
@@ -239,7 +241,7 @@ public sealed class ChatMessageService(
                     RoomDisplayName = roomDisplayName,
                     CategoryKey = categoryKey,
                     CategoryDisplayName = categoryDisplayName,
-                    MessageContent = sanitized,
+                    MessageContent = message.RawContent,
                     MentionKind = mentionKind,
                     CreatedAtUtc = message.CreatedAtUtc,
                     OwnerAccountClass = accountClass,
@@ -267,7 +269,7 @@ public sealed class ChatMessageService(
                 RoomDisplayName = roomDisplayName,
                 CategoryKey = categoryKey,
                 CategoryDisplayName = categoryDisplayName,
-                MessageContent = sanitized,
+                MessageContent = message.RawContent,
                 MentionKind = "Reply",
                 CreatedAtUtc = message.CreatedAtUtc,
                 OwnerAccountClass = accountClass,
@@ -283,11 +285,21 @@ public sealed class ChatMessageService(
         return dto;
     }
 
-    public async Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(Guid userId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(
+        Guid userId,
+        string? categoryKey = null,
+        CancellationToken ct = default)
     {
+        ChatNavDto nav = await GetAccessibleInboxNavAsync(userId, ct);
+        IReadOnlyList<string> accessibleRoomIds = SelectAccessibleRoomIds(nav, categoryKey);
+        if (accessibleRoomIds.Count == 0)
+            return [];
+
         List<ChatMentionNotification> items = await masterDb.ChatMentionNotifications
             .AsNoTracking()
-            .Where(notification => notification.RecipientUserId == userId)
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && accessibleRoomIds.Contains(notification.RoomId))
             .OrderByDescending(notification => notification.CreatedAtUtc)
             .Take(200)
             .ToListAsync(ct);
@@ -297,20 +309,47 @@ public sealed class ChatMessageService(
 
     public async Task<ChatInboxSummaryDto> GetInboxSummaryAsync(Guid userId, CancellationToken ct = default)
     {
-        List<ChatInboxSummaryItemDto> categories = await masterDb.ChatMentionNotifications
+        ChatNavDto nav = await GetAccessibleInboxNavAsync(userId, ct);
+        List<string> accessibleRoomIds = nav.Categories
+            .SelectMany(category => category.Rooms)
+            .Select(room => room.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (accessibleRoomIds.Count == 0)
+            return new ChatInboxSummaryDto();
+
+        List<ChatInboxSummaryItemDto> unreadCategories = await masterDb.ChatMentionNotifications
             .AsNoTracking()
-            .Where(notification => notification.RecipientUserId == userId && notification.ReadAtUtc == null)
-            .GroupBy(notification => new { notification.CategoryKey, notification.CategoryDisplayName })
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && notification.ReadAtUtc == null
+                && accessibleRoomIds.Contains(notification.RoomId))
+            .GroupBy(notification => notification.CategoryKey)
             .Select(group => new ChatInboxSummaryItemDto
             {
-                CategoryKey = group.Key.CategoryKey,
-                CategoryDisplayName = group.Key.CategoryDisplayName,
+                CategoryKey = group.Key,
+                CategoryDisplayName = string.Empty,
                 UnreadCount = group.Count(),
             })
-            .OrderBy(item => item.CategoryDisplayName)
             .ToListAsync(ct);
 
-        return new ChatInboxSummaryDto { Categories = categories };
+        Dictionary<string, int> unreadByCategory = unreadCategories.ToDictionary(
+            category => category.CategoryKey,
+            category => category.UnreadCount,
+            StringComparer.Ordinal);
+
+        return new ChatInboxSummaryDto
+        {
+            Categories = nav.Categories
+                .Select(category => new ChatInboxSummaryItemDto
+                {
+                    CategoryKey = category.Key,
+                    CategoryDisplayName = category.Name,
+                    UnreadCount = unreadByCategory.GetValueOrDefault(category.Key),
+                })
+                .ToArray(),
+        };
     }
 
     public async Task<bool> MarkInboxReadAsync(Guid userId, Guid notificationId, CancellationToken ct = default)
@@ -362,8 +401,47 @@ public sealed class ChatMessageService(
             .Where(notification => notification.RecipientUserId == userId)
             .ExecuteDeleteAsync(ct);
 
+    public async Task<int> DeleteInboxCategoryAsync(
+        Guid userId,
+        string categoryKey,
+        CancellationToken ct = default)
+    {
+        ChatNavDto nav = await GetAccessibleInboxNavAsync(userId, ct);
+        IReadOnlyList<string> accessibleRoomIds = SelectAccessibleRoomIds(nav, categoryKey);
+        if (accessibleRoomIds.Count == 0)
+            return 0;
+
+        return await masterDb.ChatMentionNotifications
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && accessibleRoomIds.Contains(notification.RoomId))
+            .ExecuteDeleteAsync(ct);
+    }
+
     private async Task<EffectiveMaskDto> GetMasksAsync(Guid userId, CancellationToken ct) =>
         await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+
+    private async Task<ChatNavDto> GetAccessibleInboxNavAsync(Guid userId, CancellationToken ct)
+    {
+        EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
+        return chatRoomAccess.GetAccessibleNav(masks);
+    }
+
+    private static IReadOnlyList<string> SelectAccessibleRoomIds(ChatNavDto nav, string? categoryKey)
+    {
+        IEnumerable<ChatNavCategoryDto> categories = nav.Categories;
+        if (!string.IsNullOrWhiteSpace(categoryKey))
+        {
+            categories = categories.Where(category =>
+                string.Equals(category.Key, categoryKey, StringComparison.Ordinal));
+        }
+
+        return categories
+            .SelectMany(category => category.Rooms)
+            .Select(room => room.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
 
     private string ResolveUsername(Guid userId)
     {
@@ -405,7 +483,7 @@ public sealed class ChatMessageService(
             SenderId = message.SenderId,
             SenderUsername = message.SenderUsername,
             SenderMessageColor = message.SenderMessageColor,
-            Content = message.SanitizedContent ?? message.RawContent,
+            Content = message.RawContent,
             CreatedAtUtc = message.CreatedAtUtc,
             ReplyToMessageId = message.ReplyToMessageId,
             ReplyToSenderId = message.ReplyToSenderId,
