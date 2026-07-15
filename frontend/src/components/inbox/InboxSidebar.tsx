@@ -2,27 +2,43 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faInbox } from '@fortawesome/free-solid-svg-icons'
+import { chatApi } from '../../api/chatApi'
 import { inboxApi } from '../../api/inboxApi'
 import { useAuth } from '../../context/AuthContext'
 import { useChatNavSync } from '../../hooks/useChatNavSync'
 import { INBOX_UPDATED_EVENT } from '../../utils/inboxEvents'
-import { LoadingBars } from '../LoadingBars'
 import { getCategoryIcon } from '../chat/chatIcons'
-import type { ChatInboxSummary } from '../../types/inbox'
+import { SidebarSkeleton } from '../layout/SidebarSkeleton'
+import type { ChatInboxSummaryItem } from '../../types/inbox'
 
 export function InboxSidebar() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const selectedCategoryKey = searchParams.get('category')
-  const [summary, setSummary] = useState<ChatInboxSummary | null>(null)
+  const [categories, setCategories] = useState<ChatInboxSummaryItem[] | null>(null)
   const [error, setError] = useState('')
 
   const loadSummary = useCallback(async () => {
     setError('')
     try {
-      const { data } = await inboxApi.getSummary()
-      setSummary(data)
+      const [{ data: nav }, { data: summary }] = await Promise.all([
+        chatApi.getNav(),
+        inboxApi.getSummary(),
+      ])
+      const unreadByCategory = new Map(
+        summary.categories.map((category) => [category.categoryKey, category.unreadCount]),
+      )
+
+      // Chat navigation is the canonical role-aware category list. The inbox
+      // summary contributes counts only, so zero-unread categories stay visible.
+      setCategories(
+        nav.categories.map((category) => ({
+          categoryKey: category.key,
+          categoryDisplayName: category.name,
+          unreadCount: unreadByCategory.get(category.key) ?? 0,
+        })),
+      )
     } catch {
       setError('Could not load inbox categories.')
     }
@@ -50,17 +66,17 @@ export function InboxSidebar() {
 
   useEffect(() => {
     if (
-      summary
+      categories
       && selectedCategoryKey
-      && !summary.categories.some((category) => category.categoryKey === selectedCategoryKey)
+      && !categories.some((category) => category.categoryKey === selectedCategoryKey)
     ) {
       navigate('/inbox', { replace: true })
     }
-  }, [navigate, selectedCategoryKey, summary])
+  }, [categories, navigate, selectedCategoryKey])
 
   const collectiveUnreadCount = useMemo(
-    () => summary?.categories.reduce((total, category) => total + category.unreadCount, 0) ?? 0,
-    [summary],
+    () => categories?.reduce((total, category) => total + category.unreadCount, 0) ?? 0,
+    [categories],
   )
 
   function linkClassName(isActive: boolean): string {
@@ -77,10 +93,10 @@ export function InboxSidebar() {
       </div>
 
       <div className="chat-sidebar-body">
-        {!summary && !error && <LoadingBars message="Loading inbox…" />}
+        {!categories && !error && <SidebarSkeleton label="Loading inbox categories" />}
         {error && <p className="chat-sidebar-error">{error}</p>}
 
-        {summary && (
+        {categories && (
           <section className="chat-category chat-category--public">
             <div className="chat-category-label-row">
               <span className="chat-category-label">Inbox views</span>
@@ -102,7 +118,7 @@ export function InboxSidebar() {
                   </span>
                 </Link>
               </li>
-              {summary.categories.map((category) => (
+              {categories.map((category) => (
                 <li key={category.categoryKey}>
                   <Link
                     to={'/inbox?category=' + encodeURIComponent(category.categoryKey)}

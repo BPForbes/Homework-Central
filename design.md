@@ -196,12 +196,14 @@ The canonical wait indicator is `<LoadingBars />`, implemented at
 
 - Use the bar indicator whenever a route or page is loading, a content region is waiting
   for data, authentication or permission checks block rendering, a send/save/delete action
-  blocks a region, or another visible bottleneck prevents the next interaction.
+  blocks a region, or another visible bottleneck prevents the next interaction. Compact
+  navigation sidebars are the exception: use the static `<SidebarSkeleton />` placeholder
+  rather than a tall loading animation.
 - Keep the loading container transparent. It may reserve space or block interaction while
   consistency is required, but it must not paint an opaque page/card background over the
   living-water environment.
 - Supply a specific present-progress message such as “Loading messages…” or “Saving room…”.
-  Do not introduce standalone “Loading…” text, a second spinner, or a component-local loader.
+  Do not introduce a second spinner or a component-local loader.
 - Keep controls that could duplicate the operation disabled for the duration of the wait.
   The bar communicates progress; disabled state preserves request integrity.
 - The animation uses only `transform` and `opacity`, inherits the global reduced-motion

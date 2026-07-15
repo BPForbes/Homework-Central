@@ -30,8 +30,16 @@ export function Inbox() {
     void inboxApi
       .getInbox(selectedCategoryKey)
       .then(({ data }) => {
-        if (active)
-          setItems(data)
+        if (!active)
+          return
+
+        // Keep the view correct during a rolling backend restart too. The
+        // server remains the authorization boundary once the request lands.
+        setItems(
+          selectedCategoryKey
+            ? data.filter((item) => item.categoryKey === selectedCategoryKey)
+            : data,
+        )
       })
       .catch(() => {
         if (active)

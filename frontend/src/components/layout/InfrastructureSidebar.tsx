@@ -10,6 +10,7 @@ import {
   faShieldHalved,
   faUsersGear,
 } from '@fortawesome/free-solid-svg-icons'
+import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
   useServerNavSection,
@@ -17,6 +18,7 @@ import {
   type ServerNavSection,
   type UserConfigNavSection,
 } from '../../hooks/useInfrastructureNav'
+import { SidebarSkeleton } from './SidebarSkeleton'
 
 function SidebarSectionLink({
   active,
@@ -56,6 +58,7 @@ interface ConfigurationSidebarProps<T extends string> {
   items: SidebarItem<T>[]
   section: T
   setSection: (section: T) => void
+  loading: boolean
 }
 
 function ConfigurationSidebar<T extends string>({
@@ -65,6 +68,7 @@ function ConfigurationSidebar<T extends string>({
   items,
   section,
   setSection,
+  loading,
 }: ConfigurationSidebarProps<T>) {
   return (
     <aside className="chat-sidebar" aria-label={ariaLabel}>
@@ -75,31 +79,35 @@ function ConfigurationSidebar<T extends string>({
         </h2>
       </div>
       <div className="chat-sidebar-body">
-        <section className="chat-category chat-category--public">
-          <div className="chat-category-label-row">
-            <span className="chat-category-label">
-              <FontAwesomeIcon icon={titleIcon} className="chat-category-icon" />
-              Configuration
-            </span>
-          </div>
-          <ul className="chat-room-list">
-            {items.map((item) => (
-              <SidebarSectionLink
-                key={item.id}
-                active={section === item.id}
-                label={item.label}
-                icon={item.icon}
-                onClick={() => setSection(item.id)}
-              />
-            ))}
-          </ul>
-        </section>
+        {loading ? (
+          <SidebarSkeleton label={`Loading ${title} navigation`} />
+        ) : (
+          <section className="chat-category chat-category--public">
+            <div className="chat-category-label-row">
+              <span className="chat-category-label">
+                <FontAwesomeIcon icon={titleIcon} className="chat-category-icon" />
+                Configuration
+              </span>
+            </div>
+            <ul className="chat-room-list">
+              {items.map((item) => (
+                <SidebarSectionLink
+                  key={item.id}
+                  active={section === item.id}
+                  label={item.label}
+                  icon={item.icon}
+                  onClick={() => setSection(item.id)}
+                />
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </aside>
   )
 }
 
-function ServerSidebar() {
+function ServerSidebar({ loading }: { loading: boolean }) {
   const [section, setSection] = useServerNavSection()
 
   const items: { id: ServerNavSection; label: string; icon: typeof faComments }[] = [
@@ -117,11 +125,12 @@ function ServerSidebar() {
       items={items}
       section={section}
       setSection={setSection}
+      loading={loading}
     />
   )
 }
 
-function UserConfigSidebar() {
+function UserConfigSidebar({ loading }: { loading: boolean }) {
   const [section, setSection] = useUserConfigNavSection()
 
   const items: { id: UserConfigNavSection; label: string; icon: typeof faComments }[] = [
@@ -139,17 +148,25 @@ function UserConfigSidebar() {
       items={items}
       section={section}
       setSection={setSection}
+      loading={loading}
     />
   )
 }
 
 export function InfrastructureSidebar() {
   const { pathname } = useLocation()
+  const [loadedPath, setLoadedPath] = useState<string | null>(null)
+  const loading = loadedPath !== pathname
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => setLoadedPath(pathname))
+    return () => window.cancelAnimationFrame(frameId)
+  }, [pathname])
 
   if (pathname.startsWith('/user-config'))
-    return <UserConfigSidebar />
+    return <UserConfigSidebar loading={loading} />
   if (pathname.startsWith('/server'))
-    return <ServerSidebar />
+    return <ServerSidebar loading={loading} />
 
   return null
 }
