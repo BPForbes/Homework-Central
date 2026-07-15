@@ -7,7 +7,7 @@
   color-scheme: light;
 
   /* Surfaces */
-  --color-bg: #eafaff;
+  --color-bg: #a8d8f0;
   --color-bg-elevated: #fffdf9;
   --color-surface: #ffffff;
   --color-surface-alt: #f4f1e9;
@@ -82,7 +82,7 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --color-bg: #03131f;
+  --color-bg: #1a4d5c;
   --color-bg-elevated: #211e1a;
   --color-surface: #262320;
   --color-surface-alt: #2f2b25;
@@ -170,22 +170,24 @@ body::before {
   z-index: -2;
   pointer-events: none;
   background:
-    radial-gradient(circle at 14% 10%, rgba(255, 255, 255, 0.9) 0%, transparent 26%),
-    radial-gradient(circle at 84% 24%, rgba(191, 223, 255, 0.68) 0%, transparent 34%),
-    radial-gradient(circle at 58% 78%, rgba(154, 224, 219, 0.46) 0%, transparent 40%),
-    linear-gradient(150deg, #eafaff 0%, #b8e5ed 42%, #8cccd6 70%, #d9f2f4 100%);
-  background-size: 140% 140%, 160% 160%, 150% 150%, 100% 100%;
-  background-position: 0% 20%, 100% 60%, center, center;
-  animation: water-bg-shift 20s ease-in-out infinite;
+    radial-gradient(ellipse 800px 600px at 20% 20%, rgba(200, 240, 255, 0.4) 0%, transparent 40%),
+    radial-gradient(ellipse 900px 700px at 80% 30%, rgba(150, 210, 255, 0.3) 0%, transparent 45%),
+    radial-gradient(ellipse 850px 650px at 50% 80%, rgba(120, 200, 230, 0.25) 0%, transparent 50%),
+    #a8d8f0;
+  background-size: 200% 200%, 220% 220%, 210% 210%, 100% 100%;
+  background-position: 0% 0%, 50% 50%, 25% 75%, center;
+  animation: water-shift-light 25s ease-in-out infinite;
 }
 
 :root[data-theme='dark'] body::before {
   background:
-    radial-gradient(circle at 14% 10%, rgba(82, 195, 224, 0.2) 0%, transparent 26%),
-    radial-gradient(circle at 84% 24%, rgba(88, 117, 230, 0.19) 0%, transparent 34%),
-    radial-gradient(circle at 58% 78%, rgba(19, 139, 158, 0.22) 0%, transparent 40%),
-    linear-gradient(150deg, #03131f 0%, #062d40 42%, #074354 70%, #031721 100%);
-  background-size: 140% 140%, 160% 160%, 150% 150%, 100% 100%;
+    radial-gradient(ellipse 800px 600px at 20% 20%, rgba(100, 180, 220, 0.3) 0%, transparent 40%),
+    radial-gradient(ellipse 900px 700px at 80% 30%, rgba(60, 150, 200, 0.25) 0%, transparent 45%),
+    radial-gradient(ellipse 850px 650px at 50% 80%, rgba(80, 170, 210, 0.2) 0%, transparent 50%),
+    #1a4d5c;
+  background-size: 200% 200%, 220% 220%, 210% 210%, 100% 100%;
+  background-position: 0% 0%, 50% 50%, 25% 75%, center;
+  animation: water-shift-dark 25s ease-in-out infinite;
 }
 
 ::selection {
@@ -2007,12 +2009,20 @@ a {
   to { opacity: 1; }
 }
 
-@keyframes water-bg-shift {
-  0% { background-position: 0% 20%, 100% 60%, center, center; }
-  25% { background-position: 20% 40%, 80% 30%, center, center; }
-  50% { background-position: 40% 60%, 60% 50%, center, center; }
-  75% { background-position: 60% 40%, 40% 70%, center, center; }
-  100% { background-position: 80% 20%, 20% 80%, center, center; }
+@keyframes water-shift-light {
+  0% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
+  25% { background-position: 30% 20%, 70% 40%, 40% 60%, center; }
+  50% { background-position: 60% 40%, 40% 70%, 70% 30%, center; }
+  75% { background-position: 40% 60%, 20% 80%, 50% 20%, center; }
+  100% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
+}
+
+@keyframes water-shift-dark {
+  0% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
+  25% { background-position: 30% 20%, 70% 40%, 40% 60%, center; }
+  50% { background-position: 60% 40%, 40% 70%, 70% 30%, center; }
+  75% { background-position: 40% 60%, 20% 80%, 50% 20%, center; }
+  100% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
 }
 
 @keyframes rise-in {
