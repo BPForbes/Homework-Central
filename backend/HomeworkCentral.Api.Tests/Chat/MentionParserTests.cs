@@ -71,4 +71,50 @@ public class MentionParserTests
         Assert.Equal(MentionKind.User, result.ActiveMentions[0].Kind);
         Assert.Equal("2cool_user", result.ActiveMentions[0].Token);
     }
+
+    [Fact]
+    public void Fenced_code_block_is_kept_verbatim_and_does_not_ping()
+    {
+        const string content = "```java\npublic void ping(@alice) {}\n```";
+
+        MentionParseResult result = MentionParser.Parse(content, canUseBroadcastMentions: false);
+
+        Assert.Equal(content, result.DisplayContent);
+        Assert.Empty(result.ActiveMentions);
+    }
+
+    [Fact]
+    public void Single_backtick_code_span_is_kept_verbatim_and_does_not_ping()
+    {
+        const string content = "Use `@alice` as the parameter name";
+
+        MentionParseResult result = MentionParser.Parse(content, canUseBroadcastMentions: false);
+
+        Assert.Equal(content, result.DisplayContent);
+        Assert.Empty(result.ActiveMentions);
+    }
+
+    [Fact]
+    public void Mentions_outside_a_fenced_code_block_still_ping()
+    {
+        const string content = "@bob look:\n```js\nconst x = 1\n```\ndone";
+
+        MentionParseResult result = MentionParser.Parse(content, canUseBroadcastMentions: false);
+
+        Assert.Equal(content, result.DisplayContent);
+        Assert.Single(result.ActiveMentions);
+        Assert.Equal("bob", result.ActiveMentions[0].Token);
+    }
+
+    [Fact]
+    public void Unclosed_backtick_run_is_plain_text_and_mentions_still_ping()
+    {
+        const string content = "stray ` backtick @carol";
+
+        MentionParseResult result = MentionParser.Parse(content, canUseBroadcastMentions: false);
+
+        Assert.Equal(content, result.DisplayContent);
+        Assert.Single(result.ActiveMentions);
+        Assert.Equal("carol", result.ActiveMentions[0].Token);
+    }
 }

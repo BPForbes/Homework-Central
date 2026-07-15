@@ -7,7 +7,6 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
@@ -57,7 +56,6 @@ internal static class ChatMessageServiceTestSupport
             new FakeHttpContextAccessor(BuildHttpContext(userId, username)),
             new AllAccessEffectiveMaskService(),
             new ChatRoomAccessService(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor()),
-            new HtmlContentSanitizer(),
             new MentionCooldownTracker(),
             new NoRecipientsMentionResolver(),
             new NoOpRoleAppearanceService(),

@@ -36,6 +36,11 @@ import {
   type CustomRoomType,
 } from '../types/infrastructure'
 import type { ChatNavCategory } from '../types/chat'
+import {
+  roomTypeToServerSection,
+  serverSectionToRoomType,
+  useServerNavSection,
+} from '../hooks/useInfrastructureNav'
 
 const ROOM_TYPES: { value: CustomRoomType; label: string; hint: string; icon: typeof faComments }[] = [
   { value: 'Chat', label: 'Chat', hint: 'Live messaging', icon: faComments },
@@ -51,6 +56,8 @@ function rulesFromChannel(channel: CustomChannel): CustomChannelAccessRuleInput[
 }
 
 export function ServerMaintenance() {
+  const [navSection, setNavSection] = useServerNavSection()
+  const serverSection = serverSectionToRoomType(navSection)
   const [channels, setChannels] = useState<CustomChannel[]>([])
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([])
   const [navCategories, setNavCategories] = useState<ChatNavCategory[]>([])
@@ -93,6 +100,24 @@ export function ServerMaintenance() {
     void load()
   }, [])
 
+  useEffect(() => {
+    if (editingId)
+      return
+
+    if (navSection === 'rooms') {
+      resetForm()
+      return
+    }
+
+    const type = serverSectionToRoomType(navSection)
+    if (type === 'rooms')
+      return
+
+    resetForm()
+    setRoomType(type)
+    setIconName(defaultCustomRoomIcon(type))
+  }, [navSection, editingId])
+
   const stats = useMemo(
     () => ({
       total: channels.length,
@@ -126,6 +151,7 @@ export function ServerMaintenance() {
   }
 
   function startEdit(channel: CustomChannel) {
+    setNavSection(roomTypeToServerSection(channel.roomType))
     setEditingId(channel.channelId)
     setDisplayName(channel.displayName)
     setIconName(channel.iconName ?? defaultCustomRoomIcon(channel.roomType))
@@ -281,7 +307,8 @@ export function ServerMaintenance() {
 
       {error && <p className="error sm-error">{error}</p>}
 
-      <div className="sm-layout">
+      <div className="sm-layout sm-layout--single">
+        {serverSection !== 'rooms' && (
         <section className="sm-panel sm-form-panel">
           <div className="sm-panel-header">
             <h3>{editingId ? 'Edit room' : 'Create room'}</h3>
@@ -318,6 +345,7 @@ export function ServerMaintenance() {
                       onClick={() => {
                         setRoomType(t.value)
                         setIconName(defaultCustomRoomIcon(t.value))
+                        setNavSection(roomTypeToServerSection(t.value))
                       }}
                     >
                       <FontAwesomeIcon icon={t.icon} />
@@ -490,7 +518,9 @@ export function ServerMaintenance() {
             </div>
           </form>
         </section>
+        )}
 
+        {serverSection === 'rooms' && (
         <section className="sm-panel sm-list-panel">
           <div className="sm-list-toolbar">
             <h3>Custom rooms</h3>
@@ -567,6 +597,7 @@ export function ServerMaintenance() {
             ))}
           </ul>
         </section>
+        )}
       </div>
 
       <ModerationRiskModal

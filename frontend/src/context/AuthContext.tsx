@@ -4,6 +4,7 @@ import { authApi } from '../api/authApi'
 import type { CoreMaskField, UserInfo } from '../types/auth'
 import type { CaptchaSubmission } from '../types/captcha'
 import { hasMaskBit } from '../utils/bitmask'
+import { clearAuthSession, getAccessToken, refreshSession, setAuthSession } from '../api/tokenManager'
 
 interface AuthContextValue {
   user: UserInfo | null
@@ -36,21 +37,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const token = sessionStorage.getItem('accessToken')
+        const token = getAccessToken()
         if (token) {
-          try {
-            const { data } = await authApi.me()
-            setUser(data)
-            return
-          } catch {
-            sessionStorage.removeItem('accessToken')
-          }
+          const { data } = await authApi.me()
+          setUser(data)
+          return
         }
-        const { data } = await authApi.refresh()
-        sessionStorage.setItem('accessToken', data.accessToken)
+        const data = await refreshSession()
         setUser(data.user)
       } catch {
-        sessionStorage.removeItem('accessToken')
+        clearAuthSession()
         setUser(null)
       } finally {
         setIsLoading(false)
@@ -59,9 +55,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void bootstrap()
   }, [])
 
+  useEffect(() => {
+    const handleExpired = () => setUser(null)
+    document.addEventListener('hc:auth-expired', handleExpired)
+    return () => document.removeEventListener('hc:auth-expired', handleExpired)
+  }, [])
+
   const login = useCallback(async (email: string, password: string) => {
     const { data } = await authApi.login({ email, password })
-    sessionStorage.setItem('accessToken', data.accessToken)
+    setAuthSession(data)
     setUser(data.user)
   }, [])
 
@@ -76,14 +78,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       targetUserId: targetUserId || undefined,
       tenantDatabaseName: tenantDatabaseName || undefined,
     })
-    sessionStorage.setItem('accessToken', data.accessToken)
+    setAuthSession(data)
     setUser(data.user)
   }, [])
 
   const register = useCallback(
     async (email: string, username: string, password: string, captcha?: CaptchaSubmission) => {
       const { data } = await authApi.register({ email, username, password, captcha })
-      sessionStorage.setItem('accessToken', data.accessToken)
+      setAuthSession(data)
       setUser(data.user)
     },
     []
@@ -91,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await authApi.logout().catch(() => {})
-    sessionStorage.removeItem('accessToken')
+    clearAuthSession()
     setUser(null)
   }, [])
 

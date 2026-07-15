@@ -9,8 +9,8 @@ import { captchaApi } from '../api/captchaApi'
 import { subjectsApi } from '../api/subjectsApi'
 import { inboxApi } from '../api/inboxApi'
 import { GUEST_ROLE_BIT } from '../constants/roles'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import type { ChatInboxSummaryItem } from '../types/inbox'
 
 export function Dashboard() {
@@ -73,7 +73,7 @@ export function Dashboard() {
 
       <h2>Welcome, {user?.username}!</h2>
       <p className="dashboard-hint">
-        Open the <strong>Chats</strong> menu on the left to browse subject and staff rooms you can access.
+        Use the <strong>Chats</strong> sidebar on the left to browse subject and staff rooms you can access.
       </p>
 
       {inboxSummary.length > 0 && (
@@ -98,7 +98,7 @@ export function Dashboard() {
         </div>
         <div>
           <h3>Chat rooms</h3>
-          <p>Use the sliding panel to pick a room — for example Calculus under Mathematics or Biology under Science.</p>
+          <p>Pick a room from the sidebar — for example Calculus under Mathematics or Biology under Science.</p>
         </div>
       </section>
 

@@ -10,24 +10,22 @@ at the top of the file). Everything below the token block styles by existing cla
 not by rewriting component structure — this is a CSS-level design system, not a component
 library.
 
-## Why "warm academic"
+## Why "living water"
 
-The previous design was a generic blue-on-slate SaaS look — competent, but indistinguishable
-from thousands of other admin dashboards. It's also the wrong emotional register for a tool
-students and teachers open every day: cold and corporate where it should feel more like a
-well-made notebook.
+Homework Central is one continuous environment: a calm lake by day and the same lake by
+moonlight at night. The background, glass surfaces, lighting, interaction feedback, and
+theme transition all reinforce that model. The effect must remain subtle enough for daily
+school use and inexpensive enough for low-end Chromebooks.
 
-The direction here — cream/paper neutrals, a deep teal primary, a warm amber accent, warm
-(not blue-tinted) dark mode — was chosen and pressure-tested with Fable 5 across two rounds
-of critique before implementation. Two principles came directly out of that process and
-should guide any future additions:
+Three principles guide additions:
 
-1. **Density over decoration.** A considered app is tighter than the instinct suggests —
-   AI-generated redesigns default to 16px padding and a card around everything. Prefer
-   typographic hierarchy and whitespace discipline over adding another bordered box.
-2. **Subject color should be semantic, not decorative.** The hue tokens below exist so
-   subjects/categories can carry a consistent identity (a room's accent color, an icon
-   tint) — not to be sprinkled in for variety.
+1. **Content stays above decoration.** Water motion is slow and low contrast. Dense screens
+   still rely on typography and spacing rather than adding another card.
+2. **One material system.** Sidebars, cards, dialogs, toolbars, bubbles, and inputs are
+   translucent surfaces above the same water field, not unrelated visual treatments.
+3. **Light reflects; darkness emits.** Light-mode interaction uses reflective elevation.
+   Dark-mode interaction uses cyan bloom. Subject colors remain semantic rather than
+   decorative.
 
 ## Color
 
@@ -37,35 +35,39 @@ Never hardcode a hex value in a component; add or reuse a token instead.
 ### Surfaces
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--color-bg` | `#a8d8f0` | `#1a4d5c` | Page background (water blue; see "Water background") |
-| `--color-bg-elevated` | `#fffdf9` | `#211e1a` | Sticky header, composer bar |
-| `--color-surface` | `#ffffff` | `#262320` | Cards, panels, modals |
-| `--color-surface-alt` | `#f4f1e9` | `#2f2b25` | Secondary surface, input fills, hover backgrounds |
-| `--color-surface-sunken` | `#f1ece1` | `#17150f` | Chat message panel background |
-| `--color-border` | `#e5dfd0` | `#3c362d` | Default hairline border |
-| `--color-border-strong` | `#d3cab5` | `#4c443a` | Input borders, dividers that need more definition |
+| `--color-bg` | `#eaf8ff` | `#081521` | Day sky / night sky fallback |
+| `--color-bg-elevated` | translucent white-blue | translucent navy | Sticky header, sidebar, composer |
+| `--color-surface` | 68% white glass | 72% deep-water glass | Cards, panels, modals |
+| `--color-surface-alt` | pale-water glass | lifted navy glass | Inputs, toolbars, secondary surfaces |
+| `--color-surface-sunken` | submerged pale blue | deep-water navy | Chat panel and code surfaces |
+| `--color-border` | reflective white | moon-cyan at 18% | Default glass edge |
+| `--color-border-strong` | deep-water at 32% | moon-cyan at 30% | Inputs and selected edges |
+
+`--glass-blur` and `--glass-saturate` define the shared material. Blur is applied to major
+surfaces, not every nested element, to avoid stacking expensive GPU filters.
+
+Interactive rows use `--color-interactive-fill`; chat messages use
+`--color-bubble-own` / `--color-interactive-fill`. Menu shells remain translucent so the
+water field is visible, while controls inside them remain filled and readable.
 
 ### Text
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--color-ink` | `#2b2620` | `#f2ede4` | Primary text |
-| `--color-ink-secondary` | `#6b6255` | `#b7ad9c` | Secondary text, labels |
-| `--color-ink-tertiary` | `#948a7a` | `#8a8071` | Placeholder, metadata, timestamps |
+| `--color-ink` | `#173848` | `#eaf9ff` | Primary text |
+| `--color-ink-secondary` | `#456879` | `#afd5e5` | Secondary text, labels |
+| `--color-ink-tertiary` | `#688899` | `#7fa5b6` | Placeholder, metadata, timestamps |
 
 ### Brand
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--color-primary` | `#0d7a6a` | `#1f8f79` | Buttons, links, active states — deep teal |
-| `--color-primary-hover` | `#0a6357` | `#24a68d` | Hover/active state of the above |
+| `--color-primary` | `#176f91` | `#1682ad` | Buttons, links, active states — deep water |
+| `--color-primary-hover` | `#105a77` | `#49c5ff` | Reflected / emissive interaction color |
 | `--color-primary-soft` / `-soft-strong` | tints | tints | Badge backgrounds, own-message bubble fill, focus backgrounds |
-| `--color-accent` | `#e0942e` | `#d99a3d` | Amber — badges, secondary CTAs, unread indicators |
-| `--color-on-accent` | `#4a2f0d` | `#2b1c05` | Text color used **on top of** accent/accent-soft — amber is a light/mid color, it always pairs with dark text, never white |
+| `--color-accent` | `#2e8fb8` | `#63d3ff` | Water accent / moon reflection |
+| `--color-on-accent` | white | deep navy | Contrast text on accent fills |
 
-The dark-mode primary is deliberately *not* a bright lifted teal — it's tuned dark enough
-that white button text stays legible. A separate "bright teal for text-on-dark-background"
-token was considered and rejected as unnecessary complexity; if you need a brighter teal for
-an icon/accent on a dark surface, that's a sign the surface should probably use
-`--color-primary-soft` instead.
+Solid action fills use the deeper primary token for text contrast. Bright cyan is reserved
+for dark-mode text accents and bloom rather than large button fills.
 
 ### Semantic
 `--color-danger` / `--color-danger-hover` / `--color-danger-soft`, `--color-success` /
@@ -81,25 +83,28 @@ primary action color for something unrelated to a subject.
 to the other three hues and was replaced with `--hue-plum`.)
 
 ### Shadows
-Shadows are tinted with the ink color's RGB, not neutral black/slate — `rgba(43, 38, 32, x)`
-in light mode. `--shadow-sm` and `--shadow-md` also carry a 1px inset white hairline
-(`inset 0 1px 0 rgba(255,255,255,0.5)`) on top of cream surfaces — a cheap way to make a
-card read like a cut paper edge rather than a flat rectangle. Dark mode shadows drop the
-inset and use plain black at higher opacity, since the highlight trick only works against
-a light surface.
+Light shadows combine soft blue-gray depth with a bright inset top edge, making glass appear
+to reflect daylight and lift toward the viewer. Dark shadows combine normal depth with a
+low-opacity cyan outer bloom. `--shadow-hover` and `--shadow-selected` are the canonical
+interaction treatments; do not add component-local glow colors.
 
 ## Water background
 
-Every page — auth and logged-in alike — sits on an animated "pond" made of two
-fixed, pointer-transparent layers behind all content:
+Every page — auth and logged-in alike — sits on an animated "pond" made of fixed,
+pointer-transparent layers behind all content:
 
-1. **Base gradient** (`body::before`, z-index −2): an oversized linear gradient over
-   the `--water-base-1…4` tokens whose `background-position` drifts on a 40s loop
-   (`water-base-drift`), so the water's color shifts gradually with no seams.
-   Light mode is a light-blue family, dark mode a deep blue one.
-2. **Scene canvas** (`.water-scene`, z-index −1): `frontend/src/components/background/`
-   `WaterBackground.tsx` draws the living elements. Because both layers are below
-   z-index 0, nothing here can ever cover form inputs or content.
+1. **Day/night bases** (`html::before` / `html::after`, z-index −2): oversized linear
+   gradients over the static `--water-day-1…4` / `--water-night-1…4` tokens whose
+   `background-position` drifts slowly (`water-base-drift`), so the water's color
+   gradually shifts with no seams. Theme changes cross-fade the two layers via
+   `--water-day-opacity` / `--water-night-opacity` over `--duration-theme`; the hidden
+   layer's animation is paused.
+2. **Ripple distortion** (`body::before` / `body::after`, z-index −1): low-opacity
+   repeating ring and swell layers in `--color-water-reflection`, transform-animated.
+3. **Scene canvas** (`.water-scene`, z-index −1, painted above the ripples):
+   `frontend/src/components/background/WaterBackground.tsx` draws the living elements.
+   Because every layer is below z-index 0, nothing here can ever cover form inputs
+   or content.
 
 Scene elements are **event-based**: each spawns on a random timer with a random
 lifespan. When an element drifts fully off one edge it re-enters at the antipodal
@@ -112,14 +117,19 @@ respawned. Element inventory:
 | Reflections | both | broad soft light patches, slow drift; additive blend in dark mode |
 | Lily pads | both | green (`--water-lily*`), float above the water, slight wobble |
 | Fish | both | grey (`--water-fish`), blurred, linear motion under the water |
-| Droplets | both | ripple rings; spawned randomly **and** whenever the API layer sends data (`utils/waterEvents.ts`); API ripples avoid the center band where forms live |
+| Droplets | both | ripple rings; spawned randomly **and** whenever the API layer sends data (`api/apiActivity.ts`); API ripples avoid the center band where forms live |
 | Fog | dark only | large drifting mist banks (`--water-fog`) |
 | Fireflies | dark only | sporadic random-walk flight with darts; gold bloom (`--water-firefly`) that flares with speed, additively mixed into the water |
 
 All canvas colors are read at runtime from the `--water-*` tokens (light + dark
 variants in `index.css`), so the scene follows the theme with no hardcoded hexes.
 `prefers-reduced-motion: reduce` disables the canvas scene entirely and freezes the
-base gradient via the global media query.
+CSS layers via the global media query.
+
+Performance rules: gradient-position animation is confined to the two full-viewport
+base layers; all other background motion is transform-only. Never place
+`backdrop-filter` on repeated children such as chat bubbles, room categories, or list
+rows — glass blur belongs on major chrome only.
 
 ## Typography
 
@@ -141,6 +151,7 @@ apply negative tracking to body text — it hurts readability below ~18px.
 | `--duration-base` | 220ms | Page-section entrances, button presses |
 | `--duration-slow` | 320ms | Sidebar slide, backdrop fades |
 | `--duration-slower` | 450ms | Modal/overlay entrances only |
+| `--duration-theme` | 700ms | Day/night water and material cross-fade |
 
 | Easing | Curve | Use |
 |---|---|---|
@@ -158,12 +169,17 @@ Rules of thumb, learned from the Fable 5 review and worth preserving:
   the difference between 60fps and jank on low-end school Chromebooks.
 - **Micro vs. macro durations.** 120–220ms for anything the user directly triggers (button
   press, hover). Reserve 300ms+ for backdrops/overlays the user is *watching* appear, not
-  clicking through.
+  clicking through. The 700ms theme transition is the sole exception because it represents
+  an environmental lighting change rather than direct control feedback.
 - **`prefers-reduced-motion: reduce` collapses, it doesn't remove.** All durations drop to
   ~0 globally (see the media query at the top of `index.css`) so state changes are instant
   rather than animated, but nothing gets stuck mid-transition or invisible.
 - **Skeletons only for loads that might exceed ~300ms.** A shimmer on something that
   resolves in 80ms just adds a flash of unnecessary motion.
+- **Backend mutation droplet.** User-triggered POST/PUT/PATCH/DELETE requests emit one
+  decorative droplet event, coalesced to avoid bursts (`api/apiActivity.ts`). GET polling,
+  refresh-token rotation, and SignalR keepalives never trigger it. The ripple is drawn by
+  the water scene canvas, in the outer band of the viewport away from form inputs.
 
 ## Chat bubbles
 
@@ -190,6 +206,34 @@ Light/dark is driven by `data-theme="light"|"dark"` on `<html>`, set by:
 - `ThemeContext` (`frontend/src/context/ThemeContext.tsx`), which persists the user's
   explicit choice back to `localStorage` and exposes `useTheme()`.
 - A `<ThemeToggle />` component in the app header and on the login/register pages.
+
+`ThemeContext` briefly adds `.theme-transitioning` to `<html>` when the user toggles. This
+lets theme-dependent backgrounds, borders, text, shadows, glass opacity, and water
+reflections interpolate over `--duration-theme`. The class must be removed after the
+transition and the reduced-motion rule must continue collapsing it to an instant change.
+
+Theme transitions are explicitly scoped to major surfaces, menus, and interactive controls.
+Never restore a universal `.theme-transitioning *` rule: it creates hundreds of simultaneous
+paint animations and makes the app visibly lag on chat-heavy screens.
+
+### Theme environments
+
+**Day lake (light):** `#eaf8ff` sky, `#cbefff` surface water, `#7ccde8` primary
+water, and `#2e8fb8` deep water. Panels are translucent white with reflective borders.
+
+**Night lake (dark):** `#081521` sky, `#0c2536` surface water, `#041019` deep
+water, `#63d3ff` moon reflection, and `#49c5ff` interaction bloom. Avoid pure black.
+
+### Hover and selection
+
+- Light mode: `scale(1.02)`, a 3–5% brightness/saturation lift, and
+  `--shadow-hover`. The element reflects light and rises.
+- Dark mode: `scale(1.02)`, a small saturation lift, and `--shadow-hover`. The
+  element emits a soft cyan bloom.
+- Both use `--duration-fast` (150ms). Selected items use `--shadow-selected` and
+  a primary edge so their state is not communicated by motion alone.
+- Never apply light bloom or a large dark drop shadow. The treatments are complementary,
+  not identical.
 
 ## Extending this system
 

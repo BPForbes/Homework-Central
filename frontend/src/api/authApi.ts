@@ -1,11 +1,10 @@
 import axios from 'axios'
 import type { AuthResponse, LoginRequest, RegisterRequest } from '../types/auth'
-
 import type { DevLoginOptions, DevLoginRequest } from '../types/devAuth'
-import { emitWaterDroplet } from '../utils/waterEvents'
+import { configureApiClient } from './configureApiClient'
 
 /** Auth endpoints excluded from the automatic 401 refresh retry loop. */
-const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login']
+const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login', '/auth/logout']
 
 const api = axios.create({
   baseURL: '/api',
@@ -14,44 +13,7 @@ const api = axios.create({
   timeout: 5000,
 })
 
-api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('accessToken')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  // Sending data to the server drops a ripple on the water background.
-  // Silent token refreshes are background noise, not a user action — skip them.
-  const method = (config.method ?? 'get').toLowerCase()
-  if (method !== 'get' && !(config.url ?? '').endsWith('/auth/refresh')) {
-    emitWaterDroplet()
-  }
-  return config
-})
-
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const original = error.config
-    const url: string = original?.url ?? ''
-    const isAuthEndpoint = AUTH_PATHS.some((p) => url.endsWith(p))
-
-    if (error.response?.status === 401 && original && !original._retry && !isAuthEndpoint) {
-      original._retry = true
-      try {
-        const { data } = await axios.post<AuthResponse>('/api/auth/refresh', null, {
-          withCredentials: true,
-        })
-        sessionStorage.setItem('accessToken', data.accessToken)
-        original.headers.Authorization = `Bearer ${data.accessToken}`
-        return api(original)
-      } catch {
-        sessionStorage.removeItem('accessToken')
-        window.location.href = '/login'
-      }
-    }
-    return Promise.reject(error)
-  }
-)
+configureApiClient(api, AUTH_PATHS)
 
 export const authApi = {
   login: (data: LoginRequest) => api.post<AuthResponse>('/auth/login', data),

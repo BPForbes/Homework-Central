@@ -6,7 +6,6 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Http;
@@ -64,7 +63,6 @@ public class ChatMessageServiceTests
             new FakeHttpContextAccessor(),
             effectiveMaskService,
             new ChatRoomAccessService(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor()),
-            new HtmlContentSanitizer(),
             new MentionCooldownTracker(),
             new FakeMentionRecipientResolver(),
             new FakeRoleAppearanceService(),

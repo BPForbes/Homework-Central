@@ -40,23 +40,25 @@ function InfoEntryEditor({ initialContent, saving, error, submitLabel, onSave, o
   return (
     <div className="info-entry-editor">
       <div className="chat-composer-toolbar-row">
-        {!showFormatting && <RichTextToolbar textareaRef={textareaRef} value={content} onChange={setContent} />}
+        <RichTextToolbar textareaRef={textareaRef} value={content} onChange={setContent} />
         <FormattingToggleButton active={showFormatting} onToggle={() => setShowFormatting((prev) => !prev)} />
       </div>
-      {showFormatting ? (
+      {showFormatting && (
         <div className="rich-preview-pane">
           {content.trim() ? <RichContent content={content} /> : <p className="chat-messages-empty">Nothing to preview yet.</p>}
         </div>
-      ) : (
-        <textarea
-          ref={textareaRef}
-          className="sm-textarea info-entry-textarea"
-          rows={8}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Write this entry using Markdown — **bold**, *italic*, lists, `code`, $inline math$, and more."
-        />
       )}
+      <textarea
+        ref={textareaRef}
+        className={`sm-textarea info-entry-textarea ${showFormatting ? 'rich-editor-source--preview-hidden' : ''}`}
+        rows={8}
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="Write this entry using Markdown — **bold**, *italic*, lists, `code`, $inline math$, and more."
+        readOnly={showFormatting}
+        tabIndex={showFormatting ? -1 : 0}
+        aria-hidden={showFormatting || undefined}
+      />
       {error && <p className="error">{error}</p>}
       <div className="infra-list-actions">
         <button type="button" className="btn-primary" disabled={saving || !content.trim()} onClick={() => onSave(content)}>

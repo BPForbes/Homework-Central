@@ -93,9 +93,7 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
       </div>
 
       <div className="chat-composer-toolbar-row">
-        {!showFormatting && (
-          <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} compact />
-        )}
+        <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} compact />
         <FormattingToggleButton
           active={showFormatting}
           onToggle={() => setShowFormatting((prev) => !prev)}
@@ -104,22 +102,24 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
       </div>
       <form className="chat-composer" onSubmit={handleSubmit}>
         <div className="chat-composer-input-wrap">
-          {showFormatting ? (
+          {showFormatting && (
             <div className="rich-preview-pane chat-composer-preview-pane">
               {draft.trim() ? <RichContent content={draft} /> : <p className="chat-messages-empty">Nothing to preview yet.</p>}
             </div>
-          ) : (
-            <textarea
-              ref={textareaRef}
-              className="chat-composer-input"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={activeAccount ? `Message as ${activeAccount.label}…` : 'Add a mock account above to chat'}
-              rows={1}
-              disabled={!activeAccount}
-            />
           )}
+          <textarea
+            ref={textareaRef}
+            className={`chat-composer-input ${showFormatting ? 'rich-editor-source--preview-hidden' : ''}`}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={activeAccount ? `Message as ${activeAccount.label}…` : 'Add a mock account above to chat'}
+            rows={1}
+            disabled={!activeAccount}
+            readOnly={showFormatting}
+            tabIndex={showFormatting ? -1 : 0}
+            aria-hidden={showFormatting || undefined}
+          />
         </div>
         <button type="submit" className="chat-send-btn" disabled={!activeAccount || !draft.trim()} aria-label="Send message">
           <FontAwesomeIcon icon={faArrowUp} />

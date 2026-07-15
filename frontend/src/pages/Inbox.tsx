@@ -4,8 +4,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faAt, faReply, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
 import { RichContent } from '../richtext/RichContent'
-import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import type { ChatInboxItem } from '../types/inbox'
 
 function formatUtcTimestamp(iso: string): string {

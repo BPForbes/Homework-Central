@@ -6,31 +6,62 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces */
-  --color-bg: #a8d8f0;
-  --color-bg-elevated: #fffdf9;
-  --color-surface: #ffffff;
-  --color-surface-alt: #f4f1e9;
-  --color-surface-sunken: #f1ece1;
-  --color-border: #e5dfd0;
-  --color-border-strong: #d3cab5;
+  /* Day-lake surfaces: translucent layers over the animated water field */
+  --color-bg: #eaf8ff;
+  --color-bg-elevated: rgba(247, 253, 255, 0.82);
+  --color-surface: rgba(255, 255, 255, 0.68);
+  --color-surface-alt: rgba(219, 242, 251, 0.76);
+  --color-surface-sunken: rgba(191, 229, 243, 0.6);
+  --color-border: rgba(255, 255, 255, 0.72);
+  --color-border-strong: rgba(46, 143, 184, 0.32);
+  --color-backdrop: rgba(8, 37, 54, 0.42);
+  --color-glass-highlight: rgba(255, 255, 255, 0.78);
+  --color-water-reflection: rgba(255, 255, 255, 0.34);
+  --color-interactive-fill: rgba(248, 253, 255, 0.9);
+  --color-bubble-own: rgba(124, 205, 232, 0.82);
+  --water-day-opacity: 1;
+  --water-night-opacity: 0;
+  --glass-blur: 11px;
+  --glass-saturate: 125%;
+
+  /* Water scene: day/night base gradients (crossfaded via the opacity tokens
+     above, so they are static and defined once) and the canvas elements drawn
+     by components/background/WaterBackground.tsx (theme-swapped below). */
+  --water-day-1: #eaf8ff;
+  --water-day-2: #cbefff;
+  --water-day-3: #a8ddf0;
+  --water-day-4: #7ccde8;
+  --water-night-1: #081521;
+  --water-night-2: #0c2536;
+  --water-night-3: #123a52;
+  --water-night-4: #041019;
+  --water-reflection-a: rgba(255, 255, 255, 0.5);
+  --water-reflection-b: rgba(190, 230, 255, 0.42);
+  --water-reflection-c: rgba(150, 216, 232, 0.38);
+  --water-lily: #3f9256;
+  --water-lily-rim: #2e7040;
+  --water-lily-shadow: rgba(20, 60, 90, 0.18);
+  --water-fish: rgba(92, 108, 120, 0.42);
+  --water-droplet: rgba(255, 255, 255, 0.65);
+  --water-firefly: #ffd76a;
+  --water-fog: rgba(205, 220, 232, 0.14);
 
   /* Ink */
-  --color-ink: #2b2620;
-  --color-ink-secondary: #6b6255;
-  --color-ink-tertiary: #948a7a;
+  --color-ink: #173848;
+  --color-ink-secondary: #456879;
+  --color-ink-tertiary: #688899;
 
-  /* Brand: deep teal primary, warm amber accent */
-  --color-primary: #0d7a6a;
-  --color-primary-hover: #0a6357;
-  --color-primary-soft: #e2f2ee;
-  --color-primary-soft-strong: #c7e8e0;
+  /* Brand: deep water primary and sunlit-cyan accent */
+  --color-primary: #176f91;
+  --color-primary-hover: #105a77;
+  --color-primary-soft: rgba(124, 205, 232, 0.22);
+  --color-primary-soft-strong: rgba(124, 205, 232, 0.38);
   --color-on-primary: #ffffff;
 
-  --color-accent: #e0942e;
-  --color-accent-hover: #c67f22;
-  --color-accent-soft: #fbead0;
-  --color-on-accent: #4a2f0d;
+  --color-accent: #2e8fb8;
+  --color-accent-hover: #217a9f;
+  --color-accent-soft: rgba(124, 205, 232, 0.24);
+  --color-on-accent: #ffffff;
 
   --color-danger: #c1392b;
   --color-danger-hover: #a52f22;
@@ -39,7 +70,7 @@
   --color-success: #2f8f5b;
   --color-success-soft: #ddf0e3;
 
-  --color-focus-ring: rgba(13, 122, 106, 0.32);
+  --color-focus-ring: rgba(46, 143, 184, 0.34);
 
   /* Subject/category hues — rotate across rooms so the palette earns its keep semantically */
   --hue-violet: #7c5cbf;
@@ -51,12 +82,17 @@
   --hue-plum: #93467a;
   --hue-plum-soft: #f5e3ee;
 
-  /* Shadows (tinted with ink, not neutral black; inset hairline reads like a paper edge) */
-  --shadow-sm: 0 1px 2px rgba(43, 38, 32, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  --shadow-md: 0 6px 16px rgba(43, 38, 32, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  --shadow-lg: 0 16px 40px rgba(43, 38, 32, 0.16);
-  --shadow-primary: 0 6px 18px rgba(13, 122, 106, 0.28);
-  --shadow-accent: 0 6px 18px rgba(224, 148, 46, 0.32);
+  /* Reflective elevation: soft depth plus a bright waterline on the top edge */
+  --shadow-sm: 0 2px 5px rgba(23, 56, 72, 0.08), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-md: 0 8px 22px rgba(23, 56, 72, 0.13), 0 2px 7px rgba(23, 56, 72, 0.08),
+    inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-lg: 0 20px 48px rgba(23, 56, 72, 0.2), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-primary: 0 8px 22px rgba(46, 143, 184, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  --shadow-accent: 0 8px 22px rgba(124, 205, 232, 0.32);
+  --shadow-hover: 0 10px 26px rgba(23, 56, 72, 0.15), 0 3px 8px rgba(23, 56, 72, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  --shadow-selected: 0 8px 24px rgba(46, 143, 184, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
   /* Radii */
   --radius-sm: 7px;
@@ -74,52 +110,57 @@
   --duration-base: 220ms;
   --duration-slow: 320ms;
   --duration-slower: 450ms;
+  --duration-theme: 700ms;
 
   /* Type */
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-
-  /* Water scene (base gradient + canvas elements — see components/background/WaterBackground.tsx) */
-  --water-base-1: #cfeeff;
-  --water-base-2: #a8d8f0;
-  --water-base-3: #7cc3e0;
-  --water-base-4: #b7e3f2;
-  --water-reflection-a: rgba(255, 255, 255, 0.5);
-  --water-reflection-b: rgba(190, 230, 255, 0.42);
-  --water-reflection-c: rgba(150, 216, 232, 0.38);
-  --water-lily: #3f9256;
-  --water-lily-rim: #2e7040;
-  --water-lily-shadow: rgba(20, 60, 90, 0.18);
-  --water-fish: rgba(92, 108, 120, 0.42);
-  --water-droplet: rgba(255, 255, 255, 0.65);
-  --water-firefly: #ffd76a;
-  --water-fog: rgba(205, 220, 232, 0.14);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --color-bg: #1a4d5c;
-  --color-bg-elevated: #211e1a;
-  --color-surface: #262320;
-  --color-surface-alt: #2f2b25;
-  --color-surface-sunken: #17150f;
-  --color-border: #3c362d;
-  --color-border-strong: #4c443a;
+  --color-bg: #081521;
+  --color-bg-elevated: rgba(10, 26, 40, 0.78);
+  --color-surface: rgba(12, 37, 54, 0.72);
+  --color-surface-alt: rgba(16, 49, 69, 0.7);
+  --color-surface-sunken: rgba(4, 16, 25, 0.76);
+  --color-border: rgba(99, 211, 255, 0.18);
+  --color-border-strong: rgba(99, 211, 255, 0.3);
+  --color-backdrop: rgba(1, 8, 14, 0.7);
+  --color-glass-highlight: rgba(99, 211, 255, 0.18);
+  --color-water-reflection: rgba(99, 211, 255, 0.16);
+  --color-interactive-fill: rgba(13, 47, 67, 0.9);
+  --color-bubble-own: rgba(22, 130, 173, 0.78);
+  --water-day-opacity: 0;
+  --water-night-opacity: 1;
+  --glass-saturate: 135%;
 
-  --color-ink: #f2ede4;
-  --color-ink-secondary: #b7ad9c;
-  --color-ink-tertiary: #8a8071;
+  /* Water scene canvas elements (night: moonlit reflections, fog + fireflies) */
+  --water-reflection-a: rgba(99, 211, 255, 0.2);
+  --water-reflection-b: rgba(90, 135, 220, 0.16);
+  --water-reflection-c: rgba(73, 197, 255, 0.16);
+  --water-lily: #2f6b40;
+  --water-lily-rim: #24512f;
+  --water-lily-shadow: rgba(0, 10, 20, 0.35);
+  --water-fish: rgba(155, 170, 182, 0.3);
+  --water-droplet: rgba(170, 220, 240, 0.5);
+  --water-firefly: #ffd76a;
+  --water-fog: rgba(190, 205, 220, 0.1);
 
-  --color-primary: #1f8f79;
-  --color-primary-hover: #24a68d;
-  --color-primary-soft: rgba(63, 191, 168, 0.16);
-  --color-primary-soft-strong: rgba(63, 191, 168, 0.28);
+  --color-ink: #eaf9ff;
+  --color-ink-secondary: #afd5e5;
+  --color-ink-tertiary: #7fa5b6;
+
+  --color-primary: #1682ad;
+  --color-primary-hover: #49c5ff;
+  --color-primary-soft: rgba(73, 197, 255, 0.14);
+  --color-primary-soft-strong: rgba(73, 197, 255, 0.25);
   --color-on-primary: #ffffff;
 
-  --color-accent: #d99a3d;
-  --color-accent-hover: #e6ac52;
-  --color-accent-soft: rgba(240, 184, 85, 0.16);
-  --color-on-accent: #2b1c05;
+  --color-accent: #63d3ff;
+  --color-accent-hover: #8adeff;
+  --color-accent-soft: rgba(99, 211, 255, 0.15);
+  --color-on-accent: #041019;
 
   --color-danger: #cf5546;
   --color-danger-hover: #db6e5f;
@@ -128,7 +169,7 @@
   --color-success: #3d9c68;
   --color-success-soft: rgba(95, 189, 133, 0.18);
 
-  --color-focus-ring: rgba(63, 191, 168, 0.4);
+  --color-focus-ring: rgba(73, 197, 255, 0.42);
 
   --hue-violet: #a58ee0;
   --hue-violet-soft: rgba(165, 142, 224, 0.16);
@@ -139,27 +180,15 @@
   --hue-plum: #c97dae;
   --hue-plum-soft: rgba(201, 125, 174, 0.16);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.36);
-  --shadow-lg: 0 20px 46px rgba(0, 0, 0, 0.55);
-  --shadow-primary: 0 6px 18px rgba(31, 143, 121, 0.4);
-  --shadow-accent: 0 6px 18px rgba(217, 154, 61, 0.35);
-
-  /* Water scene (dark: deep blue water, moonlit reflections, fog + fireflies) */
-  --water-base-1: #0b2f42;
-  --water-base-2: #1a4d5c;
-  --water-base-3: #0e3a4e;
-  --water-base-4: #143f50;
-  --water-reflection-a: rgba(110, 200, 235, 0.26);
-  --water-reflection-b: rgba(90, 135, 220, 0.2);
-  --water-reflection-c: rgba(35, 160, 185, 0.24);
-  --water-lily: #2f6b40;
-  --water-lily-rim: #24512f;
-  --water-lily-shadow: rgba(0, 10, 20, 0.35);
-  --water-fish: rgba(155, 170, 182, 0.3);
-  --water-droplet: rgba(170, 220, 240, 0.5);
-  --water-firefly: #ffd76a;
-  --water-fog: rgba(190, 205, 220, 0.12);
+  --shadow-sm: 0 3px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.38), inset 0 1px 0 var(--color-glass-highlight);
+  --shadow-lg: 0 24px 56px rgba(0, 0, 0, 0.58), 0 0 28px rgba(73, 197, 255, 0.08);
+  --shadow-primary: 0 8px 24px rgba(73, 197, 255, 0.3), 0 0 22px rgba(73, 197, 255, 0.2);
+  --shadow-accent: 0 8px 24px rgba(99, 211, 255, 0.26), 0 0 20px rgba(99, 211, 255, 0.18);
+  --shadow-hover: 0 10px 30px rgba(0, 0, 0, 0.42), 0 0 24px rgba(73, 197, 255, 0.24),
+    inset 0 1px 0 rgba(99, 211, 255, 0.24);
+  --shadow-selected: 0 8px 28px rgba(0, 0, 0, 0.34), 0 0 24px rgba(73, 197, 255, 0.28),
+    0 0 0 1px rgba(99, 211, 255, 0.24);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -183,44 +212,106 @@
 
 html {
   scroll-behavior: smooth;
+  min-height: 100%;
+  background: var(--color-bg);
+  transition: background-color var(--duration-theme) var(--ease-in-out);
 }
 
-body {
-  font-family: var(--font-sans);
-  color: var(--color-ink);
-  min-height: 100vh;
-  position: relative;
-  overflow-x: hidden;
-  transition: color var(--duration-slow) var(--ease-in-out);
+html::before,
+html::after {
+  content: '';
+  position: fixed;
+  inset: -8%;
+  pointer-events: none;
+  z-index: -2;
+  transition: opacity var(--duration-theme) var(--ease-in-out);
 }
 
 /*
- * Water background, two layers:
- * 1. body::before — the blue base. An oversized gradient whose position drifts
- *    slowly, so the water's color gradually shifts. It can never "run out":
- *    the gradient always covers the viewport, so no seams or hard lines.
- * 2. .water-scene — a fixed canvas (components/background/WaterBackground.tsx)
- *    that draws the moving elements: reflections, lily pads, fish, droplets,
- *    and (dark mode) fog + fireflies. Elements that drift off one edge
- *    re-enter antipodally on the opposite edge, so nothing escapes the water.
+ * Day/night water bases. Oversized gradients whose background-position drifts
+ * slowly, so the water's color gradually shifts with no seams; theme changes
+ * cross-fade the two layers via the --water-*-opacity tokens. The moving
+ * highlights (reflections, lily pads, fish, fog, fireflies) are drawn by the
+ * .water-scene canvas, where they wrap antipodally instead of escaping.
  */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
+html::before {
+  opacity: var(--water-day-opacity);
   background: linear-gradient(
     150deg,
-    var(--water-base-1) 0%,
-    var(--water-base-2) 36%,
-    var(--water-base-3) 68%,
-    var(--water-base-4) 100%
+    var(--water-day-1) 0%,
+    var(--water-day-2) 36%,
+    var(--water-day-4) 68%,
+    var(--water-day-3) 100%
   );
   background-size: 220% 220%;
   animation: water-base-drift 40s ease-in-out infinite alternate;
 }
 
+html::after {
+  opacity: var(--water-night-opacity);
+  background: linear-gradient(
+    150deg,
+    var(--water-night-1) 0%,
+    var(--water-night-2) 36%,
+    var(--water-night-3) 68%,
+    var(--water-night-4) 100%
+  );
+  background-size: 220% 220%;
+  animation: water-base-drift 52s ease-in-out infinite alternate-reverse;
+}
+
+:root[data-theme='light']::after,
+:root[data-theme='dark']::before {
+  animation-play-state: paused;
+}
+
+body {
+  font-family: var(--font-sans);
+  position: relative;
+  z-index: 0;
+  background: transparent;
+  color: var(--color-ink);
+  min-height: 100vh;
+  transition: color var(--duration-theme) var(--ease-in-out);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.58;
+  background:
+    repeating-radial-gradient(ellipse at 52% 115%, transparent 0 28px, var(--color-water-reflection) 30px 31px,
+      transparent 33px 58px),
+    repeating-radial-gradient(ellipse at 18% 88%, transparent 0 36px, var(--color-water-reflection) 38px 39px,
+      transparent 41px 72px),
+    linear-gradient(105deg, transparent 10%, var(--color-water-reflection) 46%, transparent 62%);
+  background-size: 140% 120%, 160% 130%, 180% 100%;
+  animation: water-ripple 14s ease-in-out infinite alternate, water-ripple-shift 22s ease-in-out infinite alternate-reverse;
+  transition: opacity var(--duration-theme) var(--ease-in-out);
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: -4%;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.34;
+  background:
+    radial-gradient(circle at var(--wave-a-x, 24%) var(--wave-a-y, 72%), var(--color-water-reflection) 0%, transparent 42%),
+    radial-gradient(circle at var(--wave-b-x, 76%) var(--wave-b-y, 64%), var(--color-water-reflection) 0%, transparent 38%);
+  animation: water-swell 16s ease-in-out infinite alternate;
+  transition: opacity var(--duration-theme) var(--ease-in-out);
+}
+
+/*
+ * Living-elements canvas (components/background/WaterBackground.tsx):
+ * reflections, lily pads, fish, droplet ripples, and in dark mode fog and
+ * fireflies. Paints above the ripple layers, below all page content.
+ */
 .water-scene {
   position: fixed;
   inset: 0;
@@ -230,10 +321,70 @@ body::before {
   pointer-events: none;
 }
 
+#root {
+  min-height: 100vh;
+}
+
+:root.theme-transitioning :is(
+  .app-header,
+  .chat-sidebar,
+  .chat-sidebar-header,
+  .chat-category,
+  .server-maintenance-nav,
+  .server-nav-link,
+  .chat-room-link,
+  .server-page-card,
+  .sm-panel,
+  .sm-room-card,
+  .infra-list-item,
+  .chat-room-page--active,
+  .chat-room-header,
+  .chat-room-panel,
+  .chat-composer-wrap,
+  .rich-toolbar,
+  .rich-toolbar-btn,
+  .chat-bubble,
+  button,
+  input,
+  textarea,
+  select
+) {
+  transition-property: background-color, border-color, color, box-shadow, opacity;
+  transition-duration: var(--duration-theme);
+  transition-timing-function: var(--ease-in-out);
+}
+
 @keyframes water-base-drift {
   0% { background-position: 0% 0%; }
   45% { background-position: 70% 40%; }
   100% { background-position: 100% 100%; }
+}
+
+@keyframes water-ripple {
+  from { transform: translate3d(-1.5%, 0.5%, 0) scale(1.01); }
+  to { transform: translate3d(1.5%, -1%, 0) scale(1.04); }
+}
+
+@keyframes water-ripple-shift {
+  from { background-position: 0% 0%, 100% 100%, 0% 50%; }
+  to { background-position: 8% 6%, 92% 88%, 100% 50%; }
+}
+
+@keyframes water-swell {
+  from {
+    --wave-a-x: 20%;
+    --wave-a-y: 74%;
+    --wave-b-x: 80%;
+    --wave-b-y: 62%;
+    transform: translate3d(-1%, 0, 0) scale(1);
+  }
+  to {
+    --wave-a-x: 28%;
+    --wave-a-y: 68%;
+    --wave-b-x: 72%;
+    --wave-b-y: 70%;
+    transform: translate3d(1%, -0.5%, 0) scale(1.03);
+  }
 }
 
 ::selection {
@@ -310,6 +461,8 @@ a {
    Auth pages
    ========================================================================== */
 
+/* No background of its own: the water layers (base, ripples, scene canvas)
+   show through, same as the logged-in pages. */
 .auth-page {
   position: relative;
   min-height: 100vh;
@@ -679,9 +832,15 @@ a {
 .app-layout {
   min-height: 100vh;
   display: flex;
+  align-items: stretch;
+}
+
+.app-content {
+  min-width: 0;
+  min-height: 100vh;
+  flex: 1;
+  display: flex;
   flex-direction: column;
-  position: relative;
-  z-index: 1;
 }
 
 .app-header {
@@ -695,7 +854,10 @@ a {
   position: sticky;
   top: 0;
   z-index: 40;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: inset 0 1px 0 var(--color-glass-highlight);
+  transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out),
+    box-shadow var(--duration-theme) var(--ease-in-out), color var(--duration-theme) var(--ease-in-out);
 }
 
 .app-header-start {
@@ -736,7 +898,7 @@ a {
   gap: 0.75rem 1rem;
   margin-bottom: 1.25rem;
   padding: 0.65rem 0.85rem;
-  background: var(--color-surface-alt);
+  background: color-mix(in srgb, var(--color-surface-alt) 58%, transparent);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
@@ -928,7 +1090,7 @@ a {
 .confirm-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(20, 18, 14, 0.5);
+  background: var(--color-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1124,7 +1286,7 @@ a {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(20, 18, 14, 0.55);
+  background: var(--color-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1325,78 +1487,32 @@ a {
   padding: 1.25rem;
 }
 
-.chat-menu-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 0.9rem;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  font-family: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: var(--shadow-primary);
-  transition: transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast) var(--ease-out),
-    background var(--duration-fast) var(--ease-out);
-}
-
-.chat-menu-toggle:hover {
-  background: var(--color-primary-hover);
-  transform: translateY(-1px);
-}
-
-.chat-menu-toggle:active {
-  transform: scale(0.96);
-}
-
-/* Sliding chat sidebar */
-.chat-sidebar-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 18, 14, 0.5);
-  border: none;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-slow) var(--ease-out);
-  z-index: 90;
-  cursor: pointer;
-}
-
-.chat-sidebar-backdrop.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
+/* Persistent chat rail */
 .chat-sidebar {
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 0;
-  width: min(320px, 88vw);
-  height: 100%;
+  width: clamp(11rem, 23vw, 20rem);
+  height: 100vh;
+  height: 100dvh;
+  flex: 0 0 clamp(11rem, 23vw, 20rem);
   background: var(--color-bg-elevated);
   border-right: 1px solid var(--color-border);
   box-shadow: var(--shadow-lg);
-  transform: translateX(-100%);
-  transition: transform var(--duration-slow) var(--ease-out);
-  z-index: 100;
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out),
+    box-shadow var(--duration-theme) var(--ease-in-out);
+  z-index: 50;
   display: flex;
   flex-direction: column;
-}
-
-.chat-sidebar.open {
-  transform: translateX(0);
 }
 
 .chat-sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 1rem 1.1rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
+  box-shadow: inset 0 1px 0 var(--color-glass-highlight);
 }
 
 .chat-sidebar-header h2 {
@@ -1410,30 +1526,6 @@ a {
 
 .chat-sidebar-title-icon {
   color: var(--color-primary);
-}
-
-.chat-sidebar-close {
-  width: 2rem;
-  height: 2rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-alt);
-  color: var(--color-ink-tertiary);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-spring);
-}
-
-.chat-sidebar-close:hover {
-  background: var(--color-border);
-  color: var(--color-ink);
-}
-
-.chat-sidebar-close:active {
-  transform: scale(0.9);
 }
 
 .chat-sidebar-body {
@@ -1457,8 +1549,21 @@ a {
   margin-bottom: 0.5rem;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: var(--color-surface);
+  background: transparent;
   border: 1px solid var(--color-border);
+}
+
+.chat-category-label-row {
+  display: flex;
+  align-items: center;
+  padding: 0.65rem 0.9rem 0.35rem;
+  background: var(--color-interactive-fill);
+}
+
+.chat-category-label-row .chat-category-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-ink-secondary);
 }
 
 .chat-category-toggle {
@@ -1469,7 +1574,7 @@ a {
   gap: 0.5rem;
   padding: 0.75rem 0.9rem;
   border: none;
-  background: var(--color-surface-alt);
+  background: var(--color-interactive-fill);
   cursor: pointer;
   text-align: left;
   font-size: 0.9rem;
@@ -1518,6 +1623,7 @@ a {
   color: var(--color-ink-secondary);
   font-size: 0.9rem;
   font-weight: 600;
+  background: color-mix(in srgb, var(--color-interactive-fill) 72%, transparent);
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out);
 }
@@ -1532,6 +1638,19 @@ a {
   background: var(--color-primary-soft-strong);
   color: var(--color-primary-hover);
   font-weight: 700;
+}
+
+.infra-sidebar-link {
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-room-list .infra-sidebar-link .chat-room-icon {
+  width: 1.1rem;
+  flex-shrink: 0;
 }
 
 .chat-room-icon {
@@ -1554,10 +1673,6 @@ a {
 
 .chat-room-hero-layered {
   font-size: 1rem;
-}
-
-.chat-key-badge-layered {
-  font-size: 28px;
 }
 
 .chat-room-link.active .chat-room-icon,
@@ -2036,6 +2151,101 @@ a {
   box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary);
 }
 
+.role-appearance-wheel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.color-wheel-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 12rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.color-wheel-square {
+  position: relative;
+  width: 100%;
+  height: 8rem;
+  border-radius: var(--radius-sm);
+  background-image:
+    linear-gradient(to top, #000, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.color-wheel-square-thumb {
+  position: absolute;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: var(--radius-full);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), var(--shadow-sm);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-wheel-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.color-wheel-hue {
+  position: relative;
+  flex: 1;
+  height: 0.9rem;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%
+  );
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.color-wheel-hue-thumb {
+  position: absolute;
+  top: 50%;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: var(--radius-full);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), var(--shadow-sm);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-wheel-eyedropper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+
+.color-wheel-eyedropper:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
 .role-appearance-mentionable {
   display: flex;
   align-items: center;
@@ -2146,6 +2356,10 @@ a {
   height: calc(100vh - 5.5rem);
   margin: -1.5rem;
   max-width: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
 }
 
 .chat-room-header {
@@ -2155,6 +2369,7 @@ a {
   padding: 0.85rem 1.25rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
 }
 
@@ -2233,7 +2448,15 @@ a {
 
 .chat-bubble {
   position: relative;
-  max-width: min(75%, 28rem);
+  /* Flex items default to min-width:auto, which lets an unbreakable child (a long code line, a
+     wide equation) force the bubble past max-width instead of respecting it — min-width:0 makes
+     the cap actually stick, so overflow is handled by the specific child's own scroll container
+     (.hc-code-block, .katex-display) instead of spilling past the bubble's rounded background. */
+  min-width: 0;
+  /* The 75%/28rem cap lives on .chat-message-thread (the bubble's always-present wrapper);
+     repeating it here would compound to 56% of the row (75% of 75%). */
+  max-width: 100%;
+  width: fit-content;
   padding: 0.6rem 0.85rem;
   border-radius: var(--radius-lg);
   line-height: 1.45;
@@ -2245,14 +2468,14 @@ a {
 
 .chat-bubble--own {
   align-self: flex-end;
-  background: var(--color-primary-soft-strong);
+  background: var(--color-bubble-own);
   color: var(--color-ink);
   box-shadow: var(--shadow-sm);
 }
 
 .chat-bubble--other {
   align-self: flex-start;
-  background: var(--color-surface);
+  background: var(--color-interactive-fill);
   color: var(--color-ink);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
@@ -2323,6 +2546,7 @@ a {
 .chat-message-thread {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   max-width: min(75%, 28rem);
 }
 
@@ -2513,6 +2737,7 @@ a {
   flex-direction: column;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
 }
 
@@ -2528,6 +2753,11 @@ a {
   flex: 1;
   margin-bottom: 0;
   min-width: 0;
+}
+
+.chat-composer-toolbar-row .rich-preview-toggle {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .chat-composer-preview-pane {
@@ -2654,17 +2884,6 @@ a {
 .chat-send-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.chat-key-badge {
-  position: absolute;
-  bottom: 5.25rem;
-  right: 1.25rem;
-  font-size: 28px;
-  opacity: 0.9;
-  pointer-events: none;
-  filter: drop-shadow(0 2px 4px rgba(43, 38, 32, 0.16));
-  z-index: 2;
 }
 
 /* Captcha widget (signup + dashboard verify) — label row + content only; no outer box so the
@@ -3082,10 +3301,12 @@ a {
   padding: 1.5rem 1.75rem;
   margin-bottom: 1.5rem;
   border-radius: var(--radius-xl);
-  background: linear-gradient(135deg, #171512 0%, #24211b 55%, #1d3a34 100%);
-  color: #f2ede4;
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink);
   overflow: hidden;
   flex-wrap: wrap;
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.75)) saturate(var(--glass-saturate));
 }
 
 .sm-hero::before {
@@ -3125,13 +3346,13 @@ a {
 }
 
 .sm-hero .server-page-subtitle {
-  color: #cbc3b2;
+  color: var(--color-ink-tertiary);
   margin: 0;
 }
 
 .sm-hero .server-page-subtitle code {
-  background: rgba(242, 237, 228, 0.14);
-  color: #f2ede4;
+  background: var(--color-surface-alt);
+  color: var(--color-ink);
   padding: 0.05rem 0.35rem;
   border-radius: 5px;
   font-size: 0.85em;
@@ -3966,7 +4187,7 @@ a {
   padding: 0.4rem;
   margin-bottom: 0.5rem;
   border-radius: var(--radius-md);
-  background: var(--color-surface-alt);
+  background: color-mix(in srgb, var(--color-surface-alt) 50%, transparent);
   border: 1px solid var(--color-border);
 }
 
@@ -4051,6 +4272,9 @@ a {
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring), background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .rich-preview-toggle.active {
@@ -4067,9 +4291,32 @@ a {
   background: var(--color-surface-alt);
 }
 
+/* Keep the source mounted so toolbar actions retain the last text selection while previewing. */
+.rich-editor-source--preview-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 /* Markdown output itself — shared by chat bubbles, the mock chat preview, and info entries */
 .rich-content {
   overflow-wrap: anywhere;
+  /* Markdown emits real block tags (<p>, <ul>, <pre>) with newlines between them; without this,
+     a pre-wrap ancestor (.chat-bubble) renders those inter-tag newlines as phantom blank lines.
+     Author line breaks are preserved as <br> by the renderer (breaks: true), not by whitespace. */
+  white-space: normal;
+  /* Last-resort containment for wide content with no scroll container of its own — chiefly long
+     inline KaTeX, which cannot line-break — so it scrolls inside the bubble instead of bleeding
+     past it. Code blocks, tables, and display math still scroll themselves first. */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .rich-content > *:first-child {
@@ -4171,6 +4418,7 @@ a {
 .rich-content .hc-code-block {
   margin: 0.6em 0;
   padding: 0.75em 0.9em;
+  max-width: 100%;
   overflow-x: auto;
   border-radius: var(--radius-md);
   background: var(--color-surface-sunken);
@@ -4204,8 +4452,16 @@ a {
 
 .rich-content .katex-display {
   margin: 0.6em 0;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* Belt-and-suspenders: katex.css already sets nowrap on `.katex-display > .katex`, but inline
+   math ($...$) renders a bare `.katex` with no such ancestor rule, so a long inline formula could
+   still wrap mid-symbol without this. */
+.rich-content .katex {
+  white-space: nowrap;
 }
 
 /* Custom syntax-highlight theme mapped to design tokens (no canned hljs theme import) */
@@ -4254,4 +4510,387 @@ a {
 
 .rich-content .hljs-deletion {
   color: var(--color-danger);
+}
+
+/* ==========================================================================
+   Water material, theme-aware interaction lighting, and responsive rail
+   ========================================================================== */
+
+.auth-card,
+.dashboard-card,
+.dashboard-inbox-summary,
+.server-page-card,
+.get-roles-panel,
+.modal-panel,
+.confirm-modal,
+.sm-panel {
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.theme-toggle,
+.btn-primary,
+.btn-secondary,
+.server-nav-link,
+.dashboard-card,
+.dashboard-inbox-link,
+.inbox-item,
+.inbox-item-link,
+.infra-list-item,
+.custom-role-icon-option,
+.chat-category-toggle,
+.chat-room-link,
+.chat-bubble,
+.chat-bubble-action-btn,
+.chat-reply-quote-bubble,
+.chat-send-btn,
+.get-roles-button,
+.sm-segmented-option,
+.sm-icon-option,
+.sm-room-card,
+.sm-icon-btn,
+.mock-account-chip,
+.rich-toolbar-btn,
+.rich-toolbar-color,
+.rich-preview-toggle {
+  transform-origin: center;
+  transition: transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+:root[data-theme='light'] :is(
+  .theme-toggle,
+  .btn-primary,
+  .btn-secondary,
+  .server-nav-link,
+  .dashboard-card,
+  .dashboard-inbox-link,
+  .inbox-item,
+  .inbox-item-link,
+  .infra-list-item,
+  .custom-role-icon-option,
+  .chat-category-toggle,
+  .chat-room-link,
+  .chat-bubble,
+  .chat-bubble-action-btn,
+  .chat-reply-quote-bubble,
+  .chat-send-btn,
+  .get-roles-button,
+  .sm-segmented-option,
+  .sm-icon-option,
+  .sm-room-card,
+  .sm-icon-btn,
+  .mock-account-chip,
+  .rich-toolbar-btn,
+  .rich-toolbar-color,
+  .rich-preview-toggle
+):hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: var(--shadow-hover);
+}
+
+:root[data-theme='dark'] :is(
+  .theme-toggle,
+  .btn-primary,
+  .btn-secondary,
+  .server-nav-link,
+  .dashboard-card,
+  .dashboard-inbox-link,
+  .inbox-item,
+  .inbox-item-link,
+  .infra-list-item,
+  .custom-role-icon-option,
+  .chat-category-toggle,
+  .chat-room-link,
+  .chat-bubble,
+  .chat-bubble-action-btn,
+  .chat-reply-quote-bubble,
+  .chat-send-btn,
+  .get-roles-button,
+  .sm-segmented-option,
+  .sm-icon-option,
+  .sm-room-card,
+  .sm-icon-btn,
+  .mock-account-chip,
+  .rich-toolbar-btn,
+  .rich-toolbar-color,
+  .rich-preview-toggle
+):hover:not(:disabled) {
+  transform: scale(1.02);
+  box-shadow: var(--shadow-hover);
+}
+
+:is(
+  .chat-room-link.active,
+  .inbox-item--selected,
+  .custom-role-icon-option.selected,
+  .role-appearance-swatch.selected,
+  .maze-unsolvable-btn.active,
+  .get-roles-button.claimed,
+  .sm-segmented-option.active,
+  .sm-icon-option.selected,
+  .mock-account-chip.active,
+  .rich-preview-toggle.active
+) {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-selected);
+}
+
+.infra-area-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 13rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.infra-area-sidebar {
+  position: sticky;
+  top: 5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-surface-alt) 42%, transparent);
+}
+
+.infra-area-sidebar button {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-interactive-fill);
+  color: var(--color-ink-secondary);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.infra-area-sidebar button:hover {
+  transform: scale(1.02);
+  color: var(--color-primary-hover);
+  box-shadow: var(--shadow-hover);
+}
+
+.infra-area-sidebar button.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft-strong);
+  color: var(--color-primary-hover);
+  box-shadow: var(--shadow-selected);
+}
+
+.infra-area-content {
+  min-width: 0;
+}
+
+.sm-layout--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.user-role-search {
+  display: flex;
+  gap: 0.6rem;
+  margin: 1rem 0;
+  align-items: stretch;
+}
+
+.user-role-search .btn-primary {
+  width: auto;
+  flex: 0 0 auto;
+  align-self: stretch;
+  white-space: nowrap;
+}
+
+.user-role-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.user-role-search-results,
+.user-role-grid {
+  list-style: none;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.user-role-search-results {
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  margin-bottom: 1rem;
+}
+
+.user-role-search-results button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-interactive-fill);
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-role-search-results button span,
+.user-role-detail header p {
+  color: var(--color-ink-tertiary);
+  font-size: 0.78rem;
+}
+
+.user-role-detail {
+  display: grid;
+  gap: 0.8rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.user-role-detail > header,
+.user-role-grid li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+}
+
+.user-role-grid {
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.user-role-grid li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.user-role-grid li > button {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.user-role-grid li {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-interactive-fill);
+}
+
+.user-role-grid li.assigned {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.user-role-grid small {
+  color: var(--color-ink-tertiary);
+}
+
+.user-effective-permissions {
+  padding: 0;
+  border: 0;
+}
+
+.user-effective-permissions span {
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-tertiary);
+  font-size: 0.78rem;
+}
+
+.user-effective-permissions span.active {
+  background: var(--color-primary-soft-strong);
+  color: var(--color-primary-hover);
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .chat-sidebar {
+    width: 9.5rem;
+    flex-basis: 9.5rem;
+  }
+
+  .chat-sidebar-body {
+    padding: 0.4rem;
+  }
+
+  .chat-sidebar-header {
+    padding-inline: 0.75rem;
+  }
+
+  .chat-category-toggle {
+    padding-inline: 0.65rem;
+  }
+
+  .chat-room-link {
+    gap: 0.45rem;
+    padding-inline: 0.55rem;
+  }
+
+  .app-header {
+    padding-inline: 0.75rem;
+  }
+
+  .app-title {
+    font-size: 0.95rem;
+  }
+
+  .app-title-text {
+    display: none;
+  }
+
+  .user-info > span {
+    display: none;
+  }
+
+  .user-info {
+    gap: 0.45rem;
+  }
+
+  .user-info .btn-secondary {
+    padding-inline: 0.6rem;
+    white-space: nowrap;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+
+  .chat-room-page--active {
+    margin: -1rem;
+  }
+
+  .chat-composer-toolbar-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding-inline: 0.65rem;
+  }
+
+  .chat-composer-toolbar-row .rich-toolbar {
+    flex-basis: 100%;
+    order: 2;
+  }
+
+  .chat-composer-toolbar-row .rich-preview-toggle {
+    order: 1;
+    margin-left: auto;
+  }
+
+  .infra-area-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .infra-area-sidebar {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

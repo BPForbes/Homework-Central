@@ -61,7 +61,8 @@ export function RichTextToolbar({ textareaRef, value, onChange, compact = false 
     onChange(result.value)
     window.requestAnimationFrame(() => {
       const el = textareaRef.current
-      el?.focus()
+      if (el?.getAttribute('aria-hidden') !== 'true')
+        el?.focus()
       el?.setSelectionRange(result.selectionStart, result.selectionEnd)
     })
   }
@@ -126,19 +127,15 @@ export function RichTextToolbar({ textareaRef, value, onChange, compact = false 
       <button type="button" className="rich-toolbar-btn" title="Inline code" onClick={() => run('inlineCode')}>
         <FontAwesomeIcon icon={faCode} />
       </button>
-      {!compact && (
-        <button type="button" className="rich-toolbar-btn" title="Code block" onClick={() => run('codeBlock')}>
-          <FontAwesomeIcon icon={faFileCode} />
-        </button>
-      )}
+      <button type="button" className="rich-toolbar-btn" title="Code block" onClick={() => run('codeBlock')}>
+        <FontAwesomeIcon icon={faFileCode} />
+      </button>
       <button type="button" className="rich-toolbar-btn" title="Inline math ($…$)" onClick={() => run('inlineMath')}>
         <FontAwesomeIcon icon={faSquareRootVariable} />
       </button>
-      {!compact && (
-        <button type="button" className="rich-toolbar-btn" title="Display math ($$…$$)" onClick={() => run('displayMath')}>
-          <span className="rich-toolbar-text-btn">Σ</span>
-        </button>
-      )}
+      <button type="button" className="rich-toolbar-btn" title="Display math ($$…$$)" onClick={() => run('displayMath')}>
+        <span className="rich-toolbar-text-btn">Σ</span>
+      </button>
 
       <span className="rich-toolbar-sep" aria-hidden="true" />
       <label className="rich-toolbar-select-wrap" title="Font size">

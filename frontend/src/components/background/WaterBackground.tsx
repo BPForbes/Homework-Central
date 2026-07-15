@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { WATER_DROPLET_EVENT } from '../../utils/waterEvents'
+import { API_MUTATION_EVENT } from '../../api/apiActivity'
 
 /**
  * Animated water scene rendered on a full-viewport canvas behind all page
@@ -16,7 +16,7 @@ import { WATER_DROPLET_EVENT } from '../../utils/waterEvents'
  * - lily pads (both themes): green, floating above the water
  * - fish (both themes): grey, blurred, moving linearly under the water
  * - droplets (both themes): ripple rings — spawned randomly and whenever the
- *   API layer sends data to the server (see utils/waterEvents.ts)
+ *   API layer sends data to the server (see api/apiActivity.ts)
  * - fog + fireflies (dark mode only): drifting mist and sporadically darting
  *   points of light that bloom gold over the water
  *
@@ -219,7 +219,7 @@ class WaterScene {
   start(): void {
     this.resize()
     window.addEventListener('resize', this.handleResize)
-    window.addEventListener(WATER_DROPLET_EVENT, this.handleApiDroplet)
+    document.addEventListener(API_MUTATION_EVENT, this.handleApiDroplet)
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
     const now = performance.now()
@@ -237,7 +237,7 @@ class WaterScene {
   destroy(): void {
     cancelAnimationFrame(this.rafId)
     window.removeEventListener('resize', this.handleResize)
-    window.removeEventListener(WATER_DROPLET_EVENT, this.handleApiDroplet)
+    document.removeEventListener(API_MUTATION_EVENT, this.handleApiDroplet)
     this.themeObserver.disconnect()
   }
 

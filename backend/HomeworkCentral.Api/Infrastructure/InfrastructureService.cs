@@ -37,6 +37,23 @@ public interface IInfrastructureService
 
     Task<IReadOnlyList<InfrastructureUserLookupDto>> SearchUsersAsync(string query, CancellationToken ct = default);
     Task<InfrastructureUserLookupDto?> GetUserWithCustomRolesAsync(Guid userId, string? tenantDatabaseName = null, CancellationToken ct = default);
+    Task<InfrastructureUserLookupDto?> GetUserRoleManagementAsync(
+        Guid actorUserId,
+        Guid userId,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default);
+    Task<bool> AdminAssignPlatformRoleAsync(
+        Guid actorUserId,
+        Guid targetUserId,
+        string roleName,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default);
+    Task<bool> AdminRevokePlatformRoleAsync(
+        Guid actorUserId,
+        Guid targetUserId,
+        string roleName,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default);
     Task<IReadOnlyList<AssignableUserDto>> ListAssignableUsersAsync(Guid actorUserId, Guid roleId, CancellationToken ct = default);
     Task<int> BulkAssignCustomRoleAsync(Guid actorUserId, Guid roleId, BulkAssignCustomRoleRequest request, CancellationToken ct = default);
     Task<bool> AdminAssignCustomRoleAsync(Guid actorUserId, Guid targetUserId, Guid roleId, string? tenantDatabaseName = null, CancellationToken ct = default);
@@ -740,6 +757,196 @@ public sealed class InfrastructureService(
                 .FirstOrDefaultAsync(u => u.UserId == userId, ct);
 
             return user is null ? null : await BuildUserLookupAsync(user, location.TenantDatabaseName, ct);
+        }
+        finally
+        {
+            if (location.DisposeDb)
+                await location.Db.DisposeAsync();
+        }
+    }
+
+    public async Task<InfrastructureUserLookupDto?> GetUserRoleManagementAsync(
+        Guid actorUserId,
+        Guid userId,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default)
+    {
+        UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(userId, tenantDatabaseName, ct);
+        if (location is null)
+            return null;
+
+        try
+        {
+            User? user = await location.Db.Users
+                .AsNoTracking()
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId, ct);
+            if (user is null)
+                return null;
+
+            InfrastructureUserLookupDto result = await BuildUserLookupAsync(user, location.TenantDatabaseName, ct);
+            AccessScope scope = RequireScope();
+            short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(user);
+            bool targetBelowActor = userId != actorUserId && PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel);
+            HashSet<string> assignedNames = user.UserRoles
+                .Where(ur => !ur.Role.IsCustom)
+                .Select(ur => ur.Role.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            for (short bit = PlatformRoles.Guest; bit <= PlatformRoles.Founder; bit++)
+            {
+                if (!PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string roleName))
+                    continue;
+
+                bool assigned = assignedNames.Contains(roleName);
+                bool roleBelowActor = PlatformRoleCatalog.CanGrantRole(actorLevel, bit);
+                result.PlatformRoles.Add(new PlatformRoleAssignmentDto
+                {
+                    Name = roleName,
+                    Bit = bit,
+                    IsAssigned = assigned,
+                    CanGrant = !assigned && targetBelowActor && roleBelowActor,
+                    CanRevoke = assigned && targetBelowActor && roleBelowActor,
+                });
+            }
+
+            UserEffectiveMask? effective = await location.Db.UserEffectiveMasks
+                .AsNoTracking()
+                .FirstOrDefaultAsync(mask => mask.UserId == userId, ct);
+            if (effective is null)
+                effective = await EffectiveMaskService.RebuildOnContextAsync(location.Db, userId, ct);
+
+            result.EffectivePermissionIds = AuthorizationCatalog.Permissions
+                .Where(permission => BitMask.HasBit(effective.EffectiveModerationMask, permission.PermissionId))
+                .Select(permission => permission.PermissionId)
+                .ToList();
+            return result;
+        }
+        finally
+        {
+            if (location.DisposeDb)
+                await location.Db.DisposeAsync();
+        }
+    }
+
+    public async Task<bool> AdminAssignPlatformRoleAsync(
+        Guid actorUserId,
+        Guid targetUserId,
+        string roleName,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default)
+    {
+        if (!PlatformRoleCatalog.TryGetCanonicalRoleName(roleName, out string canonicalName, out short roleBit))
+            throw new InvalidOperationException("Unknown platform role.");
+
+        AccessScope scope = RequireScope();
+        short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
+        if (!PlatformRoleCatalog.CanGrantRole(actorLevel, roleBit))
+            throw new InvalidOperationException("You can only grant roles below your own highest role.");
+
+        UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(targetUserId, tenantDatabaseName, ct);
+        if (location is null)
+            return false;
+
+        try
+        {
+            User target = await location.Db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstAsync(u => u.UserId == targetUserId, ct);
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(target);
+            if (targetUserId == actorUserId || !PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel))
+                throw new InvalidOperationException("You can only manage users below your own highest role.");
+
+            Role role = await location.Db.Roles.FirstOrDefaultAsync(r => r.Name == canonicalName && !r.IsCustom, ct)
+                ?? throw new InvalidOperationException("Platform role is not configured.");
+
+            string? mutuallyExclusive = canonicalName switch
+            {
+                "Guest" => "VerifiedUser",
+                "VerifiedUser" => "Guest",
+                _ => null,
+            };
+            if (mutuallyExclusive is not null)
+            {
+                UserRole? conflicting = target.UserRoles.FirstOrDefault(ur =>
+                    string.Equals(ur.Role.Name, mutuallyExclusive, StringComparison.OrdinalIgnoreCase));
+                if (conflicting is not null)
+                    location.Db.UserRoles.Remove(conflicting);
+            }
+
+            if (!target.UserRoles.Any(ur => ur.RoleId == role.RoleId))
+            {
+                location.Db.UserRoles.Add(new UserRole
+                {
+                    UserId = targetUserId,
+                    RoleId = role.RoleId,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = await ResolveAssignedByForTargetDbAsync(location.Db, actorUserId, ct),
+                });
+            }
+
+            await location.Db.SaveChangesAsync(ct);
+            await EffectiveMaskService.RebuildOnContextAsync(location.Db, targetUserId, ct);
+            return true;
+        }
+        finally
+        {
+            if (location.DisposeDb)
+                await location.Db.DisposeAsync();
+        }
+    }
+
+    public async Task<bool> AdminRevokePlatformRoleAsync(
+        Guid actorUserId,
+        Guid targetUserId,
+        string roleName,
+        string? tenantDatabaseName = null,
+        CancellationToken ct = default)
+    {
+        if (!PlatformRoleCatalog.TryGetCanonicalRoleName(roleName, out string canonicalName, out short roleBit))
+            throw new InvalidOperationException("Unknown platform role.");
+
+        AccessScope scope = RequireScope();
+        short actorLevel = await GetActorGrantLevelAsync(actorUserId, scope, ct);
+        if (!PlatformRoleCatalog.CanGrantRole(actorLevel, roleBit))
+            throw new InvalidOperationException("You can only revoke roles below your own highest role.");
+
+        UserDatabaseLocation? location = await userDirectory.ResolveUserDbAsync(targetUserId, tenantDatabaseName, ct);
+        if (location is null)
+            return false;
+
+        try
+        {
+            User target = await location.Db.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstAsync(u => u.UserId == targetUserId, ct);
+            short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(target);
+            if (targetUserId == actorUserId || !PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel))
+                throw new InvalidOperationException("You can only manage users below your own highest role.");
+
+            UserRole? assignment = target.UserRoles.FirstOrDefault(ur =>
+                string.Equals(ur.Role.Name, canonicalName, StringComparison.OrdinalIgnoreCase));
+            if (assignment is null)
+                return true;
+
+            location.Db.UserRoles.Remove(assignment);
+            if (string.Equals(canonicalName, "VerifiedUser", StringComparison.OrdinalIgnoreCase)
+                && !target.UserRoles.Any(ur => string.Equals(ur.Role.Name, "Guest", StringComparison.OrdinalIgnoreCase)))
+            {
+                Role guest = await location.Db.Roles.FirstAsync(r => r.Name == "Guest" && !r.IsCustom, ct);
+                location.Db.UserRoles.Add(new UserRole
+                {
+                    UserId = targetUserId,
+                    RoleId = guest.RoleId,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = await ResolveAssignedByForTargetDbAsync(location.Db, actorUserId, ct),
+                });
+            }
+
+            await location.Db.SaveChangesAsync(ct);
+            await EffectiveMaskService.RebuildOnContextAsync(location.Db, targetUserId, ct);
+            return true;
         }
         finally
         {

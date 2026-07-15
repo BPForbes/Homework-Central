@@ -187,11 +187,6 @@ export function ChatRoom() {
               mentionRoles={mentionRoles}
               onReply={startReply}
             />
-            {room.isPrivate && (
-              <div className="chat-key-badge" aria-hidden="true">
-                <ChatRoomIcon icon={icon} isPrivate layeredClassName="chat-key-badge-layered" />
-              </div>
-            )}
             <ChatComposer
               disabled={messagesLoading}
               sending={sending}
