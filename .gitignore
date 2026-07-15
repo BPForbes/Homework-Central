@@ -30,3 +30,4 @@ claude-mem/
 # OS
 .DS_Store
 Thumbs.db
+.postgres-volume-password
