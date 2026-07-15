@@ -10,6 +10,8 @@ import {
   resolveCustomRoleIcon,
 } from '../components/infrastructure/customRoleIcons'
 import { ColorWheelPicker } from '../components/infrastructure/ColorWheelPicker'
+import { ConfirmModal, type ConfirmModalAction } from '../components/infrastructure/ConfirmModal'
+import { LoadingBars } from '../components/LoadingBars'
 import {
   GET_ROLES_ROOM_ID,
   MODERATION_PERMISSIONS,
@@ -37,12 +39,7 @@ function userSelectionKey(user: AssignableUser): string {
 interface DialogState {
   title: string
   message: string
-  actions: Array<{
-    label: string
-    variant: 'primary' | 'secondary'
-    onClick: () => void
-    disabled?: boolean
-  }>
+  actions: ConfirmModalAction[]
 }
 
 export function UserConfig() {
@@ -391,23 +388,6 @@ export function UserConfig() {
   const selectableUsers = assignableUsers.filter((user) => user.canAssign && !user.alreadyAssigned)
   const placementRole = placementRoleId ? roles.find((role) => role.roleId === placementRoleId) ?? null : null
 
-  useEffect(() => {
-    if (!dialog && !confirmAssignOpen && !placementRole)
-      return
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape')
-        return
-
-      setDialog(null)
-      setConfirmAssignOpen(false)
-      setPlacementRoleId(null)
-      setPlacementRoomId('')
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [dialog, confirmAssignOpen, placementRole])
 
   return (
     <div className="server-page">
@@ -432,7 +412,7 @@ export function UserConfig() {
             Select users who may receive this role. You can only assign to users whose highest platform role is below yours.
           </p>
 
-          {assignLoading && <p className="chat-sidebar-status">Loading users…</p>}
+          {assignLoading && <LoadingBars message="Loading users…" />}
 
           {!assignLoading && selectableUsers.length > 0 && (
             <div className="assignable-user-scroll">
@@ -748,106 +728,52 @@ export function UserConfig() {
       )}
 
       {confirmAssignOpen && assignRole && (
-        <div className="confirm-modal-backdrop" role="presentation" onClick={() => setConfirmAssignOpen(false)}>
-          <div
-            className="confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-assign-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 id="confirm-assign-title" className="confirm-modal-title">Confirm assignment</h4>
-            <p>
-              Assign <strong>{assignRole.name}</strong> to {selectedUserKeys.size} user
-              {selectedUserKeys.size === 1 ? '' : 's'}?
-            </p>
-            <div className="confirm-modal-actions">
-              <button
-                type="button"
-                className="btn-secondary confirm-modal-button"
-                disabled={assignLoading}
-                onClick={() => setConfirmAssignOpen(false)}
-              >
-                No
-              </button>
-              <button
-                type="button"
-                className="btn-primary confirm-modal-button"
-                disabled={assignLoading}
-                onClick={() => void confirmAssignments()}
-              >
-                Yes
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          title="Confirm assignment"
+          onClose={() => setConfirmAssignOpen(false)}
+          actions={[
+            { label: 'No', variant: 'secondary', disabled: assignLoading, onClick: () => setConfirmAssignOpen(false) },
+            { label: 'Yes', variant: 'primary', disabled: assignLoading, onClick: () => void confirmAssignments() },
+          ]}
+        >
+          <p>
+            Assign <strong>{assignRole.name}</strong> to {selectedUserKeys.size} user
+            {selectedUserKeys.size === 1 ? '' : 's'}?
+          </p>
+        </ConfirmModal>
       )}
 
       {placementRole && (
-        <div className="confirm-modal-backdrop" role="presentation" onClick={closePlacementModal}>
-          <div
-            className="confirm-modal confirm-modal-wide"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="placement-modal-title"
-            onClick={(e) => e.stopPropagation()}
+        <ConfirmModal
+          title="Set claim room"
+          wide
+          onClose={closePlacementModal}
+          actions={[
+            { label: 'Cancel', variant: 'secondary', onClick: closePlacementModal },
+            { label: 'Save', variant: 'primary', onClick: () => void savePlacement(placementRole.roleId) },
+          ]}
+        >
+          <p className="server-page-subtitle">
+            Choose where users can claim “{placementRole.name}”.
+          </p>
+          <select
+            className="confirm-modal-select"
+            value={placementRoomId}
+            onChange={(event) => setPlacementRoomId(event.target.value)}
+            aria-label="Claim room"
           >
-            <h4 id="placement-modal-title" className="confirm-modal-title">Set claim room</h4>
-            <p className="server-page-subtitle">
-              Choose where users can claim “{placementRole.name}”.
-            </p>
-            <select
-              className="confirm-modal-select"
-              value={placementRoomId}
-              onChange={(e) => setPlacementRoomId(e.target.value)}
-            >
-              <option value="">Not on any claim page</option>
-              {claimRoomOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-            <div className="confirm-modal-actions">
-              <button type="button" className="btn-secondary confirm-modal-button" onClick={closePlacementModal}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn-primary confirm-modal-button"
-                onClick={() => void savePlacement(placementRole.roleId)}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+            <option value="">Not on any claim page</option>
+            {claimRoomOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </ConfirmModal>
       )}
 
       {dialog && (
-        <div className="confirm-modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
-          <div
-            className="confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="dialog-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 id="dialog-title" className="confirm-modal-title">{dialog.title}</h4>
-            <p>{dialog.message}</p>
-            <div className={`confirm-modal-actions ${dialog.actions.length > 1 ? '' : 'confirm-modal-actions-single'}`}>
-              {dialog.actions.map((action) => (
-                <button
-                  key={action.label}
-                  type="button"
-                  className={`${action.variant === 'primary' ? 'btn-primary' : 'btn-secondary'} confirm-modal-button`}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <ConfirmModal title={dialog.title} actions={dialog.actions} onClose={() => setDialog(null)}>
+          <p>{dialog.message}</p>
+        </ConfirmModal>
       )}
     </div>
   )

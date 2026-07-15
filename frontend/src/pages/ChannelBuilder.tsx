@@ -12,6 +12,7 @@ import { ChatPreviewPanel } from '../components/infrastructure/ChatPreviewPanel'
 import { MockAccountBar } from '../components/infrastructure/MockAccountBar'
 import { useMockAccounts } from '../components/infrastructure/mockAccounts'
 import type { CustomChannel } from '../types/infrastructure'
+import { LoadingBars } from '../components/LoadingBars'
 
 type BuilderMode = 'edit' | 'preview'
 
@@ -57,7 +58,7 @@ export function ChannelBuilder() {
         <FontAwesomeIcon icon={faArrowLeft} /> Back to Server Maintenance
       </Link>
 
-      {loading && <p className="chat-room-status">Loading room…</p>}
+      {loading && <LoadingBars message="Loading room…" />}
       {error && <p className="error">{error}</p>}
 
       {channel && (

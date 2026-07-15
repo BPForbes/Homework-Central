@@ -6,6 +6,8 @@ import { RichTextToolbar } from '../../richtext/RichTextToolbar'
 import { RichContent } from '../../richtext/RichContent'
 import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 import type { InfoEntryFeed } from '../../types/infrastructure'
+import { formatUtcTimestamp } from '../../utils/formatUtcTimestamp'
+import { LoadingBars } from '../LoadingBars'
 
 interface InfoEntriesFeedProps {
   roomId: string
@@ -13,15 +15,6 @@ interface InfoEntriesFeedProps {
   readOnly?: boolean
 }
 
-function formatUtcTimestamp(iso: string): string {
-  const date = new Date(iso)
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  const hours = String(date.getUTCHours()).padStart(2, '0')
-  const minutes = String(date.getUTCMinutes()).padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes} UTC`
-}
 
 interface InfoEntryEditorProps {
   initialContent: string
@@ -132,7 +125,7 @@ export function InfoEntriesFeed({ roomId, readOnly = false }: InfoEntriesFeedPro
     }
   }
 
-  if (loading) return <p className="chat-room-status">Loading…</p>
+  if (loading) return <LoadingBars message="Loading entries…" />
   if (loadError) return <p className="error">{loadError}</p>
   if (!feed) return null
 

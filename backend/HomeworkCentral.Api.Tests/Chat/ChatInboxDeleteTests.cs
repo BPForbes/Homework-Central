@@ -1,6 +1,9 @@
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Data;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace HomeworkCentral.Api.Tests.Chat;
@@ -86,6 +89,43 @@ public class ChatInboxDeleteTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task DeleteInboxCategory_removes_only_notifications_from_accessible_category()
+    {
+        Skip.IfNot(_databaseAvailable, "Requires Postgres at TEST_CHAT_DATABASE_URL.");
+
+        Guid recipient = Guid.NewGuid();
+        ChatRoomDefinition scienceRoom = ChatRoomCatalog.SubjectRooms
+            .First(room => room.CategoryKey == SubjectMaskNames.Science);
+
+        _db.ChatMentionNotifications.AddRange(
+            CreateNotification(recipient, ChatRoomCatalog.GeneralRoom),
+            CreateNotification(recipient, scienceRoom));
+        await _db.SaveChangesAsync();
+
+        ChatMessageService service = ChatMessageServiceTestSupport.BuildService(
+            _db,
+            recipient,
+            "recipient");
+
+        int inaccessibleDeleted = await service.DeleteInboxCategoryAsync(
+            recipient,
+            SubjectMaskNames.Science);
+        Assert.Equal(0, inaccessibleDeleted);
+
+        int deleted = await service.DeleteInboxCategoryAsync(
+            recipient,
+            ChatRoomBlueprint.GeneralCategoryKey);
+        Assert.Equal(1, deleted);
+
+        List<ChatMentionNotification> remaining = await _db.ChatMentionNotifications
+            .AsNoTracking()
+            .Where(notification => notification.RecipientUserId == recipient)
+            .ToListAsync();
+        ChatMentionNotification notification = Assert.Single(remaining);
+        Assert.Equal(scienceRoom.Id, notification.RoomId);
+    }
+
+    [SkippableFact]
     public async Task DeleteInboxItems_does_not_remove_another_users_notifications()
     {
         Skip.IfNot(_databaseAvailable, "Requires Postgres at TEST_CHAT_DATABASE_URL.");
@@ -106,4 +146,76 @@ public class ChatInboxDeleteTests : IAsyncLifetime
         Assert.Equal(0, deleted);
         Assert.Single(await bobService.GetInboxAsync(alice));
     }
+
+    [SkippableFact]
+    public async Task GetInbox_filters_collective_and_category_views_to_accessible_rooms()
+    {
+        Skip.IfNot(_databaseAvailable, "Requires Postgres at TEST_CHAT_DATABASE_URL.");
+
+        Guid recipient = Guid.NewGuid();
+        ChatRoomDefinition scienceRoom = ChatRoomCatalog.SubjectRooms
+            .First(room => room.CategoryKey == SubjectMaskNames.Science);
+
+        _db.ChatMentionNotifications.AddRange(
+            CreateNotification(recipient, ChatRoomCatalog.GeneralRoom),
+            CreateNotification(recipient, scienceRoom));
+        await _db.SaveChangesAsync();
+
+        ChatMessageService service = ChatMessageServiceTestSupport.BuildService(
+            _db,
+            recipient,
+            "recipient");
+
+        ChatInboxItemDto collectiveItem = Assert.Single(await service.GetInboxAsync(recipient));
+        Assert.Equal(ChatRoomCatalog.GeneralRoom.Id, collectiveItem.RoomId);
+
+        ChatInboxItemDto generalItem = Assert.Single(
+            await service.GetInboxAsync(recipient, ChatRoomBlueprint.GeneralCategoryKey));
+        Assert.Equal(ChatRoomCatalog.GeneralRoom.Id, generalItem.RoomId);
+
+        Assert.Empty(await service.GetInboxAsync(recipient, SubjectMaskNames.Science));
+
+        ChatInboxSummaryDto summary = await service.GetInboxSummaryAsync(recipient);
+        ChatInboxSummaryItemDto generalSummary = Assert.Single(summary.Categories);
+        Assert.Equal(ChatRoomBlueprint.GeneralCategoryKey, generalSummary.CategoryKey);
+        Assert.Equal(1, generalSummary.UnreadCount);
+    }
+
+    [SkippableFact]
+    public async Task GetInboxSummary_includes_accessible_categories_with_zero_unread_items()
+    {
+        Skip.IfNot(_databaseAvailable, "Requires Postgres at TEST_CHAT_DATABASE_URL.");
+
+        Guid recipient = Guid.NewGuid();
+        ChatMessageService service = ChatMessageServiceTestSupport.BuildService(
+            _db,
+            recipient,
+            "recipient");
+
+        ChatInboxSummaryDto summary = await service.GetInboxSummaryAsync(recipient);
+
+        ChatInboxSummaryItemDto generalSummary = Assert.Single(summary.Categories);
+        Assert.Equal(ChatRoomBlueprint.GeneralCategoryKey, generalSummary.CategoryKey);
+        Assert.Equal(0, generalSummary.UnreadCount);
+    }
+
+    private static ChatMentionNotification CreateNotification(
+        Guid recipientUserId,
+        ChatRoomDefinition room) =>
+        new()
+        {
+            NotificationId = Guid.NewGuid(),
+            MessageId = Guid.NewGuid(),
+            RecipientUserId = recipientUserId,
+            SenderId = Guid.NewGuid(),
+            SenderUsername = "sender",
+            RoomId = room.Id,
+            RoomDisplayName = room.RoomDisplayName,
+            CategoryKey = room.CategoryKey,
+            CategoryDisplayName = room.CategoryDisplayName,
+            MessageContent = "Mention",
+            MentionKind = "Mention",
+            CreatedAtUtc = DateTime.UtcNow,
+            OwnerAccountClass = AccountClass.RealAccount,
+        };
 }

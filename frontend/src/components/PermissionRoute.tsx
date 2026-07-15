@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { LoadingBars } from './LoadingBars'
 
 interface Props {
   permissionBit: number
@@ -14,7 +15,7 @@ export function PermissionRoute({ permissionBit, children }: Props) {
   if (isLoading) {
     return (
       <div className="loading-screen">
-        <div className="spinner" />
+        <LoadingBars message="Checking permissions…" />
       </div>
     )
   }

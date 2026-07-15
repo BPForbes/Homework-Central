@@ -2,12 +2,14 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
+import { InboxSidebar } from '../inbox/InboxSidebar'
 import { ThemeToggle } from '../ThemeToggle'
+import { InfrastructureSidebar } from './InfrastructureSidebar'
 import {
-  InfrastructureSidebar,
   shouldShowChatSidebar,
+  shouldShowInboxSidebar,
   shouldShowInfrastructureSidebar,
-} from './InfrastructureSidebar'
+} from './sidebarVisibility'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {
@@ -15,6 +17,7 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const showChatSidebar = shouldShowChatSidebar(location.pathname)
+  const showInboxSidebar = shouldShowInboxSidebar(location.pathname)
   const showInfrastructureSidebar = shouldShowInfrastructureSidebar(location.pathname)
 
   async function handleLogout() {
@@ -26,6 +29,7 @@ export function AppLayout() {
     <div className="app-layout">
       {showInfrastructureSidebar && <InfrastructureSidebar />}
       {showChatSidebar && <ChatSidebar />}
+      {showInboxSidebar && <InboxSidebar />}
 
       <div className="app-content">
         <header className="app-header">

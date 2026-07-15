@@ -1,35 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import {
-  faCircleInfo,
-  faComments,
-  faGlobe,
-  faIdBadge,
-  faKey,
-  faLayerGroup,
-  faLock,
-  faMagnifyingGlass,
-  faPen,
-  faPlus,
-  faTrashCan,
-  faUserShield,
-  faWandMagicSparkles,
-  faXmark,
-} from '@fortawesome/free-solid-svg-icons'
+import { faGlobe, faLock, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { chatApi } from '../api/chatApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { ModerationRiskModal } from '../components/infrastructure/ModerationRiskModal'
-import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
+import { CustomRoomList } from '../components/infrastructure/CustomRoomList'
+import {
+  RoomAccessRulesField,
+  RoomCategoryFields,
+  RoomIconField,
+  RoomPrivacyField,
+  RoomTypeField,
+} from '../components/infrastructure/RoomEditorFields'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { defaultCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
 import {
-  CUSTOM_ROOM_ICON_OPTIONS,
-  defaultCustomRoomIcon,
-  resolveCustomRoomIcon,
-} from '../components/infrastructure/customRoomIcons'
-import {
-  PLATFORM_ROLES,
   type CustomChannel,
   type CustomChannelAccessRuleInput,
   type CustomRole,
@@ -42,11 +28,6 @@ import {
   useServerNavSection,
 } from '../hooks/useInfrastructureNav'
 
-const ROOM_TYPES: { value: CustomRoomType; label: string; hint: string; icon: typeof faComments }[] = [
-  { value: 'Chat', label: 'Chat', hint: 'Live messaging', icon: faComments },
-  { value: 'Info', label: 'Info', hint: 'Static page', icon: faCircleInfo },
-  { value: 'RoleClaim', label: 'Role claim', hint: 'Self-service roles', icon: faIdBadge },
-]
 
 function rulesFromChannel(channel: CustomChannel): CustomChannelAccessRuleInput[] {
   return channel.accessRules.map((r) => ({
@@ -333,115 +314,38 @@ export function ServerMaintenance() {
               />
             </div>
 
-            {!editingId ? (
-              <div className="sm-field">
-                <span className="sm-label">Room type</span>
-                <div className="sm-segmented">
-                  {ROOM_TYPES.map((t) => (
-                    <button
-                      key={t.value}
-                      type="button"
-                      className={`sm-segmented-option ${roomType === t.value ? 'active' : ''}`}
-                      onClick={() => {
-                        setRoomType(t.value)
-                        setIconName(defaultCustomRoomIcon(t.value))
-                        setNavSection(roomTypeToServerSection(t.value))
-                      }}
-                    >
-                      <FontAwesomeIcon icon={t.icon} />
-                      <span>
-                        {t.label}
-                        <small>{t.hint}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="sm-static-chip">
-                <FontAwesomeIcon icon={ROOM_TYPES.find((t) => t.value === roomType)?.icon ?? faComments} />
-                {roomType} room <span className="sm-static-chip-hint">(type locked after creation)</span>
-              </div>
-            )}
+            <RoomTypeField
+              roomType={roomType}
+              editing={Boolean(editingId)}
+              onChange={(nextRoomType, nextIconName) => {
+                setRoomType(nextRoomType)
+                setIconName(nextIconName)
+                setNavSection(roomTypeToServerSection(nextRoomType))
+              }}
+            />
 
-            <div className="sm-field">
-              <span className="sm-label">Icon</span>
-              <div className="sm-icon-grid">
-                {CUSTOM_ROOM_ICON_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`sm-icon-option ${iconName === option.id ? 'selected' : ''}`}
-                    onClick={() => setIconName(option.id)}
-                    title={option.label}
-                  >
-                    <FontAwesomeIcon icon={option.icon} />
-                  </button>
-                ))}
-              </div>
-            </div>
+            <RoomIconField
+              iconName={iconName}
+              onChange={setIconName}
+            />
 
-            <div className="sm-field">
-              <label htmlFor="custom-cat-name" className="sm-label">
-                <FontAwesomeIcon icon={faLayerGroup} /> Category
-              </label>
-              <select
-                id="room-category"
-                className="sm-input"
-                value={isNewCategory ? '' : categoryKey}
-                onChange={(e) => pickCategory(e.target.value)}
-              >
-                <option value="">New / custom category…</option>
-                {navCategories.map((cat) => (
-                  <option key={cat.key} value={cat.key}>{cat.name}</option>
-                ))}
-              </select>
-              <input
-                id="custom-cat-name"
-                type="text"
-                className="sm-input"
-                value={categoryDisplayName}
-                onChange={(e) => setCategoryDisplayName(e.target.value)}
-                placeholder="Display name (e.g. Mathematics)"
-              />
-              {isNewCategory && (
-                <input
-                  id="custom-cat-key"
-                  type="text"
-                  className="sm-input"
-                  value={categoryKey}
-                  onChange={(e) => setCategoryKey(e.target.value)}
-                  placeholder="Category key (e.g. mathematics)"
-                />
-              )}
-            </div>
+            <RoomCategoryFields
+              categoryKey={categoryKey}
+              categoryDisplayName={categoryDisplayName}
+              isNewCategory={isNewCategory}
+              categories={navCategories}
+              onCategoryPick={pickCategory}
+              onCategoryKeyChange={setCategoryKey}
+              onCategoryDisplayNameChange={setCategoryDisplayName}
+            />
 
-            <div className="sm-field sm-privacy-field">
-              <div className="sm-privacy-row">
-                <div className="sm-privacy-copy">
-                  <span className="sm-label sm-label--inline">
-                    <FontAwesomeIcon icon={isPrivate ? faLock : faGlobe} />
-                    {isPrivate ? 'Private room' : 'Public room'}
-                  </span>
-                  <span className="sm-privacy-hint">
-                    {isPrivate ? 'Only members with a matching role can view this room.' : 'Anyone on the server can view this room.'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isPrivate}
-                  className={`sm-switch ${isPrivate ? 'on' : ''}`}
-                  onClick={() => {
-                    const nextPrivate = !isPrivate
-                    setIsPrivate(nextPrivate)
-                    if (!nextPrivate) setAccessRules([])
-                  }}
-                >
-                  <span className="sm-switch-thumb" />
-                </button>
-              </div>
-            </div>
+            <RoomPrivacyField
+              isPrivate={isPrivate}
+              onChange={(nextPrivate) => {
+                setIsPrivate(nextPrivate)
+                if (!nextPrivate) setAccessRules([])
+              }}
+            />
 
             {roomType === 'Info' && !editingId && (
               <p className="dashboard-hint">
@@ -451,61 +355,22 @@ export function ServerMaintenance() {
             )}
 
             {isPrivate && (
-              <div className="sm-field">
-                <span className="sm-label">
-                  <FontAwesomeIcon icon={faUserShield} /> Access roles <span className="sm-required">required</span>
-                </span>
-                <div className="sm-rule-add">
-                  <select
-                    className="sm-input"
-                    value={selectedCustomRoleId}
-                    onChange={(e) => { setSelectedCustomRoleId(e.target.value); setSelectedPlatformBit('') }}
-                  >
-                    <option value="">Custom role…</option>
-                    {customRoles.map((r) => (
-                      <option key={r.roleId} value={r.roleId}>{r.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    className="sm-input"
-                    value={selectedPlatformBit}
-                    onChange={(e) => { setSelectedPlatformBit(e.target.value); setSelectedCustomRoleId('') }}
-                  >
-                    <option value="">Platform role…</option>
-                    {PLATFORM_ROLES.map((r) => (
-                      <option key={r.bit} value={r.bit}>{r.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="sm-icon-btn sm-icon-btn--primary"
-                    onClick={addAccessRule}
-                    disabled={!selectedCustomRoleId && !selectedPlatformBit}
-                    title="Add access rule"
-                  >
-                    <FontAwesomeIcon icon={faPlus} />
-                  </button>
-                </div>
-                <div className="sm-rule-chips">
-                  {accessRules.length === 0 && <span className="sm-rule-empty">No access roles yet.</span>}
-                  {accessRules.map((rule, idx) => (
-                    <span key={idx} className="sm-rule-chip">
-                      <FontAwesomeIcon icon={rule.customRoleId ? faUserShield : faKey} />
-                      {rule.customRoleId
-                        ? customRoles.find((r) => r.roleId === rule.customRoleId)?.name ?? 'Unknown role'
-                        : PLATFORM_ROLES.find((r) => r.bit === rule.platformRoleBit)?.name}
-                      <button
-                        type="button"
-                        className="sm-rule-chip-remove"
-                        onClick={() => setAccessRules((prev) => prev.filter((_, i) => i !== idx))}
-                        aria-label="Remove access rule"
-                      >
-                        <FontAwesomeIcon icon={faXmark} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <RoomAccessRulesField
+                accessRules={accessRules}
+                customRoles={customRoles}
+                selectedCustomRoleId={selectedCustomRoleId}
+                selectedPlatformBit={selectedPlatformBit}
+                onCustomRoleChange={(roleId) => {
+                  setSelectedCustomRoleId(roleId)
+                  setSelectedPlatformBit('')
+                }}
+                onPlatformRoleChange={(roleBit) => {
+                  setSelectedPlatformBit(roleBit)
+                  setSelectedCustomRoleId('')
+                }}
+                onAdd={addAccessRule}
+                onRemove={(index) => setAccessRules((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+              />
             )}
 
             <div className="sm-form-actions">
@@ -521,82 +386,15 @@ export function ServerMaintenance() {
         )}
 
         {serverSection === 'rooms' && (
-        <section className="sm-panel sm-list-panel">
-          <div className="sm-list-toolbar">
-            <h3>Custom rooms</h3>
-            <div className="sm-search">
-              <FontAwesomeIcon icon={faMagnifyingGlass} className="sm-search-icon" />
-              <input
-                type="search"
-                placeholder="Search rooms…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {filteredChannels.length === 0 && (
-            <p className="server-page-subtitle sm-empty-state">
-              {channels.length === 0 ? 'No custom rooms yet — create one to get started.' : 'No rooms match your search.'}
-            </p>
-          )}
-
-          <ul className="sm-room-grid">
-            {filteredChannels.map((channel) => (
-              <li
-                key={channel.channelId}
-                className={`sm-room-card ${editingId === channel.channelId ? 'sm-room-card--editing' : ''}`}
-              >
-                <div className="sm-room-card-top">
-                  <div className="sm-room-card-icon">
-                    <ChatRoomIcon
-                      icon={resolveCustomRoomIcon(channel.iconName, channel.roomType)}
-                      isPrivate={channel.isPrivate}
-                      layeredClassName="chat-room-icon-layered"
-                    />
-                  </div>
-                  <div className="sm-room-card-title">
-                    <strong>{channel.displayName}</strong>
-                    <span className="sm-room-card-category">{channel.categoryDisplayName}</span>
-                  </div>
-                  <span className={`sm-badge ${channel.isPrivate ? 'sm-badge--private' : 'sm-badge--public'}`}>
-                    <FontAwesomeIcon icon={channel.isPrivate ? faLock : faGlobe} />
-                    {channel.isPrivate ? 'Private' : 'Public'}
-                  </span>
-                </div>
-
-                <div className="sm-room-card-meta">
-                  <span className="sm-room-card-type">{channel.roomType}</span>
-                  <code className="sm-room-card-id">{channel.roomId}</code>
-                </div>
-
-                <div className="sm-room-card-actions">
-                  <Link to={`/chat/${encodeURIComponent(channel.roomId)}`} className="sm-icon-btn" title="Open room">
-                    <FontAwesomeIcon icon={faComments} />
-                  </Link>
-                  <Link
-                    to={`/server/channels/${channel.channelId}`}
-                    className="sm-icon-btn"
-                    title="Build & preview"
-                  >
-                    <FontAwesomeIcon icon={faWandMagicSparkles} />
-                  </Link>
-                  <button type="button" className="sm-icon-btn" onClick={() => startEdit(channel)} title="Edit room">
-                    <FontAwesomeIcon icon={faPen} />
-                  </button>
-                  <button
-                    type="button"
-                    className="sm-icon-btn sm-icon-btn--danger"
-                    onClick={() => void handleArchive(channel.channelId)}
-                    title="Archive room"
-                  >
-                    <FontAwesomeIcon icon={faTrashCan} />
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+          <CustomRoomList
+            channels={filteredChannels}
+            totalChannelCount={channels.length}
+            editingId={editingId}
+            search={search}
+            onSearchChange={setSearch}
+            onEdit={startEdit}
+            onArchive={(channelId) => void handleArchive(channelId)}
+          />
         )}
       </div>
 

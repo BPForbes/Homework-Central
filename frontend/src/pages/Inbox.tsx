@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faAt, faReply, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { inboxApi } from '../api/inboxApi'
 import { RichContent } from '../richtext/RichContent'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
+import { LoadingBars } from '../components/LoadingBars'
+import { notifyInboxUpdated } from '../utils/inboxEvents'
+import { formatUtcTimestamp } from '../utils/formatUtcTimestamp'
 import type { ChatInboxItem } from '../types/inbox'
 
-function formatUtcTimestamp(iso: string): string {
-  const date = new Date(iso)
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  const hours = String(date.getUTCHours()).padStart(2, '0')
-  const minutes = String(date.getUTCMinutes()).padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes} UTC`
-}
-
 export function Inbox() {
+  const [searchParams] = useSearchParams()
+  const selectedCategoryKey = searchParams.get('category') || null
   const [items, setItems] = useState<ChatInboxItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -26,15 +21,45 @@ export function Inbox() {
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    setItems([])
+    setSelectedIds(new Set())
+
     void inboxApi
-      .getInbox()
-      .then(({ data }) => setItems(data))
-      .catch(() => setError('Could not load your inbox.'))
-      .finally(() => setLoading(false))
-  }, [])
+      .getInbox(selectedCategoryKey)
+      .then(({ data }) => {
+        if (!active)
+          return
+
+        // Keep the view correct during a rolling backend restart too. The
+        // server remains the authorization boundary once the request lands.
+        setItems(
+          selectedCategoryKey
+            ? data.filter((item) => item.categoryKey === selectedCategoryKey)
+            : data,
+        )
+      })
+      .catch(() => {
+        if (active)
+          setError('Could not load your inbox.')
+      })
+      .finally(() => {
+        if (active)
+          setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedCategoryKey])
 
   const allSelected = items.length > 0 && selectedIds.size === items.length
   const someSelected = selectedIds.size > 0
+  const selectedCategoryDisplayName = selectedCategoryKey
+    ? items.find((item) => item.categoryKey === selectedCategoryKey)?.categoryDisplayName
+    : null
 
   const selectedCountLabel = useMemo(() => {
     if (selectedIds.size === 0)
@@ -73,6 +98,7 @@ export function Inbox() {
               : entry
           )
         )
+        notifyInboxUpdated()
       } catch {
         // Navigation still works if mark-read fails.
       }
@@ -93,6 +119,7 @@ export function Inbox() {
       await inboxApi.deleteItems(ids)
       setItems((prev) => prev.filter((item) => !selectedIds.has(item.notificationId)))
       setSelectedIds(new Set())
+      notifyInboxUpdated()
     } catch {
       setError('Could not delete the selected inbox items.')
     } finally {
@@ -104,15 +131,21 @@ export function Inbox() {
     if (items.length === 0 || deleting)
       return
 
-    if (!window.confirm('Clear your entire inbox? This cannot be undone.'))
+    const confirmationMessage = selectedCategoryKey
+      ? 'Clear every item in this category? This cannot be undone.'
+      : 'Clear your entire inbox? This cannot be undone.'
+
+    if (!window.confirm(confirmationMessage))
       return
 
     setDeleting(true)
     setError('')
     try {
-      await inboxApi.deleteAll()
+      await inboxApi.deleteAll(selectedCategoryKey)
+
       setItems([])
       setSelectedIds(new Set())
+      notifyInboxUpdated()
     } catch {
       setError('Could not clear your inbox.')
     } finally {
@@ -130,7 +163,13 @@ export function Inbox() {
         </div>
         <div>
           <h2>Inbox</h2>
-          <p className="inbox-subtitle">Mentions and replies to your messages</p>
+          <p className="inbox-subtitle">
+            {selectedCategoryKey
+              ? selectedCategoryDisplayName
+                ? 'Mentions and replies in ' + selectedCategoryDisplayName
+                : 'Mentions and replies in the selected category'
+              : 'Mentions and replies to your messages'}
+          </p>
         </div>
       </header>
 
@@ -161,17 +200,21 @@ export function Inbox() {
               disabled={deleting}
               onClick={() => void handleClearAll()}
             >
-              Clear all
+              {selectedCategoryKey ? 'Clear category' : 'Clear all'}
             </button>
           </div>
         </div>
       )}
 
-      {loading && <p className="inbox-status">Loading inbox…</p>}
+      {loading && <LoadingBars message="Loading inbox…" />}
       {error && <p className="inbox-error">{error}</p>}
 
       {!loading && !error && items.length === 0 && (
-        <p className="inbox-empty">Nothing yet. @mentions and replies to your messages will show up here.</p>
+        <p className="inbox-empty">
+          {selectedCategoryKey
+            ? 'Nothing yet in this category.'
+            : 'Nothing yet. @mentions and replies to your messages will show up here.'}
+        </p>
       )}
 
       <ul className="inbox-list">

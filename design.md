@@ -95,8 +95,8 @@ pointer-transparent layers behind all content:
 
 1. **Day/night bases** (`html::before` / `html::after`, z-index −2): oversized linear
    gradients over the static `--water-day-1…4` / `--water-night-1…4` tokens whose
-   `background-position` drifts slowly (`water-base-drift`), so the water's color
-   gradually shifts with no seams. Theme changes cross-fade the two layers via
+   compositor-only `transform` drifts slowly (`water-base-drift`), so the water's
+   color gradually shifts without repainting the full viewport. Theme changes cross-fade via
    `--water-day-opacity` / `--water-night-opacity` over `--duration-theme`; the hidden
    layer's animation is paused. There are deliberately no repeating ring/line
    overlays — the water stays smooth, and all texture comes from the scene canvas.
@@ -105,11 +105,14 @@ pointer-transparent layers behind all content:
    Because every layer is below z-index 0, nothing here can ever cover form inputs
    or content.
 
-Scene elements are **event-based**: each spawns on a random timer with a random
-lifespan. When an element drifts fully off one edge it re-enters at the antipodal
-point, computed with the standard 2-D rotation matrix R(θ) at θ = π (R(π) = −I) about
-the viewport center — unless its lifespan has expired, in which case it is simply not
-respawned. Element inventory:
+Scene elements are **event-based** on a fixed 30 FPS simulation. Blue-noise intervals
+(minimum gap plus an exponential tail), density feedback, and bounded burst queues keep
+arrivals natural without clustering or exceeding each kind's cap. Spawn positions use
+spatial weighting to favor deeper outer water and avoid interactive foreground surfaces.
+Lifespans are randomized in frames; expiry tags an entity for a kind-specific
+despawn (fish dive, lily pads sink, fog and fireflies fade). A retiring entity is removed
+immediately if its center reaches a foreground interaction surface or viewport edge.
+Live entities that leave the viewport wrap to the antipodal point. Element inventory:
 
 | Element | Themes | Behavior |
 |---|---|---|
@@ -125,10 +128,12 @@ variants in `index.css`), so the scene follows the theme with no hardcoded hexes
 `prefers-reduced-motion: reduce` disables the canvas scene entirely and freezes the
 CSS layers via the global media query.
 
-Performance rules: gradient-position animation is confined to the two full-viewport
-base layers; all other background motion lives on the canvas. Never place
-`backdrop-filter` on repeated children such as chat bubbles, room categories, or list
-rows — glass blur belongs on major chrome only.
+Performance rules: the two full-viewport base layers animate only compositor transforms.
+The canvas uses a fixed 30 FPS step, an adaptive DPR/pixel budget with entity-count
+hysteresis, lookup-table trigonometry, approximate decorative-vector magnitudes, cached
+interaction bounds, gradient/fish sprites and geometry, coalesced resize work, and pauses
+while the document is hidden. Never place `backdrop-filter` on repeated children such as
+chat bubbles, room categories, or list rows — glass blur belongs on major chrome only.
 
 ## Typography
 
@@ -179,6 +184,30 @@ Rules of thumb, learned from the Fable 5 review and worth preserving:
   decorative droplet event, coalesced to avoid bursts (`api/apiActivity.ts`). GET polling,
   refresh-token rotation, and SignalR keepalives never trigger it. The ripple is drawn by
   the water scene canvas, in the outer band of the viewport away from form inputs.
+
+## Loading and bottleneck states
+
+The canonical wait indicator is `<LoadingBars />`, implemented at
+`frontend/src/components/LoadingBars.tsx:9`. Its bar geometry begins at
+`frontend/src/index.css:651` and its shared `backend-bar-loader` keyframes begin at
+`frontend/src/index.css:685`. Full-viewport waits compose that same component through
+`frontend/src/components/BackendConnectingLoader.tsx:11`; the corresponding wrapper at
+`frontend/src/index.css:626` must remain transparent.
+
+- Use the bar indicator whenever a route or page is loading, a content region is waiting
+  for data, authentication or permission checks block rendering, a send/save/delete action
+  blocks a region, or another visible bottleneck prevents the next interaction. Compact
+  navigation sidebars are the exception: use the static `<SidebarSkeleton />` placeholder
+  rather than a tall loading animation.
+- Keep the loading container transparent. It may reserve space or block interaction while
+  consistency is required, but it must not paint an opaque page/card background over the
+  living-water environment.
+- Supply a specific present-progress message such as “Loading messages…” or “Saving room…”.
+  Do not introduce a second spinner or a component-local loader.
+- Keep controls that could duplicate the operation disabled for the duration of the wait.
+  The bar communicates progress; disabled state preserves request integrity.
+- The animation uses only `transform` and `opacity`, inherits the global reduced-motion
+  collapse, and must continue using the existing primary color tokens.
 
 ## Chat bubbles
 
