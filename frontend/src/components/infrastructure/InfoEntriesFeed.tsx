@@ -97,6 +97,13 @@ export function InfoEntriesFeed({ roomId, readOnly = false }: InfoEntriesFeedPro
     void load()
   }, [load])
 
+  // When readOnly changes (e.g., switching Edit ↔ Preview mode), clear any active editor.
+  useEffect(() => {
+    if (readOnly && editingEntryId) {
+      setEditingEntryId(null)
+    }
+  }, [readOnly])
+
   async function handleCreate(content: string) {
     setSaving(true)
     setActionError('')
@@ -183,7 +190,7 @@ export function InfoEntriesFeed({ roomId, readOnly = false }: InfoEntriesFeedPro
                 </button>
               )}
             </div>
-            {editingEntryId === entry.entryId ? (
+            {editingEntryId === entry.entryId && !readOnly ? (
               <InfoEntryEditor
                 initialContent={entry.content}
                 saving={saving}
