@@ -26,7 +26,7 @@ export function ChatRoomIcon({
       <FontAwesomeIcon
         icon={faKey}
         transform="shrink-8 down-10 left-10"
-        style={{ color: '#ffcc00' }}
+        className="chat-room-key-overlay"
       />
     </span>
   )

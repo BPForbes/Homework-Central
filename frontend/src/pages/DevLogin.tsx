@@ -4,8 +4,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { authApi } from '../api/authApi'
+import { delay } from '../utils/healthCheck'
 import type { DevDeveloperOption, DevStatus } from '../types/devAuth'
 
 const DEV_BYPASS_ENABLED = import.meta.env.VITE_HC_DEV_BYPASS === 'true'
@@ -37,6 +38,7 @@ export function DevLogin() {
     }
 
     let cancelled = false
+    const controller = new AbortController()
 
     // The readiness poll's own error state is kept separate from `error` (which also carries
     // submit-attempt failures set by handleSubmit): loadOptions previously called setError('')
@@ -94,13 +96,18 @@ export function DevLogin() {
         const ready = await loadOptions()
         if (ready || cancelled)
           break
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        try {
+          await delay(2000, controller.signal)
+        } catch {
+          break
+        }
       }
     }
 
     void pollUntilReady()
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [navigate])
 

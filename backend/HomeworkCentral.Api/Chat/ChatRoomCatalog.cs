@@ -137,4 +137,48 @@ public static class ChatRoomCatalog
             index > 0 && char.IsUpper(ch) && !char.IsUpper(pascalName[index - 1])
                 ? " " + ch
                 : ch.ToString()));
+
+    public sealed record CatalogCategoryTemplate(
+        string Key,
+        string DisplayName,
+        ChatCategoryKind CategoryKind);
+
+    /// <summary>
+    /// Resolves built-in chat nav categories (General, Staff, subject expertise) so custom rooms
+    /// can merge into an existing sidebar section instead of creating a duplicate category.
+    /// </summary>
+    public static bool TryGetCatalogCategoryTemplate(
+        string categoryKey,
+        out CatalogCategoryTemplate template)
+    {
+        if (string.Equals(categoryKey, ChatRoomBlueprint.GeneralCategoryKey, StringComparison.OrdinalIgnoreCase))
+        {
+            template = new CatalogCategoryTemplate(
+                ChatRoomBlueprint.GeneralCategoryKey,
+                ChatRoomBlueprint.GeneralCategoryDisplayName,
+                ChatCategoryKind.General);
+            return true;
+        }
+
+        if (string.Equals(categoryKey, StaffCategoryKey, StringComparison.OrdinalIgnoreCase))
+        {
+            template = new CatalogCategoryTemplate(
+                StaffCategoryKey,
+                StaffCategoryDisplayName,
+                ChatCategoryKind.Staff);
+            return true;
+        }
+
+        foreach ((string key, string displayName) in CategoryDisplayNames)
+        {
+            if (!string.Equals(categoryKey, key, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            template = new CatalogCategoryTemplate(key, displayName, ChatCategoryKind.Subject);
+            return true;
+        }
+
+        template = null!;
+        return false;
+    }
 }

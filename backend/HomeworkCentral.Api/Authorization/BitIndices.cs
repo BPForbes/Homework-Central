@@ -23,6 +23,7 @@ public static class ModerationPermissions
     public const short ModerateResources = 17;
     public const short SuspendAccounts = 18;
     public const short HandleAppeals = 19;
+    public const short ManageServerInfrastructure = 20;
 }
 
 /// <summary>Mask B — platform roles. Higher bit index = higher authority for role grants.</summary>

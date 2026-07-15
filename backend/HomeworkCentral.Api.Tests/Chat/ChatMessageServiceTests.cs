@@ -1,11 +1,11 @@
 using System.Collections;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
-using HomeworkCentral.Api.Security;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Http;
@@ -62,8 +62,10 @@ public class ChatMessageServiceTests
             db,
             new FakeHttpContextAccessor(),
             effectiveMaskService,
-            new ChatRoomAccessService(),
-            new HtmlContentSanitizer(),
+            new ChatRoomAccessService(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor()),
+            new MentionCooldownTracker(),
+            new FakeMentionRecipientResolver(),
+            new FakeRoleAppearanceService(),
             new FakeHubContext());
     }
 
@@ -118,6 +120,46 @@ public class ChatMessageServiceTests
         };
     }
 
+    private sealed class FakeMentionRecipientResolver : IMentionRecipientResolver
+    {
+        public Task<HashSet<Guid>> ResolveRecipientsAsync(
+            string roomId,
+            string groupKey,
+            IReadOnlyList<ParsedMention> activeMentions,
+            Guid senderId,
+            AccountClass senderAccountClass,
+            string? senderTenantDatabaseName,
+            CancellationToken ct = default) =>
+            Task.FromResult(new HashSet<Guid>());
+    }
+
+    private sealed class FakeRoleAppearanceService : IRoleAppearanceService
+    {
+        public Task<string> ResolveSenderColorAsync(BitArray roleMask, CancellationToken ct = default) =>
+            Task.FromResult(RoleAppearanceDefaults.FallbackColor);
+
+        public Task<IReadOnlyList<MentionRoleOptionDto>> GetMentionableRolesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<MentionRoleOptionDto>>([]);
+
+        public Task<IReadOnlyList<RoleAppearanceDto>> ListRoleAppearanceAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<RoleAppearanceDto>>([]);
+
+        public Task<RoleAppearanceDto?> UpdateRoleAppearanceAsync(
+            Guid roleId,
+            UpdateRoleAppearanceRequest request,
+            CancellationToken ct = default) =>
+            Task.FromResult<RoleAppearanceDto?>(null);
+
+        public Task<bool> IsMentionablePlatformRoleAsync(string roleName, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
+        public Task<Guid?> TryGetMentionableCustomRoleIdAsync(string roleName, CancellationToken ct = default) =>
+            Task.FromResult<Guid?>(null);
+
+        public Task PropagateCustomRoleAppearanceAsync(Guid roleId, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
     private sealed class FakeEffectiveMaskService(UserEffectiveMask mask) : IEffectiveMaskService
     {
         public Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default) =>
@@ -125,6 +167,13 @@ public class ChatMessageServiceTests
 
         public Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default) =>
             Task.FromResult(mask);
+
+        public Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default)
+        {
+            EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+            dto.CustomRoleIds = [];
+            return Task.FromResult(dto);
+        }
     }
 
     private sealed class FakeHttpContextAccessor : IHttpContextAccessor

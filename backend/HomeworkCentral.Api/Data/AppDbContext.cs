@@ -33,6 +33,10 @@ public partial class AppDbContext(
     public DbSet<UserSubjectExpertiseMask> UserSubjectExpertiseMasks => Set<UserSubjectExpertiseMask>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMentionNotification> ChatMentionNotifications => Set<ChatMentionNotification>();
+    public DbSet<CustomChannel> CustomChannels => Set<CustomChannel>();
+    public DbSet<CustomChannelAccessRule> CustomChannelAccessRules => Set<CustomChannelAccessRule>();
+    public DbSet<InfoEntry> InfoEntries => Set<InfoEntry>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -60,6 +64,17 @@ public partial class AppDbContext(
             e.Property(r => r.PermissionMask).HasBitColumn("bit(256)", 256);
             e.Property(r => r.FeatureMask).HasBitColumn("bit(256)", 256);
             e.Property(r => r.Description);
+            e.Property(r => r.IsCustom).HasDefaultValue(false);
+            e.Property(r => r.CreatedAtUtc).IsRequired();
+            e.Property(r => r.ClaimHostRoomId).HasMaxLength(128);
+            e.Property(r => r.ClaimDisplayOrder).HasDefaultValue(0);
+            e.Property(r => r.IconName).HasMaxLength(64);
+            e.Property(r => r.MessageColor).HasMaxLength(7);
+            e.Property(r => r.IsMentionableByUsers).HasDefaultValue(false);
+            e.Property(r => r.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
         });
 
         mb.Entity<UserRole>(e =>
@@ -188,6 +203,7 @@ public partial class AppDbContext(
             e.Property(m => m.MessageId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(m => m.RoomId).HasMaxLength(128).IsRequired();
             e.Property(m => m.SenderUsername).HasMaxLength(64).IsRequired();
+            e.Property(m => m.SenderMessageColor).HasMaxLength(7);
             e.Property(m => m.RawContent).IsRequired();
             e.Property(m => m.CreatedAtUtc).IsRequired();
             e.Property(m => m.OwnerAccountClass)
@@ -195,8 +211,92 @@ public partial class AppDbContext(
                 .HasMaxLength(32)
                 .IsRequired();
             e.Property(m => m.TenantDatabaseName).HasMaxLength(128);
+            e.Property(m => m.ReplyToSenderUsername).HasMaxLength(64);
+            e.Property(m => m.ReplyToContentSnippet).HasMaxLength(200);
             e.HasIndex(m => new { m.RoomId, m.CreatedAtUtc });
             e.HasIndex(m => m.SenderId);
+            e.HasIndex(m => m.ReplyToMessageId);
+        });
+
+        mb.Entity<ChatMentionNotification>(e =>
+        {
+            e.HasKey(n => n.NotificationId);
+            e.Property(n => n.NotificationId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(n => n.SenderUsername).HasMaxLength(64).IsRequired();
+            e.Property(n => n.RoomId).HasMaxLength(128).IsRequired();
+            e.Property(n => n.RoomDisplayName).HasMaxLength(128).IsRequired();
+            e.Property(n => n.CategoryKey).HasMaxLength(64).IsRequired();
+            e.Property(n => n.CategoryDisplayName).HasMaxLength(128).IsRequired();
+            e.Property(n => n.MessageContent).IsRequired();
+            e.Property(n => n.MentionKind).HasMaxLength(32).IsRequired();
+            e.Property(n => n.CreatedAtUtc).IsRequired();
+            e.Property(n => n.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(n => n.TenantDatabaseName).HasMaxLength(128);
+            e.HasIndex(n => new { n.RecipientUserId, n.ReadAtUtc });
+            e.HasIndex(n => new { n.RecipientUserId, n.CreatedAtUtc });
+            e.HasIndex(n => new { n.RecipientUserId, n.CategoryKey });
+            e.HasIndex(n => n.MessageId);
+        });
+
+        mb.Entity<CustomChannel>(e =>
+        {
+            e.HasKey(c => c.ChannelId);
+            e.Property(c => c.ChannelId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(c => c.RoomId).HasMaxLength(128).IsRequired();
+            e.HasIndex(c => c.RoomId).IsUnique();
+            e.Property(c => c.DisplayName).HasMaxLength(128).IsRequired();
+            e.Property(c => c.IconName).HasMaxLength(64);
+            e.Property(c => c.CategoryKey).HasMaxLength(64).IsRequired();
+            e.Property(c => c.CategoryDisplayName).HasMaxLength(128).IsRequired();
+            e.Property(c => c.RoomType)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(c => c.TieType)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(c => c.TieSubjectMask).HasMaxLength(64);
+            e.Property(c => c.CreatedAtUtc).IsRequired();
+            e.Property(c => c.UpdatedAtUtc).IsRequired();
+            e.Property(c => c.OwnerAccountClass)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            e.Property(c => c.IsArchived).HasDefaultValue(false);
+        });
+
+        mb.Entity<CustomChannelAccessRule>(e =>
+        {
+            e.HasKey(r => r.AccessRuleId);
+            e.Property(r => r.AccessRuleId).HasDefaultValueSql("gen_random_uuid()");
+            e.HasOne(r => r.Channel)
+                .WithMany(c => c.AccessRules)
+                .HasForeignKey(r => r.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(r => r.CustomRole)
+                .WithMany()
+                .HasForeignKey(r => r.CustomRoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => r.ChannelId);
+        });
+
+        mb.Entity<InfoEntry>(e =>
+        {
+            e.HasKey(i => i.EntryId);
+            e.Property(i => i.EntryId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(i => i.AuthorUsername).HasMaxLength(64).IsRequired();
+            e.Property(i => i.Content).IsRequired();
+            e.Property(i => i.CreatedAtUtc).IsRequired();
+            e.Property(i => i.UpdatedAtUtc).IsRequired();
+            e.HasOne(i => i.Channel)
+                .WithMany()
+                .HasForeignKey(i => i.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(i => i.ChannelId);
         });
 
         mb.ApplyScopedResourceFilters(this);
