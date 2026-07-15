@@ -2,6 +2,7 @@ import axios from 'axios'
 import type { AuthResponse, LoginRequest, RegisterRequest } from '../types/auth'
 
 import type { DevLoginOptions, DevLoginRequest } from '../types/devAuth'
+import { emitWaterDroplet } from '../utils/waterEvents'
 
 /** Auth endpoints excluded from the automatic 401 refresh retry loop. */
 const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/dev/login']
@@ -17,6 +18,12 @@ api.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('accessToken')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  // Sending data to the server drops a ripple on the water background.
+  // Silent token refreshes are background noise, not a user action — skip them.
+  const method = (config.method ?? 'get').toLowerCase()
+  if (method !== 'get' && !(config.url ?? '').endsWith('/auth/refresh')) {
+    emitWaterDroplet()
   }
   return config
 })

@@ -77,6 +77,22 @@
 
   /* Type */
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Water scene (base gradient + canvas elements — see components/background/WaterBackground.tsx) */
+  --water-base-1: #cfeeff;
+  --water-base-2: #a8d8f0;
+  --water-base-3: #7cc3e0;
+  --water-base-4: #b7e3f2;
+  --water-reflection-a: rgba(255, 255, 255, 0.5);
+  --water-reflection-b: rgba(190, 230, 255, 0.42);
+  --water-reflection-c: rgba(150, 216, 232, 0.38);
+  --water-lily: #3f9256;
+  --water-lily-rim: #2e7040;
+  --water-lily-shadow: rgba(20, 60, 90, 0.18);
+  --water-fish: rgba(92, 108, 120, 0.42);
+  --water-droplet: rgba(255, 255, 255, 0.65);
+  --water-firefly: #ffd76a;
+  --water-fog: rgba(205, 220, 232, 0.14);
 }
 
 :root[data-theme='dark'] {
@@ -128,6 +144,22 @@
   --shadow-lg: 0 20px 46px rgba(0, 0, 0, 0.55);
   --shadow-primary: 0 6px 18px rgba(31, 143, 121, 0.4);
   --shadow-accent: 0 6px 18px rgba(217, 154, 61, 0.35);
+
+  /* Water scene (dark: deep blue water, moonlit reflections, fog + fireflies) */
+  --water-base-1: #0b2f42;
+  --water-base-2: #1a4d5c;
+  --water-base-3: #0e3a4e;
+  --water-base-4: #143f50;
+  --water-reflection-a: rgba(110, 200, 235, 0.26);
+  --water-reflection-b: rgba(90, 135, 220, 0.2);
+  --water-reflection-c: rgba(35, 160, 185, 0.24);
+  --water-lily: #2f6b40;
+  --water-lily-rim: #24512f;
+  --water-lily-shadow: rgba(0, 10, 20, 0.35);
+  --water-fish: rgba(155, 170, 182, 0.3);
+  --water-droplet: rgba(170, 220, 240, 0.5);
+  --water-firefly: #ffd76a;
+  --water-fog: rgba(190, 205, 220, 0.12);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -162,32 +194,46 @@ body {
   transition: color var(--duration-slow) var(--ease-in-out);
 }
 
-/* Water surface animated background layer */
+/*
+ * Water background, two layers:
+ * 1. body::before — the blue base. An oversized gradient whose position drifts
+ *    slowly, so the water's color gradually shifts. It can never "run out":
+ *    the gradient always covers the viewport, so no seams or hard lines.
+ * 2. .water-scene — a fixed canvas (components/background/WaterBackground.tsx)
+ *    that draws the moving elements: reflections, lily pads, fish, droplets,
+ *    and (dark mode) fog + fireflies. Elements that drift off one edge
+ *    re-enter antipodally on the opposite edge, so nothing escapes the water.
+ */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -2;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse 800px 600px at 20% 20%, rgba(200, 240, 255, 0.4) 0%, transparent 40%),
-    radial-gradient(ellipse 900px 700px at 80% 30%, rgba(150, 210, 255, 0.3) 0%, transparent 45%),
-    radial-gradient(ellipse 850px 650px at 50% 80%, rgba(120, 200, 230, 0.25) 0%, transparent 50%),
-    #a8d8f0;
-  background-size: 200% 200%, 220% 220%, 210% 210%, 100% 100%;
-  background-position: 0% 0%, 50% 50%, 25% 75%, center;
-  animation: water-shift-light 25s ease-in-out infinite;
+  background: linear-gradient(
+    150deg,
+    var(--water-base-1) 0%,
+    var(--water-base-2) 36%,
+    var(--water-base-3) 68%,
+    var(--water-base-4) 100%
+  );
+  background-size: 220% 220%;
+  animation: water-base-drift 40s ease-in-out infinite alternate;
 }
 
-:root[data-theme='dark'] body::before {
-  background:
-    radial-gradient(ellipse 800px 600px at 20% 20%, rgba(100, 180, 220, 0.3) 0%, transparent 40%),
-    radial-gradient(ellipse 900px 700px at 80% 30%, rgba(60, 150, 200, 0.25) 0%, transparent 45%),
-    radial-gradient(ellipse 850px 650px at 50% 80%, rgba(80, 170, 210, 0.2) 0%, transparent 50%),
-    #1a4d5c;
-  background-size: 200% 200%, 220% 220%, 210% 210%, 100% 100%;
-  background-position: 0% 0%, 50% 50%, 25% 75%, center;
-  animation: water-shift-dark 25s ease-in-out infinite;
+.water-scene {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+@keyframes water-base-drift {
+  0% { background-position: 0% 0%; }
+  45% { background-position: 70% 40%; }
+  100% { background-position: 100% 100%; }
 }
 
 ::selection {
@@ -2007,22 +2053,6 @@ a {
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes water-shift-light {
-  0% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
-  25% { background-position: 30% 20%, 70% 40%, 40% 60%, center; }
-  50% { background-position: 60% 40%, 40% 70%, 70% 30%, center; }
-  75% { background-position: 40% 60%, 20% 80%, 50% 20%, center; }
-  100% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
-}
-
-@keyframes water-shift-dark {
-  0% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
-  25% { background-position: 30% 20%, 70% 40%, 40% 60%, center; }
-  50% { background-position: 60% 40%, 40% 70%, 70% 30%, center; }
-  75% { background-position: 40% 60%, 20% 80%, 50% 20%, center; }
-  100% { background-position: 0% 0%, 50% 50%, 25% 75%, center; }
 }
 
 @keyframes rise-in {

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { emitWaterDroplet } from '../utils/waterEvents'
 import type {
   ClaimableCustomRole,
   CustomChannel,
@@ -17,6 +18,8 @@ const api = axios.create({ baseURL: '/api/infrastructure' })
 api.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('accessToken')
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // Sending data to the server drops a ripple on the water background.
+  if ((config.method ?? 'get').toLowerCase() !== 'get') emitWaterDroplet()
   return config
 })
 
