@@ -7,7 +7,7 @@
   color-scheme: light;
 
   /* Surfaces */
-  --color-bg: #faf8f4;
+  --color-bg: #eafaff;
   --color-bg-elevated: #fffdf9;
   --color-surface: #ffffff;
   --color-surface-alt: #f4f1e9;
@@ -82,7 +82,7 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --color-bg: #1b1916;
+  --color-bg: #03131f;
   --color-bg-elevated: #211e1a;
   --color-surface: #262320;
   --color-surface-alt: #2f2b25;
@@ -155,10 +155,37 @@ html {
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-bg);
   color: var(--color-ink);
   min-height: 100vh;
-  transition: background var(--duration-slow) var(--ease-in-out), color var(--duration-slow) var(--ease-in-out);
+  position: relative;
+  overflow-x: hidden;
+  transition: color var(--duration-slow) var(--ease-in-out);
+}
+
+/* Water surface animated background layer */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 14% 10%, rgba(255, 255, 255, 0.9) 0%, transparent 26%),
+    radial-gradient(circle at 84% 24%, rgba(191, 223, 255, 0.68) 0%, transparent 34%),
+    radial-gradient(circle at 58% 78%, rgba(154, 224, 219, 0.46) 0%, transparent 40%),
+    linear-gradient(150deg, #eafaff 0%, #b8e5ed 42%, #8cccd6 70%, #d9f2f4 100%);
+  background-size: 140% 140%, 160% 160%, 150% 150%, 100% 100%;
+  background-position: 0% 20%, 100% 60%, center, center;
+  animation: water-bg-shift 20s ease-in-out infinite;
+}
+
+:root[data-theme='dark'] body::before {
+  background:
+    radial-gradient(circle at 14% 10%, rgba(82, 195, 224, 0.2) 0%, transparent 26%),
+    radial-gradient(circle at 84% 24%, rgba(88, 117, 230, 0.19) 0%, transparent 34%),
+    radial-gradient(circle at 58% 78%, rgba(19, 139, 158, 0.22) 0%, transparent 40%),
+    linear-gradient(150deg, #03131f 0%, #062d40 42%, #074354 70%, #031721 100%);
+  background-size: 140% 140%, 160% 160%, 150% 150%, 100% 100%;
 }
 
 ::selection {
@@ -242,10 +269,6 @@ a {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background:
-    radial-gradient(circle at 12% 8%, var(--color-primary-soft) 0%, transparent 45%),
-    radial-gradient(circle at 88% 92%, var(--color-accent-soft) 0%, transparent 40%),
-    var(--color-bg);
 }
 
 .auth-card {
@@ -609,6 +632,8 @@ a {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
 }
 
 .app-header {
@@ -1980,6 +2005,14 @@ a {
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes water-bg-shift {
+  0% { background-position: 0% 20%, 100% 60%, center, center; }
+  25% { background-position: 20% 40%, 80% 30%, center, center; }
+  50% { background-position: 40% 60%, 60% 50%, center, center; }
+  75% { background-position: 60% 40%, 40% 70%, center, center; }
+  100% { background-position: 80% 20%, 20% 80%, center, center; }
 }
 
 @keyframes rise-in {
