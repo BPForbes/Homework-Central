@@ -62,6 +62,8 @@ interface SceneEntity {
   fishSpots?: Array<{ x: number; y: number; radius: number }>
   /** Stable body outline generated once rather than tracing Béziers every frame. */
   fishBodyPath?: Path2D
+  /** Palette slot is selected once at spawn instead of recomputed every draw. */
+  fishStyleIndex?: number
   /** Firefly steering state: random-walk heading and dart window. */
   wanderAngle?: number
   dartUntil?: number
@@ -210,6 +212,44 @@ const DESPAWN_FRAMES: Record<EntityKind, number> = {
 }
 const MAX_CANVAS_PIXELS = 8_000_000
 const RADIAL_SPRITE_SIZE = 128
+const INTERACTION_CACHE_FRAMES = secondsToFrames(0.5)
+const TRIG_TABLE_BITS = 11
+const TRIG_TABLE_SIZE = 1 << TRIG_TABLE_BITS
+const TRIG_TABLE_MASK = TRIG_TABLE_SIZE - 1
+const TRIG_INDEX_SCALE = TRIG_TABLE_SIZE / (Math.PI * 2)
+const TRIG_QUARTER_TURN = TRIG_TABLE_SIZE >> 2
+const SIN_LOOKUP = new Float32Array(TRIG_TABLE_SIZE)
+for (let index = 0; index < TRIG_TABLE_SIZE; index++)
+  SIN_LOOKUP[index] = Math.sin(index / TRIG_INDEX_SCALE)
+
+/**
+ * Nearest-sample trig is accurate to roughly 0.18 degrees at this table size.
+ * That is imperceptible for ambient motion and avoids repeated transcendental
+ * math when every fish and firefly is steering on the same frame.
+ */
+function fastSin(angle: number): number {
+  return SIN_LOOKUP[((angle * TRIG_INDEX_SCALE) | 0) & TRIG_TABLE_MASK]
+}
+
+function fastCos(angle: number): number {
+  return SIN_LOOKUP[(((angle * TRIG_INDEX_SCALE) | 0) + TRIG_QUARTER_TURN) & TRIG_TABLE_MASK]
+}
+
+/** Max-plus-fraction approximation, within about 4% of Math.hypot for 2D vectors. */
+function fastMagnitude(x: number, y: number): number {
+  const absoluteX = Math.abs(x)
+  const absoluteY = Math.abs(y)
+  const maximum = Math.max(absoluteX, absoluteY)
+  const minimum = Math.min(absoluteX, absoluteY)
+  return maximum * 0.96043387 + minimum * 0.397824735
+}
+
+interface FishBodySprite {
+  canvas: HTMLCanvasElement
+  width: number
+  height: number
+}
+
 const INTERACTION_SURFACE_SELECTOR = [
   '.auth-card',
   '.verify-card',
@@ -250,6 +290,9 @@ class WaterScene {
   private accumulatedMs = 0
   private frame = 0
   private running = false
+  private renderDprCap = 1.75
+  private interactionBounds: number[] = []
+  private interactionBoundsFrame = Number.NEGATIVE_INFINITY
   private lastApiDropletAt = 0
   private readonly pendingSpawns: ScheduledSpawn<SpawnableKind>[] = []
   private readonly spawners = Object.fromEntries(
@@ -268,6 +311,8 @@ class WaterScene {
     maximumBurst: 1,
   })
   private readonly radialSprites = new Map<string, HTMLCanvasElement>()
+  private readonly fishBodyPaths = new Map<number, Path2D>()
+  private readonly fishBodySprites = new Map<string, FishBodySprite>()
   private readonly themeObserver: MutationObserver
   private readonly handleResize = () => {
     if (this.resizeRafId !== 0) return
@@ -352,6 +397,7 @@ class WaterScene {
     this.dark = document.documentElement.getAttribute('data-theme') === 'dark'
     this.palette = readPalette()
     this.radialSprites.clear()
+    this.fishBodySprites.clear()
     if (!this.dark) {
       for (const entity of this.entities) {
         if (entity.kind === 'droplet') continue
@@ -369,7 +415,7 @@ class WaterScene {
     const height = window.innerHeight
     const deviceDpr = window.devicePixelRatio || 1
     const pixelBudgetDpr = Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, width * height))
-    const dpr = Math.max(1, Math.min(1.75, deviceDpr, pixelBudgetDpr))
+    const dpr = Math.max(1, Math.min(this.renderDprCap, deviceDpr, pixelBudgetDpr))
     if (width === this.width && height === this.height && Math.abs(dpr - this.dpr) < 0.01) return
 
     this.width = width
@@ -378,6 +424,7 @@ class WaterScene {
     this.canvas.width = Math.round(width * dpr)
     this.canvas.height = Math.round(height * dpr)
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    this.interactionBoundsFrame = Number.NEGATIVE_INFINITY
   }
 
   private count(kind: EntityKind): number {
@@ -460,6 +507,52 @@ class WaterScene {
     return path
   }
 
+  private getFishBodyPath(radius: number): Path2D {
+    const key = Math.round(radius * 2)
+    const cached = this.fishBodyPaths.get(key)
+    if (cached) return cached
+    const path = this.createFishBodyPath(key / 2)
+    this.fishBodyPaths.set(key, path)
+    return path
+  }
+
+  /**
+   * Fish body gradients used to be allocated for every fish on every frame.
+   * Render each half-pixel size/palette combination once at 2x resolution,
+   * then composite the small sprite under the live fins, tail, and mottling.
+   */
+  private getFishBodySprite(radius: number, styleIndex: number): FishBodySprite {
+    const key = styleIndex + '-' + radius
+    const cached = this.fishBodySprites.get(key)
+    if (cached) return cached
+
+    const length = radius * 2.2
+    const width = radius * 0.75
+    const padding = 2
+    const spriteWidth = Math.ceil(length * 2 + padding * 2)
+    const spriteHeight = Math.ceil(width * 2 + padding * 2)
+    const pixelScale = 2
+    const canvas = document.createElement('canvas')
+    canvas.width = spriteWidth * pixelScale
+    canvas.height = spriteHeight * pixelScale
+    const context = canvas.getContext('2d')
+    if (context) {
+      const { spine, flank } = this.palette.fish[styleIndex]
+      context.setTransform(pixelScale, 0, 0, pixelScale, 0, 0)
+      context.translate(spriteWidth / 2, spriteHeight / 2)
+      const gradient = context.createLinearGradient(0, -width, 0, width)
+      gradient.addColorStop(0, rgba(flank))
+      gradient.addColorStop(0.5, rgba(spine))
+      gradient.addColorStop(1, rgba(flank))
+      context.fillStyle = gradient
+      context.fill(this.getFishBodyPath(radius))
+    }
+
+    const sprite = { canvas, width: spriteWidth, height: spriteHeight }
+    this.fishBodySprites.set(key, sprite)
+    return sprite
+  }
+
   private seedInitial(frame: number): void {
     const seedKind = (kind: SpawnableKind, amount: number) => {
       for (let index = 0; index < amount; index++) {
@@ -490,17 +583,17 @@ class WaterScene {
       case 'reflection': {
         const angle = rand(0, Math.PI * 2)
         const speed = rand(5, 13)
-        return { ...base, pos: this.scheduledPoint(scheduled, 60, true), vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed }, radius: rand(150, 320) }
+        return { ...base, pos: this.scheduledPoint(scheduled, 60, true), vel: { x: fastCos(angle) * speed, y: fastSin(angle) * speed }, radius: rand(150, 320) }
       }
       case 'lily': {
         const angle = rand(0, Math.PI * 2)
         const speed = rand(3, 8)
-        return { ...base, pos: this.scheduledPoint(scheduled, 40, true), vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed }, radius: rand(16, 30) }
+        return { ...base, pos: this.scheduledPoint(scheduled, 40, true), vel: { x: fastCos(angle) * speed, y: fastSin(angle) * speed }, radius: rand(16, 30) }
       }
       case 'fish': {
         const heading = scheduled?.heading ?? rand(0, Math.PI * 2)
         const cruiseSpeed = rand(26, 46)
-        const radius = rand(9, 14)
+        const radius = Math.round(rand(9, 14) * 2) / 2
         const length = radius * 2.2
         const width = radius * 0.75
         const spotRandom = seededRandom(seed)
@@ -513,7 +606,7 @@ class WaterScene {
         return {
           ...base,
           pos: this.scheduledPoint(scheduled, 40, true),
-          vel: { x: Math.cos(heading) * cruiseSpeed, y: Math.sin(heading) * cruiseSpeed },
+          vel: { x: fastCos(heading) * cruiseSpeed, y: fastSin(heading) * cruiseSpeed },
           radius,
           heading,
           cruiseSpeed,
@@ -522,7 +615,8 @@ class WaterScene {
           headingDrift: 0,
           nextTurnAt: frame + sampleFrameRange(1, 4),
           fishSpots,
-          fishBodyPath: this.createFishBodyPath(radius),
+          fishBodyPath: this.getFishBodyPath(radius),
+          fishStyleIndex: Math.floor(seed) % this.palette.fish.length,
         }
       }
       case 'firefly':
@@ -581,12 +675,12 @@ class WaterScene {
       entity.nextTurnAt = frame + sampleFrameRange(2, 6)
     }
     // Tail angle is sin(phase); its rate of change, cos(phase), is the stroke.
-    const stroke = Math.cos(entity.tailPhase)
+    const stroke = fastCos(entity.tailPhase)
     entity.heading =
       (entity.heading ?? 0) + (entity.headingDrift ?? 0) * dt - stroke * 0.1 * tailRate * dt
     const speed = (entity.cruiseSpeed ?? 32) * (0.65 + 0.6 * Math.abs(stroke))
-    entity.vel.x = Math.cos(entity.heading ?? 0) * speed
-    entity.vel.y = Math.sin(entity.heading ?? 0) * speed
+    entity.vel.x = fastCos(entity.heading ?? 0) * speed
+    entity.vel.y = fastSin(entity.heading ?? 0) * speed
   }
 
   /** Sporadic firefly flight: a random-walk heading with occasional darts. */
@@ -598,8 +692,8 @@ class WaterScene {
     const darting = entity.dartUntil !== undefined && frame < entity.dartUntil
     const speed = darting ? 120 : 26
     const blend = Math.min(1, (darting ? 6 : 2.4) * dt)
-    entity.vel.x += (Math.cos(entity.wanderAngle) * speed - entity.vel.x) * blend
-    entity.vel.y += (Math.sin(entity.wanderAngle) * speed - entity.vel.y) * blend
+    entity.vel.x += (fastCos(entity.wanderAngle) * speed - entity.vel.x) * blend
+    entity.vel.y += (fastSin(entity.wanderAngle) * speed - entity.vel.y) * blend
   }
 
   private beginDespawn(entity: SceneEntity): void {
@@ -612,9 +706,30 @@ class WaterScene {
     return Math.min(1, Math.max(0, (frame - entity.despawnFrame) / DESPAWN_FRAMES[entity.kind]))
   }
 
+  private refreshInteractionBounds(): void {
+    if (this.frame - this.interactionBoundsFrame < INTERACTION_CACHE_FRAMES) return
+    this.interactionBoundsFrame = this.frame
+    this.interactionBounds.length = 0
+
+    for (const surface of document.querySelectorAll<HTMLElement>(INTERACTION_SURFACE_SELECTOR)) {
+      const rect = surface.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) continue
+      this.interactionBounds.push(rect.left, rect.top, rect.right, rect.bottom)
+    }
+  }
+
   private isInteractionSurfaceAt(x: number, y: number): boolean {
-    const target = document.elementFromPoint(x, y)
-    return target instanceof Element && target.closest(INTERACTION_SURFACE_SELECTOR) !== null
+    this.refreshInteractionBounds()
+    for (let index = 0; index < this.interactionBounds.length; index += 4) {
+      if (
+        x >= this.interactionBounds[index] &&
+        x <= this.interactionBounds[index + 2] &&
+        y >= this.interactionBounds[index + 1] &&
+        y <= this.interactionBounds[index + 3]
+      )
+        return true
+    }
+    return false
   }
 
   private step(frame: number, dt: number): void {
@@ -625,10 +740,13 @@ class WaterScene {
       if (entity.despawnFrame === undefined && frame - entity.bornFrame >= entity.lifespanFrames)
         this.beginDespawn(entity)
 
+      const despawning = entity.despawnFrame !== undefined
+      const retirementProgress = despawning ? this.despawnProgress(entity, frame) : 0
+
       if (entity.kind === 'droplet') {
         if (
-          this.despawnProgress(entity, frame) < 1 &&
-          !(entity.despawnFrame !== undefined && this.isInteractionSurfaceAt(entity.pos.x, entity.pos.y))
+          retirementProgress < 1 &&
+          !(despawning && this.isInteractionSurfaceAt(entity.pos.x, entity.pos.y))
         )
           this.entities[writeIndex++] = entity
         continue
@@ -646,14 +764,12 @@ class WaterScene {
         entity.pos.y < -margin ||
         entity.pos.y > this.height + margin
 
-      const despawning = entity.despawnFrame !== undefined
-
       // Retiring entities may finish naturally in open water, but disappear as
       // soon as their center reaches a foreground surface or viewport edge.
       if (
         despawning &&
         (outside ||
-          this.despawnProgress(entity, frame) >= 1 ||
+          retirementProgress >= 1 ||
           this.isInteractionSurfaceAt(entity.pos.x, entity.pos.y))
       ) {
         continue
@@ -670,7 +786,33 @@ class WaterScene {
     }
 
     this.entities.length = writeIndex
+    this.adjustRenderQuality(frame)
     this.spawnDue(frame)
+  }
+
+  /**
+   * Fill rate dominates once large fog/reflection sprites overlap. Lower the
+   * backing-store DPR only at sustained high density, with hysteresis to avoid
+   * reallocating the canvas when counts hover around a threshold.
+   */
+  private adjustRenderQuality(frame: number): void {
+    if (frame % SCENE_FPS !== 0) return
+
+    const entityCount = this.entities.length
+    let nextCap = this.renderDprCap
+    if (this.renderDprCap === 1.75) {
+      if (entityCount >= 34) nextCap = 1.1
+      else if (entityCount >= 26) nextCap = 1.35
+    } else if (this.renderDprCap === 1.35) {
+      if (entityCount >= 34) nextCap = 1.1
+      else if (entityCount <= 20) nextCap = 1.75
+    } else if (entityCount <= 26) {
+      nextCap = 1.35
+    }
+
+    if (nextCap === this.renderDprCap) return
+    this.renderDprCap = nextCap
+    this.resize()
   }
 
   private spawnDue(frame: number): void {
@@ -710,12 +852,9 @@ class WaterScene {
   }
 
   /** 0→1 fade-in after spawn, then a smooth kind-specific fade on retirement. */
-  private envelope(entity: SceneEntity, frame: number): number {
+  private envelope(entity: SceneEntity, frame: number, easedProgress: number): number {
     const fadeIn = Math.min(1, Math.max(0, (frame - entity.bornFrame) / FADE_IN_FRAMES))
-    const progress = this.despawnProgress(entity, frame)
-    const easedProgress = progress * progress * (3 - 2 * progress)
-    const fadeOut = 1 - easedProgress
-    return fadeIn * fadeOut
+    return fadeIn * (1 - easedProgress)
   }
 
   private draw(frame: number): void {
@@ -726,10 +865,10 @@ class WaterScene {
   }
 
   private drawEntity(entity: SceneEntity, frame: number): void {
-    const alpha = this.envelope(entity, frame)
-    if (alpha <= 0) return
     const progress = this.despawnProgress(entity, frame)
     const easedProgress = progress * progress * (3 - 2 * progress)
+    const alpha = this.envelope(entity, frame, easedProgress)
+    if (alpha <= 0) return
     const scale =
       entity.kind === 'fish'
         ? 1 - easedProgress * 0.48
@@ -805,14 +944,14 @@ class WaterScene {
     ctx.translate(entity.pos.x, entity.pos.y)
 
     // Slow floating wobble (ctx.rotate applies the same R(θ) rotation matrix).
-    const rotation = entity.seed + Math.sin(frame / (SCENE_FPS * 3) + entity.seed) * 0.08
+    const rotation = entity.seed + fastSin(frame / (SCENE_FPS * 3) + entity.seed) * 0.08
     ctx.rotate(rotation)
 
     // Soft shadow with the same notched silhouette as the pad, cast toward the
     // lower right. The offset is fixed in screen space (the light does not
     // rotate with the pad), so counter-rotate it into pad space with R(−θ).
-    const shadowX = 2.5 * Math.cos(rotation) + 3.5 * Math.sin(rotation)
-    const shadowY = -2.5 * Math.sin(rotation) + 3.5 * Math.cos(rotation)
+    const shadowX = 2.5 * fastCos(rotation) + 3.5 * fastSin(rotation)
+    const shadowY = -2.5 * fastSin(rotation) + 3.5 * fastCos(rotation)
     ctx.fillStyle = rgba(this.palette.lilyShadow, alpha)
     this.traceLilyPad(r * 1.03, shadowX, shadowY)
     ctx.fill()
@@ -843,19 +982,20 @@ class WaterScene {
    */
   private drawFish(entity: SceneEntity, alpha: number): void {
     const { ctx } = this
-    const fishStyle = this.palette.fish[Math.floor(entity.seed) % this.palette.fish.length]
-    const { spine, flank, fin, spot: spotColor } = fishStyle
-    const tailAngle = Math.sin(entity.tailPhase ?? 0) * 0.55
+    const styleIndex = entity.fishStyleIndex ?? Math.floor(entity.seed) % this.palette.fish.length
+    const fishStyle = this.palette.fish[styleIndex]
+    const { fin, spot: spotColor } = fishStyle
+    const tailAngle = fastSin(entity.tailPhase ?? 0) * 0.55
 
     const r = entity.radius
     const length = r * 2.2 // nose-to-peduncle half length
     const width = r * 0.75 // half width at the widest point
-    const bodyPath = entity.fishBodyPath ?? this.createFishBodyPath(r)
+    const bodyPath = entity.fishBodyPath ?? this.getFishBodyPath(r)
 
     ctx.save()
     ctx.translate(entity.pos.x, entity.pos.y)
     // Heading — ctx.rotate is the same R(θ) rotation matrix.
-    ctx.rotate(entity.heading ?? Math.atan2(entity.vel.y, entity.vel.x))
+    ctx.rotate(entity.heading ?? 0)
 
     // Pectoral fins: paired, swept back, flexing gently against the tail beat.
     ctx.fillStyle = rgba(fin, alpha * 0.85)
@@ -884,13 +1024,11 @@ class WaterScene {
     ctx.fill()
     ctx.restore()
 
-    // Body with cross-body shading: flank → spine highlight → flank.
-    const gradient = ctx.createLinearGradient(0, -width, 0, width)
-    gradient.addColorStop(0, rgba(flank, alpha))
-    gradient.addColorStop(0.5, rgba(spine, alpha))
-    gradient.addColorStop(1, rgba(flank, alpha))
-    ctx.fillStyle = gradient
-    ctx.fill(bodyPath)
+    // Cross-body shading is pre-rendered once per size/palette combination.
+    const bodySprite = this.getFishBodySprite(r, styleIndex)
+    ctx.globalAlpha = alpha
+    ctx.drawImage(bodySprite.canvas, -bodySprite.width / 2, -bodySprite.height / 2, bodySprite.width, bodySprite.height)
+    ctx.globalAlpha = 1
 
     // Spawn-cached mottling, clipped to the spawn-cached body path.
     ctx.clip(bodyPath)
@@ -934,8 +1072,8 @@ class WaterScene {
 
   private drawFirefly(entity: SceneEntity, frame: number, alpha: number): void {
     const { ctx } = this
-    const pulse = 0.5 + 0.5 * Math.sin((frame / SCENE_FPS) * 4 + entity.seed)
-    const speed = Math.hypot(entity.vel.x, entity.vel.y)
+    const pulse = 0.5 + 0.5 * fastSin((frame / SCENE_FPS) * 4 + entity.seed)
+    const speed = fastMagnitude(entity.vel.x, entity.vel.y)
     // Bloom grows with movement over the water: darting fireflies flare gold.
     const intensity = Math.min(1, 0.3 + pulse * 0.35 + speed / 160)
     const glowRadius = entity.radius * (3.5 + 4.5 * intensity)

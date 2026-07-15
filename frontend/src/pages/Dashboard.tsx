@@ -33,7 +33,9 @@ export function Dashboard() {
   useEffect(() => {
     void inboxApi
       .getSummary()
-      .then(({ data }) => setInboxSummary(data.categories))
+      .then(({ data }) =>
+        setInboxSummary(data.categories.filter((category) => category.unreadCount > 0))
+      )
       .catch(() => setInboxSummary([]))
   }, [user?.userId])
 
@@ -82,7 +84,10 @@ export function Dashboard() {
           <ul className="dashboard-inbox-list">
             {inboxSummary.map((item) => (
               <li key={item.categoryKey}>
-                <Link to="/inbox" className="dashboard-inbox-link">
+                <Link
+                  to={'/inbox?category=' + encodeURIComponent(item.categoryKey)}
+                  className="dashboard-inbox-link"
+                >
                   <FontAwesomeIcon icon={byPrefixAndName.fas.envelope} className="dashboard-inbox-icon" />
                   New Message ({item.categoryDisplayName}): {item.unreadCount}
                 </Link>

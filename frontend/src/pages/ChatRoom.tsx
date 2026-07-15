@@ -15,6 +15,7 @@ import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
+import { LoadingBars } from '../components/LoadingBars'
 
 function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
   if (room.iconName) {
@@ -126,7 +127,7 @@ export function ChatRoom() {
   if (roomLoading) {
     return (
       <div className="chat-room-page">
-        <p className="chat-room-status">Loading…</p>
+        <LoadingBars message="Loading room…" />
       </div>
     )
   }

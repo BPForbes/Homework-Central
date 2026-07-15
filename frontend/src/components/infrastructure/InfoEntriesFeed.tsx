@@ -7,6 +7,7 @@ import { RichContent } from '../../richtext/RichContent'
 import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 import type { InfoEntryFeed } from '../../types/infrastructure'
 import { formatUtcTimestamp } from '../../utils/formatUtcTimestamp'
+import { LoadingBars } from '../LoadingBars'
 
 interface InfoEntriesFeedProps {
   roomId: string
@@ -124,7 +125,7 @@ export function InfoEntriesFeed({ roomId, readOnly = false }: InfoEntriesFeedPro
     }
   }
 
-  if (loading) return <p className="chat-room-status">Loading…</p>
+  if (loading) return <LoadingBars message="Loading entries…" />
   if (loadError) return <p className="error">{loadError}</p>
   if (!feed) return null
 

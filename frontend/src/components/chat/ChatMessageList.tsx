@@ -3,6 +3,7 @@ import type { ChatMessage, ChatTypingUser, MentionRoleOption } from '../../types
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { TypingIndicator } from './TypingIndicator'
 import { buildMentionStyleLookup } from './mentionAutocomplete'
+import { LoadingBars } from '../LoadingBars'
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
@@ -47,7 +48,7 @@ export function ChatMessageList({
   }
 
   if (loading) {
-    return <p className="chat-messages-status">Loading messages…</p>
+    return <LoadingBars message="Loading messages…" />
   }
 
   return (

@@ -152,13 +152,15 @@ public class ChatController(
 
     /// <summary>Returns mention notifications for the current user's inbox.</summary>
     [HttpGet("inbox")]
-    public async Task<ActionResult<IReadOnlyList<ChatInboxItemDto>>> GetInbox(CancellationToken ct)
+    public async Task<ActionResult<IReadOnlyList<ChatInboxItemDto>>> GetInbox(
+        [FromQuery] string? categoryKey,
+        CancellationToken ct)
     {
         Guid? userId = GetUserId();
         if (userId is null)
             return Unauthorized();
 
-        return Ok(await chatMessageService.GetInboxAsync(userId.Value, ct));
+        return Ok(await chatMessageService.GetInboxAsync(userId.Value, categoryKey, ct));
     }
 
     /// <summary>Returns unread mention counts grouped by chat category.</summary>
@@ -211,13 +213,19 @@ public class ChatController(
     }
 
     [HttpDelete("inbox")]
-    public async Task<IActionResult> DeleteInboxAll(CancellationToken ct)
+    public async Task<IActionResult> DeleteInboxAll(
+        [FromQuery] string? categoryKey,
+        CancellationToken ct)
     {
         Guid? userId = GetUserId();
         if (userId is null)
             return Unauthorized();
 
-        await chatMessageService.DeleteInboxAllAsync(userId.Value, ct);
+        if (string.IsNullOrWhiteSpace(categoryKey))
+            await chatMessageService.DeleteInboxAllAsync(userId.Value, ct);
+        else
+            await chatMessageService.DeleteInboxCategoryAsync(userId.Value, categoryKey, ct);
+
         return NoContent();
     }
 

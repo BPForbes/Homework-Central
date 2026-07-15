@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { chatApi } from '../api/chatApi'
+import { LoadingBars } from '../components/LoadingBars'
 
 /** Redirects to the first available chat room, or dashboard if none. */
 export function ChatIndex() {
@@ -35,7 +36,7 @@ export function ChatIndex() {
   }, [])
 
   if (loading)
-    return <p className="chat-room-status">Loading chats…</p>
+    return <LoadingBars message="Loading chats…" />
 
   return <Navigate to={target ?? '/dashboard'} replace />
 }

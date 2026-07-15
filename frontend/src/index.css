@@ -620,16 +620,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg);
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  background: transparent;
 }
 
 .backend-connecting-screen {
@@ -639,7 +630,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg);
+  background: transparent;
 }
 
 .backend-connecting-content {
@@ -660,11 +651,12 @@ a {
 .backend-connecting-bars .bar {
   width: 10px;
   height: 70px;
-  background: var(--color-primary-soft);
+  background: var(--color-primary);
   display: inline-block;
   transform-origin: bottom center;
   border-top-right-radius: 20px;
   border-top-left-radius: 20px;
+  will-change: transform, opacity;
   animation: backend-bar-loader 1.2s var(--ease-in-out) infinite;
 }
 
@@ -693,20 +685,16 @@ a {
 @keyframes backend-bar-loader {
   0% {
     transform: scaleY(0.1);
-    background: var(--color-primary-soft);
+    opacity: 0.35;
   }
   50% {
     transform: scaleY(1);
-    background: var(--color-primary);
+    opacity: 1;
   }
   100% {
     transform: scaleY(0.1);
-    background: var(--color-primary-soft);
+    opacity: 0.35;
   }
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 /* ==========================================================================
@@ -1433,6 +1421,28 @@ a {
   white-space: nowrap;
 }
 
+.inbox-sidebar-link .chat-room-name {
+  flex: 1;
+}
+
+.inbox-sidebar-count {
+  min-width: 1.5rem;
+  padding: 0.1rem 0.4rem;
+  margin-left: auto;
+  border-radius: var(--radius-full);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.inbox-sidebar-link.active .inbox-sidebar-count {
+  background: var(--color-surface);
+}
+
 /* ==========================================================================
    Dashboard content
    ========================================================================== */
@@ -1558,7 +1568,6 @@ a {
   margin-top: 0.25rem;
 }
 
-.inbox-status,
 .inbox-empty {
   color: var(--color-ink-tertiary);
 }

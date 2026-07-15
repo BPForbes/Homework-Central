@@ -129,10 +129,11 @@ variants in `index.css`), so the scene follows the theme with no hardcoded hexes
 CSS layers via the global media query.
 
 Performance rules: the two full-viewport base layers animate only compositor transforms.
-The canvas uses a fixed 30 FPS step, an adaptive DPR/pixel budget, cached gradient sprites
-and fish geometry, coalesced resize work, and pauses while the document is hidden. Never place
-`backdrop-filter` on repeated children such as chat bubbles, room categories, or list
-rows — glass blur belongs on major chrome only.
+The canvas uses a fixed 30 FPS step, an adaptive DPR/pixel budget with entity-count
+hysteresis, lookup-table trigonometry, approximate decorative-vector magnitudes, cached
+interaction bounds, gradient/fish sprites and geometry, coalesced resize work, and pauses
+while the document is hidden. Never place `backdrop-filter` on repeated children such as
+chat bubbles, room categories, or list rows — glass blur belongs on major chrome only.
 
 ## Typography
 
@@ -183,6 +184,28 @@ Rules of thumb, learned from the Fable 5 review and worth preserving:
   decorative droplet event, coalesced to avoid bursts (`api/apiActivity.ts`). GET polling,
   refresh-token rotation, and SignalR keepalives never trigger it. The ripple is drawn by
   the water scene canvas, in the outer band of the viewport away from form inputs.
+
+## Loading and bottleneck states
+
+The canonical wait indicator is `<LoadingBars />`, implemented at
+`frontend/src/components/LoadingBars.tsx:9`. Its bar geometry begins at
+`frontend/src/index.css:651` and its shared `backend-bar-loader` keyframes begin at
+`frontend/src/index.css:685`. Full-viewport waits compose that same component through
+`frontend/src/components/BackendConnectingLoader.tsx:11`; the corresponding wrapper at
+`frontend/src/index.css:626` must remain transparent.
+
+- Use the bar indicator whenever a route or page is loading, a content region is waiting
+  for data, authentication or permission checks block rendering, a send/save/delete action
+  blocks a region, or another visible bottleneck prevents the next interaction.
+- Keep the loading container transparent. It may reserve space or block interaction while
+  consistency is required, but it must not paint an opaque page/card background over the
+  living-water environment.
+- Supply a specific present-progress message such as “Loading messages…” or “Saving room…”.
+  Do not introduce standalone “Loading…” text, a second spinner, or a component-local loader.
+- Keep controls that could duplicate the operation disabled for the duration of the wait.
+  The bar communicates progress; disabled state preserves request integrity.
+- The animation uses only `transform` and `opacity`, inherits the global reduced-motion
+  collapse, and must continue using the existing primary color tokens.
 
 ## Chat bubbles
 

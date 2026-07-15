@@ -11,6 +11,7 @@ import {
 } from '../components/infrastructure/customRoleIcons'
 import { ColorWheelPicker } from '../components/infrastructure/ColorWheelPicker'
 import { ConfirmModal, type ConfirmModalAction } from '../components/infrastructure/ConfirmModal'
+import { LoadingBars } from '../components/LoadingBars'
 import {
   GET_ROLES_ROOM_ID,
   MODERATION_PERMISSIONS,
@@ -411,7 +412,7 @@ export function UserConfig() {
             Select users who may receive this role. You can only assign to users whose highest platform role is below yours.
           </p>
 
-          {assignLoading && <p className="chat-sidebar-status">Loading users…</p>}
+          {assignLoading && <LoadingBars message="Loading users…" />}
 
           {!assignLoading && selectableUsers.length > 0 && (
             <div className="assignable-user-scroll">

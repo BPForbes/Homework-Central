@@ -33,7 +33,10 @@ public interface IChatMessageService
 
     Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(
+        Guid userId,
+        string? categoryKey = null,
+        CancellationToken ct = default);
 
     Task<ChatInboxSummaryDto> GetInboxSummaryAsync(Guid userId, CancellationToken ct = default);
 
@@ -47,6 +50,11 @@ public interface IChatMessageService
         CancellationToken ct = default);
 
     Task<int> DeleteInboxAllAsync(Guid userId, CancellationToken ct = default);
+
+    Task<int> DeleteInboxCategoryAsync(
+        Guid userId,
+        string categoryKey,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -277,11 +285,21 @@ public sealed class ChatMessageService(
         return dto;
     }
 
-    public async Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(Guid userId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(
+        Guid userId,
+        string? categoryKey = null,
+        CancellationToken ct = default)
     {
+        ChatNavDto nav = await GetAccessibleInboxNavAsync(userId, ct);
+        IReadOnlyList<string> accessibleRoomIds = SelectAccessibleRoomIds(nav, categoryKey);
+        if (accessibleRoomIds.Count == 0)
+            return [];
+
         List<ChatMentionNotification> items = await masterDb.ChatMentionNotifications
             .AsNoTracking()
-            .Where(notification => notification.RecipientUserId == userId)
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && accessibleRoomIds.Contains(notification.RoomId))
             .OrderByDescending(notification => notification.CreatedAtUtc)
             .Take(200)
             .ToListAsync(ct);
@@ -291,20 +309,47 @@ public sealed class ChatMessageService(
 
     public async Task<ChatInboxSummaryDto> GetInboxSummaryAsync(Guid userId, CancellationToken ct = default)
     {
-        List<ChatInboxSummaryItemDto> categories = await masterDb.ChatMentionNotifications
+        ChatNavDto nav = await GetAccessibleInboxNavAsync(userId, ct);
+        List<string> accessibleRoomIds = nav.Categories
+            .SelectMany(category => category.Rooms)
+            .Select(room => room.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (accessibleRoomIds.Count == 0)
+            return new ChatInboxSummaryDto();
+
+        List<ChatInboxSummaryItemDto> unreadCategories = await masterDb.ChatMentionNotifications
             .AsNoTracking()
-            .Where(notification => notification.RecipientUserId == userId && notification.ReadAtUtc == null)
-            .GroupBy(notification => new { notification.CategoryKey, notification.CategoryDisplayName })
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && notification.ReadAtUtc == null
+                && accessibleRoomIds.Contains(notification.RoomId))
+            .GroupBy(notification => notification.CategoryKey)
             .Select(group => new ChatInboxSummaryItemDto
             {
-                CategoryKey = group.Key.CategoryKey,
-                CategoryDisplayName = group.Key.CategoryDisplayName,
+                CategoryKey = group.Key,
+                CategoryDisplayName = string.Empty,
                 UnreadCount = group.Count(),
             })
-            .OrderBy(item => item.CategoryDisplayName)
             .ToListAsync(ct);
 
-        return new ChatInboxSummaryDto { Categories = categories };
+        Dictionary<string, int> unreadByCategory = unreadCategories.ToDictionary(
+            category => category.CategoryKey,
+            category => category.UnreadCount,
+            StringComparer.Ordinal);
+
+        return new ChatInboxSummaryDto
+        {
+            Categories = nav.Categories
+                .Select(category => new ChatInboxSummaryItemDto
+                {
+                    CategoryKey = category.Key,
+                    CategoryDisplayName = category.Name,
+                    UnreadCount = unreadByCategory.GetValueOrDefault(category.Key),
+                })
+                .ToArray(),
+        };
     }
 
     public async Task<bool> MarkInboxReadAsync(Guid userId, Guid notificationId, CancellationToken ct = default)
@@ -356,8 +401,47 @@ public sealed class ChatMessageService(
             .Where(notification => notification.RecipientUserId == userId)
             .ExecuteDeleteAsync(ct);
 
+    public async Task<int> DeleteInboxCategoryAsync(
+        Guid userId,
+        string categoryKey,
+        CancellationToken ct = default)
+    {
+        ChatNavDto nav = await GetAccessibleInboxNavAsync(userId, ct);
+        IReadOnlyList<string> accessibleRoomIds = SelectAccessibleRoomIds(nav, categoryKey);
+        if (accessibleRoomIds.Count == 0)
+            return 0;
+
+        return await masterDb.ChatMentionNotifications
+            .Where(notification =>
+                notification.RecipientUserId == userId
+                && accessibleRoomIds.Contains(notification.RoomId))
+            .ExecuteDeleteAsync(ct);
+    }
+
     private async Task<EffectiveMaskDto> GetMasksAsync(Guid userId, CancellationToken ct) =>
         await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+
+    private async Task<ChatNavDto> GetAccessibleInboxNavAsync(Guid userId, CancellationToken ct)
+    {
+        EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
+        return chatRoomAccess.GetAccessibleNav(masks);
+    }
+
+    private static IReadOnlyList<string> SelectAccessibleRoomIds(ChatNavDto nav, string? categoryKey)
+    {
+        IEnumerable<ChatNavCategoryDto> categories = nav.Categories;
+        if (!string.IsNullOrWhiteSpace(categoryKey))
+        {
+            categories = categories.Where(category =>
+                string.Equals(category.Key, categoryKey, StringComparison.Ordinal));
+        }
+
+        return categories
+            .SelectMany(category => category.Rooms)
+            .Select(room => room.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
 
     private string ResolveUsername(Guid userId)
     {

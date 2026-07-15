@@ -10,6 +10,7 @@ import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
 import { resolveCustomRoomIcon } from '../infrastructure/customRoomIcons'
 import { ChatRoomIcon } from './ChatRoomIcon'
+import { LoadingBars } from '../LoadingBars'
 
 export function ChatSidebar() {
   const { user } = useAuth()
@@ -48,7 +49,7 @@ export function ChatSidebar() {
       </div>
 
       <div className="chat-sidebar-body">
-        {loading && <p className="chat-sidebar-status">Loading rooms…</p>}
+        {loading && <LoadingBars message="Loading rooms…" />}
         {error && <p className="chat-sidebar-error">{error}</p>}
         {!loading && !error && nav?.categories.length === 0 && (
           <p className="chat-sidebar-status">No chat rooms available for your profile yet.</p>
