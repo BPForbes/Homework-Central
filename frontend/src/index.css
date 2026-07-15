@@ -15,6 +15,15 @@
   --color-border: #e5dfd0;
   --color-border-strong: #d3cab5;
 
+  /* Water surface background (light mode) */
+  --water-base-1: #eafaff;
+  --water-base-2: #b8e5ed;
+  --water-base-3: #8cccd6;
+  --water-base-4: #d9f2f4;
+  --water-gradient-1: rgba(255, 255, 255, 0.9);
+  --water-gradient-2: rgba(191, 223, 255, 0.68);
+  --water-gradient-3: rgba(154, 224, 219, 0.46);
+
   /* Ink */
   --color-ink: #2b2620;
   --color-ink-secondary: #6b6255;
@@ -90,6 +99,15 @@
   --color-border: #3c362d;
   --color-border-strong: #4c443a;
 
+  /* Water surface background (dark mode) */
+  --water-base-1: #03131f;
+  --water-base-2: #062d40;
+  --water-base-3: #074354;
+  --water-base-4: #031721;
+  --water-gradient-1: rgba(82, 195, 224, 0.2);
+  --water-gradient-2: rgba(88, 117, 230, 0.19);
+  --water-gradient-3: rgba(19, 139, 158, 0.22);
+
   --color-ink: #f2ede4;
   --color-ink-secondary: #b7ad9c;
   --color-ink-tertiary: #8a8071;
@@ -155,10 +173,80 @@ html {
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-bg);
   color: var(--color-ink);
   min-height: 100vh;
-  transition: background var(--duration-slow) var(--ease-in-out), color var(--duration-slow) var(--ease-in-out);
+  position: relative;
+  overflow-x: hidden;
+  transition: color var(--duration-slow) var(--ease-in-out);
+}
+
+/* Animated water surface background layers */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 14% 10%, var(--water-gradient-1) 0%, transparent 26%),
+    radial-gradient(circle at 84% 24%, var(--water-gradient-2) 0%, transparent 34%),
+    radial-gradient(circle at 58% 78%, var(--water-gradient-3) 0%, transparent 40%),
+    linear-gradient(
+      150deg,
+      var(--water-base-1) 0%,
+      var(--water-base-2) 42%,
+      var(--water-base-3) 70%,
+      var(--water-base-4) 100%
+    );
+  background-size: 140% 140%, 160% 160%, 150% 150%, 100% 100%;
+  animation: water-color-drift 18s ease-in-out infinite alternate;
+}
+
+/* Soft light reflection layer */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 400px 300px at 22% 28%,
+      rgba(181, 244, 255, 0.24) 0%,
+      transparent 35%
+    ),
+    radial-gradient(
+      ellipse 420px 310px at 74% 35%,
+      rgba(130, 165, 255, 0.2) 0%,
+      transparent 37%
+    ),
+    radial-gradient(
+      ellipse 440px 320px at 52% 76%,
+      rgba(79, 222, 203, 0.16) 0%,
+      transparent 39%
+    );
+  filter: blur(55px);
+  opacity: 0.9;
+  animation: water-reflection-drift 22s ease-in-out infinite alternate;
+}
+
+:root[data-theme='dark'] body::after {
+  background:
+    radial-gradient(
+      ellipse 400px 300px at 22% 28%,
+      rgba(82, 195, 224, 0.2) 0%,
+      transparent 35%
+    ),
+    radial-gradient(
+      ellipse 420px 310px at 74% 35%,
+      rgba(88, 117, 230, 0.19) 0%,
+      transparent 37%
+    ),
+    radial-gradient(
+      ellipse 440px 320px at 52% 76%,
+      rgba(19, 139, 158, 0.22) 0%,
+      transparent 39%
+    );
 }
 
 ::selection {
@@ -242,10 +330,6 @@ a {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background:
-    radial-gradient(circle at 12% 8%, var(--color-primary-soft) 0%, transparent 45%),
-    radial-gradient(circle at 88% 92%, var(--color-accent-soft) 0%, transparent 40%),
-    var(--color-bg);
 }
 
 .auth-card {
@@ -609,6 +693,8 @@ a {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
 }
 
 .app-header {
@@ -2085,6 +2171,36 @@ a {
 @keyframes scale-in {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes water-color-drift {
+  0% {
+    background-position: 0% 20%, 100% 60%, center;
+  }
+  35% {
+    background-position: 40% 50%, 30% 30%, center;
+  }
+  70% {
+    background-position: 20% 70%, 70% 50%, center;
+  }
+  100% {
+    background-position: 70% 80%, 20% 10%, center;
+  }
+}
+
+@keyframes water-reflection-drift {
+  0% {
+    transform: translate3d(-3%, -2%, 0) scale(1.08) rotate(-1deg);
+  }
+  35% {
+    transform: translate3d(3%, 1%, 0) scale(1.12) rotate(1deg);
+  }
+  70% {
+    transform: translate3d(-1%, 4%, 0) scale(1.09) rotate(-0.5deg);
+  }
+  100% {
+    transform: translate3d(4%, -1%, 0) scale(1.13) rotate(1.5deg);
+  }
 }
 
 @keyframes message-in {
