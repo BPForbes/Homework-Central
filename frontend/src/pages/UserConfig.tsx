@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPalette } from '@fortawesome/free-solid-svg-icons'
+import { faMagnifyingGlass, faPalette } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
+import { useUserConfigNavSection } from '../hooks/useInfrastructureNav'
 import {
   CUSTOM_ROLE_ICON_OPTIONS,
   resolveCustomRoleIcon,
@@ -15,6 +16,7 @@ import {
   type AssignableUser,
   type CustomChannel,
   type CustomRole,
+  type InfrastructureUserLookup,
   type RoleAppearance,
 } from '../types/infrastructure'
 
@@ -44,6 +46,7 @@ interface DialogState {
 }
 
 export function UserConfig() {
+  const [activeSection, setActiveSection] = useUserConfigNavSection()
   const [roles, setRoles] = useState<CustomRole[]>([])
   const [roleAppearance, setRoleAppearance] = useState<RoleAppearance[]>([])
   const [appearanceSavingId, setAppearanceSavingId] = useState<string | null>(null)
@@ -65,6 +68,12 @@ export function UserConfig() {
   const [selectedUserKeys, setSelectedUserKeys] = useState<Set<string>>(new Set())
   const [assignLoading, setAssignLoading] = useState(false)
   const [confirmAssignOpen, setConfirmAssignOpen] = useState(false)
+  const [userQuery, setUserQuery] = useState('')
+  const [userResults, setUserResults] = useState<InfrastructureUserLookup[]>([])
+  const [selectedUser, setSelectedUser] = useState<InfrastructureUserLookup | null>(null)
+  const [userSearchLoading, setUserSearchLoading] = useState(false)
+  const [userRoleSaving, setUserRoleSaving] = useState<string | null>(null)
+  const assignRequestInFlight = useRef(false)
 
   const showError = useCallback((message: string) => {
     setDialog({
@@ -128,6 +137,7 @@ export function UserConfig() {
   }
 
   function startEditRole(role: CustomRole) {
+    setActiveSection('create')
     setEditingRoleId(role.roleId)
     setName(role.name)
     setDescription(role.description ?? '')
@@ -138,6 +148,10 @@ export function UserConfig() {
   }
 
   async function openAssignFlow(role: CustomRole) {
+    if (assignRequestInFlight.current)
+      return
+    assignRequestInFlight.current = true
+    setActiveSection('manage')
     setDialog(null)
     setAssignLoading(true)
     setAssignRole(role)
@@ -159,6 +173,7 @@ export function UserConfig() {
       showError('Could not load users for assignment.')
       resetRoleForm()
     } finally {
+      assignRequestInFlight.current = false
       setAssignLoading(false)
     }
   }
@@ -307,6 +322,67 @@ export function UserConfig() {
     }
   }
 
+  async function searchUsers() {
+    if (userQuery.trim().length < 2)
+      return
+    setUserSearchLoading(true)
+    setSelectedUser(null)
+    try {
+      const { data } = await infrastructureApi.searchUsers(userQuery.trim())
+      setUserResults(data)
+    } catch {
+      showError('Could not search users.')
+    } finally {
+      setUserSearchLoading(false)
+    }
+  }
+
+  async function selectUser(user: InfrastructureUserLookup) {
+    setUserSearchLoading(true)
+    try {
+      const { data } = await infrastructureApi.getUserRoleManagement(user.userId, user.tenantDatabaseName)
+      setSelectedUser(data)
+    } catch {
+      showError('Could not load that user’s roles and permissions.')
+    } finally {
+      setUserSearchLoading(false)
+    }
+  }
+
+  async function changePlatformRole(roleName: string, grant: boolean) {
+    if (!selectedUser)
+      return
+    setUserRoleSaving(`platform:${roleName}`)
+    try {
+      if (grant)
+        await infrastructureApi.assignPlatformRole(selectedUser.userId, roleName, selectedUser.tenantDatabaseName)
+      else
+        await infrastructureApi.revokePlatformRole(selectedUser.userId, roleName, selectedUser.tenantDatabaseName)
+      await selectUser(selectedUser)
+    } catch {
+      showError(`Could not ${grant ? 'grant' : 'revoke'} that platform role.`)
+    } finally {
+      setUserRoleSaving(null)
+    }
+  }
+
+  async function changeCustomRole(role: CustomRole, grant: boolean) {
+    if (!selectedUser)
+      return
+    setUserRoleSaving(`custom:${role.roleId}`)
+    try {
+      if (grant)
+        await infrastructureApi.assignRoleToUser(selectedUser.userId, role.roleId, selectedUser.tenantDatabaseName)
+      else
+        await infrastructureApi.revokeRoleFromUser(selectedUser.userId, role.roleId, selectedUser.tenantDatabaseName)
+      await selectUser(selectedUser)
+    } catch {
+      showError(`Could not ${grant ? 'grant' : 'revoke'} that custom role.`)
+    } finally {
+      setUserRoleSaving(null)
+    }
+  }
+
   const claimRoomOptions = [
     { id: GET_ROLES_ROOM_ID, label: 'Get Roles (built-in)' },
     ...channels.map((c) => ({ id: c.roomId, label: c.displayName })),
@@ -349,7 +425,7 @@ export function UserConfig() {
         </div>
       </header>
 
-      {viewMode === 'assign' && assignRole && (
+      {activeSection === 'manage' && viewMode === 'assign' && assignRole && (
         <section className="server-page-card">
           <h3>Assign “{assignRole.name}”</h3>
           <p className="server-page-subtitle">
@@ -403,7 +479,7 @@ export function UserConfig() {
         </section>
       )}
 
-      {viewMode === 'form' && (
+      {activeSection === 'create' && viewMode === 'form' && (
         <section className="server-page-card">
           <h3>{editingRoleId ? 'Edit custom role' : 'Create custom role'}</h3>
           <form className="server-stub-form" onSubmit={handleSaveRole}>
@@ -449,7 +525,7 @@ export function UserConfig() {
         </section>
       )}
 
-      <section className="server-page-card">
+      {activeSection === 'permissions' && <section className="server-page-card">
         <h3>Role appearance &amp; mentions</h3>
         <p className="server-page-subtitle">
           Set chat message colors and choose which roles standard users can @mention.
@@ -526,9 +602,9 @@ export function UserConfig() {
             </li>
           ))}
         </ul>
-      </section>
+      </section>}
 
-      <section className="server-page-card">
+      {activeSection === 'manage' && viewMode === 'form' && <section className="server-page-card">
         <h3>Custom roles</h3>
         {roles.length === 0 && <p className="server-page-subtitle">No custom roles yet.</p>}
         <ul className="infra-list">
@@ -559,7 +635,117 @@ export function UserConfig() {
             </li>
           ))}
         </ul>
-      </section>
+      </section>}
+
+      {activeSection === 'users' && (
+        <section className="server-page-card user-role-management">
+          <h3>User roles &amp; collective permissions</h3>
+          <p className="server-page-subtitle">
+            Search for a user, then grant or revoke roles below your own highest platform role.
+          </p>
+          <form
+            className="user-role-search"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void searchUsers()
+            }}
+          >
+            <input
+              type="search"
+              className="sm-input"
+              value={userQuery}
+              onChange={(event) => setUserQuery(event.target.value)}
+              placeholder="Username or email"
+              minLength={2}
+            />
+            <button type="submit" className="btn-primary" disabled={userSearchLoading || userQuery.trim().length < 2}>
+              <FontAwesomeIcon icon={faMagnifyingGlass} /> Search
+            </button>
+          </form>
+
+          {userResults.length > 0 && (
+            <ul className="user-role-search-results">
+              {userResults.map((user) => (
+                <li key={`${user.userId}:${user.tenantDatabaseName ?? 'master'}`}>
+                  <button type="button" onClick={() => void selectUser(user)}>
+                    <strong>{user.username}</strong>
+                    <span>{user.email} · {user.highestPlatformRoleName}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {selectedUser && (
+            <div className="user-role-detail">
+              <header>
+                <div>
+                  <h4>{selectedUser.username}</h4>
+                  <p>{selectedUser.email}</p>
+                </div>
+                <span className="sm-badge sm-badge--public">{selectedUser.highestPlatformRoleName}</span>
+              </header>
+
+              <h4>Platform roles</h4>
+              <ul className="user-role-grid">
+                {selectedUser.platformRoles.map((role) => (
+                  <li key={role.name} className={role.isAssigned ? 'assigned' : ''}>
+                    <span>{role.name} <small>bit {role.bit}</small></span>
+                    {role.isAssigned ? (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={!role.canRevoke || userRoleSaving === `platform:${role.name}`}
+                        onClick={() => void changePlatformRole(role.name, false)}
+                      >
+                        Revoke
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={!role.canGrant || userRoleSaving === `platform:${role.name}`}
+                        onClick={() => void changePlatformRole(role.name, true)}
+                      >
+                        Grant
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              <h4>Custom roles</h4>
+              <ul className="user-role-grid">
+                {roles.map((role) => {
+                  const assigned = selectedUser.customRoles.some((item) => item.roleId === role.roleId)
+                  return (
+                    <li key={role.roleId} className={assigned ? 'assigned' : ''}>
+                      <span>{role.name}</span>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={userRoleSaving === `custom:${role.roleId}`}
+                        onClick={() => void changeCustomRole(role, !assigned)}
+                      >
+                        {assigned ? 'Revoke' : 'Grant'}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+
+              <h4>Effective permissions from all roles</h4>
+              <div className="permission-grid user-effective-permissions">
+                {MODERATION_PERMISSIONS.map((permission) => (
+                  <span key={permission.id} className={selectedUser.effectivePermissionIds.includes(permission.id) ? 'active' : ''}>
+                    {permission.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {confirmAssignOpen && assignRole && (
         <div className="confirm-modal-backdrop" role="presentation" onClick={() => setConfirmAssignOpen(false)}>

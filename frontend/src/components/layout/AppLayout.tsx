@@ -1,17 +1,21 @@
-import { useCallback, useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBars } from '@fortawesome/free-solid-svg-icons'
 import { useAuth } from '../../context/AuthContext'
 import { ChatSidebar } from '../chat/ChatSidebar'
 import { ThemeToggle } from '../ThemeToggle'
+import {
+  InfrastructureSidebar,
+  shouldShowChatSidebar,
+  shouldShowInfrastructureSidebar,
+} from './InfrastructureSidebar'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
 export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+  const location = useLocation()
+  const showChatSidebar = shouldShowChatSidebar(location.pathname)
+  const showInfrastructureSidebar = shouldShowInfrastructureSidebar(location.pathname)
 
   async function handleLogout() {
     await logout()
@@ -20,38 +24,32 @@ export function AppLayout() {
 
   return (
     <div className="app-layout">
-      <ChatSidebar open={sidebarOpen} onClose={closeSidebar} />
+      {showInfrastructureSidebar && <InfrastructureSidebar />}
+      {showChatSidebar && <ChatSidebar />}
 
-      <header className="app-header">
-        <div className="app-header-start">
-          <button
-            type="button"
-            className="chat-menu-toggle"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open chats"
-          >
-            <FontAwesomeIcon icon={faBars} />
-            <span>Chats</span>
-          </button>
-          <h1 className="app-title">
-            <FontAwesomeIcon icon={byPrefixAndName.far.comments} className="app-title-icon" />
-            Homework Central
-          </h1>
-        </div>
-        <div className="user-info">
-          <ThemeToggle />
-          <span>
-            {user?.username} ({user?.email})
-          </span>
-          <button type="button" onClick={handleLogout} className="btn-secondary">
-            Sign out
-          </button>
-        </div>
-      </header>
+      <div className="app-content">
+        <header className="app-header">
+          <div className="app-header-start">
+            <h1 className="app-title">
+              <FontAwesomeIcon icon={byPrefixAndName.far.comments} className="app-title-icon" />
+              <span className="app-title-text">Homework Central</span>
+            </h1>
+          </div>
+          <div className="user-info">
+            <ThemeToggle />
+            <span>
+              {user?.username} ({user?.email})
+            </span>
+            <button type="button" onClick={handleLogout} className="btn-secondary">
+              Sign out
+            </button>
+          </div>
+        </header>
 
-      <main className="app-main">
-        <Outlet />
-      </main>
+        <main className="app-main">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

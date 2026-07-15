@@ -95,6 +95,7 @@ builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>()
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
 builder.Services.AddScoped<IMentionRecipientResolver, MentionRecipientResolver>();
 builder.Services.AddScoped<IAuthorizationHandler, BitmaskAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, PlatformRoleManagementAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, ResourceVisibilityHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, BitmaskAuthorizationPolicyProvider>();
 
@@ -130,8 +131,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization(opts =>
+{
     opts.AddPolicy(AuthorizationPolicyNames.ResourceVisibility,
-        policy => policy.AddRequirements(new ResourceVisibilityRequirement())));
+        policy => policy.AddRequirements(new ResourceVisibilityRequirement()));
+    opts.AddPolicy(AuthorizationPolicyNames.ManagePlatformRoles,
+        policy => policy.AddRequirements(new PlatformRoleManagementRequirement()));
+});
 builder.Services.AddSignalR();
 builder.Services.AddControllers();
 

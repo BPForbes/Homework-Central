@@ -4,6 +4,7 @@ import { chatApi } from '../api/chatApi'
 import type { ChatMessage, ChatTypingUser } from '../types/chat'
 import type { SendChatMessageError } from '../types/inbox'
 import { isAxiosError } from 'axios'
+import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
 export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -67,12 +68,13 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   }, [roomId])
 
   useEffect(() => {
-    const token = sessionStorage.getItem('accessToken')
-    if (!token)
+    if (!getAccessToken())
       return
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`/hubs/chat?access_token=${encodeURIComponent(token)}`)
+      .withUrl('/hubs/chat', {
+        accessTokenFactory: () => getFreshAccessToken(),
+      })
       .withAutomaticReconnect()
       .build()
 

@@ -20,8 +20,10 @@ export function FormattingToggleButton({ active, onToggle, disabled = false }: F
       className={`rich-preview-toggle ${active ? 'active' : ''}`}
       onClick={onToggle}
       disabled={disabled}
+      aria-pressed={active}
+      aria-label={active ? 'Hide formatting preview' : 'Show formatting preview'}
     >
-      <FontAwesomeIcon icon={active ? faEyeSlash : faEye} />
+      <FontAwesomeIcon icon={active ? faEyeSlash : faEye} aria-hidden="true" />
       {active ? 'Hide formatting' : 'Show formatting'}
     </button>
   )

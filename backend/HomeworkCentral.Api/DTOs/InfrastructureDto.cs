@@ -187,6 +187,17 @@ public class InfrastructureUserLookupDto
     public short HighestPlatformRoleBit { get; set; }
     public string HighestPlatformRoleName { get; set; } = null!;
     public List<CustomRoleDto> CustomRoles { get; set; } = [];
+    public List<PlatformRoleAssignmentDto> PlatformRoles { get; set; } = [];
+    public List<short> EffectivePermissionIds { get; set; } = [];
+}
+
+public class PlatformRoleAssignmentDto
+{
+    public string Name { get; set; } = null!;
+    public short Bit { get; set; }
+    public bool IsAssigned { get; set; }
+    public bool CanGrant { get; set; }
+    public bool CanRevoke { get; set; }
 }
 
 public class AssignableUserDto

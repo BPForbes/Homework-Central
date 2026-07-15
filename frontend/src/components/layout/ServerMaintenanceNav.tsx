@@ -10,10 +10,11 @@ interface ServerMaintenanceNavProps {
   title: string
 }
 
-function NavIconLink({ to, label, icon }: { to: string; label: string; icon: IconDefinition }) {
+function NavIconLink({ to, label, icon, end }: { to: string; label: string; icon: IconDefinition; end?: boolean }) {
   return (
     <NavLink
       to={to}
+      end={end}
       className={({ isActive }) =>
         isActive ? 'server-nav-link server-nav-link--active' : 'server-nav-link'
       }
@@ -45,7 +46,7 @@ export function ServerMaintenanceNav({ title }: ServerMaintenanceNavProps) {
         <FontAwesomeIcon icon={byPrefixAndName.fas.server} className="server-maintenance-nav-title-icon" />
       </div>
       <div className="server-maintenance-nav-links">
-        <NavIconLink to="/chat" label="Chat" icon={byPrefixAndName.far.comments} />
+        <NavIconLink to="/chat" label="Chat" icon={byPrefixAndName.far.comments} end={false} />
         <NavSeparator />
         <NavIconLink to="/inbox" label="Inbox" icon={byPrefixAndName.fas.envelope} />
         {canManageInfrastructure && (
@@ -55,9 +56,21 @@ export function ServerMaintenanceNav({ title }: ServerMaintenanceNavProps) {
               to="/user-config"
               label="User Config"
               icon={byPrefixAndName.fas['users-gear']}
+              end={false}
             />
             <NavSeparator />
-            <NavIconLink to="/server" label="Server" icon={byPrefixAndName.fas.server} />
+            <NavLink
+              to="/server"
+              end={false}
+              className={({ isActive }) =>
+                isActive ? 'server-nav-link server-nav-link--active' : 'server-nav-link'
+              }
+              title="Server"
+              aria-label="Server"
+            >
+              <FontAwesomeIcon icon={byPrefixAndName.fas.server} />
+              <span className="server-nav-link-label">Server</span>
+            </NavLink>
           </>
         )}
       </div>
