@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { authApi } from '../api/authApi'
 import { delay } from '../utils/healthCheck'
 import type { DevDeveloperOption, DevStatus } from '../types/devAuth'

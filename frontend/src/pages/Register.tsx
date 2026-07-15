@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useCaptcha } from '../hooks/useCaptcha'
 import { Captcha } from '../components/Captcha'
 import { ThemeToggle } from '../components/ThemeToggle'

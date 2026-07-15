@@ -1,6 +1,6 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { ChatSidebar } from '../chat/ChatSidebar'
 import { InboxSidebar } from '../inbox/InboxSidebar'
 import { ThemeToggle } from '../ThemeToggle'

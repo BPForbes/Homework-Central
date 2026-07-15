@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import { resolveCustomRoleIcon } from './customRoleIcons'
 import { infrastructureApi } from '../../api/infrastructureApi'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import type { ClaimableCustomRole } from '../../types/infrastructure'
 
 export function CustomRoleClaimPanel({ roomId }: { roomId: string }) {

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from '../../constants/permissions'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 
