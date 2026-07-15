@@ -98,10 +98,9 @@ pointer-transparent layers behind all content:
    `background-position` drifts slowly (`water-base-drift`), so the water's color
    gradually shifts with no seams. Theme changes cross-fade the two layers via
    `--water-day-opacity` / `--water-night-opacity` over `--duration-theme`; the hidden
-   layer's animation is paused.
-2. **Ripple distortion** (`body::before` / `body::after`, z-index −1): low-opacity
-   repeating ring and swell layers in `--color-water-reflection`, transform-animated.
-3. **Scene canvas** (`.water-scene`, z-index −1, painted above the ripples):
+   layer's animation is paused. There are deliberately no repeating ring/line
+   overlays — the water stays smooth, and all texture comes from the scene canvas.
+2. **Scene canvas** (`.water-scene`, z-index −1):
    `frontend/src/components/background/WaterBackground.tsx` draws the living elements.
    Because every layer is below z-index 0, nothing here can ever cover form inputs
    or content.
@@ -115,8 +114,8 @@ respawned. Element inventory:
 | Element | Themes | Behavior |
 |---|---|---|
 | Reflections | both | broad soft light patches, slow drift; additive blend in dark mode |
-| Lily pads | both | green (`--water-lily*`), float above the water, slight wobble |
-| Fish | both | grey (`--water-fish`), blurred, linear motion under the water |
+| Lily pads | both | green (`--water-lily*`), float above the water, slight wobble; shadow carries the same notched silhouette |
+| Fish | both | top-down, multi-colored (`--water-fish-a…d`) with spine-highlight shading, pectoral fins, seeded mottling, and a slim swishing caudal blade; each tail stroke thrusts and yaws them (burst-glide) |
 | Droplets | both | ripple rings; spawned randomly **and** whenever the API layer sends data (`api/apiActivity.ts`); API ripples avoid the center band where forms live |
 | Fog | dark only | large drifting mist banks (`--water-fog`) |
 | Fireflies | dark only | sporadic random-walk flight with darts; gold bloom (`--water-firefly`) that flares with speed, additively mixed into the water |
@@ -127,7 +126,7 @@ variants in `index.css`), so the scene follows the theme with no hardcoded hexes
 CSS layers via the global media query.
 
 Performance rules: gradient-position animation is confined to the two full-viewport
-base layers; all other background motion is transform-only. Never place
+base layers; all other background motion lives on the canvas. Never place
 `backdrop-filter` on repeated children such as chat bubbles, room categories, or list
 rows — glass blur belongs on major chrome only.
 

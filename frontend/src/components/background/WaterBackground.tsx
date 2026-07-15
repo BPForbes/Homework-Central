@@ -14,7 +14,8 @@ import { API_MUTATION_EVENT } from '../../api/apiActivity'
  * Scene inventory:
  * - reflections (both themes): broad soft light patches drifting slowly
  * - lily pads (both themes): green, floating above the water
- * - fish (both themes): grey, blurred, moving linearly under the water
+ * - fish (both themes): top-down, multi-colored with shaded flanks, pectoral
+ *   fins and a swishing tail blade; each tail stroke thrusts and jerks them
  * - droplets (both themes): ripple rings — spawned randomly and whenever the
  *   API layer sends data to the server (see api/apiActivity.ts)
  * - fog + fireflies (dark mode only): drifting mist and sporadically darting
@@ -52,6 +53,13 @@ interface SceneEntity {
   /** Firefly steering state: random-walk heading and dart window. */
   wanderAngle?: number
   dartUntil?: number
+  /** Fish swimming state: heading, cruise speed, tail oscillator, turn drift. */
+  heading?: number
+  cruiseSpeed?: number
+  tailPhase?: number
+  tailRate?: number
+  headingDrift?: number
+  nextTurnAt?: number
 }
 
 /**
@@ -122,14 +130,29 @@ function mix(from: Rgba, to: Rgba, t: number): Rgba {
   }
 }
 
+/** Mix only the RGB channels, preserving the base alpha — used for shading. */
+function shade(color: Rgba, toward: Rgba, t: number): Rgba {
+  return { ...mix(color, toward, t), a: color.a }
+}
+
+/** Small deterministic PRNG so per-entity patterning is stable across frames. */
+function seededRandom(seed: number): () => number {
+  let state = (Math.floor(seed * 1000) % 4294967296) + 1
+  return () => {
+    state = (state * 1664525 + 1013904223) % 4294967296
+    return state / 4294967296
+  }
+}
+
 const WHITE: Rgba = { r: 255, g: 255, b: 255, a: 1 }
+const BLACK: Rgba = { r: 0, g: 0, b: 0, a: 1 }
 
 interface WaterPalette {
   reflections: [Rgba, Rgba, Rgba]
   lily: Rgba
   lilyRim: Rgba
   lilyShadow: Rgba
-  fish: Rgba
+  fishColors: Rgba[]
   droplet: Rgba
   firefly: Rgba
   fog: Rgba
@@ -147,7 +170,12 @@ function readPalette(): WaterPalette {
     lily: token('--water-lily'),
     lilyRim: token('--water-lily-rim'),
     lilyShadow: token('--water-lily-shadow'),
-    fish: token('--water-fish'),
+    fishColors: [
+      token('--water-fish-a'),
+      token('--water-fish-b'),
+      token('--water-fish-c'),
+      token('--water-fish-d'),
+    ],
     droplet: token('--water-droplet'),
     firefly: token('--water-firefly'),
     fog: token('--water-fog'),
@@ -166,7 +194,7 @@ interface SpawnRule {
 const SPAWN_RULES: Record<SpawnableKind, SpawnRule> = {
   reflection: { cap: 5, minDelayMs: 4000, maxDelayMs: 9000, minLifespanMs: 50000, maxLifespanMs: 90000 },
   lily: { cap: 4, minDelayMs: 9000, maxDelayMs: 18000, minLifespanMs: 45000, maxLifespanMs: 85000 },
-  fish: { cap: 3, minDelayMs: 10000, maxDelayMs: 22000, minLifespanMs: 30000, maxLifespanMs: 60000 },
+  fish: { cap: 4, minDelayMs: 9000, maxDelayMs: 20000, minLifespanMs: 30000, maxLifespanMs: 60000 },
   firefly: { cap: 7, minDelayMs: 2500, maxDelayMs: 7000, minLifespanMs: 20000, maxLifespanMs: 45000, darkOnly: true },
   fog: { cap: 3, minDelayMs: 12000, maxDelayMs: 25000, minLifespanMs: 60000, maxLifespanMs: 110000, darkOnly: true },
 }
@@ -284,7 +312,7 @@ class WaterScene {
     }
     seedKind('reflection', 4)
     seedKind('lily', 2)
-    seedKind('fish', 1)
+    seedKind('fish', 2)
     if (this.dark) {
       seedKind('fog', 2)
       seedKind('firefly', 4)
@@ -318,13 +346,19 @@ class WaterScene {
         }
       }
       case 'fish': {
-        const angle = rand(0, Math.PI * 2)
-        const speed = rand(26, 48)
+        const heading = rand(0, Math.PI * 2)
+        const cruiseSpeed = rand(26, 46)
         return {
           ...base,
           pos: this.randomPoint(40),
-          vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+          vel: { x: Math.cos(heading) * cruiseSpeed, y: Math.sin(heading) * cruiseSpeed },
           radius: rand(9, 14),
+          heading,
+          cruiseSpeed,
+          tailPhase: rand(0, Math.PI * 2),
+          tailRate: rand(4.5, 7),
+          headingDrift: 0,
+          nextTurnAt: now + rand(1000, 4000),
         }
       }
       case 'firefly':
@@ -379,6 +413,29 @@ class WaterScene {
     this.entities.push(this.makeDroplet(pos, now))
   }
 
+  /**
+   * Top-down swimming: the tail is the motor. Each tail stroke both thrusts
+   * the fish forward (burst-glide speed pulsing at twice the swish frequency)
+   * and jerks the nose to the side opposite the swish, so the path is a
+   * natural wiggle instead of a straight glide. A slow random turn intent
+   * steers the fish over longer distances.
+   */
+  private steerFish(entity: SceneEntity, now: number, dt: number): void {
+    const tailRate = entity.tailRate ?? 5.5
+    entity.tailPhase = (entity.tailPhase ?? 0) + tailRate * dt
+    if (entity.nextTurnAt === undefined || now >= entity.nextTurnAt) {
+      entity.headingDrift = rand(-0.35, 0.35)
+      entity.nextTurnAt = now + rand(2000, 6000)
+    }
+    // Tail angle is sin(phase); its rate of change, cos(phase), is the stroke.
+    const stroke = Math.cos(entity.tailPhase)
+    entity.heading =
+      (entity.heading ?? 0) + (entity.headingDrift ?? 0) * dt - stroke * 0.1 * tailRate * dt
+    const speed = (entity.cruiseSpeed ?? 32) * (0.65 + 0.6 * Math.abs(stroke))
+    entity.vel.x = Math.cos(entity.heading) * speed
+    entity.vel.y = Math.sin(entity.heading) * speed
+  }
+
   /** Sporadic firefly flight: a random-walk heading with occasional darts. */
   private steerFirefly(entity: SceneEntity, now: number, dt: number): void {
     entity.wanderAngle = (entity.wanderAngle ?? rand(0, Math.PI * 2)) + rand(-2.4, 2.4) * dt
@@ -405,6 +462,7 @@ class WaterScene {
       }
 
       if (entity.kind === 'firefly') this.steerFirefly(entity, now, dt)
+      if (entity.kind === 'fish') this.steerFish(entity, now, dt)
       entity.pos.x += entity.vel.x * dt
       entity.pos.y += entity.vel.y * dt
 
@@ -504,30 +562,38 @@ class WaterScene {
     ctx.restore()
   }
 
+  /** The pad silhouette: a circle with a notch wedge, centered on `offset`. */
+  private traceLilyPad(radius: number, offset: Vec2): void {
+    const notchHalf = 0.30
+    this.ctx.beginPath()
+    this.ctx.moveTo(offset.x, offset.y)
+    this.ctx.arc(offset.x, offset.y, radius, notchHalf, Math.PI * 2 - notchHalf)
+    this.ctx.closePath()
+  }
+
   private drawLily(entity: SceneEntity, now: number, alpha: number): void {
     const { ctx } = this
     const r = entity.radius
     ctx.save()
     ctx.translate(entity.pos.x, entity.pos.y)
 
-    // Soft shadow cast onto the water, mixing the pad into the blue beneath it.
+    // Slow floating wobble (ctx.rotate applies the same R(θ) rotation matrix).
+    const rotation = entity.seed + Math.sin(now / 3000 + entity.seed) * 0.08
+    ctx.rotate(rotation)
+
+    // Soft shadow with the same notched silhouette as the pad, cast toward the
+    // lower right. The offset is fixed in screen space (the light does not
+    // rotate with the pad), so counter-rotate it into pad space with R(−θ).
+    const shadowOffset = rotateAbout({ x: 2.5, y: 3.5 }, { x: 0, y: 0 }, -rotation)
     ctx.fillStyle = rgba(this.palette.lilyShadow, alpha)
-    ctx.beginPath()
-    ctx.ellipse(2.5, 3.5, r * 1.02, r * 0.92, 0, 0, Math.PI * 2)
+    this.traceLilyPad(r * 1.03, shadowOffset)
     ctx.fill()
 
-    // Slow floating wobble (ctx.rotate applies the same R(θ) rotation matrix).
-    ctx.rotate(entity.seed + Math.sin(now / 3000 + entity.seed) * 0.08)
-
-    const notchHalf = 0.30
     const gradient = ctx.createRadialGradient(0, 0, r * 0.15, 0, 0, r)
     gradient.addColorStop(0, rgba(mix(this.palette.lily, WHITE, 0.22), alpha))
     gradient.addColorStop(1, rgba(this.palette.lily, alpha))
     ctx.fillStyle = gradient
-    ctx.beginPath()
-    ctx.moveTo(0, 0)
-    ctx.arc(0, 0, r, notchHalf, Math.PI * 2 - notchHalf)
-    ctx.closePath()
+    this.traceLilyPad(r, { x: 0, y: 0 })
     ctx.fill()
     ctx.strokeStyle = rgba(this.palette.lilyRim, alpha * 0.85)
     ctx.lineWidth = 1.2
@@ -535,27 +601,95 @@ class WaterScene {
     ctx.restore()
   }
 
+  /**
+   * Top-down fish: a teardrop body shaded lighter along the spine (where the
+   * light from above catches it) and darker on the flanks, paired swept-back
+   * pectoral fins, seeded mottling so each fish is patterned differently, and
+   * a narrow caudal blade swinging about the peduncle — from above the tail
+   * reads as a slim strip, never a "V".
+   */
   private drawFish(entity: SceneEntity, alpha: number): void {
     const { ctx } = this
+    const colors = this.palette.fishColors
+    const base = colors[Math.floor(entity.seed) % colors.length]
+    const spine = shade(base, WHITE, 0.35)
+    const flank = shade(base, BLACK, 0.18)
+    const fin = shade(base, BLACK, 0.28)
+    const tailAngle = Math.sin(entity.tailPhase ?? 0) * 0.55
+
+    const r = entity.radius
+    const length = r * 2.2 // nose-to-peduncle half length
+    const width = r * 0.75 // half width at the widest point
+
+    const traceBody = () => {
+      ctx.beginPath()
+      ctx.moveTo(length, 0) // nose
+      ctx.quadraticCurveTo(length * 0.55, -width, -length * 0.1, -width * 0.72)
+      ctx.quadraticCurveTo(-length * 0.75, -width * 0.3, -length * 0.95, 0)
+      ctx.quadraticCurveTo(-length * 0.75, width * 0.3, -length * 0.1, width * 0.72)
+      ctx.quadraticCurveTo(length * 0.55, width, length, 0)
+      ctx.closePath()
+    }
+
     ctx.save()
     ctx.translate(entity.pos.x, entity.pos.y)
-    // Heading from velocity — ctx.rotate is the same R(θ) rotation matrix.
-    ctx.rotate(Math.atan2(entity.vel.y, entity.vel.x))
+    // Heading — ctx.rotate is the same R(θ) rotation matrix.
+    ctx.rotate(entity.heading ?? Math.atan2(entity.vel.y, entity.vel.x))
     // A slight blur reads as "under the surface"; the low alpha lets the water
-    // blue mix into the grey body.
-    ctx.filter = 'blur(1.2px)'
-    ctx.fillStyle = rgba(this.palette.fish, alpha)
-    const bodyLength = entity.radius * 2.1
-    const bodyHeight = entity.radius * 0.8
+    // blue mix into the body colors.
+    ctx.filter = 'blur(0.8px)'
+
+    // Pectoral fins: paired, swept back, flexing gently against the tail beat.
+    ctx.fillStyle = rgba(fin, alpha * 0.85)
+    for (const side of [-1, 1] as const) {
+      ctx.save()
+      ctx.translate(length * 0.25, side * width * 0.8)
+      ctx.rotate(side * (0.9 - tailAngle * side * 0.15))
+      ctx.beginPath()
+      ctx.ellipse(0, 0, r * 0.7, r * 0.28, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    // Caudal blade, swinging about the peduncle: slim, slightly flared tip.
+    ctx.save()
+    ctx.translate(-length * 0.95, 0)
+    ctx.rotate(tailAngle)
+    ctx.fillStyle = rgba(fin, alpha * 0.9)
     ctx.beginPath()
-    ctx.ellipse(0, 0, bodyLength, bodyHeight, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(-bodyLength * 0.85, 0)
-    ctx.lineTo(-bodyLength * 1.45, -bodyHeight)
-    ctx.lineTo(-bodyLength * 1.45, bodyHeight)
+    ctx.moveTo(0, -r * 0.12)
+    ctx.quadraticCurveTo(-length * 0.35, -r * 0.3, -length * 0.55, -r * 0.22)
+    ctx.lineTo(-length * 0.5, 0)
+    ctx.lineTo(-length * 0.55, r * 0.22)
+    ctx.quadraticCurveTo(-length * 0.35, r * 0.3, 0, r * 0.12)
     ctx.closePath()
     ctx.fill()
+    ctx.restore()
+
+    // Body with cross-body shading: flank → spine highlight → flank.
+    const gradient = ctx.createLinearGradient(0, -width, 0, width)
+    gradient.addColorStop(0, rgba(flank, alpha))
+    gradient.addColorStop(0.5, rgba(spine, alpha))
+    gradient.addColorStop(1, rgba(flank, alpha))
+    ctx.fillStyle = gradient
+    traceBody()
+    ctx.fill()
+
+    // Seeded mottling, clipped to the body.
+    traceBody()
+    ctx.clip()
+    const spotRandom = seededRandom(entity.seed)
+    const spotColor = shade(base, BLACK, 0.32)
+    const spotCount = 2 + Math.floor(spotRandom() * 2)
+    for (let i = 0; i < spotCount; i++) {
+      const sx = (spotRandom() * 1.3 - 0.75) * length
+      const sy = (spotRandom() * 0.9 - 0.45) * width
+      const sr = (0.2 + spotRandom() * 0.18) * r
+      ctx.fillStyle = rgba(spotColor, alpha * 0.5)
+      ctx.beginPath()
+      ctx.ellipse(sx, sy, sr * 1.6, sr, 0, 0, Math.PI * 2)
+      ctx.fill()
+    }
     ctx.restore()
   }
 
