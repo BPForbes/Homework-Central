@@ -1,6 +1,7 @@
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Http;
