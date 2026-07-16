@@ -41,10 +41,19 @@ export function ChatComposer({
   const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [showFormatting, setShowFormatting] = useState(false)
+  const [remoteUsers, setRemoteUsers] = useState<MentionCandidate[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const mentionCandidates = mentionQuery
+  const localCandidates = mentionQuery
     ? buildMentionCandidates(messages, mentionRoles, mentionQuery.query)
+    : []
+  const mentionCandidates = mentionQuery
+    ? [
+        ...remoteUsers.filter((candidate) =>
+          !localCandidates.some((local) => local.name.toLowerCase() === candidate.name.toLowerCase()),
+        ),
+        ...localCandidates,
+      ]
     : []
 
   const mentionStyles = useMemo(
@@ -60,6 +69,35 @@ export function ChatComposer({
   useEffect(() => {
     setMentionIndex(0)
   }, [mentionQuery?.query, mentionCandidates.length])
+
+  useEffect(() => {
+    if (!mentionQuery?.query)
+    {
+      setRemoteUsers([])
+      return
+    }
+    let cancelled = false
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const { chatApi } = await import('../../api/chatApi')
+          const { data } = await chatApi.searchUsers(mentionQuery.query)
+          if (cancelled) return
+          setRemoteUsers(data.map((user) => ({
+            kind: 'user' as const,
+            name: user.username,
+            color: 'var(--color-ink-secondary)',
+          })))
+        } catch {
+          if (!cancelled) setRemoteUsers([])
+        }
+      })()
+    }, 120)
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [mentionQuery?.query])
 
   function updateMentionState(value: string, cursorPos: number) {
     setMentionQuery(getActiveMentionQuery(value, cursorPos))

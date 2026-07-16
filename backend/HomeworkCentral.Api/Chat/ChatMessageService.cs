@@ -1,5 +1,7 @@
 using System.Collections;
 using System.Security.Claims;
+using System.Text.Json;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
@@ -30,7 +32,9 @@ public interface IChatMessageService
         Guid userId,
         string content,
         Guid? replyToMessageId = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        IReadOnlyList<Guid>? attachmentIds = null,
+        ChatForwardSnapshotDto? forwardedFrom = null);
 
     Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default);
 
@@ -75,7 +79,8 @@ public sealed class ChatMessageService(
     IMentionCooldownTracker mentionCooldownTracker,
     IMentionRecipientResolver mentionRecipientResolver,
     IRoleAppearanceService roleAppearanceService,
-    IHubContext<ChatHub> hubContext) : IChatMessageService
+    IHubContext<ChatHub> hubContext,
+    IAssessmentQueue assessmentQueue) : IChatMessageService
 {
     private const int MaxMessageLength = 4000;
     private const int DefaultPageSize = 50;
@@ -115,6 +120,7 @@ public sealed class ChatMessageService(
             return [];
 
         int pageSize = limit is > 0 and <= 100 ? limit : DefaultPageSize;
+        bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
 
         // Real-vs-developer traffic is filtered by the IShareableScopedResource EF global query filter.
         IQueryable<ChatMessage> query = masterDb.ChatMessages
@@ -124,13 +130,18 @@ public sealed class ChatMessageService(
         if (beforeUtc is not null)
             query = query.Where(message => message.CreatedAtUtc < beforeUtc.Value);
 
+        if (!isTicketRoom)
+            query = query.Include(m => m.Votes);
+
         List<ChatMessage> messages = await query
+            .Include(m => m.Attachments).ThenInclude(a => a.Attachment)
+            .Include(m => m.LinkPreviews)
             .OrderByDescending(message => message.CreatedAtUtc)
             .Take(pageSize)
             .ToListAsync(ct);
 
         messages.Reverse();
-        return messages.Select(ToDto).ToArray();
+        return messages.Select(m => ToDto(m, userId, includeVotes: !isTicketRoom)).ToArray();
     }
 
     public async Task<ChatMessageDto?> SendMessageAsync(
@@ -138,14 +149,20 @@ public sealed class ChatMessageService(
         Guid userId,
         string content,
         Guid? replyToMessageId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IReadOnlyList<Guid>? attachmentIds = null,
+        ChatForwardSnapshotDto? forwardedFrom = null)
     {
         if (!await CanAccessRoomAsync(roomId, userId, ct))
             return null;
 
-        string trimmed = content.Trim();
-        if (string.IsNullOrEmpty(trimmed) || trimmed.Length > MaxMessageLength)
+        string trimmed = (content ?? string.Empty).Trim();
+        bool hasAttachments = attachmentIds is { Count: > 0 };
+        bool hasForward = forwardedFrom is not null;
+        if ((string.IsNullOrEmpty(trimmed) && !hasAttachments && !hasForward) || trimmed.Length > MaxMessageLength)
             return null;
+        if (string.IsNullOrEmpty(trimmed))
+            trimmed = hasForward ? "(forwarded message)" : "(attachment)";
 
         EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
         BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
@@ -196,9 +213,32 @@ public sealed class ChatMessageService(
             ReplyToSenderId = replyTarget?.SenderId,
             ReplyToSenderUsername = replyTarget?.SenderUsername,
             ReplyToContentSnippet = replyTarget is null ? null : ChatReplySnippet.Build(replyTarget.RawContent),
+            ForwardedFromJson = forwardedFrom is null
+                ? null
+                : JsonSerializer.Serialize(forwardedFrom, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                }),
         };
 
         masterDb.ChatMessages.Add(message);
+
+        if (attachmentIds is { Count: > 0 })
+        {
+            int order = 0;
+            foreach (Guid attachmentId in attachmentIds.Distinct())
+            {
+                bool exists = await masterDb.ChatAttachments.AnyAsync(a => a.AttachmentId == attachmentId, ct);
+                if (!exists)
+                    continue;
+                masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
+                {
+                    MessageId = message.MessageId,
+                    AttachmentId = attachmentId,
+                    SortOrder = order++,
+                });
+            }
+        }
 
         ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
         string roomDisplayName = room?.RoomDisplayName ?? roomId;
@@ -280,7 +320,12 @@ public sealed class ChatMessageService(
 
         await masterDb.SaveChangesAsync(ct);
 
-        ChatMessageDto dto = ToDto(message);
+        await assessmentQueue.EnqueueAsync(
+            new AssessmentMessageJob(message.MessageId, roomId, userId, message.RawContent),
+            ct);
+
+        bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
+        ChatMessageDto dto = ToDto(message, userId, includeVotes: !isTicketRoom);
         string broadcastGroupKey = ChatRoomGroupKey.Build(roomId, accountClass);
         await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", dto, ct);
         return dto;
@@ -476,8 +521,30 @@ public sealed class ChatMessageService(
         return BitMask.HasBit(featureMask, PlatformFeatures.GroupMessages);
     }
 
-    private static ChatMessageDto ToDto(ChatMessage message) =>
-        new()
+    private static ChatMessageDto ToDto(ChatMessage message, Guid? viewerId = null, bool includeVotes = true)
+    {
+        int ups = includeVotes ? message.Votes?.Count(v => v.Value > 0) ?? 0 : 0;
+        int downs = includeVotes ? message.Votes?.Count(v => v.Value < 0) ?? 0 : 0;
+        short? viewerVote = includeVotes && viewerId is Guid vid
+            ? message.Votes?.FirstOrDefault(v => v.UserId == vid)?.Value
+            : null;
+
+        ChatForwardSnapshotDto? forward = null;
+        if (!string.IsNullOrWhiteSpace(message.ForwardedFromJson))
+        {
+            try
+            {
+                forward = JsonSerializer.Deserialize<ChatForwardSnapshotDto>(
+                    message.ForwardedFromJson,
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            }
+            catch (JsonException)
+            {
+                forward = null;
+            }
+        }
+
+        return new ChatMessageDto
         {
             MessageId = message.MessageId,
             RoomId = message.RoomId,
@@ -490,7 +557,33 @@ public sealed class ChatMessageService(
             ReplyToSenderId = message.ReplyToSenderId,
             ReplyToSenderUsername = message.ReplyToSenderUsername,
             ReplyToContentSnippet = message.ReplyToContentSnippet,
+            Score = ups - downs,
+            UpvoteCount = ups,
+            DownvoteCount = downs,
+            ViewerVote = viewerVote is null ? null : viewerVote > 0 ? "up" : "down",
+            ForwardedFrom = forward,
+            Attachments = message.Attachments?
+                .OrderBy(a => a.SortOrder)
+                .Select(a => new ChatAttachmentInfoDto
+                {
+                    AttachmentId = a.AttachmentId,
+                    FileName = a.Attachment.OriginalFileName,
+                    ContentType = a.Attachment.ContentType,
+                    SizeBytes = a.Attachment.SizeBytes,
+                    DownloadUrl = $"/api/chat/attachments/{a.AttachmentId}",
+                })
+                .ToList() ?? [],
+            LinkPreviews = message.LinkPreviews?
+                .Select(p => new LinkPreviewDto
+                {
+                    Url = p.Url,
+                    Title = p.Title,
+                    Description = p.Description,
+                    ImageUrl = p.ImageUrl,
+                })
+                .ToList() ?? [],
         };
+    }
 
     private static ChatInboxItemDto ToInboxDto(ChatMentionNotification notification)
     {

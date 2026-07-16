@@ -1,5 +1,7 @@
 import {
+  faArrowDown,
   faEnvelope,
+  faExclamation,
   faServer,
   faUsersGear,
 } from '@fortawesome/free-solid-svg-icons'
@@ -11,6 +13,8 @@ export const byPrefixAndName = {
     envelope: faEnvelope,
     server: faServer,
     'users-gear': faUsersGear,
+    'arrow-down': faArrowDown,
+    exclamation: faExclamation,
   },
   far: {
     comments: faComments,

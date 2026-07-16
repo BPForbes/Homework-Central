@@ -33,7 +33,7 @@ export function buildMentionCandidates(
     if (!recentUsers.has(key)) {
       recentUsers.set(key, {
         name: message.senderUsername,
-        color: message.senderMessageColor ?? '#64748b',
+        color: message.senderMessageColor ?? 'var(--color-ink-secondary)',
         lastSeen: new Date(message.createdAtUtc).getTime(),
       })
     }

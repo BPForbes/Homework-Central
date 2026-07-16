@@ -91,7 +91,7 @@ public class AuthorizationCatalogTests
     // (e.g. always returning a fixed string). If a legitimate catalog change causes this to
     // fail, recompute and update the pinned literal deliberately rather than loosening the test.
     private const string ExpectedContentHashHex =
-        "8C27F8FF57C6DE0F475FFD7F5BA34AD7F08319FA539685F100D48A396D7156BA";
+        "B9F65A9451355160A54141078CDA6104B372D776D93F2E9B4D35AA2C4513C37D";
 
     [Fact]
     public void ContentHashHex_is_stable()

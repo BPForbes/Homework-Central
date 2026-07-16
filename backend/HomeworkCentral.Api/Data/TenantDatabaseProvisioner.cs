@@ -96,6 +96,11 @@ public static class TenantDatabaseProvisioner
         await tenantDb.Database.MigrateAsync(ct);
 
         await AuthorizationSeedData.SeedAsync(tenantDb, ct);
+        await HomeworkCentral.Api.Tickets.TicketPortalSeedData.SeedAsync(
+            tenantDb,
+            HomeworkCentral.Api.Authorization.AccountClass.DeveloperAccount,
+            ct: ct);
+        await HomeworkCentral.Api.Assessment.ScoringReferenceSeedData.SeedAsync(tenantDb);
         return await TenantBypassSeedData.SeedPersonaAsync(tenantDb, persona, ct);
     }
 }

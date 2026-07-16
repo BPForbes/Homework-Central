@@ -9,9 +9,16 @@ export type TicketIntakeQuestionType =
   | 'longText'
   | 'multipleChoice'
   | 'trueFalse'
+  | 'checkbox'
   | 'date'
   | 'multiSelect'
   | 'dropdown'
+  | 'fileUpload'
+  | 'link'
+  | 'messageForward'
+  | 'mixed'
+
+export type IntakeResponseKind = 'text' | 'file' | 'link' | 'forward'
 
 export interface TicketIntakeQuestion {
   id: string
@@ -19,6 +26,8 @@ export interface TicketIntakeQuestion {
   prompt: string
   required: boolean
   tracksUser: boolean
+  aiOptOut?: boolean
+  allowedResponseKinds?: IntakeResponseKind[]
   options?: string[]
 }
 
@@ -28,6 +37,7 @@ export interface TicketPortalConfig {
   ctaLabel: string
   description: string
   purpose: string
+  filterName: string
   nextDisplayNumber: number
   trackingMode: TicketTrackingMode
   trackingInstructions: string | null
@@ -41,6 +51,7 @@ export interface UpdateTicketPortalConfigRequest {
   ctaLabel: string
   description: string
   purpose: string
+  filterName: string
   trackingMode: TicketTrackingMode
   trackingInstructions: string | null
   decisionLabels: string[]
@@ -74,11 +85,14 @@ export interface Ticket {
   roomId: string
   displayName: string
   purpose: string
+  filterName: string
   displayNumber: number
   status: TicketStatus
   openedByUserId: string
   openedByUsername: string
   canManage: boolean
+  aiTrackingOptOut: boolean
+  approvedDecision: string | null
   createdAtUtc: string
   closedAtUtc: string | null
   closedByUserId: string | null
@@ -86,7 +100,7 @@ export interface Ticket {
   watches: TicketUserWatch[]
 }
 
-export type TicketAnswers = Record<string, string | string[] | boolean | null>
+export type TicketAnswers = Record<string, string | string[] | boolean | null | unknown>
 
 export interface UpsertTicketWatchRequest {
   trackedUserId: string
@@ -107,9 +121,14 @@ export const TICKET_INTAKE_QUESTION_TYPES: { value: TicketIntakeQuestionType; la
   { value: 'longText', label: 'Long text' },
   { value: 'multipleChoice', label: 'Multiple choice' },
   { value: 'trueFalse', label: 'True / false' },
+  { value: 'checkbox', label: 'Checkbox' },
   { value: 'date', label: 'Date' },
   { value: 'multiSelect', label: 'Multi-select' },
   { value: 'dropdown', label: 'Dropdown' },
+  { value: 'fileUpload', label: 'File upload' },
+  { value: 'link', label: 'Link' },
+  { value: 'messageForward', label: 'Forwarded message' },
+  { value: 'mixed', label: 'Mixed (multi-kind)' },
 ]
 
 export const TICKET_TRACKING_MODES: { value: TicketTrackingMode; label: string; hint: string }[] = [

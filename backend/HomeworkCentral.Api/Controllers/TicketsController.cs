@@ -147,6 +147,27 @@ public class TicketsController(ITicketService tickets) : ControllerBase
         }
     }
 
+    [HttpPost("api/tickets/{ticketId:guid}/approve-decision")]
+    public async Task<ActionResult<TicketDto>> ApproveDecision(
+        Guid ticketId,
+        [FromBody] ApproveTicketDecisionRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            TicketDto ticket = await tickets.ApproveDecisionAsync(ticketId, userId.Value, request, ct);
+            return Ok(ticket);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private Guid? GetUserId()
     {
         string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value

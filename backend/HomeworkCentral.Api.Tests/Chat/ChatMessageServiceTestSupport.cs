@@ -1,5 +1,7 @@
 using System.Collections;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
@@ -59,7 +61,8 @@ internal static class ChatMessageServiceTestSupport
             new MentionCooldownTracker(),
             new NoRecipientsMentionResolver(),
             new NoOpRoleAppearanceService(),
-            new NoOpHubContext());
+            new NoOpHubContext(),
+            new NoOpAssessmentQueue());
 
     internal static HttpContext BuildHttpContext(Guid userId, string username)
     {
@@ -188,6 +191,19 @@ internal static class ChatMessageServiceTestSupport
 
             public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
                 Task.CompletedTask;
+        }
+    }
+
+    internal sealed class NoOpAssessmentQueue : IAssessmentQueue
+    {
+        public ValueTask EnqueueAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
+            ValueTask.CompletedTask;
+
+        public async IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            yield break;
         }
     }
 }

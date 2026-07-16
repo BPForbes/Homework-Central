@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Runtime.CompilerServices;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
@@ -66,7 +68,8 @@ public class ChatMessageServiceTests
             new MentionCooldownTracker(),
             new FakeMentionRecipientResolver(),
             new FakeRoleAppearanceService(),
-            new FakeHubContext());
+            new FakeHubContext(),
+            new FakeAssessmentQueue());
     }
 
     private static UserEffectiveMask ToUserEffectiveMask(Guid userId, EffectiveMaskDto dto) =>
@@ -212,6 +215,19 @@ public class ChatMessageServiceTests
 
             public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
                 Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeAssessmentQueue : IAssessmentQueue
+    {
+        public ValueTask EnqueueAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
+            ValueTask.CompletedTask;
+
+        public async IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            yield break;
         }
     }
 }

@@ -269,6 +269,10 @@ public static class AuthorizationSeedData
 
             if (string.IsNullOrWhiteSpace(role.MessageColor))
                 role.MessageColor = RoleAppearanceDefaults.ResolvePlatformRoleColor(roleDefinition.Name, null);
+
+            // TrialTutor is mentionable by default (cosmetic badge used in @role pings).
+            if (string.Equals(roleDefinition.Name, "TrialTutor", StringComparison.Ordinal))
+                role.IsMentionableByUsers = true;
         }
 
         HashSet<Guid> validRoleIds = AuthorizationCatalog.Roles.Select(role => role.RoleId).ToHashSet();
