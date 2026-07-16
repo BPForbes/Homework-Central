@@ -131,6 +131,23 @@ images without deleting the database volume, run `docker system prune -af`. Do n
 The default development scripts run the API and frontend directly on the host, so Docker limits
 do not cap their CPU or memory use.
 
+### Fast repeat starts
+
+`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
+can bind without a duplicate build. It also starts the frontend before the API, allowing Vite to
+bind to port 5173 while the API completes its startup work.
+
+After one successful initialization of the local database, you can skip development migrations
+and seed warmup on repeat starts:
+
+```powershell
+$env:HC_SKIP_DEV_WARMUP = '1'
+.\scripts\run-dev.ps1
+```
+
+Unset this variable and start normally after pulling migrations or authorization/seed changes, or
+after resetting the local database. Never use it for a fresh database.
+
 ### Build without starting servers
 
 | Platform | Command |

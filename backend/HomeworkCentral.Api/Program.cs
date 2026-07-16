@@ -176,6 +176,7 @@ builder.Services.AddCors(opts =>
             .AllowAnyMethod()));
 
 bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
+bool skipDevStartupWarmup = DevStartupWarmup.ShouldSkip(builder.Configuration, builder.Environment);
 if (devBypassEnabled)
 {
     builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
@@ -244,27 +245,38 @@ if (devBypassEnabled)
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
 {
-    try
+    if (skipDevStartupWarmup)
     {
-        await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
+        app.Logger.LogWarning(
+            "{Flag}=1: skipping development migrations and seed warmup. "
+            + "Only use this with an already initialized local database.",
+            DevStartupWarmup.SkipEnvVarName);
     }
-    catch (Exception ex)
+    else
     {
-        ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
-        ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
-        logger.LogCritical(
-            ex,
-            "Database migration failed for master database '{DatabaseName}'. "
-            + "If you upgraded from the single-database layout, reset the local Docker volume: "
-            + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
-            + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
-            resolver.MasterDatabaseName);
-        throw;
+        try
+        {
+            await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
+        }
+        catch (Exception ex)
+        {
+            ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
+            ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
+            logger.LogCritical(
+                ex,
+                "Database migration failed for master database '{DatabaseName}'. "
+                + "If you upgraded from the single-database layout, reset the local Docker volume: "
+                + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
+                + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
+                resolver.MasterDatabaseName);
+            throw;
+        }
     }
 }
 
-using (IServiceScope seedScope = app.Services.CreateScope())
+if (!skipDevStartupWarmup)
 {
+    using IServiceScope seedScope = app.Services.CreateScope();
     ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
