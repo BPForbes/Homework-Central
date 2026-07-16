@@ -5,6 +5,7 @@ import type { Ticket, TicketAnswers, TicketIntakeQuestion } from '../../types/ti
 type TicketIntakeWizardProps = {
   portalRoomId: string
   questions: TicketIntakeQuestion[]
+  initialAnswers?: TicketAnswers
   onCancel: () => void
   onOpened: (ticket: Ticket) => void
 }
@@ -103,6 +104,83 @@ function QuestionField({
           </label>
         </div>
       )
+    case 'checkbox':
+      return (
+        <label className="ticket-intake-option">
+          <input
+            id={`ticket-q-${question.id}`}
+            type="checkbox"
+            checked={value === true}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+          <span>{question.aiOptOut ? 'Opt out of AI decision-making' : 'Yes'}</span>
+        </label>
+      )
+    case 'link':
+      return (
+        <input
+          id={`ticket-q-${question.id}`}
+          type="url"
+          className="sm-input"
+          placeholder="https://"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => onChange(event.target.value)}
+          required={question.required}
+        />
+      )
+    case 'fileUpload':
+    case 'messageForward':
+    case 'mixed':
+      return (
+        <div className="ticket-intake-mixed">
+          {(question.type === 'fileUpload' || question.allowedResponseKinds?.includes('file') || question.type === 'mixed') && (
+            <input
+              type="file"
+              className="sm-input"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? [])
+                void (async () => {
+                  const { chatApi } = await import('../../api/chatApi')
+                  const uploaded = []
+                  for (const file of files) {
+                    const { data } = await chatApi.uploadAttachment(file)
+                    uploaded.push({ kind: 'file', attachmentId: data.attachmentId, fileName: data.fileName })
+                  }
+                  const existing = Array.isArray(value) ? value : []
+                  onChange([...existing, ...uploaded])
+                })()
+              }}
+            />
+          )}
+          {(question.type === 'link' || question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
+            <input
+              type="url"
+              className="sm-input"
+              placeholder="Add link https://"
+              onBlur={(event) => {
+                const url = event.target.value.trim()
+                if (!url) return
+                const existing = Array.isArray(value) ? value : []
+                onChange([...existing, { kind: 'link', url }])
+                event.target.value = ''
+              }}
+            />
+          )}
+          {(question.type === 'messageForward' || question.allowedResponseKinds?.includes('forward') || question.type === 'mixed') && (
+            <p className="dashboard-hint">
+              Use Report on a chat message to prefill a forwarded proof, or paste a message id below.
+            </p>
+          )}
+          {Array.isArray(value) && value.length > 0 && (
+            <ul className="ticket-intake-parts">
+              {value.map((part, index) => (
+                <li key={index}>{typeof part === 'object' && part && 'kind' in part ? String((part as { kind: string }).kind) : String(part)}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )
     case 'date':
       return (
         <input
@@ -159,12 +237,15 @@ function QuestionField({
 export function TicketIntakeWizard({
   portalRoomId,
   questions,
+  initialAnswers = {},
   onCancel,
   onOpened,
 }: TicketIntakeWizardProps) {
-  const [answers, setAnswers] = useState<TicketAnswers>({})
+  const [answers, setAnswers] = useState<TicketAnswers>(initialAnswers)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [userQuery, setUserQuery] = useState('')
+  const [userHits, setUserHits] = useState<{ userId: string; username: string; email: string }[]>([])
 
   function setAnswer(questionId: string, value: TicketAnswers[string]) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
@@ -205,11 +286,61 @@ export function TicketIntakeWizard({
             {needsOptions(question.type) && (question.options ?? []).length === 0 && (
               <p className="ticket-intake-missing-options">This question has no options configured.</p>
             )}
-            <QuestionField
-              question={question}
-              value={answers[question.id]}
-              onChange={(next) => setAnswer(question.id, next)}
-            />
+            {question.tracksUser ? (
+              <div>
+                <input
+                  type="text"
+                  className="sm-input"
+                  placeholder="Search @username or email prefix"
+                  value={userQuery}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    setUserQuery(next)
+                    void (async () => {
+                      if (!next.trim()) {
+                        setUserHits([])
+                        return
+                      }
+                      const { infrastructureApi } = await import('../../api/infrastructureApi')
+                      const { data } = await infrastructureApi.searchUsers(next.trim())
+                      setUserHits(data.map((user) => ({
+                        userId: user.userId,
+                        username: user.username,
+                        email: user.email,
+                      })))
+                    })()
+                  }}
+                />
+                {userHits.length > 0 && (
+                  <ul className="ticket-user-hits">
+                    {userHits.map((user) => (
+                      <li key={user.userId}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => {
+                            setAnswer(question.id, user.userId)
+                            setUserQuery(user.username)
+                            setUserHits([])
+                          }}
+                        >
+                          @{user.username}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {typeof answers[question.id] === 'string' && answers[question.id] && (
+                  <p className="dashboard-hint">Selected user id: {String(answers[question.id])}</p>
+                )}
+              </div>
+            ) : (
+              <QuestionField
+                question={question}
+                value={answers[question.id]}
+                onChange={(next) => setAnswer(question.id, next)}
+              />
+            )}
           </div>
         ))}
         {error && <p className="error">{error}</p>}

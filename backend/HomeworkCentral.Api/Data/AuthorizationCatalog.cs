@@ -64,7 +64,8 @@ public static class AuthorizationCatalog
         new("Student", "Student participant.", []),
         new("Staff", "Platform staff member.", []),
         new("Tutor", "Homework tutor.", []),
-        new("SeniorTutor", "Senior tutor with seminar and event responsibilities.",
+        new("TrialTutor", "Cosmetic trial tutor badge (mentionable; mutually exclusive with Tutor).", []),
+        new("SeniorTutor", "Senior tutor with seminar and event responsibilities.",,
         [
             ModerationPermissions.ManageSeminars,
             ModerationPermissions.ManageEvents,

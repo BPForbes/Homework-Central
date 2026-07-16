@@ -430,6 +430,7 @@ public sealed class InfrastructureService(
                 CtaLabel = "Open Ticket",
                 Description = string.Empty,
                 Purpose = purpose,
+                FilterName = purpose,
                 NextDisplayNumber = 1,
                 TrackingMode = TicketTrackingModes.None,
                 DecisionLabelsJson = "[]",
@@ -888,6 +889,8 @@ public sealed class InfrastructureService(
             {
                 "Guest" => "VerifiedUser",
                 "VerifiedUser" => "Guest",
+                "TrialTutor" => "Tutor",
+                "Tutor" => "TrialTutor",
                 _ => null,
             };
             if (mutuallyExclusive is not null)

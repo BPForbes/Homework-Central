@@ -18,7 +18,9 @@ public class ChatController(
     IEffectiveMaskService effectiveMaskService,
     IChatMessageService chatMessageService,
     IChatRoomDetailService chatRoomDetailService,
-    IRoleAppearanceService roleAppearanceService) : ControllerBase
+    IRoleAppearanceService roleAppearanceService,
+    IChatMessageVoteService voteService,
+    Uploads.IChatAttachmentService attachmentService) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
     [HttpGet("nav")]
@@ -97,12 +99,11 @@ public class ChatController(
         if (userId is null)
             return Unauthorized();
 
-        // [Required]/[StringLength] on SendChatMessageRequest.Content already rejects null,
-        // empty, and oversized payloads before this action runs, but a whitespace-only string
-        // (e.g. "   ") passes those attributes, so it's still checked explicitly here — this
-        // way a bad-content rejection is always a 400, never conflated with the 403 below.
-        if (string.IsNullOrWhiteSpace(request.Content))
-            return BadRequest(new { message = "Message content cannot be empty." });
+        bool hasContent = !string.IsNullOrWhiteSpace(request.Content);
+        bool hasAttachments = request.AttachmentIds is { Count: > 0 };
+        bool hasForward = request.ForwardedFrom is not null;
+        if (!hasContent && !hasAttachments && !hasForward)
+            return BadRequest(new { message = "Message content, attachment, or forward is required." });
 
         string decodedRoomId = Uri.UnescapeDataString(roomId);
         if (!await chatMessageService.CanAccessRoomAsync(decodedRoomId, userId.Value, ct))
@@ -114,9 +115,11 @@ public class ChatController(
             message = await chatMessageService.SendMessageAsync(
                 decodedRoomId,
                 userId.Value,
-                request.Content,
+                request.Content ?? string.Empty,
                 request.ReplyToMessageId,
-                ct);
+                ct,
+                request.AttachmentIds,
+                request.ForwardedFrom);
         }
         catch (SendMessageMentionException mentionError)
         {
@@ -227,6 +230,68 @@ public class ChatController(
             await chatMessageService.DeleteInboxCategoryAsync(userId.Value, categoryKey, ct);
 
         return NoContent();
+    }
+
+    [HttpPost("messages/{messageId:guid}/vote")]
+    public async Task<ActionResult<MessageVoteDto>> CastVote(
+        Guid messageId,
+        [FromBody] CastMessageVoteRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            MessageVoteDto? result = await voteService.CastVoteAsync(
+                messageId,
+                userId.Value,
+                (short)request.Value,
+                ct);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("attachments")]
+    [RequestSizeLimit(12_000_000)]
+    public async Task<ActionResult<Uploads.ChatAttachmentDto>> UploadAttachment(
+        IFormFile file,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+        if (file is null)
+            return BadRequest(new { message = "File is required." });
+
+        try
+        {
+            return Ok(await attachmentService.UploadAsync(userId.Value, file, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("attachments/{attachmentId:guid}")]
+    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        (Stream Stream, string ContentType, string FileName)? opened =
+            await attachmentService.OpenReadAsync(attachmentId, userId.Value, ct);
+        if (opened is null)
+            return NotFound();
+
+        return File(opened.Value.Stream, opened.Value.ContentType, opened.Value.FileName);
     }
 
     private Guid? GetUserId()

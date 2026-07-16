@@ -78,12 +78,19 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
             >
               <div className={`chat-message-thread ${isActive ? 'chat-message-thread--own' : 'chat-message-thread--other'}`}>
                 <article className={`chat-bubble ${isActive ? 'chat-bubble--own' : 'chat-bubble--other'}`}>
+                  <div className="chat-bubble-score" aria-hidden>0</div>
                   <div className="chat-bubble-sender" style={sender ? { color: sender.color } : undefined}>
                     {sender?.label ?? 'Unknown mock account'}
                   </div>
                   <div className="chat-bubble-content">
                     <RichContent content={message.content} />
                   </div>
+                  {message.content.includes('http') && (
+                    <div className="chat-link-preview-card">
+                      <strong>Link preview</strong>
+                      <p>Sample unfurl card for channel builder.</p>
+                    </div>
+                  )}
                 </article>
               </div>
             </div>

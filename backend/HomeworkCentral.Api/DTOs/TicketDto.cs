@@ -9,6 +9,7 @@ public class TicketPortalConfigDto
     public string CtaLabel { get; set; } = null!;
     public string Description { get; set; } = null!;
     public string Purpose { get; set; } = null!;
+    public string FilterName { get; set; } = null!;
     public int NextDisplayNumber { get; set; }
     public string TrackingMode { get; set; } = null!;
     public string? TrackingInstructions { get; set; }
@@ -23,6 +24,7 @@ public class UpdateTicketPortalConfigRequest
     public string CtaLabel { get; set; } = null!;
     public string Description { get; set; } = null!;
     public string Purpose { get; set; } = null!;
+    public string FilterName { get; set; } = null!;
     public string TrackingMode { get; set; } = null!;
     public string? TrackingInstructions { get; set; }
     public List<string> DecisionLabels { get; set; } = [];
@@ -38,6 +40,8 @@ public class TicketIntakeQuestionDto
     public string Prompt { get; set; } = null!;
     public bool Required { get; set; }
     public bool TracksUser { get; set; }
+    public bool AiOptOut { get; set; }
+    public List<string>? AllowedResponseKinds { get; set; }
     public List<string>? Options { get; set; }
 }
 
@@ -55,16 +59,25 @@ public class TicketDto
     public string RoomId { get; set; } = null!;
     public string DisplayName { get; set; } = null!;
     public string Purpose { get; set; } = null!;
+    public string FilterName { get; set; } = null!;
     public int DisplayNumber { get; set; }
     public string Status { get; set; } = null!;
     public Guid OpenedByUserId { get; set; }
     public string OpenedByUsername { get; set; } = null!;
     public bool CanManage { get; set; }
+    public bool AiTrackingOptOut { get; set; }
+    public string? ApprovedDecision { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? ClosedAtUtc { get; set; }
     public Guid? ClosedByUserId { get; set; }
     public List<TicketIntakeAnswerDto> IntakeAnswers { get; set; } = [];
     public List<TicketUserWatchDto> Watches { get; set; } = [];
+}
+
+public class ApproveTicketDecisionRequest
+{
+    public string Decision { get; set; } = null!;
+    public string? Reason { get; set; }
 }
 
 public class TicketIntakeAnswerDto

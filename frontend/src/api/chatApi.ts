@@ -1,5 +1,5 @@
 import api from './authApi'
-import type { ChatMessage, ChatNav, ChatRoomDetail, MentionRoleOption } from '../types/chat'
+import type { ChatMessage, ChatNav, ChatRoomDetail, MentionRoleOption, MessageVoteUpdate } from '../types/chat'
 
 export const chatApi = {
   getNav: () => api.get<ChatNav>('/chat/nav'),
@@ -10,11 +10,38 @@ export const chatApi = {
   getMessages: (roomId: string, params?: { beforeUtc?: string; limit?: number }) =>
     api.get<ChatMessage[]>(`/chat/rooms/${encodeURIComponent(roomId)}/messages`, { params }),
 
-  sendMessage: (roomId: string, content: string, replyToMessageId?: string | null) =>
+  sendMessage: (
+    roomId: string,
+    content: string,
+    replyToMessageId?: string | null,
+    extras?: {
+      attachmentIds?: string[]
+      forwardedFrom?: ChatMessage['forwardedFrom']
+    },
+  ) =>
     api.post<ChatMessage>(`/chat/rooms/${encodeURIComponent(roomId)}/messages`, {
       content,
       replyToMessageId: replyToMessageId ?? undefined,
+      attachmentIds: extras?.attachmentIds,
+      forwardedFrom: extras?.forwardedFrom ?? undefined,
     }),
+
+  castVote: (messageId: string, value: 1 | -1) =>
+    api.post<MessageVoteUpdate>(`/chat/messages/${messageId}/vote`, { value }),
+
+  uploadAttachment: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<{
+      attachmentId: string
+      fileName: string
+      contentType: string
+      sizeBytes: number
+      downloadUrl: string
+    }>('/chat/attachments', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 
   getMentionRoles: () => api.get<MentionRoleOption[]>('/chat/mention-roles'),
 }

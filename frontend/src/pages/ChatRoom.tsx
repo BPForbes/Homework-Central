@@ -81,7 +81,31 @@ export function ChatRoom() {
     stopTyping,
     startReply,
     cancelReply,
+    castVote,
   } = useChatRoom(isChatRoom ? decodedRoomId : '', user?.userId)
+
+  async function handleReportMessage(message: { messageId: string; roomId: string; senderId: string; senderUsername: string; content: string }) {
+    try {
+      const { data: nav } = await chatApi.getNav()
+      const portal = nav.categories
+        .flatMap((category) => category.rooms)
+        .find((room) => room.name === 'Notify Mods' && room.roomType === 'Ticket')
+      if (!portal) {
+        window.alert('Notify Mods portal is not available.')
+        return
+      }
+      const params = new URLSearchParams({
+        reportMessageId: message.messageId,
+        reportRoomId: message.roomId,
+        reportedUserId: message.senderId,
+        reportedUsername: message.senderUsername,
+        reportSnippet: message.content.slice(0, 200),
+      })
+      navigate(`/chat/${encodeURIComponent(portal.id)}?${params.toString()}`)
+    } catch {
+      window.alert('Could not open a moderation ticket.')
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -205,6 +229,8 @@ export function ChatRoom() {
               currentUserId={user?.userId}
               mentionRoles={mentionRoles}
               onReply={startReply}
+              onVote={(message, value) => void castVote(message, value)}
+              onReport={(message) => void handleReportMessage(message)}
             />
             <ChatComposer
               disabled={messagesLoading}

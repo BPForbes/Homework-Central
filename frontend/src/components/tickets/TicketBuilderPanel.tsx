@@ -50,6 +50,7 @@ function configToDraft(config: TicketPortalConfig): UpdateTicketPortalConfigRequ
     ctaLabel: config.ctaLabel,
     description: config.description,
     purpose: config.purpose,
+    filterName: config.filterName || config.purpose,
     trackingMode: config.trackingMode,
     trackingInstructions: config.trackingInstructions,
     decisionLabels: [...config.decisionLabels],
@@ -241,8 +242,21 @@ export function TicketBuilderPanel({ channelId, mode }: TicketBuilderPanelProps)
           className="sm-input"
           value={draft.purpose}
           onChange={(event) => updateDraft({ purpose: event.target.value })}
-          placeholder="e.g. Appeals"
+          placeholder="e.g. Apply for Tutor Positions"
         />
+      </div>
+
+      <div className="sm-field">
+        <label htmlFor="ticket-filter-name" className="sm-label">Filter name</label>
+        <input
+          id="ticket-filter-name"
+          type="text"
+          className="sm-input"
+          value={draft.filterName}
+          onChange={(event) => updateDraft({ filterName: event.target.value })}
+          placeholder="e.g. Tutor or Mod-Mail"
+        />
+        <p className="dashboard-hint">Used in ticket room titles: Ticket - {'{Filter}'} - 0001</p>
       </div>
 
       <div className="sm-field">
@@ -471,7 +485,36 @@ export function TicketBuilderPanel({ channelId, mode }: TicketBuilderPanelProps)
                   />
                   Tracks user
                 </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(question.aiOptOut)}
+                    onChange={(event) => updateQuestion(index, {
+                      aiOptOut: event.target.checked,
+                      type: event.target.checked ? 'checkbox' : question.type,
+                    })}
+                  />
+                  AI opt-out
+                </label>
               </div>
+
+              {question.type === 'mixed' && (
+                <input
+                  type="text"
+                  className="sm-input"
+                  value={(question.allowedResponseKinds ?? []).join(',')}
+                  onChange={(event) =>
+                    updateQuestion(index, {
+                      allowedResponseKinds: event.target.value
+                        .split(',')
+                        .map((part) => part.trim())
+                        .filter(Boolean) as TicketIntakeQuestion['allowedResponseKinds'],
+                    })
+                  }
+                  placeholder="Allowed kinds: file,link,forward,text"
+                  aria-label="Allowed response kinds"
+                />
+              )}
 
               {(question.type === 'multipleChoice' ||
                 question.type === 'multiSelect' ||

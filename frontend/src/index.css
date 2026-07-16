@@ -2258,6 +2258,30 @@ a {
   20%, 60% { box-shadow: 0 0 0 3px var(--color-focus-ring); }
 }
 
+.chat-bubble-score {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.5rem;
+  min-width: 1.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-ink-secondary);
+  opacity: 1;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.chat-bubble--own .chat-bubble-score {
+  right: auto;
+  left: 0.5rem;
+}
+
+.chat-bubble:hover .chat-bubble-score,
+.chat-bubble:focus-within .chat-bubble-score {
+  opacity: 0;
+}
+
 .chat-bubble-actions {
   position: absolute;
   top: -0.85rem;
@@ -2272,6 +2296,37 @@ a {
   transform: translateY(2px) scale(0.94);
   pointer-events: none;
   transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+}
+
+.chat-bubble-action-btn.is-active {
+  color: var(--color-accent);
+  background: var(--color-primary-soft);
+}
+
+.chat-attachment-list,
+.chat-link-preview-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.chat-attachment-image {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.chat-link-preview-card,
+.chat-forward-card {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.chat-forward-card-label {
+  font-size: 0.75rem;
+  color: var(--color-ink-tertiary);
 }
 
 .chat-bubble--other .chat-bubble-actions {

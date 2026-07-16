@@ -10,11 +10,18 @@ public class Ticket
     public string RoomId { get; set; } = null!;
     public int DisplayNumber { get; set; }
     public string Purpose { get; set; } = null!;
+    /// <summary>Filter key snapped from the portal at open time for room naming.</summary>
+    public string FilterName { get; set; } = null!;
     public Guid OpenedByUserId { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? ClosedAtUtc { get; set; }
     public Guid? ClosedByUserId { get; set; }
     public string IntakeAnswersJson { get; set; } = "[]";
+    public bool AiTrackingOptOut { get; set; }
+    public string? TrackingTemplateJson { get; set; }
+    public string? ApprovedDecision { get; set; }
+    public DateTime? DecisionApprovedAtUtc { get; set; }
+    public Guid? DecisionApprovedByUserId { get; set; }
 
     public ICollection<TicketUserWatch> Watches { get; set; } = [];
 }

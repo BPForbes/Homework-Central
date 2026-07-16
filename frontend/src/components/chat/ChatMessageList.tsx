@@ -12,6 +12,8 @@ interface ChatMessageListProps {
   currentUserId: string | undefined
   mentionRoles?: MentionRoleOption[]
   onReply: (message: ChatMessage) => void
+  onVote?: (message: ChatMessage, value: 1 | -1) => void
+  onReport?: (message: ChatMessage) => void
 }
 
 export function ChatMessageList({
@@ -21,6 +23,8 @@ export function ChatMessageList({
   currentUserId,
   mentionRoles = [],
   onReply,
+  onVote,
+  onReport,
 }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -66,6 +70,8 @@ export function ChatMessageList({
           mentionStyles={mentionStyles}
           onReply={onReply}
           onJumpToMessage={handleJumpToMessage}
+          onVote={onVote}
+          onReport={onReport}
         />
       ))}
 

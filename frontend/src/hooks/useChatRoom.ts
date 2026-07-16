@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { chatApi } from '../api/chatApi'
-import type { ChatMessage, ChatTypingUser } from '../types/chat'
+import type { ChatMessage, ChatTypingUser, MessageVoteUpdate } from '../types/chat'
 import type { SendChatMessageError } from '../types/inbox'
 import { isAxiosError } from 'axios'
 import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
@@ -82,6 +82,21 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
 
     connection.on('ReceiveMessage', (message: ChatMessage) => {
       addMessage(message)
+    })
+
+    connection.on('MessageVoteUpdated', (payload: MessageVoteUpdate) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.messageId === payload.messageId
+            ? {
+                ...message,
+                score: payload.score,
+                upvoteCount: payload.upvoteCount,
+                downvoteCount: payload.downvoteCount,
+              }
+            : message,
+        ),
+      )
     })
 
     connection.on('UserTyping', (payload: ChatTypingUser) => {
@@ -208,6 +223,29 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     setReplyTarget(null)
   }, [])
 
+  const castVote = useCallback(async (message: ChatMessage, value: 1 | -1) => {
+    try {
+      const { data } = await chatApi.castVote(message.messageId, value)
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.messageId === data.messageId
+            ? {
+                ...item,
+                score: data.score,
+                upvoteCount: data.upvoteCount,
+                downvoteCount: data.downvoteCount,
+                viewerVote: data.viewerVote === 'up' || data.viewerVote === 'down'
+                  ? data.viewerVote
+                  : null,
+              }
+            : item,
+        ),
+      )
+    } catch {
+      setError('Could not update vote.')
+    }
+  }, [])
+
   return {
     messages,
     loading,
@@ -221,5 +259,6 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     stopTyping,
     startReply,
     cancelReply,
+    castVote,
   }
 }

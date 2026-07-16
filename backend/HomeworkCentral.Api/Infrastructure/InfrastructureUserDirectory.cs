@@ -67,12 +67,13 @@ public sealed class InfrastructureUserDirectory(
         string query,
         CancellationToken ct = default)
     {
-        string term = query.Trim();
-        if (term.Length < 2)
+        string term = query.Trim().TrimStart('@');
+        if (term.Length < 1)
             return [];
 
         AccessScope scope = RequireScope();
-        string pattern = $"%{term}%";
+        // Prefix match on username and email (@T → users starting with T).
+        string prefix = term.ToLowerInvariant();
         List<(User User, string? TenantDatabaseName)> results = [];
 
         if (!string.IsNullOrEmpty(scope.TenantDatabaseName))
@@ -80,12 +81,12 @@ public sealed class InfrastructureUserDirectory(
             AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(scope.TenantDatabaseName, ct);
             await using (tenantDb)
             {
-                await SearchDbUsersAsync(tenantDb, pattern, scope.TenantDatabaseName, scope, results, ct);
+                await SearchDbUsersAsync(tenantDb, prefix, scope.TenantDatabaseName, scope, results, ct);
             }
         }
         else
         {
-            await SearchDbUsersAsync(masterDb, pattern, tenantDatabaseName: null, scope, results, ct);
+            await SearchDbUsersAsync(masterDb, prefix, tenantDatabaseName: null, scope, results, ct);
 
             if (scope.AccountClass == AccountClass.DevAdmin)
             {
@@ -94,7 +95,7 @@ public sealed class InfrastructureUserDirectory(
                     AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
                     await using (tenantDb)
                     {
-                        await SearchDbUsersAsync(tenantDb, pattern, databaseName, scope, results, ct);
+                        await SearchDbUsersAsync(tenantDb, prefix, databaseName, scope, results, ct);
                     }
                 }
             }
@@ -154,7 +155,7 @@ public sealed class InfrastructureUserDirectory(
 
     private static async Task SearchDbUsersAsync(
         AppDbContext db,
-        string pattern,
+        string prefix,
         string? tenantDatabaseName,
         AccessScope scope,
         List<(User User, string? TenantDatabaseName)> results,
@@ -163,7 +164,7 @@ public sealed class InfrastructureUserDirectory(
         List<User> users = await db.Users
             .AsNoTracking()
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .Where(u => EF.Functions.ILike(u.Username, pattern) || EF.Functions.ILike(u.Email, pattern))
+            .Where(u => u.Username.ToLower().StartsWith(prefix) || u.Email.StartsWith(prefix))
             .OrderBy(u => u.Username)
             .Take(20)
             .ToListAsync(ct);

@@ -92,10 +92,18 @@ builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();
 builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
+builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Configuration.GetSection("Llm"));
+builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
 builder.Services.AddHttpClient<OllamaTicketTrackingAnalyzer>((sp, client) =>
 {
     TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;
     client.Timeout = TimeSpan.FromSeconds(Math.Max(5, ticketOptions.RequestTimeoutSeconds));
+});
+builder.Services.AddHttpClient<HomeworkCentral.Api.Assessment.LlmClient>((sp, client) =>
+{
+    HomeworkCentral.Api.Assessment.LlmOptions llmOptions =
+        sp.GetRequiredService<IOptions<HomeworkCentral.Api.Assessment.LlmOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(5, llmOptions.TimeoutSeconds));
 });
 builder.Services.AddSingleton<NullTicketTrackingAnalyzer>();
 builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
@@ -107,6 +115,16 @@ builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
 });
 builder.Services.AddScoped<ITicketRecipientResolver, TicketRecipientResolver>();
 builder.Services.AddScoped<ITicketService, TicketService>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, HomeworkCentral.Api.Assessment.AssessmentQueue>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ILlmClient>(sp =>
+    sp.GetRequiredService<HomeworkCentral.Api.Assessment.LlmClient>());
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IVectorDocumentStore, HomeworkCentral.Api.Assessment.VectorDocumentStore>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAssessmentPipelineService, HomeworkCentral.Api.Assessment.AssessmentPipelineService>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.AssessmentWorker>();
+builder.Services.AddScoped<HomeworkCentral.Api.Chat.IChatMessageVoteService, HomeworkCentral.Api.Chat.ChatMessageVoteService>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IChatAttachmentService, HomeworkCentral.Api.Uploads.ChatAttachmentService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
@@ -294,6 +312,12 @@ if (!skipDevStartupWarmup)
         .ToListAsync();
     foreach (Guid userId in customRoleUserIds)
         await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
+
+    await TicketPortalSeedData.SeedAsync(
+        seedDb,
+        AccountClass.RealAccount,
+        startupLogger);
+    await HomeworkCentral.Api.Assessment.ScoringReferenceSeedData.SeedAsync(seedDb, startupLogger);
 
     ICustomChannelStore channelStore = seedScope.ServiceProvider.GetRequiredService<ICustomChannelStore>();
     await channelStore.RefreshAsync();
