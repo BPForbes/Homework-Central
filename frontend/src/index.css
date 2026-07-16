@@ -4575,3 +4575,243 @@ a {
   }
 
 }
+
+/* Ticket rooms */
+.ticket-portal {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 1.25rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.ticket-portal-description {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.ticket-portal-cta {
+  align-self: flex-start;
+}
+
+.ticket-intake-wizard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--color-backdrop);
+}
+
+.ticket-intake-wizard-inner {
+  width: min(100%, 32rem);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 1.25rem;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.ticket-intake-wizard-inner h3 {
+  margin: 0 0 1rem;
+}
+
+.ticket-intake-field {
+  margin-bottom: 0.75rem;
+}
+
+.ticket-intake-textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+.ticket-intake-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ticket-intake-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ticket-intake-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.ticket-chat-chrome {
+  margin: 0 0 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+}
+
+.ticket-chat-chrome-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.ticket-status-badge {
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ticket-status-badge--open {
+  background: var(--color-surface);
+  color: var(--color-accent);
+}
+
+.ticket-status-badge--closed {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+}
+
+.ticket-chat-chrome-opener {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.ticket-chat-chrome-intake h4,
+.ticket-watches h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.ticket-watches-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ticket-watch-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-size: 0.85rem;
+}
+
+.ticket-watch-chip small {
+  color: var(--color-text-muted);
+}
+
+.ticket-chat-chrome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.ticket-intake-summary {
+  margin: 0;
+}
+
+.ticket-intake-summary-row {
+  margin-bottom: 0.5rem;
+}
+
+.ticket-intake-summary-row dt {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.ticket-intake-summary-row dd {
+  margin: 0;
+}
+
+.ticket-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ticket-builder-questions {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ticket-builder-question {
+  padding: 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ticket-builder-question-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ticket-builder-question-controls {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.ticket-builder-question-flags {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.inbox-item-kind--ticket {
+  color: var(--color-accent);
+}
+
+.inbox-item-cta {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.inbox-item-ticket-decision {
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+
+.inbox-item-ticket-summary {
+  margin: 0.25rem 0 0;
+  color: var(--color-text-muted);
+}
+

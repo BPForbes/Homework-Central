@@ -16,7 +16,8 @@ public interface ICustomChannelStore
 
 public sealed record CustomChannelAccessSnapshot(
     Guid? CustomRoleId,
-    short? PlatformRoleBit);
+    short? PlatformRoleBit,
+    Guid? AllowedUserId);
 
 public sealed record CustomChannelSnapshot(
     Guid ChannelId,
@@ -76,7 +77,10 @@ public sealed class CustomChannelStore(IServiceScopeFactory scopeFactory) : ICus
                 channel.TieSubjectBitIndex,
                 channel.TiePlatformRoleBit,
                 channel.AccessRules
-                    .Select(rule => new CustomChannelAccessSnapshot(rule.CustomRoleId, rule.PlatformRoleBit))
+                    .Select(rule => new CustomChannelAccessSnapshot(
+                        rule.CustomRoleId,
+                        rule.PlatformRoleBit,
+                        rule.AllowedUserId))
                     .ToList()))
             .ToList();
     }

@@ -1,4 +1,4 @@
-export type CustomRoomType = 'Chat' | 'Info' | 'RoleClaim'
+export type CustomRoomType = 'Chat' | 'Info' | 'RoleClaim' | 'Ticket'
 export type ChannelTieType = 'None' | 'GeneralSubject' | 'SubjectExpertise' | 'PlatformRole'
 
 export interface CustomRole {
@@ -26,6 +26,7 @@ export interface CustomChannelAccessRule {
   customRoleName?: string | null
   platformRoleBit?: number | null
   platformRoleName?: string | null
+  allowedUserId?: string | null
 }
 
 export interface CustomChannel {
@@ -79,6 +80,7 @@ export interface InfoEntryFeed {
 export interface CustomChannelAccessRuleInput {
   customRoleId?: string | null
   platformRoleBit?: number | null
+  allowedUserId?: string | null
 }
 
 export const MODERATION_PERMISSIONS: { id: number; name: string; label: string }[] = [

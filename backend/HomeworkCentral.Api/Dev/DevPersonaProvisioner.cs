@@ -9,7 +9,10 @@ public sealed class DevPersonaProvisioner(
     ITenantConnectionResolver connectionResolver,
     ILogger<DevPersonaProvisioner> logger) : IDevPersonaProvisioner
 {
-    private const int MaxParallel = 6;
+    // Each persona creates a database and applies the full EF migration set. Concurrent
+    // CREATE DATABASE / migration work contends heavily for Postgres system catalogs on the
+    // small local Docker instance, so serial provisioning avoids connection timeouts.
+    private const int MaxParallel = 1;
 
     private readonly ConcurrentDictionary<string, byte> _provisioned = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task>> _inFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -111,7 +114,25 @@ public sealed class DevPersonaProvisioner(
             new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = ct },
             async (item, token) =>
             {
-                await EnsureProvisionedAsync(item.Account, item.Persona, token).ConfigureAwait(false);
+                try
+                {
+                    await EnsureProvisionedAsync(item.Account, item.Persona, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // A failed persona must not cancel Parallel.ForEachAsync's shared token:
+                    // doing so used to cancel every remaining database migration. The failed
+                    // persona remains eligible for an on-demand retry during dev login.
+                    logger.LogWarning(
+                        ex,
+                        "Skipping failed background provisioning for persona {PersonaEmail}; it can be retried at login.",
+                        item.Persona.Email);
+                    return;
+                }
 
                 int current = _provisioned.Count;
                 if (current == 1 || current == TotalPersonaCount || current % 10 == 0)

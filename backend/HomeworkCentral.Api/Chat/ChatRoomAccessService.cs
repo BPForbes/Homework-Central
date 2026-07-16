@@ -11,14 +11,17 @@ public sealed class ChatRoomAccessService(
 {
     public bool CanAccessAllRooms(EffectiveMaskDto masks) => HasElevatedRoomAccess(masks);
 
-    public bool CanAccessRoom(EffectiveMaskDto masks, string roomId)
+    public bool CanAccessRoom(EffectiveMaskDto masks, string roomId) =>
+        CanAccessRoom(masks, Guid.Empty, roomId);
+
+    public bool CanAccessRoom(EffectiveMaskDto masks, Guid userId, string roomId)
     {
         ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
         if (room is not null)
             return CanAccessRoom(masks, room);
 
         CustomChannelSnapshot? custom = FindVisibleCustomChannel(roomId);
-        return custom is not null && CanAccessCustomChannel(masks, custom);
+        return custom is not null && CanAccessCustomChannel(masks, userId, custom);
     }
 
     public bool CanAccessRoom(EffectiveMaskDto masks, ChatRoomDefinition room)
@@ -38,12 +41,12 @@ public sealed class ChatRoomAccessService(
         };
     }
 
-    public ChatNavDto GetAccessibleNav(EffectiveMaskDto masks)
+    public ChatNavDto GetAccessibleNav(EffectiveMaskDto masks, Guid userId)
     {
         List<ChatNavCategoryDto> categories = new();
 
         List<ChatRoomDefinition> accessibleGeneralRooms = ChatRoomCatalog.GeneralRooms
-            .Where(room => CanAccessRoom(masks, room))
+            .Where(room => CanAccessRoom(masks, userId, room.Id))
             .ToList();
 
         if (accessibleGeneralRooms.Count > 0)
@@ -52,7 +55,7 @@ public sealed class ChatRoomAccessService(
         }
 
         foreach (IGrouping<string, ChatRoomDefinition> subjectGroup in ChatRoomCatalog.SubjectRooms
-                     .Where(room => CanAccessRoom(masks, room))
+                     .Where(room => CanAccessRoom(masks, userId, room.Id))
                      .GroupBy(room => room.CategoryKey, StringComparer.Ordinal))
         {
             ChatRoomDefinition first = subjectGroup.First();
@@ -60,7 +63,7 @@ public sealed class ChatRoomAccessService(
         }
 
         List<ChatRoomDefinition> accessibleStaffRooms = ChatRoomCatalog.StaffRooms
-            .Where(room => CanAccessRoom(masks, room))
+            .Where(room => CanAccessRoom(masks, userId, room.Id))
             .ToList();
 
         if (accessibleStaffRooms.Count > 0)
@@ -69,7 +72,7 @@ public sealed class ChatRoomAccessService(
         }
 
         List<CustomChannelSnapshot> accessibleCustomChannels = VisibleCustomChannels()
-            .Where(channel => CanAccessCustomChannel(masks, channel))
+            .Where(channel => CanAccessCustomChannel(masks, userId, channel))
             .ToList();
 
         List<CustomChannelSnapshot> unmatchedCustomChannels = new();
@@ -177,7 +180,7 @@ public sealed class ChatRoomAccessService(
             InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass));
     }
 
-    private static bool CanAccessCustomChannel(EffectiveMaskDto masks, CustomChannelSnapshot channel)
+    private static bool CanAccessCustomChannel(EffectiveMaskDto masks, Guid userId, CustomChannelSnapshot channel)
     {
         if (HasElevatedRoomAccess(masks))
             return true;
@@ -187,6 +190,13 @@ public sealed class ChatRoomAccessService(
 
         foreach (CustomChannelAccessSnapshot rule in channel.AccessRules)
         {
+            if (userId != Guid.Empty
+                && rule.AllowedUserId is Guid allowedUserId
+                && allowedUserId == userId)
+            {
+                return true;
+            }
+
             if (rule.PlatformRoleBit is short platformBit && HasRole(masks.RoleMask, platformBit))
                 return true;
 

@@ -37,6 +37,9 @@ public partial class AppDbContext(
     public DbSet<CustomChannel> CustomChannels => Set<CustomChannel>();
     public DbSet<CustomChannelAccessRule> CustomChannelAccessRules => Set<CustomChannelAccessRule>();
     public DbSet<InfoEntry> InfoEntries => Set<InfoEntry>();
+    public DbSet<TicketPortalConfig> TicketPortalConfigs => Set<TicketPortalConfig>();
+    public DbSet<Ticket> Tickets => Set<Ticket>();
+    public DbSet<TicketUserWatch> TicketUserWatches => Set<TicketUserWatch>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -282,6 +285,55 @@ public partial class AppDbContext(
                 .HasForeignKey(r => r.CustomRoleId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => r.ChannelId);
+        });
+
+        mb.Entity<TicketPortalConfig>(e =>
+        {
+            e.HasKey(p => p.ChannelId);
+            e.Property(p => p.CtaLabel).HasMaxLength(128).IsRequired();
+            e.Property(p => p.Purpose).HasMaxLength(128).IsRequired();
+            e.Property(p => p.TrackingMode).HasMaxLength(32).IsRequired();
+            e.Property(p => p.DecisionLabelsJson).IsRequired();
+            e.Property(p => p.MentionRoleRulesJson).IsRequired();
+            e.Property(p => p.StaffAccessRulesJson).IsRequired();
+            e.Property(p => p.IntakeSchemaJson).IsRequired();
+            e.Property(p => p.UpdatedAtUtc).IsRequired();
+            e.HasOne(p => p.Channel)
+                .WithOne()
+                .HasForeignKey<TicketPortalConfig>(p => p.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<Ticket>(e =>
+        {
+            e.HasKey(t => t.TicketId);
+            e.Property(t => t.TicketId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(t => t.RoomId).HasMaxLength(128).IsRequired();
+            e.Property(t => t.Purpose).HasMaxLength(128).IsRequired();
+            e.Property(t => t.IntakeAnswersJson).IsRequired();
+            e.HasIndex(t => t.RoomId).IsUnique();
+            e.HasIndex(t => new { t.PortalChannelId, t.DisplayNumber }).IsUnique();
+            e.HasOne(t => t.Portal)
+                .WithMany()
+                .HasForeignKey(t => t.PortalChannelId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(t => t.ChatChannel)
+                .WithOne()
+                .HasForeignKey<Ticket>(t => t.ChatChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<TicketUserWatch>(e =>
+        {
+            e.HasKey(w => w.WatchId);
+            e.Property(w => w.WatchId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(w => w.ContextLabel).HasMaxLength(128).IsRequired();
+            e.Property(w => w.Source).HasMaxLength(32).IsRequired();
+            e.HasOne(w => w.Ticket)
+                .WithMany(t => t.Watches)
+                .HasForeignKey(w => w.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(w => w.TicketId);
         });
 
         mb.Entity<InfoEntry>(e =>

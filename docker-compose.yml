@@ -2,6 +2,11 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Local-development ceiling. These limits apply with ordinary `docker compose up`
+    # (unlike deploy.resources, which is Swarm-only).
+    cpus: 2.0
+    mem_limit: 1g
+    pids_limit: 256
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
@@ -28,6 +33,9 @@ services:
       context: https://github.com/WebDecoy/FCaptcha.git#v1.12.0
       dockerfile: docker/Dockerfile
     restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 128m
+    pids_limit: 64
     environment:
       FCAPTCHA_SECRET: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
       # Upstream Dockerfile copies client JS to /app/static/fcaptcha.js but the Go server
@@ -47,6 +55,9 @@ services:
       context: ./backend/HomeworkCentral.Api
       dockerfile: backend.Dockerfile
     restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 1g
+    pids_limit: 256
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__MasterConnection: >
@@ -73,6 +84,9 @@ services:
       context: ./frontend
       dockerfile: frontend.Dockerfile
     restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 128m
+    pids_limit: 64
     ports:
       - "5173:8080"
     depends_on:

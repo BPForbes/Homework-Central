@@ -264,7 +264,7 @@ export function ServerMaintenance() {
         <div className="sm-hero-copy">
           <h2>Server Maintenance</h2>
           <p className="server-page-subtitle">
-            Design custom chat, info, and role-claim rooms. Every room type opens via{' '}
+            Design custom chat, info, ticket, and role-claim rooms. Every room type opens via{' '}
             <code>/chat/&#123;roomId&#125;</code> in the sidebar.
           </p>
         </div>
@@ -351,6 +351,13 @@ export function ServerMaintenance() {
               <p className="dashboard-hint">
                 Info content is authored as dated entries after the room is created — open it from the list below
                 to add the first entry.
+              </p>
+            )}
+
+            {roomType === 'Ticket' && !editingId && (
+              <p className="dashboard-hint">
+                Ticket portal settings — intake questions, staff access, and tracking — are configured in Channel
+                Builder after the room is created.
               </p>
             )}
 

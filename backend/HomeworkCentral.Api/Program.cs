@@ -14,6 +14,7 @@ using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.ScrapingDetection;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -90,6 +91,22 @@ builder.Services.AddScoped<InfrastructureUserDirectory>();
 builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();
 builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
+builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
+builder.Services.AddHttpClient<OllamaTicketTrackingAnalyzer>((sp, client) =>
+{
+    TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(5, ticketOptions.RequestTimeoutSeconds));
+});
+builder.Services.AddSingleton<NullTicketTrackingAnalyzer>();
+builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
+{
+    TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;
+    return ticketOptions.OllamaEnabled
+        ? sp.GetRequiredService<OllamaTicketTrackingAnalyzer>()
+        : sp.GetRequiredService<NullTicketTrackingAnalyzer>();
+});
+builder.Services.AddScoped<ITicketRecipientResolver, TicketRecipientResolver>();
+builder.Services.AddScoped<ITicketService, TicketService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
@@ -159,6 +176,7 @@ builder.Services.AddCors(opts =>
             .AllowAnyMethod()));
 
 bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
+bool skipDevStartupWarmup = DevStartupWarmup.ShouldSkip(builder.Configuration, builder.Environment);
 if (devBypassEnabled)
 {
     builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
@@ -227,27 +245,38 @@ if (devBypassEnabled)
 // and concurrent startup races. In production, run migrations explicitly.
 if (app.Environment.IsDevelopment())
 {
-    try
+    if (skipDevStartupWarmup)
     {
-        await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
+        app.Logger.LogWarning(
+            "{Flag}=1: skipping development migrations and seed warmup. "
+            + "Only use this with an already initialized local database.",
+            DevStartupWarmup.SkipEnvVarName);
     }
-    catch (Exception ex)
+    else
     {
-        ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
-        ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
-        logger.LogCritical(
-            ex,
-            "Database migration failed for master database '{DatabaseName}'. "
-            + "If you upgraded from the single-database layout, reset the local Docker volume: "
-            + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
-            + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
-            resolver.MasterDatabaseName);
-        throw;
+        try
+        {
+            await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
+        }
+        catch (Exception ex)
+        {
+            ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
+            ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
+            logger.LogCritical(
+                ex,
+                "Database migration failed for master database '{DatabaseName}'. "
+                + "If you upgraded from the single-database layout, reset the local Docker volume: "
+                + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
+                + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
+                resolver.MasterDatabaseName);
+            throw;
+        }
     }
 }
 
-using (IServiceScope seedScope = app.Services.CreateScope())
+if (!skipDevStartupWarmup)
 {
+    using IServiceScope seedScope = app.Services.CreateScope();
     ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
     AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
     MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();

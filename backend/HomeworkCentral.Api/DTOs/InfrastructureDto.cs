@@ -96,6 +96,7 @@ public class CustomChannelAccessRuleDto
     public string? CustomRoleName { get; set; }
     public short? PlatformRoleBit { get; set; }
     public string? PlatformRoleName { get; set; }
+    public Guid? AllowedUserId { get; set; }
 }
 
 public class CustomChannelDto
@@ -156,6 +157,7 @@ public class CustomChannelAccessRuleInput
 {
     public Guid? CustomRoleId { get; set; }
     public short? PlatformRoleBit { get; set; }
+    public Guid? AllowedUserId { get; set; }
 }
 
 public class ClaimableCustomRoleDto

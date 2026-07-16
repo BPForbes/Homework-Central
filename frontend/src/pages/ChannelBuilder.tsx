@@ -8,6 +8,7 @@ import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
 import { InfoEntriesFeed } from '../components/infrastructure/InfoEntriesFeed'
 import { RoleClaimBuilder } from '../components/infrastructure/RoleClaimBuilder'
+import { TicketBuilderPanel } from '../components/tickets/TicketBuilderPanel'
 import { ChatPreviewPanel } from '../components/infrastructure/ChatPreviewPanel'
 import { MockAccountBar } from '../components/infrastructure/MockAccountBar'
 import { useMockAccounts } from '../components/infrastructure/mockAccounts'
@@ -133,6 +134,10 @@ export function ChannelBuilder() {
 
             {channel.roomType === 'Info' && (
               <InfoEntriesFeed roomId={channel.roomId} readOnly={mode === 'preview'} />
+            )}
+
+            {channel.roomType === 'Ticket' && (
+              <TicketBuilderPanel channelId={channel.channelId} mode={mode} />
             )}
           </section>
         </>
