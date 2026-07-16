@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
@@ -28,7 +29,8 @@ public sealed class ChatMessageVoteService(
     AppDbContext db,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
-    IHubContext<ChatHub> hubContext) : IChatMessageVoteService
+    IHubContext<ChatHub> hubContext,
+    IAssessmentQueue assessmentQueue) : IChatMessageVoteService
 {
     public async Task<MessageVoteDto?> CastVoteAsync(
         Guid messageId,
@@ -81,6 +83,17 @@ public sealed class ChatMessageVoteService(
         MessageVoteDto dto = await BuildDtoAsync(message, userId, ct);
         string groupKey = ChatRoomGroupKey.Build(message.RoomId, message.OwnerAccountClass);
         await hubContext.Clients.Group(groupKey).SendAsync("MessageVoteUpdated", dto, ct);
+
+        // Extend the assessment queue path used by SendMessage — community-only recalc, no LLM.
+        await assessmentQueue.EnqueueAsync(
+            new AssessmentMessageJob(
+                message.MessageId,
+                message.RoomId,
+                message.SenderId,
+                message.RawContent,
+                AssessmentJobKind.CommunityRecalc),
+            ct);
+
         return dto;
     }
 

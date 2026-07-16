@@ -1,5 +1,7 @@
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
@@ -30,6 +32,7 @@ public sealed class ChatAttachmentService(
     AppDbContext db,
     IAccessScopeAccessor accessScope,
     IEffectiveMaskService effectiveMaskService,
+    IChatRoomAccessService chatRoomAccess,
     IOptions<UploadOptions> options) : IChatAttachmentService
 {
     public async Task<ChatAttachmentDto> UploadAsync(Guid userId, IFormFile file, CancellationToken ct = default)
@@ -44,7 +47,7 @@ public sealed class ChatAttachmentService(
         if (!opts.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Content type '{contentType}' is not allowed.");
 
-        DTOs.EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
         System.Collections.BitArray featureMask = BitMask.FromBase64(masks.FeatureMask, 256);
         bool isImage = contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
         if (isImage && !BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
@@ -99,8 +102,13 @@ public sealed class ChatAttachmentService(
         CancellationToken ct = default)
     {
         ChatAttachment? attachment = await db.ChatAttachments.AsNoTracking()
+            .Include(a => a.MessageLinks)
+            .ThenInclude(link => link.Message)
             .FirstOrDefaultAsync(a => a.AttachmentId == attachmentId, ct);
         if (attachment is null)
+            return null;
+
+        if (!await CanDownloadAsync(attachment, userId, ct))
             return null;
 
         UploadOptions opts = options.Value;
@@ -110,5 +118,24 @@ public sealed class ChatAttachmentService(
 
         Stream stream = File.OpenRead(fullPath);
         return (stream, attachment.ContentType, attachment.OriginalFileName);
+    }
+
+    private async Task<bool> CanDownloadAsync(ChatAttachment attachment, Guid userId, CancellationToken ct)
+    {
+        // Uploader may download an unattached (or attached) file they just uploaded.
+        if (attachment.UploadedByUserId == userId)
+            return true;
+
+        List<string> roomIds = attachment.MessageLinks
+            .Select(link => link.Message.RoomId)
+            .Where(roomId => !string.IsNullOrWhiteSpace(roomId))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (roomIds.Count == 0)
+            return false;
+
+        EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
+        return roomIds.Any(roomId => chatRoomAccess.CanAccessRoom(masks, userId, roomId));
     }
 }

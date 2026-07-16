@@ -44,4 +44,10 @@ export const chatApi = {
   },
 
   getMentionRoles: () => api.get<MentionRoleOption[]>('/chat/mention-roles'),
+
+  /** Prefix user lookup available to any authenticated user (mentions / ticket intake). */
+  searchUsers: (q: string) =>
+    api.get<Array<{ userId: string; username: string; email: string }>>('/chat/users/search', {
+      params: { q },
+    }),
 }

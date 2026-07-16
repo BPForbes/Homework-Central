@@ -2,6 +2,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
@@ -20,7 +21,8 @@ public class ChatController(
     IChatRoomDetailService chatRoomDetailService,
     IRoleAppearanceService roleAppearanceService,
     IChatMessageVoteService voteService,
-    Uploads.IChatAttachmentService attachmentService) : ControllerBase
+    Uploads.IChatAttachmentService attachmentService,
+    InfrastructureUserDirectory userDirectory) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
     [HttpGet("nav")]
@@ -86,6 +88,31 @@ public class ChatController(
             return Unauthorized();
 
         return Ok(await roleAppearanceService.GetMentionableRolesAsync(ct));
+    }
+
+    /// <summary>
+    /// Prefix user lookup for mentions and ticket intake. Available to any authenticated user
+    /// (unlike /api/infrastructure/users/search which requires ManageServerInfrastructure).
+    /// Reuses <see cref="InfrastructureUserDirectory"/> rather than duplicating search logic.
+    /// </summary>
+    [HttpGet("users/search")]
+    public async Task<ActionResult<IReadOnlyList<ChatUserLookupDto>>> SearchUsers(
+        [FromQuery] string q,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        IReadOnlyList<(User User, string? TenantDatabaseName)> hits =
+            await userDirectory.SearchUsersAsync(q ?? string.Empty, ct);
+
+        return Ok(hits.Select(entry => new ChatUserLookupDto
+        {
+            UserId = entry.User.UserId,
+            Username = entry.User.Username,
+            Email = entry.User.Email,
+        }).ToList());
     }
 
     /// <summary>Sends a message to a chat room.</summary>

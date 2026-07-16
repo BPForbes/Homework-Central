@@ -2,11 +2,21 @@ using System.Threading.Channels;
 
 namespace HomeworkCentral.Api.Assessment;
 
+public enum AssessmentJobKind
+{
+    /// <summary>Full eligibility + LLM rubric + community blend for a new message.</summary>
+    Full = 0,
+
+    /// <summary>Re-aggregate community votes and adjust combined scores without re-calling the LLM.</summary>
+    CommunityRecalc = 1,
+}
+
 public sealed record AssessmentMessageJob(
     Guid MessageId,
     string RoomId,
     Guid SenderId,
-    string Content);
+    string Content,
+    AssessmentJobKind Kind = AssessmentJobKind.Full);
 
 public interface IAssessmentQueue
 {

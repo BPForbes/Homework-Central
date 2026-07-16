@@ -20,7 +20,14 @@ public sealed class AssessmentPipelineService(
     ICandidateStateService candidateState,
     ILogger<AssessmentPipelineService> logger) : IAssessmentPipelineService
 {
-    public async Task ProcessMessageAsync(AssessmentMessageJob job, CancellationToken ct = default)
+    public Task ProcessMessageAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
+        job.Kind switch
+        {
+            AssessmentJobKind.CommunityRecalc => RecalculateCommunityAsync(job, ct),
+            _ => ProcessFullAsync(job, ct),
+        };
+
+    private async Task ProcessFullAsync(AssessmentMessageJob job, CancellationToken ct)
     {
         List<TicketUserWatch> watches = await db.TicketUserWatches
             .Include(w => w.Ticket)
@@ -148,9 +155,7 @@ public sealed class AssessmentPipelineService(
                 relevance,
                 evaluation.EvaluatorConfidence,
                 originality);
-            (double? g, double reliableWeight) = await community.AggregateAsync(job.MessageId, ct);
-            double lambda = DeterministicScoring.CommunityLambda(reliableWeight);
-            double s = DeterministicScoring.CombineScores(q, g, lambda);
+            BlendedScore blend = await BlendWithCommunityAsync(job.MessageId, q, ct);
 
             if (evaluation.CriticalErrors.Count > 0)
             {
@@ -167,13 +172,14 @@ public sealed class AssessmentPipelineService(
                 EvaluatorModelVersion = "llm",
                 RawEvaluationJson = rubricJson,
                 LlmScore = q,
-                CommunityScore = g,
-                CombinedScore = s,
+                CommunityScore = blend.CommunityScore,
+                CombinedScore = blend.CombinedScore,
                 EvidenceWeight = w,
                 Difficulty = difficulty,
                 Relevance = relevance,
                 Confidence = evaluation.EvaluatorConfidence,
                 AuthenticityConfidence = originality,
+                IsAdjustment = false,
                 CreatedAtUtc = DateTime.UtcNow,
             };
             db.AssessmentEvents.Add(assessmentEvent);
@@ -191,10 +197,95 @@ public sealed class AssessmentPipelineService(
                 assessmentEvent.AssessmentEventId,
                 application.CandidateApplicationId,
                 job.MessageId,
-                s,
+                blend.CombinedScore,
                 w);
         }
     }
+
+    /// <summary>
+    /// Reuses community aggregation + deterministic blend against prior LLM scores when votes change.
+    /// Does not re-embed or re-call the LLM.
+    /// </summary>
+    private async Task RecalculateCommunityAsync(AssessmentMessageJob job, CancellationToken ct)
+    {
+        List<Guid> applicationIds = await db.AssessmentEvents.AsNoTracking()
+            .Where(e => e.MessageId == job.MessageId)
+            .Select(e => e.CandidateApplicationId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (applicationIds.Count == 0)
+            return;
+
+        foreach (Guid applicationId in applicationIds)
+        {
+            AssessmentEvent? baseline = await db.AssessmentEvents
+                .AsNoTracking()
+                .Where(e => e.MessageId == job.MessageId && e.CandidateApplicationId == applicationId)
+                .OrderByDescending(e => e.CreatedAtUtc)
+                .FirstOrDefaultAsync(ct);
+
+            if (baseline is null)
+                continue;
+
+            CandidateApplication? application = await db.CandidateApplications
+                .FirstOrDefaultAsync(a => a.CandidateApplicationId == applicationId && !a.AiOptOut, ct);
+            if (application is null)
+                continue;
+
+            BlendedScore blend = await BlendWithCommunityAsync(job.MessageId, baseline.LlmScore, ct);
+            if (Math.Abs(blend.CombinedScore - baseline.CombinedScore) < 1e-9
+                && Nullable.Equals(blend.CommunityScore, baseline.CommunityScore))
+            {
+                continue;
+            }
+
+            AssessmentEvent adjustment = new()
+            {
+                AssessmentEventId = Guid.NewGuid(),
+                CandidateApplicationId = applicationId,
+                MessageId = job.MessageId,
+                RubricVersion = baseline.RubricVersion,
+                EvaluatorModelVersion = baseline.EvaluatorModelVersion,
+                RawEvaluationJson = baseline.RawEvaluationJson,
+                LlmScore = baseline.LlmScore,
+                CommunityScore = blend.CommunityScore,
+                CombinedScore = blend.CombinedScore,
+                EvidenceWeight = baseline.EvidenceWeight,
+                Difficulty = baseline.Difficulty,
+                Relevance = baseline.Relevance,
+                Confidence = baseline.Confidence,
+                AuthenticityConfidence = baseline.AuthenticityConfidence,
+                IsAdjustment = true,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            db.AssessmentEvents.Add(adjustment);
+            await db.SaveChangesAsync(ct);
+
+            await candidateState.ApplyCombinedScoreDeltaAsync(applicationId, baseline, adjustment, ct);
+            await candidateState.EvaluateDecisionStateAsync(applicationId, ct);
+
+            logger.LogInformation(
+                "Community adjustment {EventId} for application {ApplicationId} message {MessageId}: s={Score:F2}",
+                adjustment.AssessmentEventId,
+                applicationId,
+                job.MessageId,
+                blend.CombinedScore);
+        }
+    }
+
+    private async Task<BlendedScore> BlendWithCommunityAsync(
+        Guid messageId,
+        double llmScore,
+        CancellationToken ct)
+    {
+        (double? g, double reliableWeight) = await community.AggregateAsync(messageId, ct);
+        double lambda = DeterministicScoring.CommunityLambda(reliableWeight);
+        double s = DeterministicScoring.CombineScores(llmScore, g, lambda);
+        return new BlendedScore(g, s);
+    }
+
+    private readonly record struct BlendedScore(double? CommunityScore, double CombinedScore);
 
     private static double GetNum(JsonElement el, string name) =>
         el.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.Number

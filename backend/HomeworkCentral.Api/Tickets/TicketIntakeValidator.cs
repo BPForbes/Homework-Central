@@ -116,8 +116,22 @@ public static class TicketIntakeValidator
             case "shortText":
             case "longText":
             case "date":
+                if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
+                break;
+
             case "multipleChoice":
             case "dropdown":
+                if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
+                if (question.Options is { Count: > 0 }
+                    && !question.Options.Contains(value.GetString()!, StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException($"Answer for '{question.Prompt}' is not an allowed option.");
+                }
+
+                break;
+
             case "link":
                 if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
                     throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");

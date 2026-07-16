@@ -82,3 +82,11 @@ public class ChatTypingDto
     public Guid UserId { get; set; }
     public string Username { get; set; } = null!;
 }
+
+/// <summary>Slim user hit for chat mentions and ticket intake (no role/permission payload).</summary>
+public class ChatUserLookupDto
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = null!;
+    public string Email { get; set; } = null!;
+}

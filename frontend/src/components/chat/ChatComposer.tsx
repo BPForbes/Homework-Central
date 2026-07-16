@@ -80,13 +80,13 @@ export function ChatComposer({
     const handle = window.setTimeout(() => {
       void (async () => {
         try {
-          const { infrastructureApi } = await import('../../api/infrastructureApi')
-          const { data } = await infrastructureApi.searchUsers(mentionQuery.query)
+          const { chatApi } = await import('../../api/chatApi')
+          const { data } = await chatApi.searchUsers(mentionQuery.query)
           if (cancelled) return
           setRemoteUsers(data.map((user) => ({
             kind: 'user' as const,
             name: user.username,
-            color: '#64748b',
+            color: 'var(--color-ink-secondary)',
           })))
         } catch {
           if (!cancelled) setRemoteUsers([])

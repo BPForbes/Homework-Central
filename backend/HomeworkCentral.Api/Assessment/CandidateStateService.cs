@@ -12,6 +12,16 @@ public interface ICandidateStateService
         IReadOnlyDictionary<string, double> subjectMemberships,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Adjusts competency Beta parameters when an existing message's combined score changes
+    /// (e.g. community vote recalc) without re-applying full evidence volume.
+    /// </summary>
+    Task ApplyCombinedScoreDeltaAsync(
+        Guid applicationId,
+        AssessmentEvent baselineEvent,
+        AssessmentEvent adjustmentEvent,
+        CancellationToken ct = default);
+
     Task<string> EvaluateDecisionStateAsync(Guid applicationId, CancellationToken ct = default);
 }
 
@@ -63,6 +73,51 @@ public sealed class CandidateStateService(AppDbContext db) : ICandidateStateServ
                 CompetencyId = competencyId,
                 MembershipWeight = z,
                 EffectiveEvidenceWeight = wIk,
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task ApplyCombinedScoreDeltaAsync(
+        Guid applicationId,
+        AssessmentEvent baselineEvent,
+        AssessmentEvent adjustmentEvent,
+        CancellationToken ct = default)
+    {
+        double scoreDelta = adjustmentEvent.CombinedScore - baselineEvent.CombinedScore;
+        if (Math.Abs(scoreDelta) < 1e-9)
+            return;
+
+        DateTime now = DateTime.UtcNow;
+        List<AssessmentCompetencyEvidence> evidence = await db.AssessmentCompetencyEvidence
+            .Where(e => e.AssessmentEventId == baselineEvent.AssessmentEventId)
+            .ToListAsync(ct);
+
+        foreach (AssessmentCompetencyEvidence row in evidence)
+        {
+            CandidateCompetencyState? state = await db.CandidateCompetencyStates
+                .FirstOrDefaultAsync(
+                    s => s.CandidateApplicationId == applicationId && s.CompetencyId == row.CompetencyId,
+                    ct);
+            if (state is null)
+                continue;
+
+            double wIk = row.EffectiveEvidenceWeight;
+            state.Alpha += wIk * scoreDelta;
+            state.Beta += wIk * (-scoreDelta);
+            state.Alpha = Math.Max(1e-6, state.Alpha);
+            state.Beta = Math.Max(1e-6, state.Beta);
+            state.MeanScore = DeterministicScoring.Mean(state.Alpha, state.Beta);
+            state.EvidenceVolume = DeterministicScoring.EvidenceVolume(state.Alpha, state.Beta);
+            state.LastUpdatedAtUtc = now;
+
+            db.AssessmentCompetencyEvidence.Add(new AssessmentCompetencyEvidence
+            {
+                AssessmentEventId = adjustmentEvent.AssessmentEventId,
+                CompetencyId = row.CompetencyId,
+                MembershipWeight = row.MembershipWeight,
+                EffectiveEvidenceWeight = 0,
             });
         }
 

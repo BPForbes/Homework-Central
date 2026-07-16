@@ -301,8 +301,8 @@ export function TicketIntakeWizard({
                         setUserHits([])
                         return
                       }
-                      const { infrastructureApi } = await import('../../api/infrastructureApi')
-                      const { data } = await infrastructureApi.searchUsers(next.trim())
+                      const { chatApi } = await import('../../api/chatApi')
+                      const { data } = await chatApi.searchUsers(next.trim())
                       setUserHits(data.map((user) => ({
                         userId: user.userId,
                         username: user.username,
