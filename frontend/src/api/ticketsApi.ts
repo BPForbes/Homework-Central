@@ -43,4 +43,7 @@ export const ticketsApi = {
 
   analyze: (ticketId: string) =>
     ticketsApiClient.post<TicketAnalyzeResult>(`/${ticketId}/analyze`),
+
+  approveDecision: (ticketId: string, decision: string, reason?: string) =>
+    ticketsApiClient.post<Ticket>(`/${ticketId}/approve-decision`, { decision, reason }),
 }

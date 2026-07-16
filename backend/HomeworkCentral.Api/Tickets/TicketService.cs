@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Infrastructure;
@@ -84,6 +85,12 @@ public sealed class TicketService(
         if (string.IsNullOrWhiteSpace(purpose))
             throw new InvalidOperationException("Purpose is required.");
 
+        string filterName = string.IsNullOrWhiteSpace(request.FilterName)
+            ? purpose
+            : request.FilterName.Trim();
+        if (filterName.Length > 64)
+            throw new InvalidOperationException("Filter name must be 64 characters or fewer.");
+
         string trackingMode = request.TrackingMode.Trim();
         if (!IsValidTrackingMode(trackingMode))
             throw new InvalidOperationException("Invalid tracking mode.");
@@ -95,6 +102,7 @@ public sealed class TicketService(
         config.CtaLabel = request.CtaLabel.Trim();
         config.Description = request.Description?.Trim() ?? string.Empty;
         config.Purpose = purpose;
+        config.FilterName = filterName;
         config.TrackingMode = trackingMode;
         config.TrackingInstructions = string.IsNullOrWhiteSpace(request.TrackingInstructions)
             ? null
@@ -116,6 +124,8 @@ public sealed class TicketService(
         CancellationToken ct = default)
     {
         EffectiveMaskDto openerMasks = await effectiveMaskService.GetEffectiveMaskDtoAsync(openerUserId, ct);
+        if (MentionPermissions.IsGuest(BitMask.FromBase64(openerMasks.RoleMask, 64)))
+            throw new InvalidOperationException("Guests cannot open tickets.");
         if (!chatRoomAccess.CanAccessRoom(openerMasks, openerUserId, portalRoomId))
             throw new InvalidOperationException("You cannot access this ticket portal.");
 
@@ -142,11 +152,13 @@ public sealed class TicketService(
         portal.UpdatedAtUtc = DateTime.UtcNow;
 
         string purpose = portal.Purpose;
-        string displayName = TicketDisplayNames.Open(purpose, displayNumber);
+        string filterName = string.IsNullOrWhiteSpace(portal.FilterName) ? purpose : portal.FilterName;
+        string displayName = TicketDisplayNames.Open(filterName, displayNumber);
         DateTime now = DateTime.UtcNow;
         Guid chatChannelId = Guid.NewGuid();
         string roomId = CustomChannelIds.BuildRoomId(chatChannelId);
         CustomChannel portalChannel = portal.Channel;
+        bool aiOptOut = TicketIntakeValidator.IsAiOptOut(schema, request.Answers);
 
         CustomChannel chatChannel = new()
         {
@@ -184,14 +196,43 @@ public sealed class TicketService(
             RoomId = roomId,
             DisplayNumber = displayNumber,
             Purpose = purpose,
+            FilterName = filterName,
             OpenedByUserId = openerUserId,
             CreatedAtUtc = now,
             IntakeAnswersJson = TicketJson.SerializeStoredAnswers(request.Answers),
+            AiTrackingOptOut = aiOptOut,
+            TrackingTemplateJson = aiOptOut
+                ? null
+                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers),
         };
 
         db.CustomChannels.Add(chatChannel);
         db.Tickets.Add(ticket);
-        await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, now, ct);
+        if (!aiOptOut)
+            await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, now, ct);
+
+        if (string.Equals(filterName, DefaultTicketPortalPresets.TutorFilterName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase))
+        {
+            db.CandidateApplications.Add(new CandidateApplication
+            {
+                CandidateApplicationId = Guid.NewGuid(),
+                UserId = string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
+                    && schema.FirstOrDefault(q => q.TracksUser) is { } tracks
+                    && request.Answers.TryGetValue(tracks.Id, out JsonElement tracked)
+                    && TicketIntakeValidator.TryParseUserId(tracked, out Guid reportedUserId)
+                    ? reportedUserId
+                    : openerUserId,
+                PositionId = string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
+                    ? "mod_report"
+                    : "tutor",
+                Status = CandidateApplicationStatuses.InsufficientEvidence,
+                TicketId = ticket.TicketId,
+                AiOptOut = aiOptOut,
+                CreatedAtUtc = now,
+            });
+        }
+
         await db.SaveChangesAsync(ct);
 
         List<TicketIntakeAnswerDto> intakeAnswers = TicketJson.BuildIntakeAnswerDtos(schema, request.Answers);
@@ -227,8 +268,14 @@ public sealed class TicketService(
         DateTime now = DateTime.UtcNow;
         ticket.ClosedAtUtc = now;
         ticket.ClosedByUserId = actorUserId;
-        ticket.ChatChannel.DisplayName = TicketDisplayNames.Closed(ticket.Purpose, ticket.DisplayNumber);
+        string filterName = string.IsNullOrWhiteSpace(ticket.FilterName) ? ticket.Purpose : ticket.FilterName;
+        ticket.ChatChannel.DisplayName = TicketDisplayNames.Closed(filterName, ticket.DisplayNumber);
         ticket.ChatChannel.UpdatedAtUtc = now;
+        foreach (TicketUserWatch watch in ticket.Watches.Where(w => w.IsActive))
+        {
+            watch.IsActive = false;
+            watch.UpdatedAtUtc = now;
+        }
 
         await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
@@ -247,7 +294,8 @@ public sealed class TicketService(
         DateTime now = DateTime.UtcNow;
         ticket.ClosedAtUtc = null;
         ticket.ClosedByUserId = null;
-        ticket.ChatChannel.DisplayName = TicketDisplayNames.Open(ticket.Purpose, ticket.DisplayNumber);
+        string filterName = string.IsNullOrWhiteSpace(ticket.FilterName) ? ticket.Purpose : ticket.FilterName;
+        ticket.ChatChannel.DisplayName = TicketDisplayNames.Open(filterName, ticket.DisplayNumber);
         ticket.ChatChannel.UpdatedAtUtc = now;
 
         await db.SaveChangesAsync(ct);
@@ -395,6 +443,98 @@ public sealed class TicketService(
             Watches = await MapWatchesAsync(ticket.TicketId, ct),
             InboxRecipientsNotified = notified,
         };
+    }
+
+    public async Task<TicketDto> ApproveDecisionAsync(
+        Guid ticketId,
+        Guid actorUserId,
+        ApproveTicketDecisionRequest request,
+        CancellationToken ct = default)
+    {
+        Ticket ticket = await LoadAccessibleTicketForMutationAsync(ticketId, actorUserId, ct);
+        string decision = request.Decision.Trim();
+        if (string.IsNullOrWhiteSpace(decision))
+            throw new InvalidOperationException("Decision is required.");
+
+        DateTime now = DateTime.UtcNow;
+        ticket.ApprovedDecision = decision;
+        ticket.DecisionApprovedAtUtc = now;
+        ticket.DecisionApprovedByUserId = actorUserId;
+        foreach (TicketUserWatch watch in ticket.Watches.Where(w => w.IsActive))
+        {
+            watch.IsActive = false;
+            watch.UpdatedAtUtc = now;
+        }
+
+        CandidateApplication? application = await db.CandidateApplications
+            .FirstOrDefaultAsync(a => a.TicketId == ticketId, ct);
+        if (application is not null)
+        {
+            bool approved = decision.Contains("Approve", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(decision, "Trial", StringComparison.OrdinalIgnoreCase);
+            application.Status = approved
+                ? CandidateApplicationStatuses.Approved
+                : CandidateApplicationStatuses.Rejected;
+            application.ReviewedAtUtc = now;
+            db.CandidateDecisions.Add(new CandidateDecision
+            {
+                CandidateDecisionId = Guid.NewGuid(),
+                CandidateApplicationId = application.CandidateApplicationId,
+                Decision = application.Status,
+                TriggeredBy = "human",
+                ReviewerId = actorUserId,
+                Reason = request.Reason,
+                CreatedAtUtc = now,
+            });
+
+            if (approved
+                && string.Equals(
+                    ticket.FilterName,
+                    DefaultTicketPortalPresets.TutorFilterName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await GrantTrialTutorAsync(ticket.OpenedByUserId, actorUserId, ct);
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+        return await MapTicketAsync(ticket.TicketId, actorUserId, ct)
+            ?? throw new InvalidOperationException("Ticket could not be loaded after approval.");
+    }
+
+    private async Task GrantTrialTutorAsync(Guid targetUserId, Guid actorUserId, CancellationToken ct)
+    {
+        Role? trial = await db.Roles.FirstOrDefaultAsync(r => r.Name == "TrialTutor" && !r.IsCustom, ct);
+        Role? tutor = await db.Roles.FirstOrDefaultAsync(r => r.Name == "Tutor" && !r.IsCustom, ct);
+        if (trial is null)
+            return;
+
+        User? user = await db.Users
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.UserId == targetUserId, ct);
+        if (user is null)
+            return;
+
+        if (tutor is not null)
+        {
+            UserRole? tutorAssignment = user.UserRoles.FirstOrDefault(ur => ur.RoleId == tutor.RoleId);
+            if (tutorAssignment is not null)
+                db.UserRoles.Remove(tutorAssignment);
+        }
+
+        if (!user.UserRoles.Any(ur => ur.RoleId == trial.RoleId))
+        {
+            db.UserRoles.Add(new UserRole
+            {
+                UserId = targetUserId,
+                RoleId = trial.RoleId,
+                AssignedAt = DateTime.UtcNow,
+                AssignedBy = actorUserId,
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+        await EffectiveMaskService.RebuildOnContextAsync(db, targetUserId, ct);
     }
 
     private async Task<TicketDto?> LoadAccessibleTicketDtoAsync(
@@ -705,6 +845,7 @@ public sealed class TicketService(
             CtaLabel = config.CtaLabel,
             Description = config.Description,
             Purpose = config.Purpose,
+            FilterName = string.IsNullOrWhiteSpace(config.FilterName) ? config.Purpose : config.FilterName,
             NextDisplayNumber = config.NextDisplayNumber,
             TrackingMode = config.TrackingMode,
             TrackingInstructions = config.TrackingInstructions,
@@ -785,11 +926,14 @@ public sealed class TicketService(
             RoomId = ticket.RoomId,
             DisplayName = ticket.ChatChannel.DisplayName,
             Purpose = ticket.Purpose,
+            FilterName = string.IsNullOrWhiteSpace(ticket.FilterName) ? ticket.Purpose : ticket.FilterName,
             DisplayNumber = ticket.DisplayNumber,
             Status = ticket.ClosedAtUtc is null ? TicketStatuses.Open : TicketStatuses.Closed,
             OpenedByUserId = ticket.OpenedByUserId,
             OpenedByUsername = usernames.GetValueOrDefault(ticket.OpenedByUserId, "Unknown"),
             CanManage = CanManageTicket(ticket, actorUserId, masks),
+            AiTrackingOptOut = ticket.AiTrackingOptOut,
+            ApprovedDecision = ticket.ApprovedDecision,
             CreatedAtUtc = ticket.CreatedAtUtc,
             ClosedAtUtc = ticket.ClosedAtUtc,
             ClosedByUserId = ticket.ClosedByUserId,

@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { chatApi } from '../api/chatApi'
-import type { ChatMessage, ChatTypingUser } from '../types/chat'
+import type { ChatMessage, ChatTypingUser, MessageVoteUpdate } from '../types/chat'
 import type { SendChatMessageError } from '../types/inbox'
 import { isAxiosError } from 'axios'
 import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
-export function useChatRoom(roomId: string, currentUserId: string | undefined) {
+export function useChatRoom(
+  roomId: string,
+  currentUserId: string | undefined,
+  options?: { enableVotes?: boolean },
+) {
+  const enableVotes = options?.enableVotes ?? true
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -84,6 +89,23 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       addMessage(message)
     })
 
+    if (enableVotes) {
+      connection.on('MessageVoteUpdated', (payload: MessageVoteUpdate) => {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.messageId === payload.messageId
+              ? {
+                  ...message,
+                  score: payload.score,
+                  upvoteCount: payload.upvoteCount,
+                  downvoteCount: payload.downvoteCount,
+                }
+              : message,
+          ),
+        )
+      })
+    }
+
     connection.on('UserTyping', (payload: ChatTypingUser) => {
       if (payload.userId === currentUserId)
         return
@@ -155,7 +177,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       setConnected(false)
       setTypingUsers([])
     }
-  }, [roomId, currentUserId, addMessage])
+  }, [roomId, currentUserId, addMessage, enableVotes])
 
   const stopTyping = useCallback(() => {
     if (isTypingRef.current) {
@@ -208,6 +230,31 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     setReplyTarget(null)
   }, [])
 
+  const castVote = useCallback(async (message: ChatMessage, value: 1 | -1) => {
+    if (!enableVotes)
+      return
+    try {
+      const { data } = await chatApi.castVote(message.messageId, value)
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.messageId === data.messageId
+            ? {
+                ...item,
+                score: data.score,
+                upvoteCount: data.upvoteCount,
+                downvoteCount: data.downvoteCount,
+                viewerVote: data.viewerVote === 'up' || data.viewerVote === 'down'
+                  ? data.viewerVote
+                  : null,
+              }
+            : item,
+        ),
+      )
+    } catch {
+      setError('Could not update vote.')
+    }
+  }, [enableVotes])
+
   return {
     messages,
     loading,
@@ -221,5 +268,6 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     stopTyping,
     startReply,
     cancelReply,
+    castVote,
   }
 }

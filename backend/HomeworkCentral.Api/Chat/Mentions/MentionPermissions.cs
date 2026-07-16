@@ -41,7 +41,7 @@ public static class MentionPermissions
 
     private static bool HasAnyRoleAboveGuest(System.Collections.BitArray roleMask)
     {
-        for (short bit = PlatformRoles.VerifiedUser; bit <= PlatformRoles.Founder; bit++)
+        for (short bit = PlatformRoles.VerifiedUser; bit <= PlatformRoles.TrialTutor; bit++)
         {
             if (bit < roleMask.Length && roleMask[bit])
                 return true;

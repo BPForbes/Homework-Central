@@ -13,6 +13,7 @@ public static class PlatformRoleCatalog
             ["Student"] = PlatformRoles.Student,
             ["Staff"] = PlatformRoles.Staff,
             ["Tutor"] = PlatformRoles.Tutor,
+            ["TrialTutor"] = PlatformRoles.TrialTutor,
             ["SeniorTutor"] = PlatformRoles.SeniorTutor,
             ["HeadTutor"] = PlatformRoles.HeadTutor,
             ["Moderator"] = PlatformRoles.Moderator,
@@ -68,7 +69,9 @@ public static class PlatformRoleCatalog
         short highest = PlatformRoles.Guest;
         foreach (string roleName in roleNames)
         {
-            if (TryGetRoleBit(roleName, out short bit) && bit > highest)
+            if (!TryGetRoleBit(roleName, out short bit) || bit == PlatformRoles.TrialTutor)
+                continue;
+            if (bit > highest)
                 highest = bit;
         }
 
@@ -87,7 +90,15 @@ public static class PlatformRoleCatalog
         return highest;
     }
 
-    /// <summary>Returns true when <paramref name="targetRoleBit"/> is strictly below <paramref name="granterRoleBit"/>.</summary>
-    public static bool CanGrantRole(short granterRoleBit, short targetRoleBit) =>
-        targetRoleBit < granterRoleBit;
+    /// <summary>
+    /// Returns true when <paramref name="targetRoleBit"/> is strictly below <paramref name="granterRoleBit"/>.
+    /// TrialTutor is treated as Tutor-level for grant checks so it remains grantable by HeadTutor+.
+    /// </summary>
+    public static bool CanGrantRole(short granterRoleBit, short targetRoleBit)
+    {
+        short effectiveTarget = targetRoleBit == PlatformRoles.TrialTutor
+            ? PlatformRoles.Tutor
+            : targetRoleBit;
+        return effectiveTarget < granterRoleBit;
+    }
 }

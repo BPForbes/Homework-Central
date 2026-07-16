@@ -15,6 +15,7 @@ public static class RoleAppearanceDefaults
             ["Student"] = "#22c55e",
             ["Staff"] = "#a855f7",
             ["Tutor"] = "#3b82f6",
+            ["TrialTutor"] = "#60a5fa",
             ["SeniorTutor"] = "#2563eb",
             ["HeadTutor"] = "#1d4ed8",
             ["Moderator"] = "#f59e0b",

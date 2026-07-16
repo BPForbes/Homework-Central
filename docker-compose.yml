@@ -50,6 +50,34 @@ services:
       retries: 5
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 256m
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  llm:
+    build:
+      context: ./llm-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 4g
+    environment:
+      LLM_CHAT_MODEL: "${LLM_CHAT_MODEL:-qwen3:1.7b}"
+      LLM_EMBED_MODEL: "${LLM_EMBED_MODEL:-nomic-embed-text}"
+    ports:
+      - "${LLM_HOST_PORT:-11434}:11434"
+    volumes:
+      - llmdata:/root/.ollama
+
   backend:
     build:
       context: ./backend/HomeworkCentral.Api
@@ -71,13 +99,24 @@ services:
       FCaptcha__ServerUrl: "http://fcaptcha:3000"
       FCaptcha__PublicUrl: "http://localhost:${FCAPTCHA_HOST_PORT:-3010}"
       FCaptcha__Secret: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
+      Llm__BaseUrl: "http://llm:11434"
+      Llm__Enabled: "true"
+      Tickets__OllamaBaseUrl: "http://llm:11434"
+      Uploads__RootPath: "/app/App_Data/uploads"
+      ConnectionStrings__Redis: "redis:6379"
     ports:
       - "5000:8080"
+    volumes:
+      - uploads:/app/App_Data/uploads
     depends_on:
       postgres:
         condition: service_healthy
       fcaptcha:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm:
+        condition: service_started
 
   frontend:
     build:
@@ -97,3 +136,5 @@ volumes:
   # Use `docker compose down` (no -v) or scripts/stop-dev.sh to keep this data.
   # Only `docker compose down -v` or scripts/reset-dev-db.sh wipes it.
   pgdata:
+  llmdata:
+  uploads:

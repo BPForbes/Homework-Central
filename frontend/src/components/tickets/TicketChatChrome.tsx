@@ -8,9 +8,11 @@ import { TicketIntakeSummary } from './TicketIntakeSummary'
 
 type TicketChatChromeProps = {
   roomId: string
+  /** Fired once the room is resolved as a ticket chat (true) or ordinary chat (false). */
+  onTicketResolved?: (isTicketChat: boolean) => void
 }
 
-export function TicketChatChrome({ roomId }: TicketChatChromeProps) {
+export function TicketChatChrome({ roomId, onTicketResolved }: TicketChatChromeProps) {
   const navigate = useNavigate()
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [busy, setBusy] = useState(false)
@@ -21,16 +23,22 @@ export function TicketChatChrome({ roomId }: TicketChatChromeProps) {
     async function load() {
       try {
         const { data } = await ticketsApi.getByRoom(roomId)
-        if (!cancelled) setTicket(data)
+        if (!cancelled) {
+          setTicket(data)
+          onTicketResolved?.(true)
+        }
       } catch {
-        if (!cancelled) setTicket(null)
+        if (!cancelled) {
+          setTicket(null)
+          onTicketResolved?.(false)
+        }
       }
     }
     void load()
     return () => {
       cancelled = true
     }
-  }, [roomId])
+  }, [roomId, onTicketResolved])
 
   if (!ticket) return null
 
@@ -88,9 +96,42 @@ export function TicketChatChrome({ roomId }: TicketChatChromeProps) {
 
       {error && <p className="error">{error}</p>}
 
+      {ticket.aiTrackingOptOut && (
+        <p className="dashboard-hint">AI tracking opted out for this ticket.</p>
+      )}
+      {ticket.approvedDecision && (
+        <p className="dashboard-hint">Approved decision: {ticket.approvedDecision}</p>
+      )}
+
       {ticket.canManage && (
         <div className="ticket-chat-chrome-actions">
           {ticket.status === 'Open' ? (
+          <>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy}
+            onClick={() => void run(() => ticketsApi.analyze(ticket.ticketId).then(async (result) => {
+              if (result.data.decision) {
+                await ticketsApi.approveDecision(ticket.ticketId, result.data.decision, result.data.summary ?? undefined)
+              }
+              return ticketsApi.getByRoom(roomId)
+            }))}
+          >
+            Analyze &amp; approve suggestion
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={busy}
+            onClick={() => {
+              const decision = window.prompt('Decision label to approve (e.g. Approve)')
+              if (!decision) return
+              void run(() => ticketsApi.approveDecision(ticket.ticketId, decision))
+            }}
+          >
+            Approve decision…
+          </button>
           <button
             type="button"
             className="btn-secondary"
@@ -99,6 +140,7 @@ export function TicketChatChrome({ roomId }: TicketChatChromeProps) {
           >
             <FontAwesomeIcon icon={faXmark} /> Close ticket
           </button>
+          </>
           ) : (
             <>
               <button

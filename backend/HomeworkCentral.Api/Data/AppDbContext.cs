@@ -40,6 +40,16 @@ public partial class AppDbContext(
     public DbSet<TicketPortalConfig> TicketPortalConfigs => Set<TicketPortalConfig>();
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<TicketUserWatch> TicketUserWatches => Set<TicketUserWatch>();
+    public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
+    public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
+    public DbSet<ChatMessageVote> ChatMessageVotes => Set<ChatMessageVote>();
+    public DbSet<ChatLinkPreview> ChatLinkPreviews => Set<ChatLinkPreview>();
+    public DbSet<CandidateApplication> CandidateApplications => Set<CandidateApplication>();
+    public DbSet<AssessmentEvent> AssessmentEvents => Set<AssessmentEvent>();
+    public DbSet<AssessmentCompetencyEvidence> AssessmentCompetencyEvidence => Set<AssessmentCompetencyEvidence>();
+    public DbSet<CandidateCompetencyState> CandidateCompetencyStates => Set<CandidateCompetencyState>();
+    public DbSet<CandidateDecision> CandidateDecisions => Set<CandidateDecision>();
+    public DbSet<VectorDocument> VectorDocuments => Set<VectorDocument>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -292,6 +302,7 @@ public partial class AppDbContext(
             e.HasKey(p => p.ChannelId);
             e.Property(p => p.CtaLabel).HasMaxLength(128).IsRequired();
             e.Property(p => p.Purpose).HasMaxLength(128).IsRequired();
+            e.Property(p => p.FilterName).HasMaxLength(64).IsRequired();
             e.Property(p => p.TrackingMode).HasMaxLength(32).IsRequired();
             e.Property(p => p.DecisionLabelsJson).IsRequired();
             e.Property(p => p.MentionRoleRulesJson).IsRequired();
@@ -310,7 +321,9 @@ public partial class AppDbContext(
             e.Property(t => t.TicketId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(t => t.RoomId).HasMaxLength(128).IsRequired();
             e.Property(t => t.Purpose).HasMaxLength(128).IsRequired();
+            e.Property(t => t.FilterName).HasMaxLength(64).IsRequired();
             e.Property(t => t.IntakeAnswersJson).IsRequired();
+            e.Property(t => t.ApprovedDecision).HasMaxLength(128);
             e.HasIndex(t => t.RoomId).IsUnique();
             e.HasIndex(t => new { t.PortalChannelId, t.DisplayNumber }).IsUnique();
             e.HasOne(t => t.Portal)
@@ -334,6 +347,108 @@ public partial class AppDbContext(
                 .HasForeignKey(w => w.TicketId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(w => w.TicketId);
+            e.HasIndex(w => new { w.TrackedUserId, w.IsActive });
+        });
+
+        mb.Entity<ChatAttachment>(e =>
+        {
+            e.HasKey(a => a.AttachmentId);
+            e.Property(a => a.AttachmentId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(a => a.OriginalFileName).HasMaxLength(256).IsRequired();
+            e.Property(a => a.ContentType).HasMaxLength(128).IsRequired();
+            e.Property(a => a.StoragePath).HasMaxLength(512).IsRequired();
+        });
+
+        mb.Entity<ChatMessageAttachment>(e =>
+        {
+            e.HasKey(x => new { x.MessageId, x.AttachmentId });
+            e.HasOne(x => x.Message).WithMany(m => m.Attachments).HasForeignKey(x => x.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Attachment).WithMany(a => a.MessageLinks).HasForeignKey(x => x.AttachmentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<ChatMessageVote>(e =>
+        {
+            e.HasKey(v => new { v.MessageId, v.UserId });
+            e.Property(v => v.Value).IsRequired();
+            e.HasOne(v => v.Message).WithMany(m => m.Votes).HasForeignKey(v => v.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(v => v.MessageId);
+        });
+
+        mb.Entity<ChatLinkPreview>(e =>
+        {
+            e.HasKey(p => p.PreviewId);
+            e.Property(p => p.PreviewId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(p => p.Url).HasMaxLength(2048).IsRequired();
+            e.Property(p => p.Title).HasMaxLength(512);
+            e.HasOne(p => p.Message).WithMany(m => m.LinkPreviews).HasForeignKey(p => p.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<CandidateApplication>(e =>
+        {
+            e.HasKey(a => a.CandidateApplicationId);
+            e.Property(a => a.CandidateApplicationId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(a => a.PositionId).HasMaxLength(64).IsRequired();
+            e.Property(a => a.Status).HasMaxLength(64).IsRequired();
+            e.HasIndex(a => new { a.UserId, a.PositionId, a.Status });
+            e.HasOne(a => a.Ticket).WithMany().HasForeignKey(a => a.TicketId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<AssessmentEvent>(e =>
+        {
+            e.HasKey(x => x.AssessmentEventId);
+            e.Property(x => x.AssessmentEventId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.RubricVersion).HasMaxLength(32).IsRequired();
+            e.Property(x => x.EvaluatorModelVersion).HasMaxLength(128).IsRequired();
+            e.Property(x => x.RawEvaluationJson).IsRequired();
+            e.HasOne(x => x.Application).WithMany(a => a.Events).HasForeignKey(x => x.CandidateApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.CandidateApplicationId);
+        });
+
+        mb.Entity<AssessmentCompetencyEvidence>(e =>
+        {
+            e.HasKey(x => new { x.AssessmentEventId, x.CompetencyId });
+            e.Property(x => x.CompetencyId).HasMaxLength(64).IsRequired();
+            e.HasOne(x => x.Event).WithMany(ev => ev.CompetencyEvidence).HasForeignKey(x => x.AssessmentEventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<CandidateCompetencyState>(e =>
+        {
+            e.HasKey(x => new { x.CandidateApplicationId, x.CompetencyId });
+            e.Property(x => x.CompetencyId).HasMaxLength(64).IsRequired();
+            e.HasOne(x => x.Application).WithMany(a => a.CompetencyStates)
+                .HasForeignKey(x => x.CandidateApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<CandidateDecision>(e =>
+        {
+            e.HasKey(x => x.CandidateDecisionId);
+            e.Property(x => x.CandidateDecisionId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Decision).HasMaxLength(64).IsRequired();
+            e.Property(x => x.TriggeredBy).HasMaxLength(64).IsRequired();
+            e.HasOne(x => x.Application).WithMany(a => a.Decisions)
+                .HasForeignKey(x => x.CandidateApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<VectorDocument>(e =>
+        {
+            e.HasKey(x => x.DocumentId);
+            e.Property(x => x.DocumentId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Namespace).HasMaxLength(64).IsRequired();
+            e.Property(x => x.PositionId).HasMaxLength(64);
+            e.Property(x => x.MetadataJson).IsRequired();
+            e.Property(x => x.ContentText).IsRequired();
+            e.Property(x => x.EmbeddingJson).IsRequired();
+            e.HasIndex(x => x.Namespace);
+            e.HasIndex(x => x.CanonicalRecordId);
         });
 
         mb.Entity<InfoEntry>(e =>
