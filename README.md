@@ -113,6 +113,24 @@ The browser opens automatically when servers are ready.
 | Windows | `.\scripts\stop-dev.ps1` (close API/frontend terminals manually) |
 | Linux / macOS | `./scripts/stop-dev.sh` or `Ctrl+C` in the run terminal |
 
+### Release Docker resources (Windows)
+
+Stopping the stack releases container CPU and RAM immediately; the `pgdata` volume is retained:
+
+```powershell
+.\scripts\stop-dev.ps1
+docker compose down
+```
+
+If Docker Desktop's WSL 2 VM still holds memory after the containers stop, quit Docker Desktop
+and run `wsl --shutdown`, then start Docker Desktop again. To reclaim unused build cache and
+images without deleting the database volume, run `docker system prune -af`. Do not add
+`--volumes` unless you intentionally want to delete local Postgres data.
+
+`docker-compose.yml` caps Postgres at 2 CPUs / 1 GiB and FCaptcha at 0.5 CPU / 128 MiB.
+The default development scripts run the API and frontend directly on the host, so Docker limits
+do not cap their CPU or memory use.
+
 ### Build without starting servers
 
 | Platform | Command |
