@@ -13,6 +13,8 @@ interface ChatMessageBubbleProps {
   isOwn: boolean
   highlighted?: boolean
   mentionStyles?: MentionStyleLookup
+  /** When false, score and upvote/downvote controls are not rendered (ticket rooms). */
+  votesEnabled?: boolean
   onReply: (message: ChatMessage) => void
   onJumpToMessage: (messageId: string) => void
   onVote?: (message: ChatMessage, value: 1 | -1) => void
@@ -27,6 +29,7 @@ export function ChatMessageBubble({
   isOwn,
   highlighted = false,
   mentionStyles,
+  votesEnabled = true,
   onReply,
   onJumpToMessage,
   onVote,
@@ -87,9 +90,11 @@ export function ChatMessageBubble({
           onPointerUp={(event) => endDrag(event)}
           onPointerCancel={(event) => endDrag(event, true)}
         >
-          <div className="chat-bubble-score" aria-label={`Score ${score}`}>
-            {score}
-          </div>
+          {votesEnabled && (
+            <div className="chat-bubble-score" aria-label={`Score ${score}`}>
+              {score}
+            </div>
+          )}
 
           {!isOwn && message.senderUsername && (
             <div
@@ -160,7 +165,7 @@ export function ChatMessageBubble({
           </time>
 
           <div className="chat-bubble-actions" role="toolbar" aria-label="Message actions">
-            {!isOwn && onVote && (
+            {votesEnabled && !isOwn && onVote && (
               <>
                 <button
                   type="button"

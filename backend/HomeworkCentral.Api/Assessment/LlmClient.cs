@@ -36,16 +36,16 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
 
         try
         {
-            var body = new
+            OllamaChatRequest body = new()
             {
-                model = opts.ChatModel,
-                stream = false,
-                format = "json",
-                messages = new[]
-                {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = userPrompt },
-                },
+                Model = opts.ChatModel,
+                Stream = false,
+                Format = "json",
+                Messages =
+                [
+                    new OllamaChatMessage { Role = "system", Content = systemPrompt },
+                    new OllamaChatMessage { Role = "user", Content = userPrompt },
+                ],
             };
 
             using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
@@ -79,7 +79,11 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
 
         try
         {
-            var body = new { model = opts.EmbeddingModel, prompt = text };
+            OllamaEmbedRequest body = new()
+            {
+                Model = opts.EmbeddingModel,
+                Prompt = text,
+            };
             using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
                 $"{opts.BaseUrl.TrimEnd('/')}/api/embeddings",
                 body,
@@ -120,5 +124,25 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         }
 
         return vector;
+    }
+
+    private sealed class OllamaChatRequest
+    {
+        public string Model { get; set; } = string.Empty;
+        public bool Stream { get; set; }
+        public string Format { get; set; } = "json";
+        public List<OllamaChatMessage> Messages { get; set; } = [];
+    }
+
+    private sealed class OllamaChatMessage
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+    }
+
+    private sealed class OllamaEmbedRequest
+    {
+        public string Model { get; set; } = string.Empty;
+        public string Prompt { get; set; } = string.Empty;
     }
 }

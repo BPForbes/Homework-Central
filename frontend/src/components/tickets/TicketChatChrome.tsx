@@ -8,9 +8,11 @@ import { TicketIntakeSummary } from './TicketIntakeSummary'
 
 type TicketChatChromeProps = {
   roomId: string
+  /** Fired once the room is resolved as a ticket chat (true) or ordinary chat (false). */
+  onTicketResolved?: (isTicketChat: boolean) => void
 }
 
-export function TicketChatChrome({ roomId }: TicketChatChromeProps) {
+export function TicketChatChrome({ roomId, onTicketResolved }: TicketChatChromeProps) {
   const navigate = useNavigate()
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [busy, setBusy] = useState(false)
@@ -21,16 +23,22 @@ export function TicketChatChrome({ roomId }: TicketChatChromeProps) {
     async function load() {
       try {
         const { data } = await ticketsApi.getByRoom(roomId)
-        if (!cancelled) setTicket(data)
+        if (!cancelled) {
+          setTicket(data)
+          onTicketResolved?.(true)
+        }
       } catch {
-        if (!cancelled) setTicket(null)
+        if (!cancelled) {
+          setTicket(null)
+          onTicketResolved?.(false)
+        }
       }
     }
     void load()
     return () => {
       cancelled = true
     }
-  }, [roomId])
+  }, [roomId, onTicketResolved])
 
   if (!ticket) return null
 

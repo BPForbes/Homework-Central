@@ -11,6 +11,8 @@ interface ChatMessageListProps {
   loading: boolean
   currentUserId: string | undefined
   mentionRoles?: MentionRoleOption[]
+  /** False in ticket chat rooms — score and vote controls are not rendered. */
+  votesEnabled?: boolean
   onReply: (message: ChatMessage) => void
   onVote?: (message: ChatMessage, value: 1 | -1) => void
   onReport?: (message: ChatMessage) => void
@@ -22,6 +24,7 @@ export function ChatMessageList({
   loading,
   currentUserId,
   mentionRoles = [],
+  votesEnabled = true,
   onReply,
   onVote,
   onReport,
@@ -68,9 +71,10 @@ export function ChatMessageList({
           isOwn={message.senderId === currentUserId}
           highlighted={highlightedId === message.messageId}
           mentionStyles={mentionStyles}
+          votesEnabled={votesEnabled}
           onReply={onReply}
           onJumpToMessage={handleJumpToMessage}
-          onVote={onVote}
+          onVote={votesEnabled ? onVote : undefined}
           onReport={onReport}
         />
       ))}

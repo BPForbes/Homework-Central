@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Tickets;
 using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Assessment;
@@ -11,6 +12,7 @@ public interface ICommunityScoreAggregator
 /// <summary>
 /// Reliability-weighted community score from message votes.
 /// Upvote → v=1, downvote → v=0; reliability starts uniform (1.0) in MVP.
+/// Votes inside ticket chat rooms are ignored.
 /// </summary>
 public sealed class CommunityScoreAggregator(AppDbContext db) : ICommunityScoreAggregator
 {
@@ -18,6 +20,16 @@ public sealed class CommunityScoreAggregator(AppDbContext db) : ICommunityScoreA
         Guid messageId,
         CancellationToken ct = default)
     {
+        string? roomId = await db.ChatMessages.AsNoTracking()
+            .Where(m => m.MessageId == messageId)
+            .Select(m => m.RoomId)
+            .FirstOrDefaultAsync(ct);
+        if (roomId is null)
+            return (null, 0);
+
+        if (await TicketRoomLookup.IsTicketChatRoomAsync(db, roomId, ct))
+            return (null, 0);
+
         List<short> votes = await db.ChatMessageVotes.AsNoTracking()
             .Where(v => v.MessageId == messageId)
             .Select(v => v.Value)

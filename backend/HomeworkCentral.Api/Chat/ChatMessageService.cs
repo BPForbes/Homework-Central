@@ -120,6 +120,7 @@ public sealed class ChatMessageService(
             return [];
 
         int pageSize = limit is > 0 and <= 100 ? limit : DefaultPageSize;
+        bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
 
         // Real-vs-developer traffic is filtered by the IShareableScopedResource EF global query filter.
         IQueryable<ChatMessage> query = masterDb.ChatMessages
@@ -129,8 +130,10 @@ public sealed class ChatMessageService(
         if (beforeUtc is not null)
             query = query.Where(message => message.CreatedAtUtc < beforeUtc.Value);
 
+        if (!isTicketRoom)
+            query = query.Include(m => m.Votes);
+
         List<ChatMessage> messages = await query
-            .Include(m => m.Votes)
             .Include(m => m.Attachments).ThenInclude(a => a.Attachment)
             .Include(m => m.LinkPreviews)
             .OrderByDescending(message => message.CreatedAtUtc)
@@ -138,7 +141,7 @@ public sealed class ChatMessageService(
             .ToListAsync(ct);
 
         messages.Reverse();
-        return messages.Select(m => ToDto(m, userId)).ToArray();
+        return messages.Select(m => ToDto(m, userId, includeVotes: !isTicketRoom)).ToArray();
     }
 
     public async Task<ChatMessageDto?> SendMessageAsync(
@@ -321,7 +324,8 @@ public sealed class ChatMessageService(
             new AssessmentMessageJob(message.MessageId, roomId, userId, message.RawContent),
             ct);
 
-        ChatMessageDto dto = ToDto(message, userId);
+        bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
+        ChatMessageDto dto = ToDto(message, userId, includeVotes: !isTicketRoom);
         string broadcastGroupKey = ChatRoomGroupKey.Build(roomId, accountClass);
         await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", dto, ct);
         return dto;
@@ -517,11 +521,11 @@ public sealed class ChatMessageService(
         return BitMask.HasBit(featureMask, PlatformFeatures.GroupMessages);
     }
 
-    private static ChatMessageDto ToDto(ChatMessage message, Guid? viewerId = null)
+    private static ChatMessageDto ToDto(ChatMessage message, Guid? viewerId = null, bool includeVotes = true)
     {
-        int ups = message.Votes?.Count(v => v.Value > 0) ?? 0;
-        int downs = message.Votes?.Count(v => v.Value < 0) ?? 0;
-        short? viewerVote = viewerId is Guid vid
+        int ups = includeVotes ? message.Votes?.Count(v => v.Value > 0) ?? 0 : 0;
+        int downs = includeVotes ? message.Votes?.Count(v => v.Value < 0) ?? 0 : 0;
+        short? viewerVote = includeVotes && viewerId is Guid vid
             ? message.Votes?.FirstOrDefault(v => v.UserId == vid)?.Value
             : null;
 

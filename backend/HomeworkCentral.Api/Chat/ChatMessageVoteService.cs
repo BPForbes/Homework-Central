@@ -6,6 +6,7 @@ using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Tickets;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +52,9 @@ public sealed class ChatMessageVoteService(
 
         if (!chatRoomAccess.CanAccessRoom(masks, userId, message.RoomId))
             throw new InvalidOperationException("You cannot access this room.");
+
+        if (await TicketRoomLookup.IsTicketChatRoomAsync(db, message.RoomId, ct))
+            throw new InvalidOperationException("Voting is not available in ticket rooms.");
 
         if (message.SenderId == userId)
             throw new InvalidOperationException("You cannot vote on your own message.");

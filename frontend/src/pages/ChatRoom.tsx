@@ -64,6 +64,9 @@ export function ChatRoom() {
   const [roomLoading, setRoomLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
   const [mentionRoles, setMentionRoles] = useState<MentionRoleOption[]>([])
+  // null = unresolved; avoid flashing vote UI in ticket rooms before lookup finishes
+  const [isTicketChat, setIsTicketChat] = useState<boolean | null>(null)
+  const votesEnabled = isTicketChat === false
 
   const roomType = room?.roomType ?? 'Chat'
   const isChatRoom = roomType === 'Chat'
@@ -82,7 +85,9 @@ export function ChatRoom() {
     startReply,
     cancelReply,
     castVote,
-  } = useChatRoom(isChatRoom ? decodedRoomId : '', user?.userId)
+  } = useChatRoom(isChatRoom ? decodedRoomId : '', user?.userId, {
+    enableVotes: votesEnabled,
+  })
 
   async function handleReportMessage(message: { messageId: string; roomId: string; senderId: string; senderUsername: string; content: string }) {
     try {
@@ -112,6 +117,7 @@ export function ChatRoom() {
     setRoom(null)
     setRoomLoading(true)
     setAccessDenied(false)
+    setIsTicketChat(null)
 
     void chatApi
       .getRoom(decodedRoomId)
@@ -219,7 +225,10 @@ export function ChatRoom() {
 
       {isChatRoom && (
         <>
-          <TicketChatChrome roomId={decodedRoomId} />
+          <TicketChatChrome
+            roomId={decodedRoomId}
+            onTicketResolved={setIsTicketChat}
+          />
           {messagesError && <p className="chat-room-error chat-room-error--inline">{messagesError}</p>}
           <div className="chat-room-panel">
             <ChatMessageList
@@ -228,8 +237,9 @@ export function ChatRoom() {
               loading={messagesLoading}
               currentUserId={user?.userId}
               mentionRoles={mentionRoles}
+              votesEnabled={votesEnabled}
               onReply={startReply}
-              onVote={(message, value) => void castVote(message, value)}
+              onVote={votesEnabled ? (message, value) => void castVote(message, value) : undefined}
               onReport={(message) => void handleReportMessage(message)}
             />
             <ChatComposer

@@ -6,7 +6,12 @@ import type { SendChatMessageError } from '../types/inbox'
 import { isAxiosError } from 'axios'
 import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
-export function useChatRoom(roomId: string, currentUserId: string | undefined) {
+export function useChatRoom(
+  roomId: string,
+  currentUserId: string | undefined,
+  options?: { enableVotes?: boolean },
+) {
+  const enableVotes = options?.enableVotes ?? true
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -84,20 +89,22 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       addMessage(message)
     })
 
-    connection.on('MessageVoteUpdated', (payload: MessageVoteUpdate) => {
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.messageId === payload.messageId
-            ? {
-                ...message,
-                score: payload.score,
-                upvoteCount: payload.upvoteCount,
-                downvoteCount: payload.downvoteCount,
-              }
-            : message,
-        ),
-      )
-    })
+    if (enableVotes) {
+      connection.on('MessageVoteUpdated', (payload: MessageVoteUpdate) => {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.messageId === payload.messageId
+              ? {
+                  ...message,
+                  score: payload.score,
+                  upvoteCount: payload.upvoteCount,
+                  downvoteCount: payload.downvoteCount,
+                }
+              : message,
+          ),
+        )
+      })
+    }
 
     connection.on('UserTyping', (payload: ChatTypingUser) => {
       if (payload.userId === currentUserId)
@@ -170,7 +177,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
       setConnected(false)
       setTypingUsers([])
     }
-  }, [roomId, currentUserId, addMessage])
+  }, [roomId, currentUserId, addMessage, enableVotes])
 
   const stopTyping = useCallback(() => {
     if (isTypingRef.current) {
@@ -224,6 +231,8 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
   }, [])
 
   const castVote = useCallback(async (message: ChatMessage, value: 1 | -1) => {
+    if (!enableVotes)
+      return
     try {
       const { data } = await chatApi.castVote(message.messageId, value)
       setMessages((prev) =>
@@ -244,7 +253,7 @@ export function useChatRoom(roomId: string, currentUserId: string | undefined) {
     } catch {
       setError('Could not update vote.')
     }
-  }, [])
+  }, [enableVotes])
 
   return {
     messages,
