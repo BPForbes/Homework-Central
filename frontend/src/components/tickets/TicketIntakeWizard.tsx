@@ -153,7 +153,7 @@ function QuestionField({
               }}
             />
           )}
-          {(question.type === 'link' || question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
+          {(question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
             <input
               type="url"
               className="sm-input"
@@ -330,9 +330,9 @@ export function TicketIntakeWizard({
                     ))}
                   </ul>
                 )}
-                {typeof answers[question.id] === 'string' && answers[question.id] && (
+                {typeof answers[question.id] === 'string' && answers[question.id] !== '' ? (
                   <p className="dashboard-hint">Selected user id: {String(answers[question.id])}</p>
-                )}
+                ) : null}
               </div>
             ) : (
               <QuestionField
