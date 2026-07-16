@@ -1,3 +1,5 @@
+import type { TicketIntakeAnswer } from './tickets'
+
 export interface ChatInboxItem {
   notificationId: string
   messageId: string
@@ -9,6 +11,11 @@ export interface ChatInboxItem {
   categoryDisplayName: string
   messageContent: string
   mentionKind: string
+  ticketId?: string | null
+  ticketStatus?: 'Open' | 'Closed' | null
+  ticketIntakeAnswers?: TicketIntakeAnswer[] | null
+  ticketDecision?: string | null
+  ticketDecisionSummary?: string | null
   createdAtUtc: string
   readAtUtc: string | null
   isRead: boolean

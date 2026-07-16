@@ -8,6 +8,7 @@ import {
   faPlus,
   faServer,
   faShieldHalved,
+  faTicket,
   faUsersGear,
 } from '@fortawesome/free-solid-svg-icons'
 import { useEffect, useState } from 'react'
@@ -114,6 +115,7 @@ function ServerSidebar({ loading }: { loading: boolean }) {
     { id: 'chat', label: 'Create Chat Room', icon: faComments },
     { id: 'roleclaim', label: 'Create Role Claim', icon: faIdBadge },
     { id: 'info', label: 'Create Info Page', icon: faCircleInfo },
+    { id: 'ticket', label: 'Create Ticket Room', icon: faTicket },
     { id: 'rooms', label: 'All Rooms', icon: faLayerGroup },
   ]
 

@@ -8,6 +8,7 @@ using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -83,7 +84,7 @@ public sealed class ChatMessageService(
     public async Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default)
     {
         EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
-        if (!chatRoomAccess.CanAccessRoom(masks, roomId))
+        if (!chatRoomAccess.CanAccessRoom(masks, userId, roomId))
             return false;
 
         // GroupMessages feature bit additionally gates staff rooms. Subject-expertise rooms are
@@ -424,7 +425,7 @@ public sealed class ChatMessageService(
     private async Task<ChatNavDto> GetAccessibleInboxNavAsync(Guid userId, CancellationToken ct)
     {
         EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
-        return chatRoomAccess.GetAccessibleNav(masks);
+        return chatRoomAccess.GetAccessibleNav(masks, userId);
     }
 
     private static IReadOnlyList<string> SelectAccessibleRoomIds(ChatNavDto nav, string? categoryKey)
@@ -491,8 +492,16 @@ public sealed class ChatMessageService(
             ReplyToContentSnippet = message.ReplyToContentSnippet,
         };
 
-    private static ChatInboxItemDto ToInboxDto(ChatMentionNotification notification) =>
-        new()
+    private static ChatInboxItemDto ToInboxDto(ChatMentionNotification notification)
+    {
+        TicketOpenedPayloadDto? openedPayload = notification.MentionKind == TicketMentionKinds.Opened
+            ? TicketJson.TryDeserializeOpenedPayload(notification.TicketPayloadJson)
+            : null;
+        TicketDecisionPayloadDto? decisionPayload = notification.MentionKind == TicketMentionKinds.Decision
+            ? TicketJson.TryDeserializeDecisionPayload(notification.TicketPayloadJson)
+            : null;
+
+        return new ChatInboxItemDto
         {
             NotificationId = notification.NotificationId,
             MessageId = notification.MessageId,
@@ -504,7 +513,12 @@ public sealed class ChatMessageService(
             CategoryDisplayName = notification.CategoryDisplayName,
             MessageContent = notification.MessageContent,
             MentionKind = notification.MentionKind,
+            TicketId = notification.TicketId,
+            TicketIntakeAnswers = openedPayload?.IntakeAnswers,
+            TicketDecision = decisionPayload?.Decision,
+            TicketDecisionSummary = decisionPayload?.Summary,
             CreatedAtUtc = notification.CreatedAtUtc,
             ReadAtUtc = notification.ReadAtUtc,
         };
+    }
 }

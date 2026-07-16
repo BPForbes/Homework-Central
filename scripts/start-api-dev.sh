@@ -6,6 +6,8 @@
 #
 # Usage:
 #   scripts/start-api-dev.sh
+#
+# Set HC_SKIP_DEV_WARMUP=1 only for repeat starts against an already initialized local database.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

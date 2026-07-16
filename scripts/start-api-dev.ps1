@@ -7,6 +7,8 @@
 #   scripts/start-api-dev.ps1
 #   scripts/start-api-dev.ps1 -SkipDocker
 #   scripts/start-api-dev.ps1 -PreRegistered
+#
+# Set HC_SKIP_DEV_WARMUP=1 only for repeat starts against an already initialized local database.
 [CmdletBinding()]
 param(
     [switch]$SkipDocker,

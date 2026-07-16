@@ -113,6 +113,41 @@ The browser opens automatically when servers are ready.
 | Windows | `.\scripts\stop-dev.ps1` (close API/frontend terminals manually) |
 | Linux / macOS | `./scripts/stop-dev.sh` or `Ctrl+C` in the run terminal |
 
+### Release Docker resources (Windows)
+
+Stopping the stack releases container CPU and RAM immediately; the `pgdata` volume is retained:
+
+```powershell
+.\scripts\stop-dev.ps1
+docker compose down
+```
+
+If Docker Desktop's WSL 2 VM still holds memory after the containers stop, quit Docker Desktop
+and run `wsl --shutdown`, then start Docker Desktop again. To reclaim unused build cache and
+images without deleting the database volume, run `docker system prune -af`. Do not add
+`--volumes` unless you intentionally want to delete local Postgres data.
+
+`docker-compose.yml` caps Postgres at 2 CPUs / 1 GiB and FCaptcha at 0.5 CPU / 128 MiB.
+The default development scripts run the API and frontend directly on the host, so Docker limits
+do not cap their CPU or memory use.
+
+### Fast repeat starts
+
+`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
+can bind without a duplicate build. It also starts the frontend before the API, allowing Vite to
+bind to port 5173 while the API completes its startup work.
+
+After one successful initialization of the local database, you can skip development migrations
+and seed warmup on repeat starts:
+
+```powershell
+$env:HC_SKIP_DEV_WARMUP = '1'
+.\scripts\run-dev.ps1
+```
+
+Unset this variable and start normally after pulling migrations or authorization/seed changes, or
+after resetting the local database. Never use it for a fresh database.
+
 ### Build without starting servers
 
 | Platform | Command |

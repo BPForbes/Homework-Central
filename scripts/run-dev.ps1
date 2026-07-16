@@ -8,6 +8,7 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+#   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
 # Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
 [CmdletBinding()]
 param(
@@ -48,6 +49,10 @@ Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Help         Show this help
+
+For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
+development migrations and seeds. Unset it after pulling migrations/catalog changes
+or after resetting the local database.
 
 After startup (each server opens in its own terminal window):
   Frontend  http://localhost:5173
@@ -491,6 +496,13 @@ function Start-DevStack([hashtable]$EnvValues) {
 
     $env:HC_SKIP_BROWSER_OPEN = '1'
 
+    Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
+    $frontendArgs = @('-NoExit', '-File', $frontendStarter)
+    if (-not $SkipDocker) {
+        $frontendArgs += '-PreRegistered'
+    }
+    Start-DevStackPowerShellProcess -ArgumentList $frontendArgs -WorkingDirectory $RepoRoot
+
     if (-not $script:ApiBuildFailed) {
         Write-Step 'Starting API in a new terminal (http://localhost:5000)'
         $apiArgs = @('-NoExit', '-File', $apiStarter)
@@ -499,17 +511,23 @@ function Start-DevStack([hashtable]$EnvValues) {
         } else {
             $apiArgs += '-PreRegistered'
         }
-        Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
+
+        # The parent has just completed the API build, so avoid rebuilding it in the child
+        # process before Kestrel can bind. Preserve an explicitly supplied value afterwards.
+        $previousSkipDotnetBuild = $env:HC_SKIP_DOTNET_BUILD
+        $env:HC_SKIP_DOTNET_BUILD = '1'
+        try {
+            Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
+        } finally {
+            if ($null -eq $previousSkipDotnetBuild) {
+                Remove-Item Env:HC_SKIP_DOTNET_BUILD -ErrorAction SilentlyContinue
+            } else {
+                $env:HC_SKIP_DOTNET_BUILD = $previousSkipDotnetBuild
+            }
+        }
     } else {
         Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
-
-    Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
-    $frontendArgs = @('-NoExit', '-File', $frontendStarter)
-    if (-not $SkipDocker) {
-        $frontendArgs += '-PreRegistered'
-    }
-    Start-DevStackPowerShellProcess -ArgumentList $frontendArgs -WorkingDirectory $RepoRoot
 
     Write-Step 'Opening browser tabs when servers are ready'
     if (-not $script:ApiBuildFailed) {
