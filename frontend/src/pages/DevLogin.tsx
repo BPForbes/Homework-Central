@@ -84,7 +84,10 @@ export function DevLogin() {
           return true
         }
         setSetupError(response?.data?.message ?? 'Failed to load developer accounts.')
-        return true
+        // Provisioning temporarily competes for the local Postgres instance during a cold
+        // start. Keep retrying transient network and timeout failures instead of disabling
+        // the dev-login form permanently.
+        return false
       } finally {
         if (!cancelled)
           setIsLoadingOptions(false)

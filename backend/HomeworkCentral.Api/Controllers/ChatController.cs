@@ -29,7 +29,7 @@ public class ChatController(
             return Unauthorized();
 
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
-        return Ok(chatRoomAccess.GetAccessibleNav(masks));
+        return Ok(chatRoomAccess.GetAccessibleNav(masks, userId.Value));
     }
 
     /// <summary>Returns room metadata for catalog and custom rooms (chat, info, role claim).</summary>
@@ -43,7 +43,7 @@ public class ChatController(
         string decodedRoomId = Uri.UnescapeDataString(roomId);
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
 
-        if (!chatRoomAccess.CanAccessRoom(masks, decodedRoomId))
+        if (!chatRoomAccess.CanAccessRoom(masks, userId.Value, decodedRoomId))
             return Forbid();
 
         ChatRoomDetailDto? room = await chatRoomDetailService.GetRoomAsync(decodedRoomId, masks, ct);

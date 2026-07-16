@@ -2,6 +2,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Infrastructure;
+using HomeworkCentral.Api.Tickets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,7 +14,8 @@ namespace HomeworkCentral.Api.Controllers;
 public class InfrastructureController(
     IInfrastructureService infrastructure,
     IRoleAppearanceService roleAppearanceService,
-    IInfoEntryService infoEntries) : ControllerBase
+    IInfoEntryService infoEntries,
+    ITicketService tickets) : ControllerBase
 {
     [HttpGet("roles")]
     [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
@@ -172,6 +174,45 @@ public class InfrastructureController(
     {
         bool archived = await infrastructure.ArchiveCustomChannelAsync(channelId, ct);
         return archived ? NoContent() : NotFound();
+    }
+
+    [HttpGet("channels/{channelId:guid}/ticket-config")]
+    public async Task<ActionResult<TicketPortalConfigDto>> GetTicketPortalConfig(
+        Guid channelId,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        TicketPortalConfigDto? config = await tickets.GetPortalConfigAsync(channelId, userId.Value, ct);
+        return config is null ? NotFound() : Ok(config);
+    }
+
+    [HttpPut("channels/{channelId:guid}/ticket-config")]
+    [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
+    public async Task<ActionResult<TicketPortalConfigDto>> UpdateTicketPortalConfig(
+        Guid channelId,
+        [FromBody] UpdateTicketPortalConfigRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            TicketPortalConfigDto? config = await tickets.UpdatePortalConfigAsync(
+                channelId,
+                userId.Value,
+                request,
+                ct);
+            return config is null ? NotFound() : Ok(config);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("channels/by-room/{roomId}/claimable-roles")]

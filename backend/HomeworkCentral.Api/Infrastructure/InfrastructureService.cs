@@ -6,6 +6,7 @@ using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -417,6 +418,28 @@ public sealed class InfrastructureService(
         }
 
         db.CustomChannels.Add(channel);
+        if (roomType == CustomRoomType.Ticket)
+        {
+            string purpose = string.IsNullOrWhiteSpace(request.DisplayName)
+                ? "General"
+                : request.DisplayName.Trim();
+
+            db.TicketPortalConfigs.Add(new TicketPortalConfig
+            {
+                ChannelId = channelId,
+                CtaLabel = "Open Ticket",
+                Description = string.Empty,
+                Purpose = purpose,
+                NextDisplayNumber = 1,
+                TrackingMode = TicketTrackingModes.None,
+                DecisionLabelsJson = "[]",
+                MentionRoleRulesJson = "[]",
+                StaffAccessRulesJson = "[]",
+                IntakeSchemaJson = "[]",
+                UpdatedAtUtc = now,
+            });
+        }
+
         await db.SaveChangesAsync(ct);
         await channelStore.RefreshAsync(ct);
         await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
@@ -1346,8 +1369,15 @@ public sealed class InfrastructureService(
 
         foreach (CustomChannelAccessRuleInput rule in rules)
         {
-            if (rule.CustomRoleId is null && rule.PlatformRoleBit is null)
-                throw new InvalidOperationException("Each access rule must specify a custom role or platform role.");
+            int setCount = (rule.CustomRoleId.HasValue ? 1 : 0)
+                + (rule.PlatformRoleBit.HasValue ? 1 : 0)
+                + (rule.AllowedUserId.HasValue ? 1 : 0);
+
+            if (setCount != 1)
+            {
+                throw new InvalidOperationException(
+                    "Each access rule must specify exactly one of custom role, platform role, or allowed user.");
+            }
 
             if (rule.CustomRoleId is not null)
             {
@@ -1363,6 +1393,14 @@ public sealed class InfrastructureService(
                 }
             }
 
+            if (rule.AllowedUserId is Guid allowedUserId)
+            {
+                bool userExists = await db.Users.AsNoTracking()
+                    .AnyAsync(u => u.UserId == allowedUserId, ct);
+                if (!userExists)
+                    throw new InvalidOperationException("Allowed user was not found.");
+            }
+
             // Explicitly Add() to the DbSet (not just channel.AccessRules) so EF marks this new row
             // as Added. AccessRuleId has a store-generated default (gen_random_uuid()); if we only
             // append to the navigation collection of an already-tracked `channel`, EF's automatic
@@ -1376,6 +1414,7 @@ public sealed class InfrastructureService(
                 ChannelId = channel.ChannelId,
                 CustomRoleId = rule.CustomRoleId,
                 PlatformRoleBit = rule.PlatformRoleBit,
+                AllowedUserId = rule.AllowedUserId,
             };
             db.CustomChannelAccessRules.Add(newRule);
             channel.AccessRules.Add(newRule);
@@ -1465,6 +1504,7 @@ public sealed class InfrastructureService(
                 PlatformRoleName = rule.PlatformRoleBit is short bit && PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string? platformName)
                     ? platformName
                     : null,
+                AllowedUserId = rule.AllowedUserId,
             }).ToList(),
         };
 }

@@ -14,6 +14,7 @@ using HomeworkCentral.Api.Risk;
 using HomeworkCentral.Api.ScrapingDetection;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -90,6 +91,22 @@ builder.Services.AddScoped<InfrastructureUserDirectory>();
 builder.Services.AddScoped<IInfrastructureService, InfrastructureService>();
 builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
+builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
+builder.Services.AddHttpClient<OllamaTicketTrackingAnalyzer>((sp, client) =>
+{
+    TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(5, ticketOptions.RequestTimeoutSeconds));
+});
+builder.Services.AddSingleton<NullTicketTrackingAnalyzer>();
+builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
+{
+    TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;
+    return ticketOptions.OllamaEnabled
+        ? sp.GetRequiredService<OllamaTicketTrackingAnalyzer>()
+        : sp.GetRequiredService<NullTicketTrackingAnalyzer>();
+});
+builder.Services.AddScoped<ITicketRecipientResolver, TicketRecipientResolver>();
+builder.Services.AddScoped<ITicketService, TicketService>();
 builder.Services.AddSingleton<IChatTypingTracker, ChatTypingTracker>();
 builder.Services.AddSingleton<IMentionCooldownTracker, MentionCooldownTracker>();
 builder.Services.AddSingleton<IChatOnlineTracker, ChatOnlineTracker>();
