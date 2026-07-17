@@ -358,6 +358,11 @@ public partial class AppDbContext(
             e.Property(a => a.ContentType).HasMaxLength(128).IsRequired();
             e.Property(a => a.StoragePath).HasMaxLength(512).IsRequired();
             e.Property(a => a.InlinePreviewKind).HasMaxLength(16);
+            e.Property(a => a.ScanStatus)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .HasDefaultValue(HomeworkCentral.Api.Uploads.MalwareScanResult.Unknown)
+                .IsRequired();
         });
 
         mb.Entity<ChatMessageAttachment>(e =>

@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { ticketsApi } from '../../api/ticketsApi'
 import { chatApi } from '../../api/chatApi'
-import { ConfirmModal } from '../infrastructure/ConfirmModal'
-import { estimateUploadHazard } from '../../utils/inspectFileClient'
 import type { Ticket, TicketAnswers, TicketIntakeQuestion } from '../../types/tickets'
 
 type TicketIntakeWizardProps = {
@@ -200,10 +198,6 @@ function TicketIntakeFileUploadField({
   onChange: (next: TicketAnswers[string]) => void
 }) {
   const [uploadError, setUploadError] = useState<string | null>(null)
-  const [hazardConfirm, setHazardConfirm] = useState<{
-    files: File[]
-    pendingUpload?: { attachmentId: string; fileName: string }
-  } | null>(null)
 
   async function appendUploaded(parts: Array<{ kind: 'file'; attachmentId: string; fileName: string }>) {
     const existing = Array.isArray(value) ? value : []
@@ -216,13 +210,9 @@ function TicketIntakeFileUploadField({
     for (const file of files) {
       try {
         const { data } = await chatApi.uploadAttachment(file)
-        if (data.isHazard) {
-          setHazardConfirm({ files: [file], pendingUpload: { attachmentId: data.attachmentId, fileName: data.fileName } })
-          return
-        }
         uploaded.push({ kind: 'file', attachmentId: data.attachmentId, fileName: data.fileName })
       } catch {
-        setUploadError('Upload rejected: malware detected or scanner unavailable.')
+        setUploadError('Could not upload this file. Please try again.')
         return
       }
     }
@@ -243,15 +233,6 @@ function TicketIntakeFileUploadField({
             if (files.length === 0)
               return
             void (async () => {
-              const hazards: File[] = []
-              for (const file of files) {
-                if (await estimateUploadHazard(file))
-                  hazards.push(file)
-              }
-              if (hazards.length > 0) {
-                setHazardConfirm({ files })
-                return
-              }
               await uploadFiles(files)
             })()
           }}
@@ -283,59 +264,6 @@ function TicketIntakeFileUploadField({
             <li key={index}>{typeof part === 'object' && part && 'kind' in part ? String((part as { kind: string }).kind) : String(part)}</li>
           ))}
         </ul>
-      )}
-      {hazardConfirm && (
-        <ConfirmModal
-          title="Potentially risky file"
-          onClose={() => {
-            void (async () => {
-              if (hazardConfirm.pendingUpload) {
-                try {
-                  await chatApi.deleteAttachment(hazardConfirm.pendingUpload.attachmentId)
-                } catch {
-                  // Orphan worker will purge later.
-                }
-              }
-              setHazardConfirm(null)
-            })()
-          }}
-          actions={[
-            {
-              label: 'Cancel',
-              variant: 'secondary',
-              onClick: () => {
-                void (async () => {
-                  if (hazardConfirm.pendingUpload) {
-                    try {
-                      await chatApi.deleteAttachment(hazardConfirm.pendingUpload.attachmentId)
-                    } catch {
-                      // Orphan worker will purge later.
-                    }
-                  }
-                  setHazardConfirm(null)
-                })()
-              },
-            },
-            {
-              label: 'Attach anyway',
-              variant: 'primary',
-              onClick: () => {
-                void (async () => {
-                  if (hazardConfirm.pendingUpload) {
-                    await appendUploaded([{ kind: 'file', ...hazardConfirm.pendingUpload }])
-                    setHazardConfirm(null)
-                    return
-                  }
-                  const files = hazardConfirm.files
-                  setHazardConfirm(null)
-                  await uploadFiles(files)
-                })()
-              },
-            },
-          ]}
-        >
-          <p>This file may contain code or executable content. Only attach files you trust.</p>
-        </ConfirmModal>
       )}
     </div>
   )

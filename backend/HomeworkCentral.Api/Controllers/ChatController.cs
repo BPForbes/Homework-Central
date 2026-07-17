@@ -312,6 +312,7 @@ public class ChatController(
     public async Task<IActionResult> DownloadAttachment(
         Guid attachmentId,
         [FromQuery] string? accessToken,
+        [FromQuery] bool riskAcknowledged = false,
         CancellationToken ct)
     {
         Guid? userId = GetUserId();
@@ -332,16 +333,26 @@ public class ChatController(
             }
         }
 
-        (Stream Stream, string ContentType, string FileName)? opened =
+        Uploads.AttachmentReadResult? opened =
             await attachmentService.OpenReadAsync(
                 attachmentId,
                 userId!.Value,
                 ct,
-                accessTokenValidated);
+                accessTokenValidated,
+                riskAcknowledged);
         if (opened is null)
             return NotFound();
 
-        return File(opened.Value.Stream, opened.Value.ContentType, opened.Value.FileName);
+        if (opened.RequiresCaution)
+        {
+            return Conflict(new
+            {
+                message = "This attachment needs a safety acknowledgement before it can be opened.",
+                scanStatus = opened.ScanStatus.ToString(),
+            });
+        }
+
+        return File(opened.Stream!, opened.ContentType!, opened.FileName!);
     }
 
     [HttpDelete("attachments/{attachmentId:guid}")]

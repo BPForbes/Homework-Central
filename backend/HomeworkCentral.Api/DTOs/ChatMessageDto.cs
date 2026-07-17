@@ -44,6 +44,7 @@ public class ChatAttachmentInfoDto
     public string DownloadUrl { get; set; } = null!;
     public bool IsHazard { get; set; }
     public string? InlinePreviewKind { get; set; }
+    public string ScanStatus { get; set; } = null!;
 }
 
 public class ChatForwardSnapshotDto

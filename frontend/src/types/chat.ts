@@ -45,6 +45,7 @@ export interface ChatAttachmentInfo {
   downloadUrl: string
   isHazard?: boolean
   inlinePreviewKind?: string | null
+  scanStatus?: 'Clean' | 'Infected' | 'ScanFailed' | 'NotScanned' | 'Unknown'
 }
 
 export interface ChatForwardSnapshot {

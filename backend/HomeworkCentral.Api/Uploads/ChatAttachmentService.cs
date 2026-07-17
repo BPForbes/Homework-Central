@@ -19,16 +19,25 @@ public sealed record ChatAttachmentDto(
     long SizeBytes,
     string DownloadUrl,
     bool IsHazard,
-    string? InlinePreviewKind);
+    string? InlinePreviewKind,
+    string ScanStatus);
+
+public sealed record AttachmentReadResult(
+    Stream? Stream,
+    string? ContentType,
+    string? FileName,
+    MalwareScanResult ScanStatus,
+    bool RequiresCaution);
 
 public interface IChatAttachmentService
 {
     Task<ChatAttachmentDto> UploadAsync(Guid userId, IFormFile file, CancellationToken ct = default);
-    Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(
+    Task<AttachmentReadResult?> OpenReadAsync(
         Guid attachmentId,
         Guid userId,
         CancellationToken ct = default,
-        bool accessTokenValidated = false);
+        bool accessTokenValidated = false,
+        bool riskAcknowledged = false);
     Task<bool> DeleteUnattachedAsync(Guid attachmentId, Guid userId, CancellationToken ct = default);
 }
 
@@ -70,18 +79,9 @@ public sealed class ChatAttachmentService(
         if (!isImage && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
             throw new InvalidOperationException("You do not have permission to upload files.");
 
+        MalwareScanResult scanStatus;
         await using (Stream scanStream = file.OpenReadStream())
-        {
-            MalwareScanResult scanResult = await malwareScanner.ScanAsync(scanStream, ct);
-            string? rejectionMessage = scanResult switch
-            {
-                MalwareScanResult.Infected => "Malware detected.",
-                MalwareScanResult.Unavailable => "Virus scanner unavailable.",
-                _ => null,
-            };
-            if (rejectionMessage is not null)
-                throw new InvalidOperationException(rejectionMessage);
-        }
+            scanStatus = await malwareScanner.ScanAsync(scanStream, ct);
 
         Directory.CreateDirectory(opts.RootPath);
         Guid attachmentId = Guid.NewGuid();
@@ -108,6 +108,7 @@ public sealed class ChatAttachmentService(
             TenantDatabaseName = scope.TenantDatabaseName,
             IsHazard = inspection.IsHazard,
             InlinePreviewKind = inspection.InlinePreviewKind,
+            ScanStatus = scanStatus,
         };
         db.ChatAttachments.Add(attachment);
         await db.SaveChangesAsync(ct);
@@ -119,14 +120,16 @@ public sealed class ChatAttachmentService(
             file.Length,
             accessTokenService.MintDownloadUrl(attachmentId, userId),
             inspection.IsHazard,
-            inspection.InlinePreviewKind);
+            inspection.InlinePreviewKind,
+            scanStatus.ToString());
     }
 
-    public async Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(
+    public async Task<AttachmentReadResult?> OpenReadAsync(
         Guid attachmentId,
         Guid userId,
         CancellationToken ct = default,
-        bool accessTokenValidated = false)
+        bool accessTokenValidated = false,
+        bool riskAcknowledged = false)
     {
         ChatAttachment? attachment = await db.ChatAttachments.AsNoTracking()
             .Include(a => a.MessageLinks)
@@ -138,13 +141,31 @@ public sealed class ChatAttachmentService(
         if (!accessTokenValidated && !await CanDownloadAsync(attachment, userId, ct))
             return null;
 
+        bool requiresCaution = attachment.ScanStatus is MalwareScanResult.Infected
+            or MalwareScanResult.ScanFailed
+            or MalwareScanResult.Unknown;
+        if (requiresCaution && !riskAcknowledged)
+        {
+            return new AttachmentReadResult(
+                null,
+                null,
+                null,
+                attachment.ScanStatus,
+                RequiresCaution: true);
+        }
+
         UploadOptions opts = options.Value;
         string fullPath = Path.Combine(opts.RootPath, attachment.StoragePath);
         if (!File.Exists(fullPath))
             return null;
 
         Stream stream = File.OpenRead(fullPath);
-        return (stream, attachment.ContentType, attachment.OriginalFileName);
+        return new AttachmentReadResult(
+            stream,
+            attachment.ContentType,
+            attachment.OriginalFileName,
+            attachment.ScanStatus,
+            RequiresCaution: false);
     }
 
     public async Task<bool> DeleteUnattachedAsync(Guid attachmentId, Guid userId, CancellationToken ct = default)

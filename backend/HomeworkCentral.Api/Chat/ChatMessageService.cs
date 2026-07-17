@@ -603,6 +603,7 @@ public sealed class ChatMessageService(
                         : $"/api/chat/attachments/{a.AttachmentId}",
                     IsHazard = a.Attachment.IsHazard,
                     InlinePreviewKind = a.Attachment.InlinePreviewKind,
+                    ScanStatus = a.Attachment.ScanStatus.ToString(),
                 })
                 .ToList() ?? [],
             LinkPreviews = message.LinkPreviews?

@@ -5,8 +5,6 @@ import { faArrowUp, faPaperclip, faReply, faXmark } from '@fortawesome/free-soli
 import type { ChatMessage, MentionRoleOption } from '../../types/chat'
 import { useAuth } from '../../context/useAuth'
 import { chatApi } from '../../api/chatApi'
-import { ConfirmModal } from '../infrastructure/ConfirmModal'
-import { estimateUploadHazard } from '../../utils/inspectFileClient'
 import {
   buildMentionCandidates,
   buildMentionStyleLookup,
@@ -26,14 +24,6 @@ type PendingAttachment = {
   localId: string
   attachmentId: string
   fileName: string
-}
-
-type HazardConfirmState = {
-  files: File[]
-  serverAttachment?: {
-    attachmentId: string
-    fileName: string
-  }
 }
 
 interface ChatComposerProps {
@@ -69,7 +59,6 @@ export function ChatComposer({
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [attachError, setAttachError] = useState<string | null>(null)
-  const [hazardConfirm, setHazardConfirm] = useState<HazardConfirmState | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -158,10 +147,6 @@ export function ChatComposer({
       for (const file of files) {
         try {
           const { data } = await chatApi.uploadAttachment(file)
-          if (data.isHazard) {
-            setHazardConfirm({ files: [file], serverAttachment: { attachmentId: data.attachmentId, fileName: data.fileName } })
-            return
-          }
           setPendingAttachments((prev) => [
             ...prev,
             {
@@ -171,7 +156,7 @@ export function ChatComposer({
             },
           ])
         } catch {
-          setAttachError('Upload rejected: malware detected or scanner unavailable.')
+          setAttachError('Could not upload this file. Please try again.')
           break
         }
       }
@@ -187,49 +172,7 @@ export function ChatComposer({
       return
 
     setAttachError(null)
-    const hazards: File[] = []
-    for (const file of files) {
-      if (await estimateUploadHazard(file))
-        hazards.push(file)
-    }
-    if (hazards.length > 0) {
-      setHazardConfirm({ files })
-      return
-    }
     await uploadFiles(files)
-  }
-
-  async function confirmHazardUpload() {
-    if (!hazardConfirm)
-      return
-
-    if (hazardConfirm.serverAttachment) {
-      setPendingAttachments((prev) => [
-        ...prev,
-        {
-          localId: `${hazardConfirm.serverAttachment!.attachmentId}-${hazardConfirm.serverAttachment!.fileName}`,
-          attachmentId: hazardConfirm.serverAttachment!.attachmentId,
-          fileName: hazardConfirm.serverAttachment!.fileName,
-        },
-      ])
-      setHazardConfirm(null)
-      return
-    }
-
-    const files = hazardConfirm.files
-    setHazardConfirm(null)
-    await uploadFiles(files)
-  }
-
-  async function cancelHazardUpload() {
-    if (hazardConfirm?.serverAttachment) {
-      try {
-        await chatApi.deleteAttachment(hazardConfirm.serverAttachment.attachmentId)
-      } catch {
-        // Best-effort cleanup; orphan worker will purge later.
-      }
-    }
-    setHazardConfirm(null)
   }
 
   function removePendingAttachment(localId: string) {
@@ -358,18 +301,6 @@ export function ChatComposer({
         </ul>
       )}
       {attachError && <p className="chat-composer-attach-error">{attachError}</p>}
-      {hazardConfirm && (
-        <ConfirmModal
-          title="Potentially risky file"
-          onClose={() => void cancelHazardUpload()}
-          actions={[
-            { label: 'Cancel', variant: 'secondary', onClick: () => void cancelHazardUpload() },
-            { label: 'Send anyway', variant: 'primary', onClick: () => void confirmHazardUpload() },
-          ]}
-        >
-          <p>This file may contain code or executable content. Only send files you trust.</p>
-        </ConfirmModal>
-      )}
       <div className="chat-composer-toolbar-row">
         <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={handleChange} compact />
         <FormattingToggleButton

@@ -6,6 +6,7 @@ import type { ChatAttachmentInfo } from '../../types/chat'
 import { useAuthenticatedAttachment } from '../../hooks/useAuthenticatedAttachment'
 import { classifyAttachment } from '../../utils/attachmentClassification'
 import { highlightCode } from '../../utils/highlightCode'
+import { ConfirmModal } from '../infrastructure/ConfirmModal'
 
 const TEXT_PREVIEW_MAX_BYTES = 256 * 1024
 
@@ -24,25 +25,36 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
   const [textPreview, setTextPreview] = useState<string | null>(null)
   const [textTooLarge, setTextTooLarge] = useState(false)
   const [textLoading, setTextLoading] = useState(false)
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false)
+  const [showSafetyWarning, setShowSafetyWarning] = useState(false)
+  const requiresCaution = ['Infected', 'ScanFailed', 'Unknown'].includes(attachment.scanStatus ?? 'Unknown')
 
-  const needsBlob =
+  const needsBlob = (
     useBlobFallback
     || classification.mode === 'hazard'
     || classification.mode === 'link'
     || (classification.mode === 'inline' && classification.inlineKind === 'text')
+    || (requiresCaution && riskAcknowledged)
+  ) && (!requiresCaution || riskAcknowledged)
 
   const { blobUrl, loading, error, download } = useAuthenticatedAttachment(
     attachment.attachmentId,
     needsBlob,
+    riskAcknowledged,
   )
 
-  const inlineSrc = useBlobFallback ? blobUrl : attachment.downloadUrl
+  const downloadUrl = riskAcknowledged
+    ? `${attachment.downloadUrl}${attachment.downloadUrl.includes('?') ? '&' : '?'}riskAcknowledged=true`
+    : attachment.downloadUrl
+  const inlineSrc = blobUrl ?? downloadUrl
   const showTextInline =
     classification.mode === 'inline'
     && classification.inlineKind === 'text'
     && textPreview !== null
 
   useEffect(() => {
+    if (requiresCaution && !riskAcknowledged)
+      return
     if (classification.mode !== 'inline' || classification.inlineKind !== 'text')
       return
 
@@ -53,7 +65,7 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
 
     void (async () => {
       try {
-        const response = await fetch(attachment.downloadUrl)
+        const response = await fetch(downloadUrl)
         if (!response.ok)
           throw new Error('fetch failed')
         const buffer = await response.arrayBuffer()
@@ -76,9 +88,11 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
     return () => {
       cancelled = true
     }
-  }, [attachment.downloadUrl, classification.inlineKind, classification.mode])
+  }, [classification.inlineKind, classification.mode, downloadUrl, requiresCaution, riskAcknowledged])
 
   useEffect(() => {
+    if (requiresCaution && !riskAcknowledged)
+      return
     if (!expanded || attachment.inlinePreviewKind !== 'text' || textPreview !== null)
       return
 
@@ -87,7 +101,7 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
 
     void (async () => {
       try {
-        const source = blobUrl ?? attachment.downloadUrl
+        const source = blobUrl ?? downloadUrl
         const response = await fetch(source)
         if (!response.ok)
           throw new Error('fetch failed')
@@ -111,7 +125,49 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
     return () => {
       cancelled = true
     }
-  }, [attachment.downloadUrl, attachment.inlinePreviewKind, blobUrl, expanded, textPreview])
+  }, [attachment.inlinePreviewKind, blobUrl, downloadUrl, expanded, requiresCaution, riskAcknowledged, textPreview])
+
+  if (requiresCaution && !riskAcknowledged) {
+    const warningBody = attachment.scanStatus === 'Infected'
+      ? 'Warning! This file may be malicious and could steal your data, corrupt your device, or similar. Proceed with caution…'
+      : 'Warning! This file could not be verified as safe and may be malicious. It could steal your data, corrupt your device, or similar. Proceed with caution…'
+
+    return (
+      <div className="chat-attachment-hazard">
+        <FontAwesomeIcon icon={byPrefixAndName.fas['file-circle-exclamation']} />
+        <span>{attachment.fileName}</span>
+        <button
+          type="button"
+          className="chat-attachment-download-link"
+          onClick={() => setShowSafetyWarning(true)}
+        >
+          View or download
+        </button>
+        {showSafetyWarning && (
+          <ConfirmModal
+            title="Warning — potentially malicious file"
+            onClose={() => setShowSafetyWarning(false)}
+            actions={[
+              { label: 'Cancel', variant: 'secondary', onClick: () => setShowSafetyWarning(false) },
+              {
+                label: 'Proceed anyway',
+                variant: 'primary',
+                onClick: () => {
+                  setRiskAcknowledged(true)
+                  setShowSafetyWarning(false)
+                  if (classification.mode !== 'inline')
+                    void download(attachment.fileName, true)
+                },
+              },
+            ]}
+          >
+            <p className="chat-attachment-hazard-banner">{warningBody}</p>
+            <p>You can still download or open this file after acknowledging the risk.</p>
+          </ConfirmModal>
+        )}
+      </div>
+    )
+  }
 
   if (loading || textLoading)
     return <span className="chat-attachment-loading">{attachment.fileName}</span>
@@ -224,7 +280,7 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
             if (blobUrl)
               download(attachment.fileName)
             else
-              window.open(attachment.downloadUrl, '_blank', 'noopener,noreferrer')
+              window.open(downloadUrl, '_blank', 'noopener,noreferrer')
           }}
           aria-label={`Download ${attachment.fileName}`}
         >

@@ -15,6 +15,8 @@ public class ChatAttachment
     public string? TenantDatabaseName { get; set; }
     public bool IsHazard { get; set; }
     public string? InlinePreviewKind { get; set; }
+    public HomeworkCentral.Api.Uploads.MalwareScanResult ScanStatus { get; set; } =
+        HomeworkCentral.Api.Uploads.MalwareScanResult.Unknown;
 
     public ICollection<ChatMessageAttachment> MessageLinks { get; set; } = [];
 }
