@@ -39,7 +39,7 @@ export function ChatMessageBubble({
   const [copied, setCopied] = useState(false)
   const dragState = useRef<{ pointerId: number; startX: number; currentX: number; dragging: boolean } | null>(null)
   const score = message.score ?? 0
-  const hasReply = Boolean(message.replyToMessageId)
+  const canVote = Boolean(votesEnabled && !isOwn && onVote)
 
   function handlePointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (isOwn || event.pointerType === 'mouse')
@@ -80,153 +80,144 @@ export function ChatMessageBubble({
   }
 
   return (
-    <div className={`chat-bubble-row ${isOwn ? 'chat-bubble-row--own' : 'chat-bubble-row--other'}`}>
-      <div
-        className={[
-          'chat-message-thread',
-          isOwn ? 'chat-message-thread--own' : 'chat-message-thread--other',
-          hasReply ? 'chat-message-thread--has-reply' : '',
-        ].filter(Boolean).join(' ')}
-      >
-        <article
-          data-message-id={message.messageId}
-          className={`chat-bubble ${isOwn ? 'chat-bubble--own' : 'chat-bubble--other'} ${highlighted ? 'chat-bubble--highlighted' : ''}`}
-          style={dragX !== 0 ? { transform: `translateX(${dragX}px)`, transition: 'none' } : undefined}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={(event) => endDrag(event)}
-          onPointerCancel={(event) => endDrag(event, true)}
+    <article
+      data-message-id={message.messageId}
+      className={`chat-thread-item ${highlighted ? 'chat-thread-item--highlighted' : ''}`}
+      style={dragX !== 0 ? { transform: `translateX(${dragX}px)`, transition: 'none' } : undefined}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={(event) => endDrag(event)}
+      onPointerCancel={(event) => endDrag(event, true)}
+    >
+      <header className="chat-thread-item-header">
+        <div
+          className="chat-thread-sender"
+          style={message.senderMessageColor ? { color: message.senderMessageColor } : undefined}
         >
-          {!isOwn && message.senderUsername && (
-            <div
-              className="chat-bubble-sender"
-              style={message.senderMessageColor ? { color: message.senderMessageColor } : undefined}
-            >
-              {message.senderUsername}
-            </div>
-          )}
-
-          {message.replyToMessageId && (
+          {message.senderUsername || 'Unknown'}:
+        </div>
+        {votesEnabled && (
+          <div className="chat-thread-votes" role="group" aria-label="Message votes">
             <button
               type="button"
-              className="chat-reply-snippet"
-              onClick={() => onJumpToMessage(message.replyToMessageId!)}
+              className={`chat-thread-action-btn ${message.viewerVote === 'up' ? 'is-active' : ''}`}
+              onClick={() => onVote?.(message, 1)}
+              disabled={!canVote}
+              title="Upvote"
+              aria-label="Upvote message"
             >
-              <span className="chat-reply-snippet-author">{message.replyToSenderUsername}</span>
-              <span className="chat-reply-snippet-text">{message.replyToContentSnippet}</span>
+              <FontAwesomeIcon icon={byPrefixAndName.fas['arrow-down']} flip="vertical" />
             </button>
-          )}
-
-          {message.forwardedFrom && (
-            <div className="chat-forward-card">
-              <div className="chat-forward-card-label">Forwarded from {message.forwardedFrom.sourceSenderUsername}</div>
-              <div className="chat-forward-card-body">{message.forwardedFrom.contentSnippet}</div>
-            </div>
-          )}
-
-          <div className="chat-bubble-content">
-            <RichContent content={message.content} mentionStyles={mentionStyles} />
-          </div>
-
-          {message.attachments && message.attachments.length > 0 && (
-            <ul className="chat-attachment-list">
-              {message.attachments.map((attachment) => (
-                <li key={attachment.attachmentId}>
-                  {attachment.contentType.startsWith('image/') ? (
-                    <img
-                      src={attachment.downloadUrl}
-                      alt={attachment.fileName}
-                      className="chat-attachment-image"
-                    />
-                  ) : (
-                    <a href={attachment.downloadUrl} target="_blank" rel="noreferrer">
-                      {attachment.fileName}
-                    </a>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {message.linkPreviews && message.linkPreviews.length > 0 && (
-            <ul className="chat-link-preview-list">
-              {message.linkPreviews.map((preview) => (
-                <li key={preview.url} className="chat-link-preview-card">
-                  <a href={preview.url} target="_blank" rel="noreferrer">
-                    {preview.title || preview.url}
-                  </a>
-                  {preview.description && <p>{preview.description}</p>}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <time className="chat-bubble-time" dateTime={message.createdAtUtc}>
-            {formatUtcTimestamp(message.createdAtUtc)}
-          </time>
-
-          <div className="chat-bubble-actions" role="toolbar" aria-label="Message actions">
-            {votesEnabled && (
-              <span className="chat-bubble-score-chip" aria-label={`Score ${score}`}>
-                {score}
-              </span>
-            )}
-            {votesEnabled && !isOwn && onVote && (
-              <>
-                <button
-                  type="button"
-                  className={`chat-bubble-action-btn ${message.viewerVote === 'up' ? 'is-active' : ''}`}
-                  onClick={() => onVote(message, 1)}
-                  title="Upvote"
-                  aria-label="Upvote message"
-                >
-                  <FontAwesomeIcon icon={byPrefixAndName.fas['arrow-down']} flip="vertical" />
-                </button>
-                <button
-                  type="button"
-                  className={`chat-bubble-action-btn ${message.viewerVote === 'down' ? 'is-active' : ''}`}
-                  onClick={() => onVote(message, -1)}
-                  title="Downvote"
-                  aria-label="Downvote message"
-                >
-                  <FontAwesomeIcon icon={byPrefixAndName.fas['arrow-down']} />
-                </button>
-              </>
-            )}
-            {!isOwn && (
-              <button
-                type="button"
-                className="chat-bubble-action-btn"
-                onClick={() => onReply(message)}
-                title="Reply"
-                aria-label="Reply to this message"
-              >
-                <FontAwesomeIcon icon={faReply} />
-              </button>
-            )}
+            <span className="chat-thread-score" aria-label={`Score ${score}`}>
+              {score}
+            </span>
             <button
               type="button"
-              className="chat-bubble-action-btn"
-              onClick={() => void handleCopy()}
-              title={copied ? 'Copied!' : 'Copy message'}
-              aria-label="Copy message content"
+              className={`chat-thread-action-btn ${message.viewerVote === 'down' ? 'is-active' : ''}`}
+              onClick={() => onVote?.(message, -1)}
+              disabled={!canVote}
+              title="Downvote"
+              aria-label="Downvote message"
             >
-              <FontAwesomeIcon icon={faCopy} />
+              <FontAwesomeIcon icon={byPrefixAndName.fas['arrow-down']} />
             </button>
-            {!isOwn && onReport && (
-              <button
-                type="button"
-                className="chat-bubble-action-btn"
-                onClick={() => onReport(message)}
-                title="Report"
-                aria-label="Report message"
-              >
-                <FontAwesomeIcon icon={byPrefixAndName.fas.exclamation} />
-              </button>
-            )}
           </div>
-        </article>
+        )}
+      </header>
+
+      {message.replyToMessageId && (
+        <button
+          type="button"
+          className="chat-reply-snippet"
+          onClick={() => onJumpToMessage(message.replyToMessageId!)}
+        >
+          <span className="chat-reply-snippet-author">{message.replyToSenderUsername}</span>
+          <span className="chat-reply-snippet-text">{message.replyToContentSnippet}</span>
+        </button>
+      )}
+
+      {message.forwardedFrom && (
+        <div className="chat-forward-card">
+          <div className="chat-forward-card-label">Forwarded from {message.forwardedFrom.sourceSenderUsername}</div>
+          <div className="chat-forward-card-body">{message.forwardedFrom.contentSnippet}</div>
+        </div>
+      )}
+
+      <div className="chat-thread-content">
+        <RichContent content={message.content} mentionStyles={mentionStyles} />
       </div>
-    </div>
+
+      {message.attachments && message.attachments.length > 0 && (
+        <ul className="chat-attachment-list">
+          {message.attachments.map((attachment) => (
+            <li key={attachment.attachmentId}>
+              {attachment.contentType.startsWith('image/') ? (
+                <img
+                  src={attachment.downloadUrl}
+                  alt={attachment.fileName}
+                  className="chat-attachment-image"
+                />
+              ) : (
+                <a href={attachment.downloadUrl} target="_blank" rel="noreferrer">
+                  {attachment.fileName}
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {message.linkPreviews && message.linkPreviews.length > 0 && (
+        <ul className="chat-link-preview-list">
+          {message.linkPreviews.map((preview) => (
+            <li key={preview.url} className="chat-link-preview-card">
+              <a href={preview.url} target="_blank" rel="noreferrer">
+                {preview.title || preview.url}
+              </a>
+              {preview.description && <p>{preview.description}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <footer className="chat-thread-item-footer">
+        <div className="chat-thread-actions" role="toolbar" aria-label="Message actions">
+          {!isOwn && onReport && (
+            <button
+              type="button"
+              className="chat-thread-action-btn"
+              onClick={() => onReport(message)}
+              title="Report"
+              aria-label="Report message"
+            >
+              <FontAwesomeIcon icon={byPrefixAndName.fas.exclamation} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="chat-thread-action-btn"
+            onClick={() => void handleCopy()}
+            title={copied ? 'Copied!' : 'Copy message'}
+            aria-label="Copy message content"
+          >
+            <FontAwesomeIcon icon={faCopy} />
+          </button>
+          {!isOwn && (
+            <button
+              type="button"
+              className="chat-thread-action-btn"
+              onClick={() => onReply(message)}
+              title="Reply"
+              aria-label="Reply to this message"
+            >
+              <FontAwesomeIcon icon={faReply} />
+            </button>
+          )}
+        </div>
+        <time className="chat-thread-time" dateTime={message.createdAtUtc}>
+          {formatUtcTimestamp(message.createdAtUtc)}
+        </time>
+      </footer>
+    </article>
   )
 }

@@ -70,32 +70,26 @@ export function ChatPreviewPanel({ channelDisplayName, mockAccounts, activeMockI
         {messages.length === 0 && <p className="chat-messages-empty">No messages yet. Send one as the active mock account.</p>}
         {messages.map((message) => {
           const sender = mockAccounts.find((a) => a.id === message.accountId)
-          const isActive = message.accountId === activeMockId
           return (
-            <div
-              key={message.id}
-              className={`chat-bubble-row ${isActive ? 'chat-bubble-row--own' : 'chat-bubble-row--other'}`}
-            >
-              <div className={`chat-message-thread ${isActive ? 'chat-message-thread--own' : 'chat-message-thread--other'}`}>
-                <article className={`chat-bubble ${isActive ? 'chat-bubble--own' : 'chat-bubble--other'}`}>
-                  <div className="chat-bubble-actions" aria-hidden>
-                    <span className="chat-bubble-score-chip">0</span>
-                  </div>
-                  <div className="chat-bubble-sender" style={sender ? { color: sender.color } : undefined}>
-                    {sender?.label ?? 'Unknown mock account'}
-                  </div>
-                  <div className="chat-bubble-content">
-                    <RichContent content={message.content} />
-                  </div>
-                  {message.content.includes('http') && (
-                    <div className="chat-link-preview-card">
-                      <strong>Link preview</strong>
-                      <p>Sample unfurl card for channel builder.</p>
-                    </div>
-                  )}
-                </article>
+            <article key={message.id} className="chat-thread-item">
+              <header className="chat-thread-item-header">
+                <div className="chat-thread-sender" style={sender ? { color: sender.color } : undefined}>
+                  {sender?.label ?? 'Unknown mock account'}:
+                </div>
+                <div className="chat-thread-votes" aria-hidden>
+                  <span className="chat-thread-score">0</span>
+                </div>
+              </header>
+              <div className="chat-thread-content">
+                <RichContent content={message.content} />
               </div>
-            </div>
+              {message.content.includes('http') && (
+                <div className="chat-link-preview-card">
+                  <strong>Link preview</strong>
+                  <p>Sample unfurl card for channel builder.</p>
+                </div>
+              )}
+            </article>
           )
         })}
         <div ref={bottomRef} />
