@@ -313,9 +313,16 @@ if (!skipDevStartupWarmup)
     foreach (Guid userId in customRoleUserIds)
         await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
 
+    // Custom channels / ticket portals live on the master DB and are filtered by
+    // OwnerAccountClass (real vs developer). Seed both classes here — persona tenant DBs
+    // are not consulted by CustomChannelStore or TicketService.
     await TicketPortalSeedData.SeedAsync(
         seedDb,
         AccountClass.RealAccount,
+        startupLogger);
+    await TicketPortalSeedData.SeedAsync(
+        seedDb,
+        AccountClass.DeveloperAccount,
         startupLogger);
     await HomeworkCentral.Api.Assessment.ScoringReferenceSeedData.SeedAsync(seedDb, startupLogger);
 

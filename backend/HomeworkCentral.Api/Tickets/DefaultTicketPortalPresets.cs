@@ -3,7 +3,10 @@ using HomeworkCentral.Api.DTOs;
 
 namespace HomeworkCentral.Api.Tickets;
 
-/// <summary>Canonical default ticket portals seeded per tenant/master database.</summary>
+/// <summary>
+/// Canonical default ticket portals seeded on the master database once per
+/// <see cref="Authorization.AccountClass"/> (RealAccount and DeveloperAccount).
+/// </summary>
 public static class DefaultTicketPortalPresets
 {
     public const string TutorDisplayName = "Apply for Tutor Positions";

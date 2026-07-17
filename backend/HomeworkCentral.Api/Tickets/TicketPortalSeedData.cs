@@ -10,7 +10,11 @@ using Microsoft.Extensions.Logging;
 namespace HomeworkCentral.Api.Tickets;
 
 /// <summary>
-/// Ensures the two default ticket portals exist (Tutor applications + Notify Mods) under General.
+/// Ensures the two default ticket portals exist (Tutor applications + Notify Mods) under General
+/// on the given database for the given <see cref="AccountClass"/>. Callers must seed against the
+/// master DB for both <see cref="AccountClass.RealAccount"/> and
+/// <see cref="AccountClass.DeveloperAccount"/> — <see cref="Infrastructure.ICustomChannelStore"/>
+/// and ticket APIs do not load portals from persona tenant databases.
 /// Idempotent: creates missing portals and reconciles category/description on existing ones.
 /// </summary>
 public static class TicketPortalSeedData
