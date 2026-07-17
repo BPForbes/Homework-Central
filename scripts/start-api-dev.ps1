@@ -60,6 +60,7 @@ try {
     if (-not $skipDocker) {
         Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
         Ensure-DevFCaptchaRunning -Port $envValues['FCAPTCHA_HOST_PORT']
+        Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {

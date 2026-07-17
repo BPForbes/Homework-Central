@@ -386,6 +386,14 @@ function Start-FCaptcha {
     Ensure-DevFCaptchaRunning -Port $port
 }
 
+function Start-ClamAv {
+    Write-Step "Starting ClamAV (Docker) on localhost:$($script:DevClamAvHostPort)"
+
+    Assert-DockerRunning
+
+    Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
+}
+
 function Build-PostgresHostCheck {
     dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
@@ -563,6 +571,7 @@ function Start-DevStack([hashtable]$EnvValues) {
             $fcaptchaPort = $script:DevFCaptchaHostPort
         }
         Write-Host "  FCaptcha: localhost:$fcaptchaPort (Docker; stops when both terminals are closed)"
+        Write-Host "  ClamAV:   localhost:$($script:DevClamAvHostPort) (Docker; upload scanning, fail-open while loading)"
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'
@@ -579,8 +588,9 @@ function Start-RunPhase([hashtable]$EnvValues) {
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
         Start-FCaptcha -EnvValues $EnvValues
+        Start-ClamAv
     } else {
-        Write-Step 'Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / -SkipDocker)'
+        Write-Step 'Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / -SkipDocker)'
     }
 
     Start-DevStack -EnvValues $EnvValues

@@ -58,6 +58,7 @@ trap cleanup_api EXIT
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
   ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" || fail "Could not start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" || fail "Could not start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
 if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then

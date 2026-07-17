@@ -369,6 +369,17 @@ start_fcaptcha() {
     || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
 }
 
+start_clamav() {
+  require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
+  fi
+
+  log "Starting ClamAV (Docker) on localhost:${DEV_STACK_CLAMAV_HOST_PORT}"
+  ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" \
+    || fail "Failed to start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Check: docker compose logs clamav"
+}
+
 build_postgres_host_check() {
   dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
@@ -595,8 +606,9 @@ main() {
   if [[ "$SKIP_DOCKER" == false ]]; then
     start_postgres
     start_fcaptcha
+    start_clamav
   else
-    log "Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / --skip-docker)"
+    log "Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / --skip-docker)"
   fi
 
   run_stack

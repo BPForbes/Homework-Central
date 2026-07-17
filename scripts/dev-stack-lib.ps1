@@ -14,6 +14,7 @@ $script:DevStackEnvFile = Join-Path $script:RepoRoot '.env'
 $script:DevPostgresPassword = 'postgres'
 $script:DevPostgresHostPort = '5434'
 $script:DevFCaptchaHostPort = '3010'
+$script:DevClamAvHostPort = '3310'
 $script:DevStackServerRegistered = $false
 
 function New-DevRandomSecret {
@@ -395,6 +396,76 @@ function Stop-DevStackFCaptcha {
     docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop fcaptcha *> $null
 }
 
+# ClamAV (see docker-compose.yml's `clamav` service) backs upload malware scanning
+# (appsettings.Development.json enables it). Like FCaptcha it is stateless from the app's
+# point of view, so it is started alongside Postgres and stopped whenever Postgres is.
+# Unlike FCaptcha, readiness is best-effort: the first run downloads virus signatures
+# (minutes), and the API scanner fails open (NotScanned) while clamd is unreachable, so a
+# slow ClamAV must never block the dev stack.
+function Start-DevStackClamAvContainer([string]$Port) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop or run scripts/run-dev.ps1 first.'
+    }
+
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker is not running. Start Docker Desktop and retry.'
+    }
+
+    $env:CLAMAV_HOST_PORT = $Port
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile up -d clamav
+    if ($LASTEXITCODE -ne 0) {
+        throw 'docker compose up clamav failed'
+    }
+}
+
+function Test-DevClamAvConnection([string]$Port) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        if (-not $client.ConnectAsync('127.0.0.1', [int]$Port).Wait(2000)) {
+            return $false
+        }
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 2000
+        $ping = [System.Text.Encoding]::ASCII.GetBytes("PING`n")
+        $stream.Write($ping, 0, $ping.Length)
+        $buffer = New-Object byte[] 16
+        $read = $stream.Read($buffer, 0, $buffer.Length)
+        return $read -gt 0 -and ([System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)).Trim() -eq 'PONG'
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Ensure-DevClamAvRunning([string]$Port) {
+    if (Test-DevClamAvConnection $Port) {
+        return
+    }
+
+    Write-Host "==> Starting Docker ClamAV on localhost:$Port" -ForegroundColor DarkGray
+    Start-DevStackClamAvContainer $Port
+
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        if (Test-DevClamAvConnection $Port) {
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    Write-Host '==> ClamAV is still loading virus signatures (first run downloads them; can take minutes).' -ForegroundColor DarkGray
+    Write-Host '==> Uploads scan as NotScanned (fail-open) until clamd is ready; check: docker compose logs clamav' -ForegroundColor DarkGray
+}
+
+function Stop-DevStackClamAv {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop clamav *> $null
+}
+
 function Initialize-DevStackState {
     param(
         [Parameter(Mandatory = $true)]
@@ -409,6 +480,7 @@ function Initialize-DevStackState {
             Write-Host '==> Stopping previous dev stack Postgres session' -ForegroundColor DarkGray
             Stop-DevStackPostgres -Port $existing['postgres_port']
             Stop-DevStackFCaptcha
+            Stop-DevStackClamAv
         }
 
         Write-DevStackState @{
@@ -460,6 +532,7 @@ function Unregister-DevStackServer {
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
         Stop-DevStackPostgres -Port $port
         Stop-DevStackFCaptcha
+        Stop-DevStackClamAv
         Write-Host '==> Stopped Docker Postgres and freed localhost port' -ForegroundColor DarkGray
     }
 
@@ -472,6 +545,7 @@ function Stop-DevStack {
         if ($null -ne $state -and $state['managed_postgres'] -eq '1') {
             Stop-DevStackPostgres -Port $state['postgres_port']
             Stop-DevStackFCaptcha
+            Stop-DevStackClamAv
         }
 
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
