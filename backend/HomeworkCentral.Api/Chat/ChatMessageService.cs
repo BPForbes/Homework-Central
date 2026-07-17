@@ -80,7 +80,8 @@ public sealed class ChatMessageService(
     IMentionRecipientResolver mentionRecipientResolver,
     IRoleAppearanceService roleAppearanceService,
     IHubContext<ChatHub> hubContext,
-    IAssessmentQueue assessmentQueue) : IChatMessageService
+    IAssessmentQueue assessmentQueue,
+    Uploads.IAttachmentAccessTokenService accessTokenService) : IChatMessageService
 {
     private const int MaxMessageLength = 4000;
     private const int DefaultPageSize = 50;
@@ -141,7 +142,7 @@ public sealed class ChatMessageService(
             .ToListAsync(ct);
 
         messages.Reverse();
-        return messages.Select(m => ToDto(m, userId, includeVotes: !isTicketRoom)).ToArray();
+        return messages.Select(m => ToDto(m, userId, includeVotes: !isTicketRoom, mintAccessTokens: true)).ToArray();
     }
 
     public async Task<ChatMessageDto?> SendMessageAsync(
@@ -228,15 +229,28 @@ public sealed class ChatMessageService(
             int order = 0;
             foreach (Guid attachmentId in attachmentIds.Distinct())
             {
-                bool exists = await masterDb.ChatAttachments.AnyAsync(a => a.AttachmentId == attachmentId, ct);
-                if (!exists)
-                    continue;
-                masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
+                ChatAttachment? attachment = await masterDb.ChatAttachments
+                    .FirstOrDefaultAsync(a => a.AttachmentId == attachmentId, ct);
+
+                switch (attachment)
                 {
-                    MessageId = message.MessageId,
-                    AttachmentId = attachmentId,
-                    SortOrder = order++,
-                });
+                    case null:
+                        continue;
+                    case { UploadedByUserId: Guid ownerId } when ownerId != userId:
+                        throw new InvalidOperationException("You can only attach files you uploaded.");
+                    case ChatAttachment scoped
+                        when scoped.OwnerAccountClass != accountClass
+                            || scoped.TenantDatabaseName != tenantDatabaseName:
+                        throw new InvalidOperationException("Attachment belongs to a different account scope.");
+                    case ChatAttachment owned:
+                        masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
+                        {
+                            MessageId = message.MessageId,
+                            AttachmentId = attachmentId,
+                            SortOrder = order++,
+                        });
+                        break;
+                }
             }
         }
 
@@ -334,9 +348,10 @@ public sealed class ChatMessageService(
             ct);
 
         bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
-        ChatMessageDto dto = ToDto(message, userId, includeVotes: !isTicketRoom);
+        ChatMessageDto dto = ToDto(message, userId, includeVotes: !isTicketRoom, mintAccessTokens: true);
+        ChatMessageDto broadcastDto = ToDto(message, viewerId: null, includeVotes: !isTicketRoom, mintAccessTokens: false);
         string broadcastGroupKey = ChatRoomGroupKey.Build(roomId, accountClass);
-        await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", dto, ct);
+        await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", broadcastDto, ct);
         return dto;
     }
 
@@ -530,7 +545,11 @@ public sealed class ChatMessageService(
         return BitMask.HasBit(featureMask, PlatformFeatures.GroupMessages);
     }
 
-    private static ChatMessageDto ToDto(ChatMessage message, Guid? viewerId = null, bool includeVotes = true)
+    private ChatMessageDto ToDto(
+        ChatMessage message,
+        Guid? viewerId = null,
+        bool includeVotes = true,
+        bool mintAccessTokens = true)
     {
         int ups = includeVotes ? message.Votes?.Count(v => v.Value > 0) ?? 0 : 0;
         int downs = includeVotes ? message.Votes?.Count(v => v.Value < 0) ?? 0 : 0;
@@ -579,7 +598,11 @@ public sealed class ChatMessageService(
                     FileName = a.Attachment.OriginalFileName,
                     ContentType = a.Attachment.ContentType,
                     SizeBytes = a.Attachment.SizeBytes,
-                    DownloadUrl = $"/api/chat/attachments/{a.AttachmentId}",
+                    DownloadUrl = mintAccessTokens && viewerId is Guid vid
+                        ? accessTokenService.MintDownloadUrl(a.AttachmentId, vid)
+                        : $"/api/chat/attachments/{a.AttachmentId}",
+                    IsHazard = a.Attachment.IsHazard,
+                    InlinePreviewKind = a.Attachment.InlinePreviewKind,
                 })
                 .ToList() ?? [],
             LinkPreviews = message.LinkPreviews?

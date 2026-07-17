@@ -22,6 +22,7 @@ public class ChatController(
     IRoleAppearanceService roleAppearanceService,
     IChatMessageVoteService voteService,
     Uploads.IChatAttachmentService attachmentService,
+    Uploads.IAttachmentAccessTokenService accessTokenService,
     InfrastructureUserDirectory userDirectory) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
@@ -307,18 +308,58 @@ public class ChatController(
     }
 
     [HttpGet("attachments/{attachmentId:guid}")]
-    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct)
+    [AllowAnonymous]
+    public async Task<IActionResult> DownloadAttachment(
+        Guid attachmentId,
+        [FromQuery] string? accessToken,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        bool accessTokenValidated = false;
+
+        switch (userId)
+        {
+            case null when string.IsNullOrWhiteSpace(accessToken):
+                return Unauthorized();
+            case null:
+            {
+                bool valid = await accessTokenService.TryValidateAsync(attachmentId, accessToken!, ct);
+                if (!valid)
+                    return Unauthorized();
+                accessTokenValidated = true;
+                userId = Guid.Empty;
+                break;
+            }
+        }
+
+        (Stream Stream, string ContentType, string FileName)? opened =
+            await attachmentService.OpenReadAsync(
+                attachmentId,
+                userId!.Value,
+                ct,
+                accessTokenValidated);
+        if (opened is null)
+            return NotFound();
+
+        return File(opened.Value.Stream, opened.Value.ContentType, opened.Value.FileName);
+    }
+
+    [HttpDelete("attachments/{attachmentId:guid}")]
+    public async Task<IActionResult> DeleteAttachment(Guid attachmentId, CancellationToken ct)
     {
         Guid? userId = GetUserId();
         if (userId is null)
             return Unauthorized();
 
-        (Stream Stream, string ContentType, string FileName)? opened =
-            await attachmentService.OpenReadAsync(attachmentId, userId.Value, ct);
-        if (opened is null)
-            return NotFound();
-
-        return File(opened.Value.Stream, opened.Value.ContentType, opened.Value.FileName);
+        try
+        {
+            bool deleted = await attachmentService.DeleteUnattachedAsync(attachmentId, userId.Value, ct);
+            return deleted ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     private Guid? GetUserId()

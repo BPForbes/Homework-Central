@@ -7,6 +7,7 @@ import type { ChatMessage } from '../../types/chat'
 import { RichContent } from '../../richtext/RichContent'
 import type { MentionStyleLookup } from '../../richtext/markdown'
 import { formatUtcTimestamp } from '../../utils/formatUtcTimestamp'
+import { ChatAttachmentView } from './ChatAttachmentView'
 
 interface ChatMessageBubbleProps {
   message: ChatMessage
@@ -151,17 +152,7 @@ export function ChatMessageBubble({
         <ul className="chat-attachment-list">
           {message.attachments.map((attachment) => (
             <li key={attachment.attachmentId}>
-              {attachment.contentType.startsWith('image/') ? (
-                <img
-                  src={attachment.downloadUrl}
-                  alt={attachment.fileName}
-                  className="chat-attachment-image"
-                />
-              ) : (
-                <a href={attachment.downloadUrl} target="_blank" rel="noreferrer">
-                  {attachment.fileName}
-                </a>
-              )}
+              <ChatAttachmentView attachment={attachment} />
             </li>
           ))}
         </ul>

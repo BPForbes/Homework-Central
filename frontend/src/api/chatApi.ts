@@ -38,10 +38,20 @@ export const chatApi = {
       contentType: string
       sizeBytes: number
       downloadUrl: string
+      isHazard: boolean
+      inlinePreviewKind?: string | null
     }>('/chat/attachments', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+
+  downloadAttachmentBlob: (attachmentId: string) =>
+    api.get<Blob>(`/chat/attachments/${attachmentId}`, {
+      responseType: 'blob',
+    }),
+
+  deleteAttachment: (attachmentId: string) =>
+    api.delete(`/chat/attachments/${attachmentId}`),
 
   getMentionRoles: () => api.get<MentionRoleOption[]>('/chat/mention-roles'),
 

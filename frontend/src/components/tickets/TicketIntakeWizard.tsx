@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { ticketsApi } from '../../api/ticketsApi'
+import { chatApi } from '../../api/chatApi'
+import { ConfirmModal } from '../infrastructure/ConfirmModal'
+import { estimateUploadHazard } from '../../utils/inspectFileClient'
 import type { Ticket, TicketAnswers, TicketIntakeQuestion } from '../../types/tickets'
 
 type TicketIntakeWizardProps = {
@@ -132,54 +135,7 @@ function QuestionField({
     case 'messageForward':
     case 'mixed':
       return (
-        <div className="ticket-intake-mixed">
-          {(question.type === 'fileUpload' || question.allowedResponseKinds?.includes('file') || question.type === 'mixed') && (
-            <input
-              type="file"
-              className="sm-input"
-              multiple
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? [])
-                void (async () => {
-                  const { chatApi } = await import('../../api/chatApi')
-                  const uploaded = []
-                  for (const file of files) {
-                    const { data } = await chatApi.uploadAttachment(file)
-                    uploaded.push({ kind: 'file', attachmentId: data.attachmentId, fileName: data.fileName })
-                  }
-                  const existing = Array.isArray(value) ? value : []
-                  onChange([...existing, ...uploaded])
-                })()
-              }}
-            />
-          )}
-          {(question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
-            <input
-              type="url"
-              className="sm-input"
-              placeholder="Add link https://"
-              onBlur={(event) => {
-                const url = event.target.value.trim()
-                if (!url) return
-                const existing = Array.isArray(value) ? value : []
-                onChange([...existing, { kind: 'link', url }])
-                event.target.value = ''
-              }}
-            />
-          )}
-          {(question.type === 'messageForward' || question.allowedResponseKinds?.includes('forward') || question.type === 'mixed') && (
-            <p className="dashboard-hint">
-              Use Report on a chat message to prefill a forwarded proof, or paste a message id below.
-            </p>
-          )}
-          {Array.isArray(value) && value.length > 0 && (
-            <ul className="ticket-intake-parts">
-              {value.map((part, index) => (
-                <li key={index}>{typeof part === 'object' && part && 'kind' in part ? String((part as { kind: string }).kind) : String(part)}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <TicketIntakeFileUploadField question={question} value={value} onChange={onChange} />
       )
     case 'date':
       return (
@@ -232,6 +188,157 @@ function QuestionField({
     default:
       return null
   }
+}
+
+function TicketIntakeFileUploadField({
+  question,
+  value,
+  onChange,
+}: {
+  question: TicketIntakeQuestion
+  value: TicketAnswers[string]
+  onChange: (next: TicketAnswers[string]) => void
+}) {
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [hazardConfirm, setHazardConfirm] = useState<{
+    files: File[]
+    pendingUpload?: { attachmentId: string; fileName: string }
+  } | null>(null)
+
+  async function appendUploaded(parts: Array<{ kind: 'file'; attachmentId: string; fileName: string }>) {
+    const existing = Array.isArray(value) ? value : []
+    onChange([...existing, ...parts])
+  }
+
+  async function uploadFiles(files: File[]) {
+    setUploadError(null)
+    const uploaded: Array<{ kind: 'file'; attachmentId: string; fileName: string }> = []
+    for (const file of files) {
+      try {
+        const { data } = await chatApi.uploadAttachment(file)
+        if (data.isHazard) {
+          setHazardConfirm({ files: [file], pendingUpload: { attachmentId: data.attachmentId, fileName: data.fileName } })
+          return
+        }
+        uploaded.push({ kind: 'file', attachmentId: data.attachmentId, fileName: data.fileName })
+      } catch {
+        setUploadError('Upload rejected: malware detected or scanner unavailable.')
+        return
+      }
+    }
+    if (uploaded.length > 0)
+      await appendUploaded(uploaded)
+  }
+
+  return (
+    <div className="ticket-intake-mixed">
+      {(question.type === 'fileUpload' || question.allowedResponseKinds?.includes('file') || question.type === 'mixed') && (
+        <input
+          type="file"
+          className="sm-input"
+          multiple
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? [])
+            event.target.value = ''
+            if (files.length === 0)
+              return
+            void (async () => {
+              const hazards: File[] = []
+              for (const file of files) {
+                if (await estimateUploadHazard(file))
+                  hazards.push(file)
+              }
+              if (hazards.length > 0) {
+                setHazardConfirm({ files })
+                return
+              }
+              await uploadFiles(files)
+            })()
+          }}
+        />
+      )}
+      {uploadError && <p className="chat-composer-attach-error">{uploadError}</p>}
+      {(question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
+        <input
+          type="url"
+          className="sm-input"
+          placeholder="Add link https://"
+          onBlur={(event) => {
+            const url = event.target.value.trim()
+            if (!url) return
+            const existing = Array.isArray(value) ? value : []
+            onChange([...existing, { kind: 'link', url }])
+            event.target.value = ''
+          }}
+        />
+      )}
+      {(question.type === 'messageForward' || question.allowedResponseKinds?.includes('forward') || question.type === 'mixed') && (
+        <p className="dashboard-hint">
+          Use Report on a chat message to prefill a forwarded proof, or paste a message id below.
+        </p>
+      )}
+      {Array.isArray(value) && value.length > 0 && (
+        <ul className="ticket-intake-parts">
+          {value.map((part, index) => (
+            <li key={index}>{typeof part === 'object' && part && 'kind' in part ? String((part as { kind: string }).kind) : String(part)}</li>
+          ))}
+        </ul>
+      )}
+      {hazardConfirm && (
+        <ConfirmModal
+          title="Potentially risky file"
+          onClose={() => {
+            void (async () => {
+              if (hazardConfirm.pendingUpload) {
+                try {
+                  await chatApi.deleteAttachment(hazardConfirm.pendingUpload.attachmentId)
+                } catch {
+                  // Orphan worker will purge later.
+                }
+              }
+              setHazardConfirm(null)
+            })()
+          }}
+          actions={[
+            {
+              label: 'Cancel',
+              variant: 'secondary',
+              onClick: () => {
+                void (async () => {
+                  if (hazardConfirm.pendingUpload) {
+                    try {
+                      await chatApi.deleteAttachment(hazardConfirm.pendingUpload.attachmentId)
+                    } catch {
+                      // Orphan worker will purge later.
+                    }
+                  }
+                  setHazardConfirm(null)
+                })()
+              },
+            },
+            {
+              label: 'Attach anyway',
+              variant: 'primary',
+              onClick: () => {
+                void (async () => {
+                  if (hazardConfirm.pendingUpload) {
+                    await appendUploaded([{ kind: 'file', ...hazardConfirm.pendingUpload }])
+                    setHazardConfirm(null)
+                    return
+                  }
+                  const files = hazardConfirm.files
+                  setHazardConfirm(null)
+                  await uploadFiles(files)
+                })()
+              },
+            },
+          ]}
+        >
+          <p>This file may contain code or executable content. Only attach files you trust.</p>
+        </ConfirmModal>
+      )}
+    </div>
+  )
 }
 
 export function TicketIntakeWizard({

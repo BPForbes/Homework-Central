@@ -69,7 +69,8 @@ public class ChatMessageServiceTests
             new FakeMentionRecipientResolver(),
             new FakeRoleAppearanceService(),
             new FakeHubContext(),
-            new FakeAssessmentQueue());
+            new FakeAssessmentQueue(),
+            new ChatMessageServiceTestSupport.NoOpAttachmentAccessTokenService());
     }
 
     private static UserEffectiveMask ToUserEffectiveMask(Guid userId, EffectiveMaskDto dto) =>

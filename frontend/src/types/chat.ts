@@ -43,6 +43,8 @@ export interface ChatAttachmentInfo {
   contentType: string
   sizeBytes: number
   downloadUrl: string
+  isHazard?: boolean
+  inlinePreviewKind?: string | null
 }
 
 export interface ChatForwardSnapshot {

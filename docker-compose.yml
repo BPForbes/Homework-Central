@@ -63,6 +63,20 @@ services:
       timeout: 3s
       retries: 5
 
+  clamav:
+    image: clamav/clamav:latest
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 2g
+    ports:
+      - "${CLAMAV_HOST_PORT:-3310}:3310"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
   llm:
     build:
       context: ./llm-service
@@ -104,6 +118,9 @@ services:
       Tickets__OllamaBaseUrl: "http://llm:11434"
       Uploads__RootPath: "/app/App_Data/uploads"
       ConnectionStrings__Redis: "redis:6379"
+      ClamAV__Host: "clamav"
+      ClamAV__Port: "3310"
+      ClamAV__Enabled: "true"
     ports:
       - "5000:8080"
     volumes:
@@ -114,6 +131,8 @@ services:
       fcaptcha:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
       llm:
         condition: service_started

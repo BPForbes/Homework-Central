@@ -13,6 +13,8 @@ public class ChatAttachment
     public DateTime CreatedAtUtc { get; set; }
     public AccountClass OwnerAccountClass { get; set; }
     public string? TenantDatabaseName { get; set; }
+    public bool IsHazard { get; set; }
+    public string? InlinePreviewKind { get; set; }
 
     public ICollection<ChatMessageAttachment> MessageLinks { get; set; } = [];
 }

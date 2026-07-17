@@ -2326,6 +2326,84 @@ a {
   border-radius: var(--radius-sm);
 }
 
+.chat-attachment-hazard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-danger);
+}
+
+.chat-attachment-inline {
+  position: relative;
+  max-width: 100%;
+}
+
+.chat-attachment-pdf,
+.chat-attachment-text,
+.chat-attachment-text-block {
+  width: 100%;
+  min-height: 12rem;
+  max-height: 20rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.chat-attachment-video,
+.chat-attachment-audio {
+  max-width: 100%;
+}
+
+.chat-attachment-download-btn {
+  margin-top: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+
+.chat-attachment-download-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.chat-attachment-loading,
+.chat-attachment-error {
+  font-size: 0.875rem;
+  color: var(--color-ink-secondary);
+}
+
+.chat-attachment-error {
+  color: var(--color-danger);
+}
+
+.chat-attachment-expand-btn {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.chat-attachment-hazard-preview {
+  flex-basis: 100%;
+}
+
+.chat-attachment-hazard-banner {
+  margin: 0.35rem 0;
+  font-size: 0.8125rem;
+  color: var(--color-danger);
+}
+
 .chat-link-preview-card,
 .chat-forward-card {
   margin-top: 0.25rem;

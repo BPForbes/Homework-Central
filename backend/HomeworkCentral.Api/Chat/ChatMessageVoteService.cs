@@ -65,7 +65,9 @@ public sealed class ChatMessageVoteService(
 
         if (existing is not null && existing.Value == value)
         {
-            return await BuildDtoAsync(message, userId, ct);
+            db.ChatMessageVotes.Remove(existing);
+            await db.SaveChangesAsync(ct);
+            return await BroadcastVoteUpdateAsync(message, userId, ct);
         }
 
         if (existing is null)
@@ -92,7 +94,11 @@ public sealed class ChatMessageVoteService(
                     throw;
 
                 if (existing.Value == value)
-                    return await BuildDtoAsync(message, userId, ct);
+                {
+                    db.ChatMessageVotes.Remove(existing);
+                    await db.SaveChangesAsync(ct);
+                    return await BroadcastVoteUpdateAsync(message, userId, ct);
+                }
 
                 existing.Value = value;
                 existing.UpdatedAtUtc = DateTime.UtcNow;
@@ -105,11 +111,18 @@ public sealed class ChatMessageVoteService(
             existing.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
+        return await BroadcastVoteUpdateAsync(message, userId, ct);
+    }
+
+    private async Task<MessageVoteDto> BroadcastVoteUpdateAsync(
+        ChatMessage message,
+        Guid userId,
+        CancellationToken ct)
+    {
         MessageVoteDto dto = await BuildDtoAsync(message, userId, ct);
         string groupKey = ChatRoomGroupKey.Build(message.RoomId, message.OwnerAccountClass);
         await hubContext.Clients.Group(groupKey).SendAsync("MessageVoteUpdated", dto, ct);
 
-        // Extend the assessment queue path used by SendMessage — community-only recalc, no LLM.
         await assessmentQueue.EnqueueAsync(
             new AssessmentMessageJob(
                 message.MessageId,

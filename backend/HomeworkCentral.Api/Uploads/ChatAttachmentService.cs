@@ -17,7 +17,9 @@ public sealed record ChatAttachmentDto(
     string FileName,
     string ContentType,
     long SizeBytes,
-    string DownloadUrl);
+    string DownloadUrl,
+    bool IsHazard,
+    string? InlinePreviewKind);
 
 public interface IChatAttachmentService
 {
@@ -25,7 +27,9 @@ public interface IChatAttachmentService
     Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(
         Guid attachmentId,
         Guid userId,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        bool accessTokenValidated = false);
+    Task<bool> DeleteUnattachedAsync(Guid attachmentId, Guid userId, CancellationToken ct = default);
 }
 
 public sealed class ChatAttachmentService(
@@ -33,6 +37,9 @@ public sealed class ChatAttachmentService(
     IAccessScopeAccessor accessScope,
     IEffectiveMaskService effectiveMaskService,
     IChatRoomAccessService chatRoomAccess,
+    IAttachmentTypeInspector typeInspector,
+    IMalwareScanner malwareScanner,
+    IAttachmentAccessTokenService accessTokenService,
     IOptions<UploadOptions> options) : IChatAttachmentService
 {
     public async Task<ChatAttachmentDto> UploadAsync(Guid userId, IFormFile file, CancellationToken ct = default)
@@ -41,15 +48,19 @@ public sealed class ChatAttachmentService(
         if (file.Length <= 0 || file.Length > opts.MaxBytes)
             throw new InvalidOperationException($"File must be between 1 and {opts.MaxBytes} bytes.");
 
-        string contentType = string.IsNullOrWhiteSpace(file.ContentType)
-            ? "application/octet-stream"
-            : file.ContentType;
-        if (!opts.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Content type '{contentType}' is not allowed.");
-
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
         System.Collections.BitArray featureMask = BitMask.FromBase64(masks.FeatureMask, 256);
-        bool isImage = contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+        AccessScope? scope = accessScope.ResolveCurrent()
+            ?? throw new InvalidOperationException("Access scope is required.");
+
+        AttachmentTypeInspectionResult inspection;
+        await using (Stream inspectStream = file.OpenReadStream())
+        {
+            inspection = typeInspector.Inspect(inspectStream, file.ContentType);
+        }
+
+        bool isImage = inspection.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
         if (isImage && !BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
             && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
         {
@@ -59,8 +70,18 @@ public sealed class ChatAttachmentService(
         if (!isImage && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
             throw new InvalidOperationException("You do not have permission to upload files.");
 
-        AccessScope? scope = accessScope.ResolveCurrent()
-            ?? throw new InvalidOperationException("Access scope is required.");
+        await using (Stream scanStream = file.OpenReadStream())
+        {
+            MalwareScanResult scanResult = await malwareScanner.ScanAsync(scanStream, ct);
+            string? rejectionMessage = scanResult switch
+            {
+                MalwareScanResult.Infected => "Malware detected.",
+                MalwareScanResult.Unavailable => "Virus scanner unavailable.",
+                _ => null,
+            };
+            if (rejectionMessage is not null)
+                throw new InvalidOperationException(rejectionMessage);
+        }
 
         Directory.CreateDirectory(opts.RootPath);
         Guid attachmentId = Guid.NewGuid();
@@ -68,9 +89,10 @@ public sealed class ChatAttachmentService(
         string storageName = $"{attachmentId:N}_{safeName}";
         string fullPath = Path.Combine(opts.RootPath, storageName);
 
+        await using (Stream saveStream = file.OpenReadStream())
         await using (FileStream fs = File.Create(fullPath))
         {
-            await file.CopyToAsync(fs, ct);
+            await saveStream.CopyToAsync(fs, ct);
         }
 
         ChatAttachment attachment = new()
@@ -78,12 +100,14 @@ public sealed class ChatAttachmentService(
             AttachmentId = attachmentId,
             UploadedByUserId = userId,
             OriginalFileName = safeName,
-            ContentType = contentType,
+            ContentType = inspection.ContentType,
             SizeBytes = file.Length,
             StoragePath = storageName,
             CreatedAtUtc = DateTime.UtcNow,
             OwnerAccountClass = scope.AccountClass,
             TenantDatabaseName = scope.TenantDatabaseName,
+            IsHazard = inspection.IsHazard,
+            InlinePreviewKind = inspection.InlinePreviewKind,
         };
         db.ChatAttachments.Add(attachment);
         await db.SaveChangesAsync(ct);
@@ -91,15 +115,18 @@ public sealed class ChatAttachmentService(
         return new ChatAttachmentDto(
             attachmentId,
             safeName,
-            contentType,
+            inspection.ContentType,
             file.Length,
-            $"/api/chat/attachments/{attachmentId}");
+            accessTokenService.MintDownloadUrl(attachmentId, userId),
+            inspection.IsHazard,
+            inspection.InlinePreviewKind);
     }
 
     public async Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(
         Guid attachmentId,
         Guid userId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool accessTokenValidated = false)
     {
         ChatAttachment? attachment = await db.ChatAttachments.AsNoTracking()
             .Include(a => a.MessageLinks)
@@ -108,7 +135,7 @@ public sealed class ChatAttachmentService(
         if (attachment is null)
             return null;
 
-        if (!await CanDownloadAsync(attachment, userId, ct))
+        if (!accessTokenValidated && !await CanDownloadAsync(attachment, userId, ct))
             return null;
 
         UploadOptions opts = options.Value;
@@ -120,9 +147,32 @@ public sealed class ChatAttachmentService(
         return (stream, attachment.ContentType, attachment.OriginalFileName);
     }
 
+    public async Task<bool> DeleteUnattachedAsync(Guid attachmentId, Guid userId, CancellationToken ct = default)
+    {
+        ChatAttachment? attachment = await db.ChatAttachments
+            .Include(a => a.MessageLinks)
+            .FirstOrDefaultAsync(a => a.AttachmentId == attachmentId, ct);
+        if (attachment is null)
+            return false;
+
+        if (attachment.UploadedByUserId != userId)
+            throw new InvalidOperationException("You can only delete files you uploaded.");
+
+        if (attachment.MessageLinks.Count > 0)
+            throw new InvalidOperationException("Cannot delete an attachment linked to a message.");
+
+        UploadOptions opts = options.Value;
+        string fullPath = Path.Combine(opts.RootPath, attachment.StoragePath);
+        if (File.Exists(fullPath))
+            File.Delete(fullPath);
+
+        db.ChatAttachments.Remove(attachment);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     private async Task<bool> CanDownloadAsync(ChatAttachment attachment, Guid userId, CancellationToken ct)
     {
-        // Uploader may download an unattached (or attached) file they just uploaded.
         if (attachment.UploadedByUserId == userId)
             return true;
 

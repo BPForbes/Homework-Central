@@ -94,6 +94,42 @@ builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationSer
 builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
 builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Configuration.GetSection("Llm"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
+builder.Services.Configure<HomeworkCentral.Api.Uploads.ClamAvOptions>(builder.Configuration.GetSection("ClamAv"));
+builder.Services.Configure<HomeworkCentral.Api.Uploads.AttachmentAccessOptions>(
+    builder.Configuration.GetSection("AttachmentAccess"));
+
+string? redisConnection = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnection;
+        options.InstanceName = "hc:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+
+builder.Services.AddSingleton<HomeworkCentral.Api.Uploads.HazardDefinitionRegistry>();
+builder.Services.AddSingleton<MimeDetective.IContentInspector>(_ =>
+{
+    MimeDetective.ContentInspectorBuilder inspectorBuilder = new()
+    {
+        Definitions = MimeDetective.Definitions.DefaultDefinitions.All(),
+    };
+    return inspectorBuilder.Build();
+});
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IAttachmentTypeInspector,
+    HomeworkCentral.Api.Uploads.AttachmentTypeInspector>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IMalwareScanner,
+    HomeworkCentral.Api.Uploads.ClamAvMalwareScanner>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IAttachmentAccessTokenService,
+    HomeworkCentral.Api.Uploads.AttachmentAccessTokenService>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IOrphanAttachmentCleanupService,
+    HomeworkCentral.Api.Uploads.OrphanAttachmentCleanupService>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Uploads.OrphanAttachmentCleanupWorker>();
 builder.Services.AddHttpClient<OllamaTicketTrackingAnalyzer>((sp, client) =>
 {
     TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;

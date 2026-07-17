@@ -357,6 +357,7 @@ public partial class AppDbContext(
             e.Property(a => a.OriginalFileName).HasMaxLength(256).IsRequired();
             e.Property(a => a.ContentType).HasMaxLength(128).IsRequired();
             e.Property(a => a.StoragePath).HasMaxLength(512).IsRequired();
+            e.Property(a => a.InlinePreviewKind).HasMaxLength(16);
         });
 
         mb.Entity<ChatMessageAttachment>(e =>
