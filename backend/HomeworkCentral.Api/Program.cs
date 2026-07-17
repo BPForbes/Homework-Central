@@ -374,7 +374,9 @@ if (!skipDevStartupWarmup)
         await personaProvisioner.InitializeFromExistingDatabasesAsync();
 
         startupLogger.LogInformation(
-            "Essential dev seed complete. Persona databases continue provisioning in the background.");
+            DevPersonaEagerProvisioning.IsEnabled(app.Configuration)
+                ? "Essential dev seed complete. Persona databases continue provisioning in the background."
+                : "Essential dev seed complete. Persona databases provision on demand at dev login.");
     }
 }
 
