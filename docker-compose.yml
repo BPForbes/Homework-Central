@@ -68,7 +68,9 @@ services:
     image: clamav/clamav:latest
     restart: unless-stopped
     cpus: 1.0
-    mem_limit: 2g
+    # clamd holds the signature database in RAM (~1.2-1.5g) and briefly holds two copies
+    # during a concurrent signature reload, so 2g risks OOM kills mid-reload.
+    mem_limit: 3g
     ports:
       - "${CLAMAV_HOST_PORT:-3310}:3310"
     healthcheck:

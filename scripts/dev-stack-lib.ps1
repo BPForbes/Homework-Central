@@ -466,6 +466,17 @@ function Stop-DevStackClamAv {
     docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop clamav *> $null
 }
 
+# The local API defaults to the in-memory cache (appsettings.Development.json blanks the
+# Redis connection string), but docker-compose.yml defines a `redis` service a developer may
+# have started by hand. Stop it with the rest of the stack; a no-op when it was never started.
+function Stop-DevStackRedis {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile stop redis *> $null
+}
+
 function Initialize-DevStackState {
     param(
         [Parameter(Mandatory = $true)]
@@ -481,6 +492,7 @@ function Initialize-DevStackState {
             Stop-DevStackPostgres -Port $existing['postgres_port']
             Stop-DevStackFCaptcha
             Stop-DevStackClamAv
+            Stop-DevStackRedis
         }
 
         Write-DevStackState @{
@@ -533,6 +545,7 @@ function Unregister-DevStackServer {
         Stop-DevStackPostgres -Port $port
         Stop-DevStackFCaptcha
         Stop-DevStackClamAv
+        Stop-DevStackRedis
         Write-Host '==> Stopped Docker Postgres and freed localhost port' -ForegroundColor DarkGray
     }
 
@@ -546,6 +559,7 @@ function Stop-DevStack {
             Stop-DevStackPostgres -Port $state['postgres_port']
             Stop-DevStackFCaptcha
             Stop-DevStackClamAv
+            Stop-DevStackRedis
         }
 
         Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
