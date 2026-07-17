@@ -3,10 +3,11 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     # Local-development ceiling. These limits apply with ordinary `docker compose up`
-    # (unlike deploy.resources, which is Swarm-only). Sized so dev persona provisioning
-    # (~70 tenant databases at startup) doesn't starve interactive queries.
-    cpus: 4.0
-    mem_limit: 4g
+    # (unlike deploy.resources, which is Swarm-only). Persona tenant databases provision
+    # on demand at dev login (HC_DEV_PROVISION_ALL_PERSONAS=1 restores the full startup
+    # sweep), so 2g leaves interactive queries comfortable even on an 8 GB host.
+    cpus: 2.0
+    mem_limit: 2g
     pids_limit: 256
     environment:
       POSTGRES_DB: postgres

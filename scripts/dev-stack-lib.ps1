@@ -439,7 +439,17 @@ function Test-DevClamAvConnection([string]$Port) {
     }
 }
 
+# ClamAV is opt-in for local dev: clamd keeps ~1.2-1.5g of signatures resident, which is a
+# lot on small machines, and the API scanner fails open (NotScanned) when it's absent.
+function Test-DevClamAvOptedIn {
+    return $env:HC_ENABLE_CLAMAV -eq '1'
+}
+
 function Ensure-DevClamAvRunning([string]$Port) {
+    if (-not (Test-DevClamAvOptedIn)) {
+        return
+    }
+
     if (Test-DevClamAvConnection $Port) {
         return
     }

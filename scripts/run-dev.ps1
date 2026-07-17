@@ -387,6 +387,11 @@ function Start-FCaptcha {
 }
 
 function Start-ClamAv {
+    if (-not (Test-DevClamAvOptedIn)) {
+        Write-Step 'Skipping ClamAV (set HC_ENABLE_CLAMAV=1 to scan uploads; scans fail open without it)'
+        return
+    }
+
     Write-Step "Starting ClamAV (Docker) on localhost:$($script:DevClamAvHostPort)"
 
     Assert-DockerRunning
@@ -571,7 +576,11 @@ function Start-DevStack([hashtable]$EnvValues) {
             $fcaptchaPort = $script:DevFCaptchaHostPort
         }
         Write-Host "  FCaptcha: localhost:$fcaptchaPort (Docker; stops when both terminals are closed)"
-        Write-Host "  ClamAV:   localhost:$($script:DevClamAvHostPort) (Docker; upload scanning, fail-open while loading)"
+        if (Test-DevClamAvOptedIn) {
+            Write-Host "  ClamAV:   localhost:$($script:DevClamAvHostPort) (Docker; upload scanning, fail-open while loading)"
+        } else {
+            Write-Host '  ClamAV:   off (uploads scan as NotScanned; set HC_ENABLE_CLAMAV=1 to enable)'
+        }
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'
