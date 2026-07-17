@@ -3,9 +3,10 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     # Local-development ceiling. These limits apply with ordinary `docker compose up`
-    # (unlike deploy.resources, which is Swarm-only).
-    cpus: 2.0
-    mem_limit: 1g
+    # (unlike deploy.resources, which is Swarm-only). Sized so dev persona provisioning
+    # (~70 tenant databases at startup) doesn't starve interactive queries.
+    cpus: 4.0
+    mem_limit: 4g
     pids_limit: 256
     environment:
       POSTGRES_DB: postgres
