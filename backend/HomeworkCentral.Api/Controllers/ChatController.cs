@@ -313,7 +313,7 @@ public class ChatController(
         Guid attachmentId,
         [FromQuery] string? accessToken,
         [FromQuery] bool riskAcknowledged = false,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
         Guid? userId = GetUserId();
         bool accessTokenValidated = false;
