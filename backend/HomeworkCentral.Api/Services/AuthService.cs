@@ -30,6 +30,15 @@ public class AuthService(
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
         string normalizedEmail = req.Email.ToLowerInvariant();
+        string username = req.Username.Trim();
+
+        // Fast conflict checks before captcha/hash work so retries after a slow success
+        // (or double-submit) return a clear 409 instead of a long failing INSERT.
+        if (await masterDb.Users.AsNoTracking().AnyAsync(u => u.Email == normalizedEmail))
+            throw new InvalidOperationException("An account with that email already exists. Try signing in instead.");
+        if (await masterDb.Users.AsNoTracking().AnyAsync(u => u.Username == username))
+            throw new InvalidOperationException("That username is already taken.");
+
         bool captchaVerified = await captcha.ValidateAsync(req.Captcha, CaptchaAction.Register);
 
         DateTime now = DateTime.UtcNow;
@@ -37,7 +46,7 @@ public class AuthService(
         {
             UserId = Guid.NewGuid(),
             Email = normalizedEmail,
-            Username = req.Username,
+            Username = username,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
             CreatedAt = now,
             UpdatedAt = now,
@@ -57,7 +66,7 @@ public class AuthService(
             if (pg.SqlState == "23505")
             {
                 if (string.Equals(pg.ConstraintName, "IX_Users_Email", StringComparison.Ordinal))
-                    throw new InvalidOperationException("An account with that email already exists.");
+                    throw new InvalidOperationException("An account with that email already exists. Try signing in instead.");
                 if (string.Equals(pg.ConstraintName, "IX_Users_Username", StringComparison.Ordinal))
                     throw new InvalidOperationException("That username is already taken.");
             }

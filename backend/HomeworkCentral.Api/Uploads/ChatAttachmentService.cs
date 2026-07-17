@@ -141,9 +141,9 @@ public sealed class ChatAttachmentService(
         if (!accessTokenValidated && !await CanDownloadAsync(attachment, userId, ct))
             return null;
 
-        bool requiresCaution = attachment.ScanStatus is MalwareScanResult.Infected
-            or MalwareScanResult.ScanFailed
-            or MalwareScanResult.Unknown;
+        // Only confirmed malware prompts the caution gate. Scanner downtime / NotScanned
+        // must not block previews of ordinary PNG/txt/code uploads.
+        bool requiresCaution = attachment.ScanStatus is MalwareScanResult.Infected;
         if (requiresCaution && !riskAcknowledged)
         {
             return new AttachmentReadResult(

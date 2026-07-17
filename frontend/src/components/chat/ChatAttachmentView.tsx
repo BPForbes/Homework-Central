@@ -27,7 +27,7 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
   const [textLoading, setTextLoading] = useState(false)
   const [riskAcknowledged, setRiskAcknowledged] = useState(false)
   const [showSafetyWarning, setShowSafetyWarning] = useState(false)
-  const requiresCaution = ['Infected', 'ScanFailed', 'Unknown'].includes(attachment.scanStatus ?? 'Unknown')
+  const requiresCaution = attachment.scanStatus === 'Infected'
 
   const needsBlob = (
     useBlobFallback
