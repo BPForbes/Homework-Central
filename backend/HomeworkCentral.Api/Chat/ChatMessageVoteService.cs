@@ -10,6 +10,7 @@ using HomeworkCentral.Api.Tickets;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HomeworkCentral.Api.Chat;
 
@@ -69,21 +70,41 @@ public sealed class ChatMessageVoteService(
 
         if (existing is null)
         {
-            db.ChatMessageVotes.Add(new ChatMessageVote
+            ChatMessageVote inserted = new ChatMessageVote
             {
                 MessageId = messageId,
                 UserId = userId,
                 Value = value,
                 UpdatedAtUtc = DateTime.UtcNow,
-            });
+            };
+            db.ChatMessageVotes.Add(inserted);
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsDuplicateVote(ex))
+            {
+                db.Entry(inserted).State = EntityState.Detached;
+                existing = await db.ChatMessageVotes
+                    .FirstOrDefaultAsync(v => v.MessageId == messageId && v.UserId == userId, ct);
+                if (existing is null)
+                    throw;
+
+                if (existing.Value == value)
+                    return await BuildDtoAsync(message, userId, ct);
+
+                existing.Value = value;
+                existing.UpdatedAtUtc = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
         }
         else
         {
             existing.Value = value;
             existing.UpdatedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
         }
-
-        await db.SaveChangesAsync(ct);
         MessageVoteDto dto = await BuildDtoAsync(message, userId, ct);
         string groupKey = ChatRoomGroupKey.Build(message.RoomId, message.OwnerAccountClass);
         await hubContext.Clients.Group(groupKey).SendAsync("MessageVoteUpdated", dto, ct);
@@ -117,4 +138,7 @@ public sealed class ChatMessageVoteService(
             downs,
             viewer is null ? null : viewer > 0 ? "up" : "down");
     }
+
+    private static bool IsDuplicateVote(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 }

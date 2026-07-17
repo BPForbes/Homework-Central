@@ -73,7 +73,7 @@ export function useChatRoom(
   }, [roomId])
 
   useEffect(() => {
-    if (!getAccessToken())
+    if (!roomId || !getAccessToken())
       return
 
     const connection = new signalR.HubConnectionBuilder()
@@ -161,6 +161,12 @@ export function useChatRoom(
 
     connection.onreconnecting(() => {
       setConnected(false)
+      // Automatic reconnect opens a new underlying connection id; clear typing on the dying
+      // connection so a slow hub disconnect does not leave a stuck indicator for the room.
+      if (isTypingRef.current) {
+        isTypingRef.current = false
+        void connection.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
+      }
     })
 
     return () => {

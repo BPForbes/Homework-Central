@@ -46,7 +46,7 @@ export function InboxSidebar() {
 
   useChatNavSync(() => {
     void loadSummary()
-  })
+  }, user?.userId)
 
   useEffect(() => {
     void loadSummary()
