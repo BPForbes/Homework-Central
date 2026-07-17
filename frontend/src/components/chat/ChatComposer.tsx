@@ -149,18 +149,23 @@ export function ChatComposer({
     setAttachError(null)
     setUploading(true)
     try {
-      const uploaded: PendingAttachment[] = []
       for (const file of files) {
-        const { data } = await chatApi.uploadAttachment(file)
-        uploaded.push({
-          localId: `${data.attachmentId}-${file.name}`,
-          attachmentId: data.attachmentId,
-          fileName: data.fileName,
-        })
+        try {
+          const { data } = await chatApi.uploadAttachment(file)
+          setPendingAttachments((prev) => [
+            ...prev,
+            {
+              localId: `${data.attachmentId}-${file.name}`,
+              attachmentId: data.attachmentId,
+              fileName: data.fileName,
+            },
+          ])
+        } catch {
+          setAttachError('Could not upload that file. Check the type and size, then try again.')
+          // Keep earlier successes in pendingAttachments; stop the remaining selection.
+          break
+        }
       }
-      setPendingAttachments((prev) => [...prev, ...uploaded])
-    } catch {
-      setAttachError('Could not upload that file. Check the type and size, then try again.')
     } finally {
       setUploading(false)
     }
@@ -187,7 +192,12 @@ export function ChatComposer({
     if (!sent) {
       setDraft(content)
       setPendingAttachments(attachmentsSnapshot)
-      onTyping()
+      // Attachment-only restores have blank content; do not re-broadcast typing
+      // (there is no server-side typing timeout, and refocus won't stop it).
+      if (content.trim())
+        onTyping()
+      else
+        onStopTyping()
     }
 
     textareaRef.current?.focus()
