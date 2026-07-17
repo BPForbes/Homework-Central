@@ -231,6 +231,7 @@ builder.Services.AddCors(opts =>
 
 bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
 bool skipDevStartupWarmup = DevStartupWarmup.ShouldSkip(builder.Configuration, builder.Environment);
+bool eagerPersonaProvisioning = DevPersonaEagerProvisioning.IsEnabled(builder.Configuration);
 if (devBypassEnabled)
 {
     builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
@@ -284,7 +285,11 @@ app.MapGet("/healthz", ([FromServices] IDevPersonaProvisioner? personaProvisione
         status = "healthy",
         personasProvisioned = personaProvisioner.ProvisionedCount,
         personasTotal = personaProvisioner.TotalPersonaCount,
-        personasReady = personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
+        // "Ready" means no pending background sweep. In on-demand mode (the default) every
+        // persona is usable immediately — each provisions at its first dev login — so there
+        // is nothing to wait for.
+        personasReady = !eagerPersonaProvisioning
+            || personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
     });
 });
 
@@ -374,7 +379,7 @@ if (!skipDevStartupWarmup)
         await personaProvisioner.InitializeFromExistingDatabasesAsync();
 
         startupLogger.LogInformation(
-            DevPersonaEagerProvisioning.IsEnabled(app.Configuration)
+            eagerPersonaProvisioning
                 ? "Essential dev seed complete. Persona databases continue provisioning in the background."
                 : "Essential dev seed complete. Persona databases provision on demand at dev login.");
     }
