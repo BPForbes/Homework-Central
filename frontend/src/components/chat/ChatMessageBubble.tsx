@@ -39,6 +39,7 @@ export function ChatMessageBubble({
   const [copied, setCopied] = useState(false)
   const dragState = useRef<{ pointerId: number; startX: number; currentX: number; dragging: boolean } | null>(null)
   const score = message.score ?? 0
+  const hasReply = Boolean(message.replyToMessageId)
 
   function handlePointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (isOwn || event.pointerType === 'mouse')
@@ -79,8 +80,14 @@ export function ChatMessageBubble({
   }
 
   return (
-    <div className={`chat-row ${isOwn ? 'chat-row--own' : 'chat-row--other'}`}>
-      <div className="chat-bubble-wrap">
+    <div className={`chat-bubble-row ${isOwn ? 'chat-bubble-row--own' : 'chat-bubble-row--other'}`}>
+      <div
+        className={[
+          'chat-message-thread',
+          isOwn ? 'chat-message-thread--own' : 'chat-message-thread--other',
+          hasReply ? 'chat-message-thread--has-reply' : '',
+        ].filter(Boolean).join(' ')}
+      >
         <article
           data-message-id={message.messageId}
           className={`chat-bubble ${isOwn ? 'chat-bubble--own' : 'chat-bubble--other'} ${highlighted ? 'chat-bubble--highlighted' : ''}`}
@@ -90,12 +97,6 @@ export function ChatMessageBubble({
           onPointerUp={(event) => endDrag(event)}
           onPointerCancel={(event) => endDrag(event, true)}
         >
-          {votesEnabled && (
-            <div className="chat-bubble-score" aria-label={`Score ${score}`}>
-              {score}
-            </div>
-          )}
-
           {!isOwn && message.senderUsername && (
             <div
               className="chat-bubble-sender"
@@ -165,6 +166,11 @@ export function ChatMessageBubble({
           </time>
 
           <div className="chat-bubble-actions" role="toolbar" aria-label="Message actions">
+            {votesEnabled && (
+              <span className="chat-bubble-score-chip" aria-label={`Score ${score}`}>
+                {score}
+              </span>
+            )}
             {votesEnabled && !isOwn && onVote && (
               <>
                 <button

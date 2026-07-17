@@ -196,16 +196,19 @@ export function useChatRoom(
     }
   }, [roomId])
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, attachmentIds?: string[]) => {
     const trimmed = content.trim()
-    if (!trimmed || sending)
+    const hasAttachments = Boolean(attachmentIds && attachmentIds.length > 0)
+    if ((!trimmed && !hasAttachments) || sending)
       return false
 
     const replyToMessageId = replyTarget?.messageId
     setSending(true)
     stopTyping()
     try {
-      const { data } = await chatApi.sendMessage(roomId, trimmed, replyToMessageId)
+      const { data } = await chatApi.sendMessage(roomId, trimmed, replyToMessageId, {
+        attachmentIds: hasAttachments ? attachmentIds : undefined,
+      })
       addMessage(data)
       setReplyTarget(null)
       return true

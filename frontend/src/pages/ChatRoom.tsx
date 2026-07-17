@@ -64,9 +64,9 @@ export function ChatRoom() {
   const [roomLoading, setRoomLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
   const [mentionRoles, setMentionRoles] = useState<MentionRoleOption[]>([])
-  // null = unresolved; avoid flashing vote UI in ticket rooms before lookup finishes
+  // null = unresolved; enable votes until a ticket chat is confirmed (avoids stuck-off / flash-off)
   const [isTicketChat, setIsTicketChat] = useState<boolean | null>(null)
-  const votesEnabled = isTicketChat === false
+  const votesEnabled = isTicketChat !== true
 
   const roomType = room?.roomType ?? 'Chat'
   const isChatRoom = roomType === 'Chat'

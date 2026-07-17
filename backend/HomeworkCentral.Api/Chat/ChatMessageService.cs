@@ -320,6 +320,15 @@ public sealed class ChatMessageService(
 
         await masterDb.SaveChangesAsync(ct);
 
+        if (hasAttachments)
+        {
+            await masterDb.Entry(message)
+                .Collection(m => m.Attachments)
+                .Query()
+                .Include(a => a.Attachment)
+                .LoadAsync(ct);
+        }
+
         await assessmentQueue.EnqueueAsync(
             new AssessmentMessageJob(message.MessageId, roomId, userId, message.RawContent),
             ct);
