@@ -8,7 +8,7 @@ namespace HomeworkCentral.Api.Assessment;
 public class LlmOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:11434";
-    public string ChatModel { get; set; } = "qwen3:1.7b";
+    public string ChatModel { get; set; } = "qwen3:0.6b";
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
     public int TimeoutSeconds { get; set; } = 60;
     public bool Enabled { get; set; } = true;
@@ -40,7 +40,9 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
             {
                 Model = opts.ChatModel,
                 Stream = false,
+                Think = false,
                 Format = "json",
+                Options = new OllamaRuntimeOptions(),
                 Messages =
                 [
                     new OllamaChatMessage { Role = "system", Content = systemPrompt },
@@ -130,8 +132,22 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
     {
         public string Model { get; set; } = string.Empty;
         public bool Stream { get; set; }
+        public bool Think { get; set; }
         public string Format { get; set; } = "json";
+        public OllamaRuntimeOptions Options { get; set; } = new();
         public List<OllamaChatMessage> Messages { get; set; } = [];
+    }
+
+    private sealed class OllamaRuntimeOptions
+    {
+        [JsonPropertyName("temperature")]
+        public double Temperature { get; set; } = 0;
+
+        [JsonPropertyName("num_ctx")]
+        public int ContextTokens { get; set; } = 2048;
+
+        [JsonPropertyName("num_predict")]
+        public int MaxOutputTokens { get; set; } = 256;
     }
 
     private sealed class OllamaChatMessage

@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faBrain } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { useAuth } from '../../context/useAuth'
 import { MANAGE_SERVER_INFRASTRUCTURE_BIT } from '../../constants/permissions'
@@ -60,6 +61,8 @@ export function ServerMaintenanceNav({ title }: ServerMaintenanceNavProps) {
             />
             <NavSeparator />
             <NavIconLink to="/server" label="Server" icon={byPrefixAndName.fas.server} end={false} />
+            <NavSeparator />
+            <NavIconLink to="/server/NeuralNet/TrainingFeedback" label="Neural Network" icon={faBrain} end={false} />
           </>
         )}
       </div>

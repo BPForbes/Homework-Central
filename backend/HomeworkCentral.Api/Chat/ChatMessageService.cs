@@ -137,6 +137,9 @@ public sealed class ChatMessageService(
         List<ChatMessage> messages = await query
             .Include(m => m.Attachments).ThenInclude(a => a.Attachment)
             .Include(m => m.LinkPreviews)
+            // These are independent collections. Splitting avoids multiplying vote,
+            // attachment, and preview rows in one large joined result.
+            .AsSplitQuery()
             .OrderByDescending(message => message.CreatedAtUtc)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -226,11 +229,15 @@ public sealed class ChatMessageService(
 
         if (attachmentIds is { Count: > 0 })
         {
+            Guid[] distinctAttachmentIds = attachmentIds.Distinct().ToArray();
+            Dictionary<Guid, ChatAttachment> attachmentsById = await masterDb.ChatAttachments
+                .Where(a => distinctAttachmentIds.Contains(a.AttachmentId))
+                .ToDictionaryAsync(a => a.AttachmentId, ct);
+
             int order = 0;
-            foreach (Guid attachmentId in attachmentIds.Distinct())
+            foreach (Guid attachmentId in distinctAttachmentIds)
             {
-                ChatAttachment? attachment = await masterDb.ChatAttachments
-                    .FirstOrDefaultAsync(a => a.AttachmentId == attachmentId, ct);
+                attachmentsById.TryGetValue(attachmentId, out ChatAttachment? attachment);
 
                 switch (attachment)
                 {
@@ -343,9 +350,8 @@ public sealed class ChatMessageService(
                 .LoadAsync(ct);
         }
 
-        await assessmentQueue.EnqueueAsync(
-            new AssessmentMessageJob(message.MessageId, roomId, userId, message.RawContent),
-            ct);
+        assessmentQueue.TryEnqueue(
+            new AssessmentMessageJob(message.MessageId, roomId, userId, message.RawContent));
 
         bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
         ChatMessageDto dto = ToDto(message, userId, includeVotes: !isTicketRoom, mintAccessTokens: true);

@@ -112,8 +112,35 @@ export interface TicketAnalyzeResult {
   available: boolean
   decision: string | null
   summary: string | null
+  currentScore: number | null
+  messageScores: TicketMessageScore[]
   watches: TicketUserWatch[]
   inboxRecipientsNotified: number
+}
+
+export interface TicketMessageScore {
+  scoreEventId: string
+  messageId: string
+  trackedUserId: string
+  previousScore: number
+  scoreDelta: number
+  currentScore: number
+  evidenceConfidence: number
+  relevance: number
+  reason: string
+  studentScore: number
+  studentConfidence: number
+  studentRelevance: number
+  studentCategory: string
+  studentReasoning: string
+  reviewerInvoked: boolean
+  reviewerScore: number | null
+  reviewerConfidence: number | null
+  correctionNeeded: boolean
+  reviewerExplanation: string | null
+  reviewerGuidance: string | null
+  trainingApprovedAtUtc: string | null
+  createdAtUtc: string
 }
 
 export const TICKET_INTAKE_QUESTION_TYPES: { value: TicketIntakeQuestionType; label: string }[] = [

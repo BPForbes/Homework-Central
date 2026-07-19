@@ -32,6 +32,8 @@ public interface ITicketService
         UpsertTicketWatchRequest request,
         CancellationToken ct = default);
     Task<TicketAnalyzeResultDto> AnalyzeAsync(Guid ticketId, Guid actorUserId, CancellationToken ct = default);
+    Task<TicketMessageScoreDto> ApproveScoreTrainingAsync(
+        Guid ticketId, Guid scoreEventId, Guid actorUserId, CancellationToken ct = default);
     Task<TicketDto> ApproveDecisionAsync(
         Guid ticketId,
         Guid actorUserId,

@@ -155,6 +155,9 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, H
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ILlmClient>(sp =>
     sp.GetRequiredService<HomeworkCentral.Api.Assessment.LlmClient>());
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IVectorDocumentStore, HomeworkCentral.Api.Assessment.VectorDocumentStore>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ITicketStudentModel, HomeworkCentral.Api.Assessment.TicketStudentModel>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.TicketStudentWarmupService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAssessmentPipelineService, HomeworkCentral.Api.Assessment.AssessmentPipelineService>();

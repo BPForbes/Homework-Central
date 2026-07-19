@@ -528,7 +528,8 @@ run_stack() {
   # Vite has no API dependency, so bind the frontend immediately rather than waiting for
   # migrations and seed data to finish on port 5000.
   log "Starting frontend on http://localhost:5173"
-  VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
+  NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=384}" \
+    VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
 
   if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then

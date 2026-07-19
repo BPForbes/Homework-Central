@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
@@ -21,7 +22,9 @@ public sealed class TicketService(
     IChatNavNotifier chatNavNotifier,
     IAccessScopeAccessor accessScope,
     ITicketRecipientResolver recipientResolver,
-    ITicketTrackingAnalyzer trackingAnalyzer) : ITicketService
+    ITicketTrackingAnalyzer trackingAnalyzer,
+    ITicketStudentModel student,
+    IVectorDocumentStore vectors) : ITicketService
 {
     private static readonly Guid SystemInboxMessageId =
         Guid.Parse("00000000-0000-0000-0000-00000000c002");
@@ -401,6 +404,18 @@ public sealed class TicketService(
             ?? await db.TicketPortalConfigs.AsNoTracking()
                 .FirstAsync(p => p.ChannelId == ticket.PortalChannelId, ct);
 
+        List<TicketMessageScoreDto> existingScores = await MapMessageScoresAsync(ticket.TicketId, ct);
+        if (ticket.AiTrackingOptOut)
+        {
+            return new TicketAnalyzeResultDto
+            {
+                Available = false,
+                CurrentScore = existingScores.LastOrDefault()?.CurrentScore,
+                MessageScores = existingScores,
+                Watches = await MapWatchesAsync(ticket.TicketId, ct),
+            };
+        }
+
         List<ChatMessage> messages = await db.ChatMessages
             .AsNoTracking()
             .Where(message => message.RoomId == ticket.RoomId)
@@ -413,6 +428,8 @@ public sealed class TicketService(
             return new TicketAnalyzeResultDto
             {
                 Available = false,
+                CurrentScore = existingScores.LastOrDefault()?.CurrentScore,
+                MessageScores = existingScores,
                 Watches = await MapWatchesAsync(ticket.TicketId, ct),
             };
         }
@@ -435,15 +452,118 @@ public sealed class TicketService(
             await db.SaveChangesAsync(ct);
         }
 
+        List<TicketMessageScoreDto> messageScores = await MapMessageScoresAsync(ticket.TicketId, ct);
         return new TicketAnalyzeResultDto
         {
             Available = true,
             Decision = analysis.Decision,
             Summary = analysis.Summary,
+            CurrentScore = messageScores.LastOrDefault()?.CurrentScore,
+            MessageScores = messageScores,
             Watches = await MapWatchesAsync(ticket.TicketId, ct),
             InboxRecipientsNotified = notified,
         };
     }
+
+    private async Task<List<TicketMessageScoreDto>> MapMessageScoresAsync(
+        Guid ticketId,
+        CancellationToken ct)
+    {
+        List<TicketMessageScore> newest = await db.TicketMessageScores.AsNoTracking()
+            .Where(score => score.TicketId == ticketId)
+            .OrderByDescending(score => score.CreatedAtUtc)
+            .Take(200)
+            .ToListAsync(ct);
+
+        return newest
+            .OrderBy(score => score.CreatedAtUtc)
+            .Select(score => new TicketMessageScoreDto
+            {
+                ScoreEventId = score.ScoreEventId,
+                MessageId = score.MessageId,
+                TrackedUserId = score.TrackedUserId,
+                PreviousScore = score.PreviousScore,
+                ScoreDelta = score.ScoreDelta,
+                CurrentScore = score.CurrentScore,
+                EvidenceConfidence = score.EvidenceConfidence,
+                Relevance = score.Relevance,
+                Reason = score.Reason,
+                StudentScore = score.StudentScore,
+                StudentConfidence = score.StudentConfidence,
+                StudentRelevance = score.StudentRelevance,
+                StudentCategory = score.StudentCategory,
+                StudentReasoning = score.StudentReasoning,
+                ReviewerInvoked = score.ReviewerInvoked,
+                ReviewerScore = score.ReviewerScore,
+                ReviewerConfidence = score.ReviewerConfidence,
+                CorrectionNeeded = score.CorrectionNeeded,
+                ReviewerExplanation = score.ReviewerExplanation,
+                ReviewerGuidance = score.ReviewerGuidance,
+                TrainingApprovedAtUtc = score.TrainingApprovedAtUtc,
+                CreatedAtUtc = score.CreatedAtUtc,
+            })
+            .ToList();
+    }
+
+    public async Task<TicketMessageScoreDto> ApproveScoreTrainingAsync(
+        Guid ticketId,
+        Guid scoreEventId,
+        Guid actorUserId,
+        CancellationToken ct = default)
+    {
+        Ticket ticket = await LoadAccessibleTicketForMutationAsync(ticketId, actorUserId, ct);
+        TicketMessageScore score = await db.TicketMessageScores
+            .FirstOrDefaultAsync(x => x.TicketId == ticketId && x.ScoreEventId == scoreEventId, ct)
+            ?? throw new InvalidOperationException("Score event was not found.");
+        if (score.ReviewerScore is null || score.ReviewerRelevance is null)
+            throw new InvalidOperationException("Only a completed reviewer correction can train the student.");
+
+        ChatMessage message = await db.ChatMessages.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.MessageId == score.MessageId, ct)
+            ?? throw new InvalidOperationException("The referenced message no longer exists.");
+        TicketUserWatch watch = ticket.Watches.FirstOrDefault(x => x.TrackedUserId == score.TrackedUserId)
+            ?? throw new InvalidOperationException("The score no longer has a matching ticket watch.");
+        string requirement = TicketStudentContext.BuildRequirement(watch, 4000);
+
+        TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
+            .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
+        if (training is null)
+        {
+            DateTime now = DateTime.UtcNow;
+            training = new TicketModelTrainingExample
+            {
+                TrainingExampleId = Guid.NewGuid(), MessageId = message.MessageId, ScoreEventId = score.ScoreEventId,
+                Requirement = requirement, TargetScore = score.ReviewerScore.Value,
+                TargetRelevance = score.ReviewerRelevance.Value, Category = score.StudentCategory,
+                Source = "StaffApprovedReviewer", ApprovedAtUtc = now, ApprovedByUserId = actorUserId,
+            };
+            db.TicketModelTrainingExamples.Add(training);
+            score.TrainingApprovedAtUtc = now;
+            score.TrainingApprovedByUserId = actorUserId;
+            await db.SaveChangesAsync(ct);
+            student.Train(new(requirement, message.RawContent, training.TargetScore, training.TargetRelevance, training.Category));
+            await vectors.UpsertAsync(
+                VectorNamespaces.TicketTrainingExample, message.RawContent, student.Embed(message.RawContent),
+                training.Category, training.TrainingExampleId,
+                new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source }, ct);
+        }
+
+        return MapMessageScore(score);
+    }
+
+    private static TicketMessageScoreDto MapMessageScore(TicketMessageScore score) => new()
+    {
+        ScoreEventId = score.ScoreEventId, MessageId = score.MessageId, TrackedUserId = score.TrackedUserId,
+        PreviousScore = score.PreviousScore, ScoreDelta = score.ScoreDelta, CurrentScore = score.CurrentScore,
+        EvidenceConfidence = score.EvidenceConfidence, Relevance = score.Relevance, Reason = score.Reason,
+        StudentScore = score.StudentScore, StudentConfidence = score.StudentConfidence,
+        StudentRelevance = score.StudentRelevance, StudentCategory = score.StudentCategory,
+        StudentReasoning = score.StudentReasoning, ReviewerInvoked = score.ReviewerInvoked,
+        ReviewerScore = score.ReviewerScore, ReviewerConfidence = score.ReviewerConfidence,
+        CorrectionNeeded = score.CorrectionNeeded, ReviewerExplanation = score.ReviewerExplanation,
+        ReviewerGuidance = score.ReviewerGuidance, TrainingApprovedAtUtc = score.TrainingApprovedAtUtc,
+        CreatedAtUtc = score.CreatedAtUtc,
+    };
 
     public async Task<TicketDto> ApproveDecisionAsync(
         Guid ticketId,

@@ -2,6 +2,7 @@ using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
@@ -126,8 +127,7 @@ public class ChatMessageVoteServiceTests : IAsyncLifetime
             db,
             new ChatMessageServiceTestSupport.AllAccessEffectiveMaskService(),
             new ChatRoomAccessService(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor()),
-            hub,
-            new ChatMessageServiceTestSupport.NoOpAssessmentQueue());
+            hub);
 
     private sealed class CapturingHubContext : IHubContext<ChatHub>
     {

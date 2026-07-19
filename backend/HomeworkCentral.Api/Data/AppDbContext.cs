@@ -40,6 +40,8 @@ public partial class AppDbContext(
     public DbSet<TicketPortalConfig> TicketPortalConfigs => Set<TicketPortalConfig>();
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<TicketUserWatch> TicketUserWatches => Set<TicketUserWatch>();
+    public DbSet<TicketMessageScore> TicketMessageScores => Set<TicketMessageScore>();
+    public DbSet<TicketModelTrainingExample> TicketModelTrainingExamples => Set<TicketModelTrainingExample>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
     public DbSet<ChatMessageVote> ChatMessageVotes => Set<ChatMessageVote>();
@@ -348,6 +350,49 @@ public partial class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(w => w.TicketId);
             e.HasIndex(w => new { w.TrackedUserId, w.IsActive });
+        });
+
+        mb.Entity<TicketMessageScore>(e =>
+        {
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_TicketMessageScores_PreviousScore", "\"PreviousScore\" >= 0 AND \"PreviousScore\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_ScoreDelta", "\"ScoreDelta\" >= -1 AND \"ScoreDelta\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_CurrentScore", "\"CurrentScore\" >= 0 AND \"CurrentScore\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_EvidenceConfidence", "\"EvidenceConfidence\" >= 0 AND \"EvidenceConfidence\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_Relevance", "\"Relevance\" >= 0 AND \"Relevance\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_Student", "\"StudentScore\" >= 0 AND \"StudentScore\" <= 1 AND \"StudentConfidence\" >= 0 AND \"StudentConfidence\" <= 1 AND \"StudentRelevance\" >= 0 AND \"StudentRelevance\" <= 1");
+            });
+            e.HasKey(s => s.ScoreEventId);
+            e.Property(s => s.ScoreEventId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(s => s.Reason).HasMaxLength(500).IsRequired();
+            e.Property(s => s.EvaluatorModelVersion).HasMaxLength(128).IsRequired();
+            e.Property(s => s.RawEvaluationJson).IsRequired();
+            e.Property(s => s.StudentCategory).HasMaxLength(64).IsRequired();
+            e.Property(s => s.StudentReasoning).HasMaxLength(500).IsRequired();
+            e.Property(s => s.ReviewerExplanation).HasMaxLength(500);
+            e.Property(s => s.ReviewerGuidance).HasMaxLength(500);
+            e.HasOne(s => s.Ticket)
+                .WithMany(t => t.MessageScores)
+                .HasForeignKey(s => s.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(s => new { s.TicketId, s.MessageId }).IsUnique();
+            e.HasIndex(s => new { s.TicketId, s.TrackedUserId, s.CreatedAtUtc });
+        });
+
+        mb.Entity<TicketModelTrainingExample>(e =>
+        {
+            e.ToTable(t => t.HasCheckConstraint("CK_TicketModelTrainingExamples_Targets", "\"TargetScore\" >= 0 AND \"TargetScore\" <= 1 AND \"TargetRelevance\" >= 0 AND \"TargetRelevance\" <= 1"));
+            e.HasKey(x => x.TrainingExampleId);
+            e.Property(x => x.TrainingExampleId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Requirement).HasMaxLength(4000).IsRequired();
+            e.Property(x => x.BootstrapMessage).HasMaxLength(4000);
+            e.Property(x => x.Category).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Source).HasMaxLength(32).IsRequired();
+            e.HasOne<ChatMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<TicketMessageScore>().WithOne().HasForeignKey<TicketModelTrainingExample>(x => x.ScoreEventId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.MessageId);
+            e.HasIndex(x => x.ScoreEventId).IsUnique();
         });
 
         mb.Entity<ChatAttachment>(e =>

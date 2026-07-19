@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRotateLeft, faTrashCan, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { ticketsApi } from '../../api/ticketsApi'
-import type { Ticket } from '../../types/tickets'
+import type { Ticket, TicketAnalyzeResult } from '../../types/tickets'
 import { TicketIntakeSummary } from './TicketIntakeSummary'
 
 type TicketChatChromeProps = {
@@ -17,9 +17,11 @@ export function TicketChatChrome({ roomId, onTicketResolved }: TicketChatChromeP
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [analysis, setAnalysis] = useState<TicketAnalyzeResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    setAnalysis(null)
     async function load() {
       try {
         const { data } = await ticketsApi.getByRoom(roomId)
@@ -54,6 +56,40 @@ export function TicketChatChrome({ roomId, onTicketResolved }: TicketChatChromeP
       }
     } catch {
       setError('That ticket action could not be completed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function analyze() {
+    if (!ticket) return
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await ticketsApi.analyze(ticket.ticketId)
+      setAnalysis(data)
+      const refreshed = await ticketsApi.getByRoom(roomId)
+      setTicket(refreshed.data)
+    } catch {
+      setError('AI assessment could not be completed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function approveTraining(scoreEventId: string) {
+    if (!ticket) return
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await ticketsApi.approveScoreTraining(ticket.ticketId, scoreEventId)
+      setAnalysis((current) => current ? {
+        ...current,
+        messageScores: current.messageScores.map((score) =>
+          score.scoreEventId === scoreEventId ? data : score),
+      } : current)
+    } catch {
+      setError('That reviewer correction could not be approved for training.')
     } finally {
       setBusy(false)
     }
@@ -103,6 +139,58 @@ export function TicketChatChrome({ roomId, onTicketResolved }: TicketChatChromeP
         <p className="dashboard-hint">Approved decision: {ticket.approvedDecision}</p>
       )}
 
+      {analysis && (
+        <div className="ticket-watches">
+          <h4>Hybrid confidence assessment</h4>
+          {!analysis.available && (
+            <p className="dashboard-hint">AI decisioning is opted out or currently unavailable.</p>
+          )}
+          {analysis.currentScore !== null && (
+            <p className="dashboard-hint">
+              Current confidence: <strong>{analysis.currentScore.toFixed(3)}</strong> / 1.000
+            </p>
+          )}
+          {analysis.summary && <p className="dashboard-hint">{analysis.summary}</p>}
+          {analysis.decision && (
+            <p className="dashboard-hint">Suggested label: <strong>{analysis.decision}</strong></p>
+          )}
+          {analysis.messageScores.length > 0 && (
+            <ul className="ticket-watches-list">
+              {[...analysis.messageScores].reverse().slice(0, 10).map((score) => (
+                <li key={score.scoreEventId} className="ticket-watch-chip">
+                  <strong>
+                    {score.scoreDelta >= 0 ? '+' : ''}{score.scoreDelta.toFixed(3)} → {score.currentScore.toFixed(3)}
+                  </strong>
+                  <span>
+                    Student {score.studentScore.toFixed(3)} · confidence {score.studentConfidence.toFixed(3)} · {score.studentCategory}
+                  </span>
+                  {score.reviewerInvoked && score.reviewerScore !== null && (
+                    <span>
+                      Ollama reviewer {score.reviewerScore.toFixed(3)} · confidence {(score.reviewerConfidence ?? 0).toFixed(3)}
+                      {score.correctionNeeded ? ' · correction suggested' : ' · validated'}
+                    </span>
+                  )}
+                  <span>{score.reviewerExplanation || score.studentReasoning || score.reason}</span>
+                  {score.reviewerGuidance && <small>Tutor guidance: {score.reviewerGuidance}</small>}
+                  {score.trainingApprovedAtUtc && <small>Reviewer example approved for student training.</small>}
+                  {ticket.canManage && score.reviewerScore !== null && !score.trainingApprovedAtUtc && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={busy}
+                      onClick={() => void approveTraining(score.scoreEventId)}
+                    >
+                      Approve reviewer example for training
+                    </button>
+                  )}
+                  <small>Message {score.messageId}</small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {ticket.canManage && (
         <div className="ticket-chat-chrome-actions">
           {ticket.status === 'Open' ? (
@@ -110,16 +198,25 @@ export function TicketChatChrome({ roomId, onTicketResolved }: TicketChatChromeP
           <button
             type="button"
             className="btn-primary"
-            disabled={busy}
-            onClick={() => void run(() => ticketsApi.analyze(ticket.ticketId).then(async (result) => {
-              if (result.data.decision) {
-                await ticketsApi.approveDecision(ticket.ticketId, result.data.decision, result.data.summary ?? undefined)
-              }
-              return ticketsApi.getByRoom(roomId)
-            }))}
+            disabled={busy || ticket.aiTrackingOptOut}
+            onClick={() => void analyze()}
           >
-            Analyze &amp; approve suggestion
+            Refresh AI assessment
           </button>
+          {analysis?.decision && (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={busy}
+              onClick={() => void run(() => ticketsApi.approveDecision(
+                ticket.ticketId,
+                analysis.decision!,
+                analysis.summary ?? undefined,
+              ))}
+            >
+              Approve AI suggestion…
+            </button>
+          )}
           <button
             type="button"
             className="btn-secondary"

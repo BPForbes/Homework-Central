@@ -6,6 +6,9 @@ import type { SendChatMessageError } from '../types/inbox'
 import { isAxiosError } from 'axios'
 import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
+// Bound long-lived room tabs; older history can be fetched again through pagination.
+const MAX_RETAINED_MESSAGES = 250
+
 export function useChatRoom(
   roomId: string,
   currentUserId: string | undefined,
@@ -27,7 +30,7 @@ export function useChatRoom(
     setMessages((prev) => {
       if (prev.some((existing) => existing.messageId === message.messageId))
         return prev
-      return [...prev, message]
+      return [...prev, message].slice(-MAX_RETAINED_MESSAGES)
     })
   }, [])
 
@@ -55,7 +58,7 @@ export function useChatRoom(
           }
           return Array.from(byId.values()).sort(
             (a, b) => new Date(a.createdAtUtc).getTime() - new Date(b.createdAtUtc).getTime()
-          )
+          ).slice(-MAX_RETAINED_MESSAGES)
         })
       } catch {
         if (!cancelled)

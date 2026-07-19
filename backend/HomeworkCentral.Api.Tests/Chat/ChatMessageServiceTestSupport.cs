@@ -198,8 +198,7 @@ internal static class ChatMessageServiceTestSupport
 
     internal sealed class NoOpAssessmentQueue : IAssessmentQueue
     {
-        public ValueTask EnqueueAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public bool TryEnqueue(AssessmentMessageJob job) => true;
 
         public async IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(
             [EnumeratorCancellation] CancellationToken ct)

@@ -103,4 +103,6 @@ public static class VectorNamespaces
     public const string ScoringReference = "scoring_reference";
     public const string CandidateEvidence = "candidate_evidence";
     public const string AssessmentTicketMemory = "assessment_ticket_memory";
+    public const string TicketMessageEvidence = "ticket_message_evidence";
+    public const string TicketTrainingExample = "ticket_training_example";
 }

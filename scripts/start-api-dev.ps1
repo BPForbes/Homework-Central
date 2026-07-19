@@ -83,6 +83,12 @@ try {
         }
     }
 
+    if (-not (Test-Path Env:DOTNET_GCHeapHardLimit) -or
+        [string]::IsNullOrWhiteSpace($env:DOTNET_GCHeapHardLimit)) {
+        # 0x18000000 = 384 MiB. Apply only to the running API (after the build),
+        # leaving native/runtime overhead outside the managed-heap allowance.
+        $env:DOTNET_GCHeapHardLimit = '18000000'
+    }
     dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
         Tee-Object -FilePath $errorLog
     $exitCode = $LASTEXITCODE

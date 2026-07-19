@@ -80,6 +80,9 @@ if [[ "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; th
   dotnet build "$API_PROJECT" -c Debug -v q
 fi
 
+# 0x18000000 = 384 MiB. Set this after the build so only the API runtime is
+# constrained; preserve an explicit caller override.
+export DOTNET_GCHeapHardLimit="${DOTNET_GCHeapHardLimit:-18000000}"
 set +e
 dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 api_status=$?

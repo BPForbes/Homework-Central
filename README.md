@@ -127,9 +127,18 @@ and run `wsl --shutdown`, then start Docker Desktop again. To reclaim unused bui
 images without deleting the database volume, run `docker system prune -af`. Do not add
 `--volumes` unless you intentionally want to delete local Postgres data.
 
-`docker-compose.yml` caps Postgres at 2 CPUs / 1 GiB and FCaptcha at 0.5 CPU / 128 MiB.
-The default development scripts run the API and frontend directly on the host, so Docker limits
-do not cap their CPU or memory use.
+`docker-compose.yml` keeps the lightweight core below a 1.25 GiB container ceiling. ClamAV and
+Ollama are separate `antivirus` and `ai` profiles because an 8 GiB Windows machine cannot safely
+run both together. CPU values are ceilings rather than reservations. The default development
+scripts run the API and frontend directly on the host, so Docker limits do not cap those two host
+processes. Windows users should also cap Docker Desktop's WSL 2 utility VM; see
+[`docs/windows-docker-resources.md`](docs/windows-docker-resources.md).
+
+Ticket AI uses bounded per-message confidence changes with an auditable vector
+archive; see [`docs/ticket-ai-scoring.md`](docs/ticket-ai-scoring.md).
+
+Backend query, shared-memory, service-alternative, and RabbitMQ tradeoffs are
+documented in [`docs/system-efficiency.md`](docs/system-efficiency.md).
 
 ### Fast repeat starts
 

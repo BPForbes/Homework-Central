@@ -33,6 +33,7 @@ const Inbox = lazyPage(() => import('./pages/Inbox'), 'Inbox')
 const UserConfig = lazyPage(() => import('./pages/UserConfig'), 'UserConfig')
 const ServerMaintenance = lazyPage(() => import('./pages/ServerMaintenance'), 'ServerMaintenance')
 const ChannelBuilder = lazyPage(() => import('./pages/ChannelBuilder'), 'ChannelBuilder')
+const NeuralNet = lazyPage(() => import('./pages/NeuralNet'), 'NeuralNet')
 
 export default function App() {
   return (
@@ -90,6 +91,18 @@ export default function App() {
                       <ChannelBuilder />
                     </PermissionRoute>
                   }
+                />
+                <Route
+                  path="/server/NeuralNet/TrainingFeedback"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
+                />
+                <Route
+                  path="/server/NeuralNet/DataManagement"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
+                />
+                <Route
+                  path="/server/NeuralNet/Visualizer"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
                 />
               </Route>
               <Route path="*" element={<Navigate to="/login" replace />} />
