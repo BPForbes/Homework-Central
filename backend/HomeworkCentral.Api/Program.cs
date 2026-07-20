@@ -157,8 +157,12 @@ builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ILlmClient>(sp =>
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IVectorDocumentStore, HomeworkCentral.Api.Assessment.VectorDocumentStore>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ITicketStudentModel, HomeworkCentral.Api.Assessment.TicketStudentModel>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetCheckpointStore>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetTrainingPromoter>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingQueue, HomeworkCentral.Api.Assessment.NeuralNetTrainingQueue>();
 builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetTrainingWorker>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
 builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.TicketStudentWarmupService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
@@ -388,6 +392,15 @@ if (!skipDevStartupWarmup)
                 ? "Essential dev seed complete. Persona databases continue provisioning in the background."
                 : "Essential dev seed complete. Persona databases provision on demand at dev login.");
     }
+}
+
+if (builder.Configuration.GetValue<bool>("KubernetesTraining:RunOneQueued"))
+{
+    using IServiceScope kubernetesJobScope = app.Services.CreateScope();
+    HomeworkCentral.Api.Assessment.INeuralNetTrainingService training = kubernetesJobScope.ServiceProvider.GetRequiredService<HomeworkCentral.Api.Assessment.INeuralNetTrainingService>();
+    bool claimed = await training.RunNextSyntheticSessionAsync(CancellationToken.None);
+    app.Logger.LogInformation("Kubernetes training worker completed. Claimed queued session: {Claimed}", claimed);
+    return;
 }
 
 app.Run();

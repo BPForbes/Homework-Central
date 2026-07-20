@@ -35,6 +35,8 @@ public sealed class NeuralNetTrainingWorker(
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
                 INeuralNetTrainingService service = scope.ServiceProvider.GetRequiredService<INeuralNetTrainingService>();
                 await service.RunSyntheticSessionAsync(sessionId, stoppingToken);
+                NeuralNetTrainingPromoter promoter = scope.ServiceProvider.GetRequiredService<NeuralNetTrainingPromoter>();
+                await promoter.PromoteNextAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

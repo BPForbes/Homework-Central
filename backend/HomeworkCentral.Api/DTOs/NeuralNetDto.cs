@@ -1,3 +1,5 @@
+using HomeworkCentral.Api.Assessment;
+
 namespace HomeworkCentral.Api.DTOs;
 
 public sealed class NeuralNetTrainingFeedbackDto
@@ -40,6 +42,7 @@ public sealed class StartNeuralNetTrainingRequest
 {
     public int TicketCount { get; set; } = 3;
     public int MaxPassesPerTicket { get; set; } = 3;
+    public NeuralTrainingMode Mode { get; set; } = NeuralTrainingMode.Both;
 }
 
 public sealed class NeuralNetTrainingSessionDto
@@ -47,7 +50,8 @@ public sealed class NeuralNetTrainingSessionDto
     public Guid SessionId { get; set; }
     public int RequestedTicketCount { get; set; }
     public int MaxPassesPerTicket { get; set; }
-    public string Status { get; set; } = string.Empty;
+        public NeuralTrainingMode Mode { get; set; }
+public string Status { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? StartedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }

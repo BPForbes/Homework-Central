@@ -95,6 +95,8 @@ public class TicketModelTrainingExample
     public string Source { get; set; } = "Seed";
     public DateTime ApprovedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
+    public Guid? NeuralNetTrainingSessionId { get; set; }
+    public long? CanonicalGenerationApplied { get; set; }
 }
 
 /// <summary>Auditable, synthetic-only teacher/student training run initiated by an administrator.</summary>
@@ -104,10 +106,38 @@ public class NeuralNetTrainingSession
     public Guid StartedByUserId { get; set; }
     public int RequestedTicketCount { get; set; }
     public int MaxPassesPerTicket { get; set; }
-    public string Status { get; set; } = "Queued";
+        public HomeworkCentral.Api.Assessment.NeuralTrainingMode Mode { get; set; } = HomeworkCentral.Api.Assessment.NeuralTrainingMode.Both;
+public string Status { get; set; } = "Queued";
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? StartedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     public string? FailureReason { get; set; }
     public string? ReportJson { get; set; }
+}
+
+/// <summary>Immutable canonical parameter snapshot for the tiny student model.</summary>
+public class NeuralNetCanonicalCheckpoint
+{
+    public long Generation { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
+    public string ParametersBase64 { get; set; } = string.Empty;
+    public string Checksum { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; }
+}
+
+/// <summary>Serialized promotion work item; worker candidate weights are never installed directly.</summary>
+public class NeuralNetTrainingPromotion
+{
+    public Guid PromotionId { get; set; }
+    public Guid SessionId { get; set; }
+    public long PromotionSequence { get; set; }
+    public string Status { get; set; } = "Pending";
+    public int AttemptCount { get; set; }
+    public Guid? LeaseId { get; set; }
+    public DateTime? LeaseExpiresAtUtc { get; set; }
+    public string? FailureReason { get; set; }
+    public long? PromotedGeneration { get; set; }
+    public string? PromotionReportJson { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
 }

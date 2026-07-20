@@ -43,6 +43,8 @@ public partial class AppDbContext(
     public DbSet<TicketMessageScore> TicketMessageScores => Set<TicketMessageScore>();
     public DbSet<TicketModelTrainingExample> TicketModelTrainingExamples => Set<TicketModelTrainingExample>();
     public DbSet<NeuralNetTrainingSession> NeuralNetTrainingSessions => Set<NeuralNetTrainingSession>();
+    public DbSet<NeuralNetCanonicalCheckpoint> NeuralNetCanonicalCheckpoints => Set<NeuralNetCanonicalCheckpoint>();
+    public DbSet<NeuralNetTrainingPromotion> NeuralNetTrainingPromotions => Set<NeuralNetTrainingPromotion>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
     public DbSet<ChatMessageVote> ChatMessageVotes => Set<ChatMessageVote>();
@@ -396,6 +398,8 @@ public partial class AppDbContext(
             e.HasOne<TicketMessageScore>().WithOne().HasForeignKey<TicketModelTrainingExample>(x => x.ScoreEventId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.MessageId);
             e.HasIndex(x => x.ScoreEventId).IsUnique();
+            e.HasIndex(x => x.NeuralNetTrainingSessionId);
+            e.HasIndex(x => x.CanonicalGenerationApplied);
         });
 
         mb.Entity<NeuralNetTrainingSession>(e =>
@@ -403,9 +407,29 @@ public partial class AppDbContext(
             e.HasKey(x => x.SessionId);
             e.Property(x => x.SessionId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Mode).HasConversion<string>().HasMaxLength(16).HasDefaultValue("Both").IsRequired();
             e.Property(x => x.FailureReason).HasMaxLength(1000);
             e.Property(x => x.ReportJson);
             e.HasIndex(x => x.CreatedAtUtc);
+        });
+
+        mb.Entity<NeuralNetCanonicalCheckpoint>(e =>
+        {
+            e.HasKey(x => x.Generation);
+            e.Property(x => x.ModelVersion).HasMaxLength(64).IsRequired();
+            e.Property(x => x.ParametersBase64).IsRequired();
+            e.Property(x => x.Checksum).HasMaxLength(64).IsRequired();
+        });
+
+        mb.Entity<NeuralNetTrainingPromotion>(e =>
+        {
+            e.HasKey(x => x.PromotionId);
+            e.Property(x => x.PromotionId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.FailureReason).HasMaxLength(1000);
+            e.HasIndex(x => x.PromotionSequence).IsUnique();
+            e.HasIndex(x => new { x.Status, x.LeaseExpiresAtUtc });
+            e.HasIndex(x => x.SessionId).IsUnique();
         });
 
         mb.Entity<ChatAttachment>(e =>

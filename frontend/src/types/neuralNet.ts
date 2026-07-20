@@ -35,6 +35,7 @@ export interface NeuralNetTrainingSession {
   sessionId: string
   requestedTicketCount: number
   maxPassesPerTicket: number
+  mode: NeuralTrainingMode
   status: string
   createdAtUtc: string
   startedAtUtc?: string
@@ -43,4 +44,5 @@ export interface NeuralNetTrainingSession {
   hasReport: boolean
 }
 
-export interface StartNeuralNetTrainingRequest { ticketCount: number; maxPassesPerTicket: number }
+export type NeuralTrainingMode = 'Both' | 'Moderation' | 'Tutoring'
+export interface StartNeuralNetTrainingRequest { ticketCount: number; maxPassesPerTicket: number; mode: NeuralTrainingMode }

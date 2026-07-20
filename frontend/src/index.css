@@ -4970,4 +4970,9 @@ a {
 .neural-node-group { cursor: pointer; }
 .neural-node-group:hover .neural-node, .neural-node--selected { fill: var(--color-primary-soft-strong); stroke: var(--color-primary); transform: scale(1.06); }
 .neural-node-text, .neural-layer-label { fill: var(--color-ink); font-family: var(--font-sans); font-size: 14px; font-weight: 600; pointer-events: none; }
+.neural-edge--recorded { stroke: var(--color-primary); stroke-width: 1.25; opacity: .42; }
+.neural-edge--active { stroke: var(--color-on-accent); stroke-width: 2.25; opacity: 1; }
+.neural-edge--accepted { stroke: var(--color-success); }
+.neural-edge--revision { stroke: var(--color-danger); }
+.neural-edge--backward { stroke: var(--color-danger); stroke-dasharray: 5 4; opacity: .7; }
 .neural-layer-label { fill: var(--color-ink-secondary); font-size: 13px; }

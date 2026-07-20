@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Models;
+using System.Security.Cryptography;
 
 namespace HomeworkCentral.Api.Assessment;
 
@@ -37,12 +38,20 @@ public interface ITicketStudentModel
     NeuralNetStateSnapshot GetStateSnapshot();
 }
 
+public interface ITicketStudentModelTelemetry
+{
+    TicketStudentInferenceTrace PredictWithTrace(string requirement, string message);
+    TrainingPassTrace TrainWithTrace(StudentTrainingExample example, int epochs = 12);
+    NeuralNetTopologySnapshot GetTopologySnapshot();
+    NeuralNetParameterSnapshot GetParameterSnapshot(long? canonicalGeneration, int localRevision);
+    void LoadParameterSnapshot(NeuralNetParameterSnapshot snapshot);
+}
 /// <summary>
 /// A deliberately tiny, CPU-only neural student: 256 hashed text inputs, one
 /// 8-neuron hidden layer, and evidence/relevance outputs. Its weights occupy
 /// roughly 17 KB and inference does not allocate a dense feature vector.
 /// </summary>
-public sealed class TicketStudentModel : ITicketStudentModel
+public sealed class TicketStudentModel : ITicketStudentModel, ITicketStudentModelTelemetry
 {
     private const int InputSize = 256;
     private const int HiddenSize = 8;
@@ -131,6 +140,139 @@ public sealed class TicketStudentModel : ITicketStudentModel
         }
     }
 
+    public TicketStudentInferenceTrace PredictWithTrace(string requirement, string message)
+    {
+        Dictionary<int, float> features = Featurize(requirement, message, InputSize);
+        gate.EnterReadLock();
+        try
+        {
+            ForwardPropagationTrace forward = CaptureForward(features);
+            TicketStudentPrediction prediction = BuildPrediction(requirement, features, forward.EvidenceProbability, forward.RelevanceProbability);
+            return new TicketStudentInferenceTrace(prediction, forward);
+        }
+        finally { gate.ExitReadLock(); }
+    }
+
+    public TrainingPassTrace TrainWithTrace(StudentTrainingExample example, int epochs = 12)
+    {
+        gate.EnterWriteLock();
+        try
+        {
+            Dictionary<int, float> features = Featurize(example.Requirement, example.Message, InputSize);
+            List<TrainingIterationReplay> iterations = [];
+            for (int epoch = 0; epoch < Math.Clamp(epochs, 1, 100); epoch++)
+            {
+                ForwardPropagationTrace before = CaptureForward(features);
+                LossTrace lossBefore = Loss(before, example);
+                float[] hidden = before.NodeActivations.Where(x => x.Index is >= 256 and < 264).OrderBy(x => x.Index).Select(x => x.Value).ToArray();
+                float[] outputGradient = [(float)(before.EvidenceProbability - example.EvidenceScore), (float)(before.RelevanceProbability - example.Relevance)];
+                float[] hiddenGradient = new float[HiddenSize];
+                for (int h = 0; h < HiddenSize; h++)
+                {
+                    float downstream = outputGradient[0] * outputWeights[h] + outputGradient[1] * outputWeights[HiddenSize + h];
+                    hiddenGradient[h] = downstream * (1 - hidden[h] * hidden[h]);
+                }
+                List<SparseValue> weightGradients = []; List<SparseValue> biasGradients = []; List<ParameterDelta> deltas = [];
+                for (int output = 0; output < 2; output++)
+                    for (int h = 0; h < HiddenSize; h++)
+                    {
+                        int parameter = InputSize * HiddenSize + HiddenSize + output * HiddenSize + h;
+                        float gradient = outputGradient[output] * hidden[h]; float beforeValue = outputWeights[output * HiddenSize + h]; float delta = -((float)LearningRate * gradient);
+                        outputWeights[output * HiddenSize + h] = beforeValue + delta; weightGradients.Add(new SparseValue(parameter, gradient)); deltas.Add(new ParameterDelta(parameter, beforeValue, gradient, delta, outputWeights[output * HiddenSize + h]));
+                    }
+                for (int output = 0; output < 2; output++)
+                {
+                    int parameter = InputSize * HiddenSize + HiddenSize + HiddenSize * 2 + output; float gradient = outputGradient[output]; float beforeValue = outputBias[output]; float delta = -((float)LearningRate * gradient);
+                    outputBias[output] = beforeValue + delta; biasGradients.Add(new SparseValue(parameter, gradient)); deltas.Add(new ParameterDelta(parameter, beforeValue, gradient, delta, outputBias[output]));
+                }
+                for (int h = 0; h < HiddenSize; h++)
+                {
+                    foreach ((int index, float value) in features)
+                    {
+                        int parameter = h * InputSize + index; float gradient = hiddenGradient[h] * value; float beforeValue = inputWeights[parameter]; float delta = -((float)LearningRate * gradient);
+                        inputWeights[parameter] = beforeValue + delta; weightGradients.Add(new SparseValue(parameter, gradient)); deltas.Add(new ParameterDelta(parameter, beforeValue, gradient, delta, inputWeights[parameter]));
+                    }
+                    int biasParameter = InputSize * HiddenSize + h; float biasBefore = hiddenBias[h]; float biasDelta = -((float)LearningRate * hiddenGradient[h]); hiddenBias[h] = biasBefore + biasDelta; biasGradients.Add(new SparseValue(biasParameter, hiddenGradient[h])); deltas.Add(new ParameterDelta(biasParameter, biasBefore, hiddenGradient[h], biasDelta, hiddenBias[h]));
+                }
+                float[] allGradients = weightGradients.Concat(biasGradients).Select(x => x.Value).ToArray(); float max = allGradients.Length == 0 ? 0 : allGradients.Max(x => MathF.Abs(x)); float min = allGradients.Where(x => x != 0).DefaultIfEmpty(0).Min(x => MathF.Abs(x)); float l2 = MathF.Sqrt(allGradients.Sum(x => x * x));
+                BackpropagationTrace backward = new([], [], weightGradients, biasGradients, l2, new GradientHealth(l2 > 0 && l2 < 1e-6f, l2 > 100f, 1e-6f, 100f, max, min));
+                ForwardPropagationTrace after = CaptureForward(features); LossTrace lossAfter = Loss(after, example);
+                iterations.Add(new TrainingIterationReplay(epoch, before, lossBefore, backward, new ParameterUpdateTrace((float)LearningRate, "SGD", deltas), after, lossAfter));
+            }
+            support.Add(new SupportExample(features, example.Category)); if (support.Count > 512) support.RemoveAt(0);
+            return new TrainingPassTrace(iterations);
+        }
+        finally { gate.ExitWriteLock(); }
+    }
+
+    public NeuralNetTopologySnapshot GetTopologySnapshot()
+    {
+        List<ReplayNode> nodes = []; List<ReplayEdge> edges = []; List<ReplayParameter> parameters = [];
+        for (int input = 0; input < InputSize; input++) nodes.Add(new ReplayNode(input, $"input-{input}", "input", $"Feature {input}", input, false));
+        for (int hidden = 0; hidden < HiddenSize; hidden++) nodes.Add(new ReplayNode(InputSize + hidden, $"hidden-{hidden}", "hidden", $"Hidden {hidden + 1}", null, true));
+        nodes.Add(new ReplayNode(InputSize + HiddenSize, "output-evidence", "output", "Evidence", null, true)); nodes.Add(new ReplayNode(InputSize + HiddenSize + 1, "output-relevance", "output", "Relevance", null, true));
+        int edge = 0;
+        for (int hidden = 0; hidden < HiddenSize; hidden++) for (int input = 0; input < InputSize; input++) { int p = hidden * InputSize + input; parameters.Add(new ReplayParameter(p, $"w-input-{input}-hidden-{hidden}", ReplayParameterKind.Weight, input, InputSize + hidden, true)); edges.Add(new ReplayEdge(edge++, $"edge-{input}-{hidden}", input, InputSize + hidden, p)); }
+        for (int hidden = 0; hidden < HiddenSize; hidden++) parameters.Add(new ReplayParameter(InputSize * HiddenSize + hidden, $"b-hidden-{hidden}", ReplayParameterKind.Bias, null, InputSize + hidden, true));
+        for (int output = 0; output < 2; output++) for (int hidden = 0; hidden < HiddenSize; hidden++) { int p = InputSize * HiddenSize + HiddenSize + output * HiddenSize + hidden; parameters.Add(new ReplayParameter(p, $"w-hidden-{hidden}-output-{output}", ReplayParameterKind.Weight, InputSize + hidden, InputSize + HiddenSize + output, true)); edges.Add(new ReplayEdge(edge++, $"edge-hidden-{hidden}-output-{output}", InputSize + hidden, InputSize + HiddenSize + output, p)); }
+        for (int output = 0; output < 2; output++) parameters.Add(new ReplayParameter(InputSize * HiddenSize + HiddenSize + HiddenSize * 2 + output, $"b-output-{output}", ReplayParameterKind.Bias, null, InputSize + HiddenSize + output, true));
+        return new NeuralNetTopologySnapshot("hc-student-mlp-v2", nodes, edges, parameters);
+    }
+
+    public NeuralNetParameterSnapshot GetParameterSnapshot(long? canonicalGeneration, int localRevision)
+    {
+        gate.EnterReadLock();
+        try
+        {
+            float[] values = new float[inputWeights.Length + hiddenBias.Length + outputWeights.Length + outputBias.Length];
+            int offset = 0;
+            Array.Copy(inputWeights, 0, values, offset, inputWeights.Length); offset += inputWeights.Length;
+            Array.Copy(hiddenBias, 0, values, offset, hiddenBias.Length); offset += hiddenBias.Length;
+            Array.Copy(outputWeights, 0, values, offset, outputWeights.Length); offset += outputWeights.Length;
+            Array.Copy(outputBias, 0, values, offset, outputBias.Length);
+            byte[] bytes = new byte[values.Length * sizeof(float)];
+            Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
+            return new(canonicalGeneration, localRevision, "ieee754-float32-le", "dense-base64", values.Length,
+                Convert.ToBase64String(bytes), Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+        }
+        finally { gate.ExitReadLock(); }
+    }
+
+    public void LoadParameterSnapshot(NeuralNetParameterSnapshot snapshot)
+    {
+        if (snapshot.NumericFormat != "ieee754-float32-le" || snapshot.ParameterCount != inputWeights.Length + hiddenBias.Length + outputWeights.Length + outputBias.Length)
+            throw new InvalidDataException("Unsupported student-model checkpoint.");
+        byte[] bytes = Convert.FromBase64String(snapshot.PackedValues);
+        if (bytes.Length != snapshot.ParameterCount * sizeof(float) || !string.Equals(Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), snapshot.Checksum, StringComparison.Ordinal))
+            throw new InvalidDataException("Checkpoint integrity validation failed.");
+        float[] values = new float[snapshot.ParameterCount]; Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
+        gate.EnterWriteLock();
+        try { int offset = 0; Array.Copy(values, offset, inputWeights, 0, inputWeights.Length); offset += inputWeights.Length; Array.Copy(values, offset, hiddenBias, 0, hiddenBias.Length); offset += hiddenBias.Length; Array.Copy(values, offset, outputWeights, 0, outputWeights.Length); offset += outputWeights.Length; Array.Copy(values, offset, outputBias, 0, outputBias.Length); }
+        finally { gate.ExitWriteLock(); }
+    }
+
+    private TicketStudentPrediction BuildPrediction(string requirement, Dictionary<int, float> features, float evidence, float relevance)
+    {
+        double similarity = support.Count == 0 ? 0 : support.Max(item => Cosine(features, item.Features)); double separation = Math.Abs(evidence - .5) * 2; double confidence = Math.Clamp(separation * (.35 + .65 * similarity), .05, .99); string category = DetectCategory(requirement); string reasoning = similarity >= .55 ? $"Student pattern match for {category}; reviewer recommended when confidence is below threshold." : $"Limited training support for {category}; reviewer recommended.";
+        return new TicketStudentPrediction(evidence, relevance, confidence, category, reasoning, "hc-student-mlp-v2");
+    }
+
+    private ForwardPropagationTrace CaptureForward(Dictionary<int, float> features)
+    {
+        float[] pre = new float[HiddenSize]; float[] hidden = new float[HiddenSize]; List<SparseValue> nodePre = []; List<SparseValue> nodeAct = []; List<SparseValue> contributions = []; List<SparseValue> biases = [];
+        foreach ((int index, float value) in features) contributions.Add(new SparseValue(index, value));
+        for (int h = 0; h < HiddenSize; h++) { float sum = hiddenBias[h]; biases.Add(new SparseValue(InputSize * HiddenSize + h, hiddenBias[h])); foreach ((int index, float value) in features) { float c = inputWeights[h * InputSize + index] * value; if (c != 0) contributions.Add(new SparseValue(h * InputSize + index, c)); sum += c; } pre[h] = sum; hidden[h] = MathF.Tanh(sum); nodePre.Add(new SparseValue(InputSize + h, sum)); nodeAct.Add(new SparseValue(InputSize + h, hidden[h])); }
+        float[] logits = new float[2]; float[] probabilities = new float[2];
+        for (int output = 0; output < 2; output++) { float sum = outputBias[output]; biases.Add(new SparseValue(InputSize * HiddenSize + HiddenSize + HiddenSize * 2 + output, outputBias[output])); for (int h = 0; h < HiddenSize; h++) { float c = outputWeights[output * HiddenSize + h] * hidden[h]; if (c != 0) contributions.Add(new SparseValue(InputSize * HiddenSize + HiddenSize + output * HiddenSize + h, c)); sum += c; } logits[output] = sum; probabilities[output] = 1f / (1f + MathF.Exp(-Math.Clamp(sum, -20, 20))); nodePre.Add(new SparseValue(InputSize + HiddenSize + output, sum)); nodeAct.Add(new SparseValue(InputSize + HiddenSize + output, probabilities[output])); }
+        List<FeatureActivation> featureActivations = features.OrderBy(x => x.Key).Select(x => new FeatureActivation(x.Key, x.Value, [])).ToList(); float confidence = Math.Clamp(Math.Abs(probabilities[0] - .5f) * 2f, .05f, .99f);
+        return new ForwardPropagationTrace(featureActivations, nodePre, nodeAct, contributions, biases, logits[0], logits[1], probabilities[0], probabilities[1], confidence);
+    }
+
+    private static LossTrace Loss(ForwardPropagationTrace forward, StudentTrainingExample example)
+    {
+        static float Bce(float target, float prediction) { prediction = Math.Clamp(prediction, 1e-6f, 1 - 1e-6f); return -(target * MathF.Log(prediction) + (1 - target) * MathF.Log(1 - prediction)); }
+        float evidence = Bce((float)example.EvidenceScore, forward.EvidenceProbability); float relevance = Bce((float)example.Relevance, forward.RelevanceProbability); return new LossTrace("binary-cross-entropy-v1", evidence, relevance, 0, evidence + relevance);
+    }
     private void TrainCore(StudentTrainingExample example, int epochs, bool remember)
     {
         Dictionary<int, float> features = Featurize(example.Requirement, example.Message, InputSize);
@@ -205,9 +347,28 @@ public sealed class TicketStudentModel : ITicketStudentModel
     private static Dictionary<int, float> Featurize(string requirement, string message, int size)
     {
         Dictionary<int, float> result = [];
-        AddTokens(result, "requirement " + requirement, size, 0.65f);
-        AddTokens(result, "message " + message, size, 1f);
+        int textSize = size == InputSize ? 252 : size;
+        AddTokens(result, "requirement " + requirement, textSize, 0.65f);
+        AddTokens(result, "message " + message, textSize, 1f);
+        if (size == InputSize)
+        {
+            result[252] = MetadataValue(message, "community_vote");
+            result[253] = MetadataValue(message, "channel_relevance");
+            result[254] = MetadataValue(message, "thread_position");
+            result[255] = MetadataValue(message, "prior_score");
+        }
         return result;
+    }
+
+    private static float MetadataValue(string text, string name)
+    {
+        string marker = name + "=";
+        int start = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0) return 0;
+        start += marker.Length;
+        int end = text.IndexOfAny([' ', '\r', '\n', '>'], start);
+        string raw = end < 0 ? text[start..] : text[start..end];
+        return float.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, out float value) ? Math.Clamp(value, -1, 1) : 0;
     }
 
     private static void AddTokens(Dictionary<int, float> target, string text, int size, float weight)
