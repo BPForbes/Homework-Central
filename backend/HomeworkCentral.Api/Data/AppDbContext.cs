@@ -407,7 +407,8 @@ public partial class AppDbContext(
             e.HasKey(x => x.SessionId);
             e.Property(x => x.SessionId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.Status).HasMaxLength(32).IsRequired();
-            e.Property(x => x.Mode).HasConversion<string>().HasMaxLength(16).HasDefaultValue("Both").IsRequired();
+            e.Property(x => x.Mode).HasConversion<string>().HasMaxLength(16)
+                .HasDefaultValue(HomeworkCentral.Api.Assessment.NeuralTrainingMode.Both).IsRequired();
             e.Property(x => x.FailureReason).HasMaxLength(1000);
             e.Property(x => x.ReportJson);
             e.HasIndex(x => x.CreatedAtUtc);
