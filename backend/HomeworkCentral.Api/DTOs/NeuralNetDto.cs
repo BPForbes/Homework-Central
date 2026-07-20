@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Assessment;
+using System.Text.Json.Serialization;
 
 namespace HomeworkCentral.Api.DTOs;
 
@@ -42,6 +43,8 @@ public sealed class StartNeuralNetTrainingRequest
 {
     public int TicketCount { get; set; } = 3;
     public int MaxPassesPerTicket { get; set; } = 3;
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public NeuralTrainingMode Mode { get; set; } = NeuralTrainingMode.Both;
 }
 
@@ -50,8 +53,9 @@ public sealed class NeuralNetTrainingSessionDto
     public Guid SessionId { get; set; }
     public int RequestedTicketCount { get; set; }
     public int MaxPassesPerTicket { get; set; }
-        public NeuralTrainingMode Mode { get; set; }
-public string Status { get; set; } = string.Empty;
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public NeuralTrainingMode Mode { get; set; }
+    public string Status { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? StartedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
