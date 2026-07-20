@@ -13,5 +13,5 @@ export const neuralNetApi = {
   getVisualizer: () => api.get<NeuralNetVisualizer>('/visualizer'),
   startTraining: (request: StartNeuralNetTrainingRequest) => api.post<NeuralNetTrainingSession>('/training', request),
   listTrainingSessions: () => api.get<NeuralNetTrainingSession[]>('/training'),
-  downloadTrainingReport: (sessionId: string) => api.get(/training//report, { responseType: 'blob' }),
+  downloadTrainingReport: (sessionId: string) => api.get(`/training/${sessionId}/report`, { responseType: 'blob' }),
 }
