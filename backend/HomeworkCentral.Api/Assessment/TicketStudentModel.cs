@@ -172,7 +172,21 @@ public sealed class TicketStudentModel : ITicketStudentModel, ITicketStudentMode
                     float downstream = outputGradient[0] * outputWeights[h] + outputGradient[1] * outputWeights[HiddenSize + h];
                     hiddenGradient[h] = downstream * (1 - hidden[h] * hidden[h]);
                 }
-                List<SparseValue> weightGradients = []; List<SparseValue> biasGradients = []; List<ParameterDelta> deltas = [];
+                List<SparseValue> activationGradients = []; List<SparseValue> preActivationGradients = []; List<SparseValue> weightGradients = []; List<SparseValue> biasGradients = []; List<ParameterDelta> deltas = [];
+                for (int output = 0; output < 2; output++)
+                {
+                    float probability = output == 0 ? before.EvidenceProbability : before.RelevanceProbability;
+                    float target = output == 0 ? (float)example.EvidenceScore : (float)example.Relevance;
+                    float activationGradient = (probability - target) / Math.Max(probability * (1 - probability), 1e-6f);
+                    activationGradients.Add(new SparseValue(InputSize + HiddenSize + output, activationGradient));
+                    preActivationGradients.Add(new SparseValue(InputSize + HiddenSize + output, outputGradient[output]));
+                }
+                for (int h = 0; h < HiddenSize; h++)
+                {
+                    float derivative = 1 - hidden[h] * hidden[h];
+                    activationGradients.Add(new SparseValue(InputSize + h, derivative == 0 ? 0 : hiddenGradient[h] / derivative));
+                    preActivationGradients.Add(new SparseValue(InputSize + h, hiddenGradient[h]));
+                }
                 for (int output = 0; output < 2; output++)
                     for (int h = 0; h < HiddenSize; h++)
                     {
@@ -195,7 +209,7 @@ public sealed class TicketStudentModel : ITicketStudentModel, ITicketStudentMode
                     int biasParameter = InputSize * HiddenSize + h; float biasBefore = hiddenBias[h]; float biasDelta = -((float)LearningRate * hiddenGradient[h]); hiddenBias[h] = biasBefore + biasDelta; biasGradients.Add(new SparseValue(biasParameter, hiddenGradient[h])); deltas.Add(new ParameterDelta(biasParameter, biasBefore, hiddenGradient[h], biasDelta, hiddenBias[h]));
                 }
                 float[] allGradients = weightGradients.Concat(biasGradients).Select(x => x.Value).ToArray(); float max = allGradients.Length == 0 ? 0 : allGradients.Max(x => MathF.Abs(x)); float min = allGradients.Where(x => x != 0).DefaultIfEmpty(0).Min(x => MathF.Abs(x)); float l2 = MathF.Sqrt(allGradients.Sum(x => x * x));
-                BackpropagationTrace backward = new([], [], weightGradients, biasGradients, l2, new GradientHealth(l2 > 0 && l2 < 1e-6f, l2 > 100f, 1e-6f, 100f, max, min));
+                BackpropagationTrace backward = new(activationGradients, preActivationGradients, weightGradients, biasGradients, l2, new GradientHealth(l2 > 0 && l2 < 1e-6f, l2 > 100f, 1e-6f, 100f, max, min));
                 ForwardPropagationTrace after = CaptureForward(features); LossTrace lossAfter = Loss(after, example);
                 iterations.Add(new TrainingIterationReplay(epoch, before, lossBefore, backward, new ParameterUpdateTrace((float)LearningRate, "SGD", deltas), after, lossAfter));
             }
