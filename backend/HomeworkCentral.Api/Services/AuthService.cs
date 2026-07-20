@@ -124,15 +124,23 @@ public class AuthService(
             foreach (DevPersonaDefinition persona in account.Personas)
             {
                 string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
-                if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
-                    continue;
-
                 if (PersonaProvisioner?.TryGetPersonaIdentity(databaseName, out PersonaIdentity cachedIdentity) == true)
                 {
                     personas.Add(new DevUserOption
                     {
                         UserId = cachedIdentity.UserId,
                         Username = cachedIdentity.Username,
+                        TenantDatabaseName = databaseName,
+                    });
+                    continue;
+                }
+
+                if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
+                {
+                    personas.Add(new DevUserOption
+                    {
+                        UserId = Guid.Empty,
+                        Username = persona.Username,
                         TenantDatabaseName = databaseName,
                     });
                     continue;
@@ -188,7 +196,8 @@ public class AuthService(
         if (account is null || !developer.UserRoles.Any(ur => ur.Role.Name == "Developer"))
             throw new UnauthorizedAccessException("Selected account is not a developer.");
 
-        if (req.TargetUserId is null || req.TargetUserId == Guid.Empty)
+        bool impersonatingPersona = !string.IsNullOrWhiteSpace(req.TenantDatabaseName);
+        if (!impersonatingPersona && (req.TargetUserId is null || req.TargetUserId == Guid.Empty))
         {
             User loginUser = await masterDb.Users
                 .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
@@ -200,11 +209,10 @@ public class AuthService(
             return await BuildAuthResponseAsync(loginUser, masterDb, tenantDatabaseName: null);
         }
 
-        if (string.IsNullOrWhiteSpace(req.TenantDatabaseName))
-            throw new InvalidOperationException("Tenant database name is required when impersonating a persona.");
-
+        string tenantDatabaseName = req.TenantDatabaseName
+            ?? throw new InvalidOperationException("Tenant database name is required when impersonating a persona.");
         (DevAccountDefinition Account, DevPersonaDefinition Persona)? personaMatch =
-            DevAccountCatalog.FindByPersonaDatabaseName(req.TenantDatabaseName);
+            DevAccountCatalog.FindByPersonaDatabaseName(tenantDatabaseName);
 
         if (personaMatch is null
             || !string.Equals(personaMatch.Value.Account.DeveloperEmail, developer.Email, StringComparison.OrdinalIgnoreCase))
@@ -219,20 +227,23 @@ public class AuthService(
                 personaMatch.Value.Persona);
         }
 
-        AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(req.TenantDatabaseName);
+        AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabaseName);
         await using (tenantDb)
         {
+            bool resolveByCatalogEmail = req.TargetUserId is null || req.TargetUserId == Guid.Empty;
             User loginPersona = await tenantDb.Users
                 .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
                 .Include(u => u.EffectiveMask!)
                     .ThenInclude(m => m.SubjectExpertiseMasks)
-                .FirstOrDefaultAsync(u => u.UserId == req.TargetUserId)
+                .FirstOrDefaultAsync(u => resolveByCatalogEmail
+                    ? u.Email == personaMatch.Value.Persona.Email
+                    : u.UserId == req.TargetUserId)
                 ?? throw new InvalidOperationException("Selected user was not found.");
 
             if (!string.Equals(loginPersona.Email, personaMatch.Value.Persona.Email, StringComparison.OrdinalIgnoreCase))
                 throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
 
-            return await BuildAuthResponseAsync(loginPersona, tenantDb, req.TenantDatabaseName);
+            return await BuildAuthResponseAsync(loginPersona, tenantDb, tenantDatabaseName);
         }
     }
 

@@ -1,6 +1,7 @@
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
@@ -49,7 +50,9 @@ public sealed class ChatAttachmentService(
     IAttachmentTypeInspector typeInspector,
     IMalwareScanner malwareScanner,
     IAttachmentAccessTokenService accessTokenService,
-    IOptions<UploadOptions> options) : IChatAttachmentService
+    IOptions<UploadOptions> options,
+    IConfiguration configuration,
+    IWebHostEnvironment environment) : IChatAttachmentService
 {
     public async Task<ChatAttachmentDto> UploadAsync(Guid userId, IFormFile file, CancellationToken ct = default)
     {
@@ -62,6 +65,8 @@ public sealed class ChatAttachmentService(
 
         AccessScope? scope = accessScope.ResolveCurrent()
             ?? throw new InvalidOperationException("Access scope is required.");
+        bool developmentPersona = (scope.AccountClass is AccountClass.DeveloperAccount or AccountClass.DevAdmin)
+            && DevBypass.IsEnabled(configuration, environment);
 
         AttachmentTypeInspectionResult inspection;
         await using (Stream inspectStream = file.OpenReadStream())
@@ -70,13 +75,13 @@ public sealed class ChatAttachmentService(
         }
 
         bool isImage = inspection.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
-        if (isImage && !BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
+        if (!developmentPersona && isImage && !BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
             && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
         {
             throw new InvalidOperationException("You do not have permission to upload images.");
         }
 
-        if (!isImage && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
+        if (!developmentPersona && !isImage && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
             throw new InvalidOperationException("You do not have permission to upload files.");
 
         MalwareScanResult scanStatus;

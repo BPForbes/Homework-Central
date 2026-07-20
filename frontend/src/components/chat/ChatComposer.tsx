@@ -49,8 +49,9 @@ export function ChatComposer({
   onStopTyping,
   onCancelReply,
 }: ChatComposerProps) {
-  const { hasFeature } = useAuth()
-  const canUpload = hasFeature(FEATURE_FILE_UPLOADS) || hasFeature(FEATURE_IMAGE_UPLOADS)
+  const { hasFeature, user } = useAuth()
+  const isDeveloperSession = user?.accountClass === 'DeveloperAccount' || user?.accountClass === 'DevAdmin'
+  const canUpload = isDeveloperSession || hasFeature(FEATURE_FILE_UPLOADS) || hasFeature(FEATURE_IMAGE_UPLOADS)
   const [draft, setDraft] = useState('')
   const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
