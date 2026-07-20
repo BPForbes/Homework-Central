@@ -65,6 +65,7 @@ public class TicketMessageScore
     public double StudentRelevance { get; set; }
     public string StudentCategory { get; set; } = "general";
     public string StudentReasoning { get; set; } = string.Empty;
+    public string ContextSnapshot { get; set; } = string.Empty;
     public bool ReviewerInvoked { get; set; }
     public double? ReviewerScore { get; set; }
     public double? ReviewerConfidence { get; set; }
@@ -87,10 +88,26 @@ public class TicketModelTrainingExample
     public Guid? ScoreEventId { get; set; }
     public string Requirement { get; set; } = string.Empty;
     public string? BootstrapMessage { get; set; }
+    public string? ContextSnapshot { get; set; }
     public double TargetScore { get; set; }
     public double TargetRelevance { get; set; }
     public string Category { get; set; } = "general";
     public string Source { get; set; } = "Seed";
     public DateTime ApprovedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
+}
+
+/// <summary>Auditable, synthetic-only teacher/student training run initiated by an administrator.</summary>
+public class NeuralNetTrainingSession
+{
+    public Guid SessionId { get; set; }
+    public Guid StartedByUserId { get; set; }
+    public int RequestedTicketCount { get; set; }
+    public int MaxPassesPerTicket { get; set; }
+    public string Status { get; set; } = "Queued";
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime? StartedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public string? FailureReason { get; set; }
+    public string? ReportJson { get; set; }
 }

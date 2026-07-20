@@ -29,7 +29,8 @@ public sealed class TicketStudentWarmupService(
             {
                 string? message = row.MessageId is Guid id ? messages.GetValueOrDefault(id) : row.BootstrapMessage;
                 if (string.IsNullOrWhiteSpace(message)) continue;
-                student.Train(new(row.Requirement, message, row.TargetScore, row.TargetRelevance, row.Category), row.Source == "Seed" ? 100 : 16);
+                string modelMessage = string.IsNullOrWhiteSpace(row.ContextSnapshot) ? message : $"{row.ContextSnapshot}\n<current_message>\n{message}\n</current_message>";
+                student.Train(new(row.Requirement, modelMessage, row.TargetScore, row.TargetRelevance, row.Category), row.Source == "Seed" ? 100 : 16);
                 await vectors.UpsertAsync(
                     VectorNamespaces.TicketTrainingExample, message, student.Embed(message), row.Category,
                     row.TrainingExampleId,

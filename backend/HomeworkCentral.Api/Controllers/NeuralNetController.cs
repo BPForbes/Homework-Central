@@ -41,6 +41,25 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
     public async Task<ActionResult<NeuralNetVisualizerDto>> GetVisualizer(CancellationToken ct) =>
         Ok(await training.GetVisualizerAsync(ct));
 
+    [HttpPost("training")]
+    public async Task<ActionResult<NeuralNetTrainingSessionDto>> StartTraining([FromBody] StartNeuralNetTrainingRequest request, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null) return Unauthorized();
+        return Accepted(await training.StartSyntheticSessionAsync(request, userId.Value, ct));
+    }
+
+    [HttpGet("training")]
+    public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingSessionDto>>> GetTrainingSessions(CancellationToken ct) =>
+        Ok(await training.GetTrainingSessionsAsync(ct));
+
+    [HttpGet("training/{sessionId:guid}/report")]
+    public async Task<IActionResult> DownloadTrainingReport(Guid sessionId, CancellationToken ct)
+    {
+        string? report = await training.GetSessionReportAsync(sessionId, ct);
+        return string.IsNullOrWhiteSpace(report) ? NotFound() : File(System.Text.Encoding.UTF8.GetBytes(report), "application/json", $"neural-net-training-{sessionId:N}.json");
+    }
+
     private Guid? GetUserId()
     {
         string? claim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;

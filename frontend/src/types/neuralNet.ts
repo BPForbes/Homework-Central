@@ -30,3 +30,17 @@ export interface NeuralNetVisualizer {
   modelVersion: string
   trainingExamples: number
 }
+
+export interface NeuralNetTrainingSession {
+  sessionId: string
+  requestedTicketCount: number
+  maxPassesPerTicket: number
+  status: string
+  createdAtUtc: string
+  startedAtUtc?: string
+  completedAtUtc?: string
+  failureReason?: string
+  hasReport: boolean
+}
+
+export interface StartNeuralNetTrainingRequest { ticketCount: number; maxPassesPerTicket: number }

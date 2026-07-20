@@ -60,6 +60,13 @@ public sealed class AssessmentPipelineService(
 
         TicketOptions ticketOptions = options.Value;
         IReadOnlyList<float> embedding = student.Embed(job.Content);
+        List<ChatMessage> recentMessages = await db.ChatMessages.AsNoTracking()
+            .Where(message => message.RoomId == job.RoomId && message.MessageId != job.MessageId)
+            .OrderByDescending(message => message.CreatedAtUtc)
+            .Take(5)
+            .OrderBy(message => message.CreatedAtUtc)
+            .ToListAsync(ct);
+        string contextSnapshot = BuildContextSnapshot(recentMessages);
 
         foreach (TicketUserWatch watch in watches)
         {
@@ -76,14 +83,18 @@ public sealed class AssessmentPipelineService(
                 ?? Math.Clamp(ticketOptions.InitialConfidenceScore, 0, 1);
 
             string requirement = TicketStudentContext.BuildRequirement(watch, 4000);
-            TicketStudentPrediction prediction = student.Predict(requirement, job.Content);
+            string modelRequirement = $"{requirement}\nRunning ticket confidence before this message: {previousScore:F3}.";
+            string modelMessage = string.IsNullOrEmpty(contextSnapshot)
+                ? job.Content
+                : $"{contextSnapshot}\n<current_message>\n{job.Content}\n</current_message>";
+            TicketStudentPrediction prediction = student.Predict(modelRequirement, modelMessage);
             bool reviewerInvoked = ticketOptions.OllamaEnabled && TicketReviewPolicy.ShouldReview(
                 prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
             IReadOnlyList<VectorDocument> similar = reviewerInvoked
                 ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, prediction.Category, ct)
                 : [];
             string? rawReview = reviewerInvoked
-                ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, requirement, similar, ticketOptions.MaxMessageCharacters), ct)
+                ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, modelRequirement, contextSnapshot, similar, ticketOptions.MaxMessageCharacters), ct)
                 : null;
             TicketReviewerEvaluation? review = !string.IsNullOrWhiteSpace(rawReview)
                                                    && TicketReviewerEvaluation.TryParse(rawReview, out TicketReviewerEvaluation parsed)
@@ -121,6 +132,7 @@ public sealed class AssessmentPipelineService(
                 StudentRelevance = prediction.Relevance,
                 StudentCategory = prediction.Category,
                 StudentReasoning = prediction.Reasoning,
+                ContextSnapshot = contextSnapshot,
                 ReviewerInvoked = reviewerInvoked,
                 ReviewerScore = review?.ReviewerScore,
                 ReviewerConfidence = review?.ReviewerConfidence,
@@ -156,6 +168,7 @@ public sealed class AssessmentPipelineService(
                     studentCategory = prediction.Category,
                     reviewerInvoked,
                     reviewerScore = review?.ReviewerScore,
+                    contextMessageCount = recentMessages.Count,
                     evaluatedAtUtc = scoreEvent.CreatedAtUtc,
                 },
                 ct);
@@ -175,6 +188,7 @@ public sealed class AssessmentPipelineService(
         AssessmentMessageJob job,
         TicketStudentPrediction prediction,
         string requirement,
+        string contextSnapshot,
         IReadOnlyList<VectorDocument> similar,
         int maxMessageCharacters)
     {
@@ -198,6 +212,9 @@ public sealed class AssessmentPipelineService(
         builder.AppendLine($"sender_id: {job.SenderId:D}");
         builder.AppendLine(message);
         builder.AppendLine("</message_untrusted>");
+        builder.AppendLine("<recent_chat_context_untrusted>");
+        builder.AppendLine(Truncate(contextSnapshot, 2500));
+        builder.AppendLine("</recent_chat_context_untrusted>");
         builder.AppendLine("<student_output_untrusted>");
         builder.AppendLine($"requirement: {Truncate(requirement, 4000)}");
         builder.AppendLine($"score: {prediction.EvidenceScore:F4}");
@@ -214,4 +231,15 @@ public sealed class AssessmentPipelineService(
 
     private static string Truncate(string value, int maxCharacters) =>
         value.Length <= maxCharacters ? value : value[..maxCharacters];
+
+    private static string BuildContextSnapshot(IEnumerable<ChatMessage> messages)
+    {
+        StringBuilder builder = new();
+        foreach (ChatMessage message in messages)
+        {
+            string text = Truncate(message.RawContent, 400);
+            builder.AppendLine($"[{message.SenderUsername}] {text}");
+        }
+        return Truncate(builder.ToString().Trim(), 2500);
+    }
 }

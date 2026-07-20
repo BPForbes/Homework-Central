@@ -35,3 +35,22 @@ public sealed class NeuralNetVisualizerDto
     public string ModelVersion { get; set; } = "hc-student-mlp-v1";
     public int TrainingExamples { get; set; }
 }
+
+public sealed class StartNeuralNetTrainingRequest
+{
+    public int TicketCount { get; set; } = 3;
+    public int MaxPassesPerTicket { get; set; } = 3;
+}
+
+public sealed class NeuralNetTrainingSessionDto
+{
+    public Guid SessionId { get; set; }
+    public int RequestedTicketCount { get; set; }
+    public int MaxPassesPerTicket { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime? StartedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public string? FailureReason { get; set; }
+    public bool HasReport { get; set; }
+}

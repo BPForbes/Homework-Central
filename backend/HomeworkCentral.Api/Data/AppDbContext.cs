@@ -42,6 +42,7 @@ public partial class AppDbContext(
     public DbSet<TicketUserWatch> TicketUserWatches => Set<TicketUserWatch>();
     public DbSet<TicketMessageScore> TicketMessageScores => Set<TicketMessageScore>();
     public DbSet<TicketModelTrainingExample> TicketModelTrainingExamples => Set<TicketModelTrainingExample>();
+    public DbSet<NeuralNetTrainingSession> NeuralNetTrainingSessions => Set<NeuralNetTrainingSession>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
     public DbSet<ChatMessageVote> ChatMessageVotes => Set<ChatMessageVote>();
@@ -370,6 +371,7 @@ public partial class AppDbContext(
             e.Property(s => s.RawEvaluationJson).IsRequired();
             e.Property(s => s.StudentCategory).HasMaxLength(64).IsRequired();
             e.Property(s => s.StudentReasoning).HasMaxLength(500).IsRequired();
+            e.Property(s => s.ContextSnapshot).HasMaxLength(5000).IsRequired();
             e.Property(s => s.ReviewerExplanation).HasMaxLength(500);
             e.Property(s => s.ReviewerGuidance).HasMaxLength(500);
             e.HasOne(s => s.Ticket)
@@ -387,12 +389,23 @@ public partial class AppDbContext(
             e.Property(x => x.TrainingExampleId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.Requirement).HasMaxLength(4000).IsRequired();
             e.Property(x => x.BootstrapMessage).HasMaxLength(4000);
+            e.Property(x => x.ContextSnapshot).HasMaxLength(5000);
             e.Property(x => x.Category).HasMaxLength(64).IsRequired();
             e.Property(x => x.Source).HasMaxLength(32).IsRequired();
             e.HasOne<ChatMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne<TicketMessageScore>().WithOne().HasForeignKey<TicketModelTrainingExample>(x => x.ScoreEventId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.MessageId);
             e.HasIndex(x => x.ScoreEventId).IsUnique();
+        });
+
+        mb.Entity<NeuralNetTrainingSession>(e =>
+        {
+            e.HasKey(x => x.SessionId);
+            e.Property(x => x.SessionId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.FailureReason).HasMaxLength(1000);
+            e.Property(x => x.ReportJson);
+            e.HasIndex(x => x.CreatedAtUtc);
         });
 
         mb.Entity<ChatAttachment>(e =>

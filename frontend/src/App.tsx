@@ -93,7 +93,7 @@ export default function App() {
                   }
                 />
                 <Route
-                  path="/server/NeuralNet/TrainingFeedback"
+                  path="/server/NeuralNet/Training"`n                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>} `n                />`n                <Route`n                  path="/server/NeuralNet/TrainingFeedback"
                   element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
                 />
                 <Route

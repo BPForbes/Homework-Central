@@ -17,11 +17,24 @@ public sealed record TicketStudentPrediction(
     string Reasoning,
     string ModelVersion);
 
+public sealed record NeuralNetStateSnapshot(
+    int InputNodes,
+    int HiddenNodes,
+    int OutputNodes,
+    int SupportExamples,
+    double InputWeightL2,
+    double OutputWeightL2,
+    double HiddenBiasL2,
+    double OutputBiasL2,
+    IReadOnlyList<float> HiddenBias,
+    IReadOnlyList<float> OutputBias);
+
 public interface ITicketStudentModel
 {
     TicketStudentPrediction Predict(string requirement, string message);
     IReadOnlyList<float> Embed(string text);
     void Train(StudentTrainingExample example, int epochs = 12);
+    NeuralNetStateSnapshot GetStateSnapshot();
 }
 
 /// <summary>
@@ -99,6 +112,22 @@ public sealed class TicketStudentModel : ITicketStudentModel
         finally
         {
             gate.ExitWriteLock();
+        }
+    }
+
+    public NeuralNetStateSnapshot GetStateSnapshot()
+    {
+        gate.EnterReadLock();
+        try
+        {
+            return new NeuralNetStateSnapshot(
+                InputSize, HiddenSize, 2, support.Count,
+                L2(inputWeights), L2(outputWeights), L2(hiddenBias), L2(outputBias),
+                hiddenBias.ToArray(), outputBias.ToArray());
+        }
+        finally
+        {
+            gate.ExitReadLock();
         }
     }
 
@@ -218,6 +247,8 @@ public sealed class TicketStudentModel : ITicketStudentModel
             rightNorm += value * value;
         return leftNorm <= 0 || rightNorm <= 0 ? 0 : Math.Clamp(dot / Math.Sqrt(leftNorm * rightNorm), 0, 1);
     }
+
+    private static double L2(IEnumerable<float> values) => Math.Sqrt(values.Sum(value => value * value));
 
     private static string DetectCategory(string requirement)
     {
