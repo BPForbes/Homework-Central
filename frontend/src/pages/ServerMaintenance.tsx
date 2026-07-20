@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBrain, faGlobe, faLock, faXmark } from '@fortawesome/free-solid-svg-icons'
-import { Link } from 'react-router-dom'
+import { faGlobe, faLock, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { infrastructureApi } from '../api/infrastructureApi'
 import { chatApi } from '../api/chatApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
@@ -12,7 +11,6 @@ import {
   RoomCategoryFields,
   RoomIconField,
   RoomPrivacyField,
-  RoomTypeField,
 } from '../components/infrastructure/RoomEditorFields'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import { defaultCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
@@ -289,12 +287,6 @@ export function ServerMaintenance() {
 
       {error && <p className="error sm-error">{error}</p>}
 
-      <section className="server-page-card">
-        <h3><FontAwesomeIcon icon={faBrain} /> Neural Network</h3>
-        <p>Review tutor feedback before it changes the student model, inspect approved data, and view the fixed low-memory network.</p>
-        <Link to="/server/NeuralNet/TrainingFeedback" className="btn-secondary">Open Training Feedback</Link>
-      </section>
-
       <div className="sm-layout sm-layout--single">
         {serverSection !== 'rooms' && (
         <section className="sm-panel sm-form-panel">
@@ -320,16 +312,6 @@ export function ServerMaintenance() {
                 required
               />
             </div>
-
-            <RoomTypeField
-              roomType={roomType}
-              editing={Boolean(editingId)}
-              onChange={(nextRoomType, nextIconName) => {
-                setRoomType(nextRoomType)
-                setIconName(nextIconName)
-                setNavSection(roomTypeToServerSection(nextRoomType))
-              }}
-            />
 
             <RoomIconField
               iconName={iconName}

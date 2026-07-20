@@ -4961,3 +4961,13 @@ a {
   color: var(--color-text-muted);
 }
 
+
+.neural-graph-panel { overflow: hidden; }
+.neural-zoom { width: min(100%, 22rem); accent-color: var(--color-primary); }
+.neural-graph { display: block; width: 100%; min-height: 18rem; margin-top: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-sunken); }
+.neural-edge { stroke: var(--color-accent); stroke-width: 2; transition: opacity var(--duration-fast) var(--ease-out); }
+.neural-node { fill: var(--color-surface-alt); stroke: var(--color-border-strong); stroke-width: 2; transition: transform var(--duration-fast) var(--ease-out), fill var(--duration-fast) var(--ease-out); transform-box: fill-box; transform-origin: center; }
+.neural-node-group { cursor: pointer; }
+.neural-node-group:hover .neural-node, .neural-node--selected { fill: var(--color-primary-soft-strong); stroke: var(--color-primary); transform: scale(1.06); }
+.neural-node-text, .neural-layer-label { fill: var(--color-ink); font-family: var(--font-sans); font-size: 14px; font-weight: 600; pointer-events: none; }
+.neural-layer-label { fill: var(--color-ink-secondary); font-size: 13px; }
