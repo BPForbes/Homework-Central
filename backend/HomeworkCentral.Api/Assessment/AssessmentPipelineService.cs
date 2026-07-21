@@ -263,8 +263,11 @@ public sealed class AssessmentPipelineService(
         if (subjects.AppliedGenerals.Count == 0 && subjects.ChannelGeneral is null)
             return reasoning;
         string applied = subjects.AppliedGenerals.Count == 0 ? "none" : string.Join(", ", subjects.AppliedGenerals);
+        string expertise = subjects.AppliedExpertise.Count == 0
+            ? string.Empty
+            : $"; expertise=[{string.Join(", ", subjects.AppliedExpertise)}]";
         string channel = subjects.ChannelGeneral ?? "unscoped";
-        return $"{reasoning} Applied=[{applied}]; channel={channel}; exact={subjects.ExactMatch:F2}; cross={subjects.CrossSubjectSupport:F2}; reward×{subjects.RewardScale:F2}.";
+        return $"{reasoning} Applied=[{applied}]{expertise}; channel={channel}; exact={subjects.ExactMatch:F2}; cross={subjects.CrossSubjectSupport:F2}; reward×{subjects.RewardScale:F2}.";
     }
 
     private static string BuildContextSnapshot(IEnumerable<ChatMessage> messages)

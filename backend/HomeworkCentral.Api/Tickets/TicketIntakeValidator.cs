@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.DTOs;
 
 namespace HomeworkCentral.Api.Tickets;
@@ -79,7 +80,7 @@ public static class TicketIntakeValidator
 
     public static void ValidateAnswers(
         IReadOnlyList<TicketIntakeQuestionDto> schema,
-        IReadOnlyDictionary<string, JsonElement> answers)
+        Dictionary<string, JsonElement> answers)
     {
         ValidateSchema(schema);
 
@@ -95,8 +96,27 @@ public static class TicketIntakeValidator
                 continue;
 
             ValidateAnswerValue(question, value);
+
+            if (IsTutorSubjectsQuestion(question)
+                && value.ValueKind == JsonValueKind.String)
+            {
+                TutorSubjectTextProcessor.ProcessResult processed =
+                    TutorSubjectTextProcessor.ProcessStrict(value.GetString());
+                if (!processed.Ok)
+                {
+                    throw new InvalidOperationException(
+                        processed.ErrorMessage
+                        ?? "Could not verify one or more subjects. Please re-enter them.");
+                }
+
+                // Persist Mask-C generals (case-canonical) so downstream signals stay consistent.
+                answers[question.Id] = JsonSerializer.SerializeToElement(processed.CanonicalDisplay);
+            }
         }
     }
+
+    private static bool IsTutorSubjectsQuestion(TicketIntakeQuestionDto question) =>
+        string.Equals(question.Id, TutorSubjectTextProcessor.TutorSubjectsQuestionId, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsAiOptOut(
         IReadOnlyList<TicketIntakeQuestionDto> schema,

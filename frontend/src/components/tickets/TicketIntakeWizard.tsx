@@ -298,8 +298,11 @@ export function TicketIntakeWizard({
     try {
       const { data } = await ticketsApi.open(portalRoomId, answers)
       onOpened(data)
-    } catch {
-      setError('Could not open the ticket. Check required answers and try again.')
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? 'Could not open the ticket. Check required answers and try again.'
+      setError(msg)
     } finally {
       setSubmitting(false)
     }

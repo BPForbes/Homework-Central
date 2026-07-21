@@ -21,7 +21,11 @@ function viewForPath(pathname: string): NeuralView {
 }
 
 function cascadeMeta(model: NeuralNetVisualizerModel) {
-  const stage1 = model.stage1LayerWidths?.length ? model.stage1LayerWidths : [30, 24, 8]
+  const stage1 = model.stage1LayerWidths?.length
+    ? model.stage1LayerWidths
+    : model.chatMonitoringKind === 'Tutoring'
+      ? [46, 32, 8]
+      : [30, 24, 8]
   const stage2 = model.layerWidths.length ? model.layerWidths : [86, 48, 72, 64, 56, 103]
   const role = model.stage1Role ?? (model.chatMonitoringKind === 'Tutoring' ? 'subject-context router' : 'concept-context router')
   const categories = model.categoryCount ?? Math.max(0, (stage2[stage2.length - 1] ?? 2) - 2)
