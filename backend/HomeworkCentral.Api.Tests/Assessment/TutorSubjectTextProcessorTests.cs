@@ -114,7 +114,8 @@ public class TutorSubjectTextProcessorTests
 
         float[] routerInput = TutoringSubjectContextRouter.BuildRouterInput(snapshot);
         Assert.Equal(TutoringSubjectContextRouter.InputSize, routerInput.Length);
-        Assert.Equal(46, routerInput.Length);
+        Assert.Equal(TutoringSubjectContextRouter.InputSize, routerInput.Length);
+        Assert.Equal(62, routerInput.Length);
         Assert.True(routerInput.Skip(TutoringSubjectContextRouter.BaseInputSize).Sum() >= 1f);
         Assert.Equal(1f, routerInput[5]); // Science applied hot (index 1 in generals → slot 4+1)
         Assert.Equal(1f, routerInput[6]); // ComputerScience applied hot
@@ -123,7 +124,7 @@ public class TutorSubjectTextProcessorTests
     [Fact]
     public void Tutoring_router_topology_includes_expertise_hash_bins()
     {
-        Assert.Equal(46, TutoringSubjectContextRouter.InputSize);
+        Assert.Equal(62, TutoringSubjectContextRouter.InputSize);
         Assert.Equal(32, TutoringSubjectContextRouter.HiddenSize);
         Assert.Equal(8, TutoringSubjectContextRouter.OutputSize);
         using TutoringSubjectContextRouter router = new();
