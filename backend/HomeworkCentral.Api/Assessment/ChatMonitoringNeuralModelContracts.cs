@@ -15,7 +15,12 @@ public sealed record ChatMonitoringNeuralModelInput(
     float ThreadContinuity,
     float PriorScore);
 
-public sealed record ChatMonitoringNeuralModelTargets(float Evidence, float Relevance);
+/// <summary>
+/// Supervised targets. Evidence/relevance use sigmoid+BCE; <see cref="CategoryIndex"/> uses
+/// softmax + categorical cross-entropy (3Blue1Brown multi-class cost). Use -1 to derive the
+/// index from the training example category string.
+/// </summary>
+public sealed record ChatMonitoringNeuralModelTargets(float Evidence, float Relevance, int CategoryIndex = -1);
 
 public sealed record ChatMonitoringNeuralModelPrediction(
     float Evidence,
@@ -24,7 +29,8 @@ public sealed record ChatMonitoringNeuralModelPrediction(
     NeuralModelKindChatMonitoring ChatMonitoringKind,
     string ModelVersion,
     string Category,
-    string Reasoning);
+    string Reasoning,
+    float CategoryConfidence = 0f);
 
 public sealed record ChatMonitoringNeuralModelTrainingExample(
     ChatMonitoringNeuralModelInput Input,
@@ -56,6 +62,16 @@ public interface IChatMonitoringNeuralModelTelemetry : IChatMonitoringNeuralMode
     ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input);
     TrainingPassTrace TrainWithTrace(
         ChatMonitoringNeuralModelTrainingExample example,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f);
+    /// <summary>
+    /// Mini-batch SGD as in 3Blue1Brown: C = (1/n) Σ C_x and one update along −∇C.
+    /// </summary>
+    TrainingPassTrace TrainMiniBatchWithTrace(
+        IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> examples,
         int epochs = 12,
         NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
         float evidenceTolerance = 0f,

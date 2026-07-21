@@ -92,8 +92,10 @@ public sealed class AssessmentPipelineService(
             ChatMonitoringNeuralModelPrediction prediction = model.Predict(new ChatMonitoringNeuralModelInput(
                 modelRequirement, contextSnapshot, job.Content, 0, 1, Math.Clamp(recentMessages.Count / 5f, 0, 1), (float)previousScore));
             string retrievalPositionId = ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind);
-            bool reviewerInvoked = ticketOptions.OllamaEnabled && TicketReviewPolicy.ShouldReview(
-                prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
+            bool reviewerInvoked = !ticketOptions.NeuralOnlyScoring
+                && ticketOptions.OllamaEnabled
+                && TicketReviewPolicy.ShouldReview(
+                    prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
             IReadOnlyList<VectorDocument> similar = reviewerInvoked
                 ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, retrievalPositionId, ct)
                 : [];

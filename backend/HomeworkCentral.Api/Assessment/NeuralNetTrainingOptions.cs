@@ -24,6 +24,11 @@ public sealed class NeuralNetTrainingOptions
     /// <summary>Flush accumulated DB rows / vector upserts after this many training examples.</summary>
     public int PersistenceBatchSize { get; set; } = 50;
 
+    /// <summary>
+    /// Mini-batch size for SGD (3Blue1Brown average cost). 1 = online SGD per example.
+    /// </summary>
+    public int MiniBatchSize { get; set; } = 8;
+
     /// <summary>Use compact per-epoch replay (loss + grad norm) instead of full parameter deltas.</summary>
     public bool CompactReplay { get; set; } = true;
 

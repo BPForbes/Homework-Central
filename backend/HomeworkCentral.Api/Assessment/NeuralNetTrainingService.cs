@@ -316,9 +316,11 @@ public sealed class NeuralNetTrainingService(
         run.StartedAtUtc = DateTime.UtcNow;
         await PersistAsync(persistenceGate, timings, ct);
         PersistenceBatch batch = new(db, vectors, persistenceGate, Options.PersistenceBatchSize, timings);
+        List<PendingTrainItem> pendingTrain = [];
         try
         {
             IReadOnlyList<(int TicketIndex, SyntheticTicket Ticket)> selected = SelectTicketsForRun(session.SessionId, run.ChatMonitoringKind, tickets, Options.CrossDomainSampleRate);
+            int miniBatchSize = Math.Clamp(Options.MiniBatchSize, 1, 64);
             foreach ((int ticketIndex, SyntheticTicket generated) in selected)
             {
                 replay.BeginTicket(ticketIndex, generated);
@@ -338,68 +340,31 @@ public sealed class NeuralNetTrainingService(
 
                     bool withinTolerance = Math.Abs(prediction.Evidence - evaluation.TargetScore) <= Options.EvidenceTolerance
                         && Math.Abs(prediction.Relevance - evaluation.TargetRelevance) <= Options.RelevanceTolerance;
-                    TrainingPassTrace? trainingTrace = null;
-                    bool accepted = withinTolerance;
-                    if (!withinTolerance)
+
+                    if (withinTolerance)
                     {
-                        float signedVote = community.Sampling.VoterCount == 0 ? 0 : ((float)community.Sampling.Upvotes - community.Sampling.Downvotes) / community.Sampling.VoterCount * community.VoteConfidence;
-                        ChatMonitoringNeuralModelInput trainingInput = input with { CommunityVote = signedVote, PriorScore = prediction.Evidence };
-                        ChatMonitoringNeuralModelTrainingExample trainingExample = new(trainingInput,
-                            new ChatMonitoringNeuralModelTargets((float)evaluation.TargetScore, (float)evaluation.TargetRelevance), generated.Category);
-                        NeuralTrainingTraceDetail detail = ShouldCaptureFullTrace(session.SessionId, ticketIndex, message.MessageIndex, run.ChatMonitoringKind)
-                            ? NeuralTrainingTraceDetail.Full
-                            : NeuralTrainingTraceDetail.Compact;
-                        int localEpochs = Math.Clamp(Options.LocalEpochs, 1, 100);
-                        // MaxPassesPerTicket remains an admin-facing budget: multiply the default epoch budget when raised.
-                        if (session.MaxPassesPerTicket > 1)
-                            localEpochs = Math.Clamp(localEpochs * session.MaxPassesPerTicket / 3, 12, 100);
-
-                        System.Diagnostics.Stopwatch trainWatch = System.Diagnostics.Stopwatch.StartNew();
-                        trainingTrace = telemetry.TrainWithTrace(
-                            trainingExample,
-                            localEpochs,
-                            detail,
-                            Options.EvidenceTolerance,
-                            Options.RelevanceTolerance,
-                            Options.LossStopThreshold);
-                        trainWatch.Stop();
-                        timings.AddTrain(trainWatch.ElapsedMilliseconds);
-                        if (trainingTrace.Iterations.Count > 0)
-                            timings.AddExampleCost(trainingTrace.Iterations[^1].LossAfterUpdate.TotalLoss);
-
-                        ChatMonitoringNeuralModelPrediction after = telemetry.Predict(trainingInput);
-                        accepted = Math.Abs(after.Evidence - evaluation.TargetScore) <= Options.EvidenceTolerance
-                            && Math.Abs(after.Relevance - evaluation.TargetRelevance) <= Options.RelevanceTolerance;
-
-                        TicketModelTrainingExample record = new()
-                        {
-                            TrainingExampleId = Guid.NewGuid(), Requirement = requirement, BootstrapMessage = message.Content,
-                            TargetScore = evaluation.TargetScore, TargetRelevance = evaluation.TargetRelevance, Category = generated.Category,
-                            Source = "SyntheticLlmTraining", ApprovedAtUtc = DateTime.UtcNow, ApprovedByUserId = session.StartedByUserId,
-                            NeuralNetTrainingSessionId = session.SessionId, ChatMonitoringKind = run.ChatMonitoringKind,
-                            ContextSnapshot = generated.ContextSnapshot,
-                        };
-                        await batch.EnqueueAsync(record, message.Content, ChatMonitoringVectorKeys.LineagePositionId(run.ChatMonitoringKind), ct);
+                        if (ShouldAudit(session.SessionId, ticketIndex, message.MessageIndex, run.ChatMonitoringKind))
+                            evaluation = await MaybeAuditAsync(generated, message, requirement, prediction, evaluation, timings, ct);
+                        replay.AddPass(ticketIndex, message, 1, generated, initialInference, evaluation, community, null, true);
+                        continue;
                     }
 
-                    if (ShouldAudit(session.SessionId, ticketIndex, message.MessageIndex, run.ChatMonitoringKind))
-                    {
-                        System.Diagnostics.Stopwatch auditWatch = System.Diagnostics.Stopwatch.StartNew();
-                        SyntheticEvaluatorResult? audit = null;
-                        for (int attempt = 0; attempt < 3 && audit is null; attempt++)
-                        {
-                            timings.Llm2JsonRetries += attempt > 0 ? 1 : 0;
-                            audit = await EvaluateSyntheticTicketAsync(generated with { Message = message.Content, Requirement = requirement }, prediction, ct);
-                        }
-                        auditWatch.Stop();
-                        timings.AddAudit(auditWatch.ElapsedMilliseconds);
-                        if (audit is not null)
-                            evaluation = evaluation with { Feedback = Truncate($"{evaluation.Feedback} | audit:{audit.Verdict}/{audit.Feedback}", 2000) };
-                    }
+                    float signedVote = community.Sampling.VoterCount == 0 ? 0 : ((float)community.Sampling.Upvotes - community.Sampling.Downvotes) / community.Sampling.VoterCount * community.VoteConfidence;
+                    ChatMonitoringNeuralModelInput trainingInput = input with { CommunityVote = signedVote, PriorScore = prediction.Evidence };
+                    int categoryIndex = ChatMonitoringTicketContext.CategoryIndex(generated.Category, run.ChatMonitoringKind);
+                    ChatMonitoringNeuralModelTrainingExample trainingExample = new(trainingInput,
+                        new ChatMonitoringNeuralModelTargets((float)evaluation.TargetScore, (float)evaluation.TargetRelevance, categoryIndex), generated.Category);
+                    pendingTrain.Add(new PendingTrainItem(ticketIndex, message, generated, requirement, trainingInput, trainingExample, initialInference, evaluation, community,
+                        ShouldCaptureFullTrace(session.SessionId, ticketIndex, message.MessageIndex, run.ChatMonitoringKind)));
 
-                    replay.AddPass(ticketIndex, message, 1, generated, initialInference, evaluation, community, trainingTrace, accepted);
+                    if (pendingTrain.Count >= miniBatchSize)
+                        await FlushTrainMiniBatchAsync(session, run, telemetry, replay, batch, pendingTrain, timings, ct);
                 }
             }
+
+            if (pendingTrain.Count > 0)
+                await FlushTrainMiniBatchAsync(session, run, telemetry, replay, batch, pendingTrain, timings, ct);
+
             await batch.FlushAsync(ct);
             run.Status = "Completed";
             run.CompletedAtUtc = DateTime.UtcNow;
@@ -407,6 +372,11 @@ public sealed class NeuralNetTrainingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (pendingTrain.Count > 0)
+            {
+                try { await FlushTrainMiniBatchAsync(session, run, telemetry, replay, batch, pendingTrain, timings, CancellationToken.None); }
+                catch { /* best-effort drain */ }
+            }
             await batch.FlushAsync(CancellationToken.None);
             run.Status = "Failed";
             run.CompletedAtUtc = DateTime.UtcNow;
@@ -416,6 +386,96 @@ public sealed class NeuralNetTrainingService(
         }
         finally { await PersistAsync(persistenceGate, timings, CancellationToken.None); }
     }
+
+    private async Task FlushTrainMiniBatchAsync(
+        NeuralNetTrainingSession session,
+        ChatMonitoringNeuralModelRun run,
+        IChatMonitoringNeuralModelTelemetry telemetry,
+        ReplayBuilder replay,
+        PersistenceBatch batch,
+        List<PendingTrainItem> pending,
+        TrainingSessionTimings timings,
+        CancellationToken ct)
+    {
+        if (pending.Count == 0) return;
+        List<PendingTrainItem> items = [.. pending];
+        pending.Clear();
+
+        int localEpochs = Math.Clamp(Options.LocalEpochs, 1, 100);
+        if (session.MaxPassesPerTicket > 1)
+            localEpochs = Math.Clamp(localEpochs * session.MaxPassesPerTicket / 3, 12, 100);
+        NeuralTrainingTraceDetail detail = items.Any(x => x.FullTrace)
+            ? NeuralTrainingTraceDetail.Full
+            : NeuralTrainingTraceDetail.Compact;
+
+        System.Diagnostics.Stopwatch trainWatch = System.Diagnostics.Stopwatch.StartNew();
+        TrainingPassTrace trainingTrace = telemetry.TrainMiniBatchWithTrace(
+            items.Select(x => x.Example).ToList(),
+            localEpochs,
+            detail,
+            Options.EvidenceTolerance,
+            Options.RelevanceTolerance,
+            Options.LossStopThreshold);
+        trainWatch.Stop();
+        timings.AddTrain(trainWatch.ElapsedMilliseconds);
+        timings.AddExampleCost(trainingTrace.FinalAverageCost);
+
+        foreach (PendingTrainItem item in items)
+        {
+            ChatMonitoringNeuralModelPrediction after = telemetry.Predict(item.TrainingInput);
+            bool accepted = Math.Abs(after.Evidence - item.Evaluation.TargetScore) <= Options.EvidenceTolerance
+                && Math.Abs(after.Relevance - item.Evaluation.TargetRelevance) <= Options.RelevanceTolerance;
+            SyntheticEvaluatorResult evaluation = item.Evaluation;
+            if (ShouldAudit(session.SessionId, item.TicketIndex, item.Message.MessageIndex, run.ChatMonitoringKind))
+                evaluation = await MaybeAuditAsync(item.Ticket, item.Message, item.Requirement, item.InitialInference.Prediction, evaluation, timings, ct);
+
+            TicketModelTrainingExample record = new()
+            {
+                TrainingExampleId = Guid.NewGuid(), Requirement = item.Requirement, BootstrapMessage = item.Message.Content,
+                TargetScore = evaluation.TargetScore, TargetRelevance = evaluation.TargetRelevance, Category = item.Ticket.Category,
+                Source = "SyntheticLlmTraining", ApprovedAtUtc = DateTime.UtcNow, ApprovedByUserId = session.StartedByUserId,
+                NeuralNetTrainingSessionId = session.SessionId, ChatMonitoringKind = run.ChatMonitoringKind,
+                ContextSnapshot = item.Ticket.ContextSnapshot,
+            };
+            await batch.EnqueueAsync(record, item.Message.Content, ChatMonitoringVectorKeys.LineagePositionId(run.ChatMonitoringKind), ct);
+            replay.AddPass(item.TicketIndex, item.Message, 1, item.Ticket, item.InitialInference, evaluation, item.Community, trainingTrace, accepted);
+        }
+    }
+
+    private async Task<SyntheticEvaluatorResult> MaybeAuditAsync(
+        SyntheticTicket generated,
+        SyntheticThreadMessage message,
+        string requirement,
+        ChatMonitoringNeuralModelPrediction prediction,
+        SyntheticEvaluatorResult evaluation,
+        TrainingSessionTimings timings,
+        CancellationToken ct)
+    {
+        System.Diagnostics.Stopwatch auditWatch = System.Diagnostics.Stopwatch.StartNew();
+        SyntheticEvaluatorResult? audit = null;
+        for (int attempt = 0; attempt < 3 && audit is null; attempt++)
+        {
+            timings.Llm2JsonRetries += attempt > 0 ? 1 : 0;
+            audit = await EvaluateSyntheticTicketAsync(generated with { Message = message.Content, Requirement = requirement }, prediction, ct);
+        }
+        auditWatch.Stop();
+        timings.AddAudit(auditWatch.ElapsedMilliseconds);
+        if (audit is not null)
+            evaluation = evaluation with { Feedback = Truncate($"{evaluation.Feedback} | audit:{audit.Verdict}/{audit.Feedback}", 2000) };
+        return evaluation;
+    }
+
+    private sealed record PendingTrainItem(
+        int TicketIndex,
+        SyntheticThreadMessage Message,
+        SyntheticTicket Ticket,
+        string Requirement,
+        ChatMonitoringNeuralModelInput TrainingInput,
+        ChatMonitoringNeuralModelTrainingExample Example,
+        ChatMonitoringNeuralModelInferenceTrace InitialInference,
+        SyntheticEvaluatorResult Evaluation,
+        SyntheticCommunityResolution Community,
+        bool FullTrace);
 
     private async Task PersistAsync(SemaphoreSlim persistenceGate, TrainingSessionTimings timings, CancellationToken ct)
     {
@@ -760,7 +820,7 @@ public sealed class NeuralNetTrainingService(
             NeuralNetParameterSnapshot final = telemetry.GetParameterSnapshot(null, localRevision);
             IReadOnlyList<TrainingTicketReplay> ticketReplay = tickets.Select(ticket => new TrainingTicketReplay(ticket.Index, Intern(ticket.Ticket.Category), Intern(ticket.Ticket.Requirement), Intern(ticket.Ticket.ContextSnapshot), ticket.Messages.Select(message => new TrainingMessageReplay(message.Message.MessageIndex, Intern(message.Message.AuthorId), Intern(message.Message.AuthorRole), Intern(message.Message.Channel), message.Message.IsDistractor, message.Message.ChannelRelevance, message.Passes)).ToList())).ToList();
             ReplayPayloadCollections payloads = new(inputs, forwards, evaluations, losses, backwards, updates, verdicts, voteGeneration, voteEvaluation, voteSampling);
-            TrainingProvenance provenance = new(telemetry.GetStateSnapshot().ModelVersion, "hashed-text-48-v1", "binary-cross-entropy-v1", "SGD", .035f, epochs, "hc-xoshiro256ss-v1", 0x48434D4C, "replay-v2-worker-v1");
+            TrainingProvenance provenance = new(telemetry.GetStateSnapshot().ModelVersion, "hashed-text-48-v1", "bce+softmax-ce-avg-v1", "momentum-mini-batch-SGD", .035f, epochs, "hc-xoshiro256ss-v1", 0x48434D4C, "replay-v2-worker-v1");
             ReplayIntegrity placeholder = new("hc-replay-canonical-json-v1", "sha-256", "", initial.Checksum, final.Checksum, "");
             NeuralNetReplayReportV2 draft = new("2.0", session.SessionId, status, telemetry.GetTopologySnapshot(), new(strings), provenance, initial, ticketReplay, frames, payloads, final, placeholder, failure);
             ReplayIntegrity integrity = NeuralNetReplaySerializer.CreateIntegrity(draft.Topology, initial, final, NeuralNetReplaySerializer.Serialize(draft));

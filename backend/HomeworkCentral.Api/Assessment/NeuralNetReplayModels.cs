@@ -16,13 +16,14 @@ public sealed record NeuralNetTopologySnapshot(string ModelVersion, IReadOnlyLis
 public sealed record FeatureSource(string Token, string SourceField, int TokenOccurrenceIndex, uint Hash, float AddedValue);
 public sealed record FeatureActivation(int FeatureIndex, float Value, IReadOnlyList<FeatureSource> Sources);
 public sealed record ForwardPropagationTrace(IReadOnlyList<FeatureActivation> Features, IReadOnlyList<SparseValue> NodePreActivations, IReadOnlyList<SparseValue> NodeActivations, IReadOnlyList<SparseValue> EdgeContributions, IReadOnlyList<SparseValue> BiasContributions, float EvidenceLogit, float RelevanceLogit, float EvidenceProbability, float RelevanceProbability, float Confidence);
-public sealed record LossTrace(string Function, float EvidenceLoss, float RelevanceLoss, float RegularizationLoss, float TotalLoss);
+public sealed record LossTrace(string Function, float EvidenceLoss, float RelevanceLoss, float RegularizationLoss, float TotalLoss, int SampleCount = 1, float CategoryLoss = 0f);
 public sealed record GradientHealth(bool VanishingDetected, bool ExplodingDetected, float VanishingThreshold, float ExplodingThreshold, float MaximumAbsoluteGradient, float MinimumNonZeroAbsoluteGradient);
 public sealed record BackpropagationTrace(IReadOnlyList<SparseValue> ActivationGradients, IReadOnlyList<SparseValue> PreActivationGradients, IReadOnlyList<SparseValue> WeightGradients, IReadOnlyList<SparseValue> BiasGradients, float GradientL2Norm, GradientHealth Health);
 public sealed record ParameterDelta(int ParameterIndex, float ValueBefore, float Gradient, float Delta, float ValueAfter);
 public sealed record ParameterUpdateTrace(float LearningRate, string Optimizer, IReadOnlyList<ParameterDelta> Parameters);
 public sealed record TrainingIterationReplay(int Epoch, ForwardPropagationTrace BeforeUpdate, LossTrace LossBeforeUpdate, BackpropagationTrace Backward, ParameterUpdateTrace Update, ForwardPropagationTrace AfterUpdate, LossTrace LossAfterUpdate);
-public sealed record TrainingPassTrace(IReadOnlyList<TrainingIterationReplay> Iterations);
+/// <summary>One training pass. <see cref="BatchSize"/> &gt; 1 means iterations used 3B1B-style average cost C = (1/n) Σ C_x.</summary>
+public sealed record TrainingPassTrace(IReadOnlyList<TrainingIterationReplay> Iterations, int BatchSize = 1, float FinalAverageCost = 0f);
 public sealed record NeuralNetParameterSnapshot(long? CanonicalGeneration, int LocalRevision, string NumericFormat, string Encoding, int ParameterCount, string PackedValues, string Checksum);
 public sealed record ReplayIntegrity(string CanonicalizationVersion, string HashAlgorithm, string TopologyChecksum, string InitialStateChecksum, string FinalStateChecksum, string ReportChecksum);
 public sealed record ReplayFrame(long Sequence, ReplayPhase Phase, ReplayPayloadKind PayloadKind, int TicketIndex, int PassIndex, int? MessageIndex, int? Epoch, DateTimeOffset? CapturedAt, int PayloadIndex);

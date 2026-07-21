@@ -62,4 +62,9 @@ public static class ChatMonitoringTicketContext
         if (value.Contains("evad") || value.Contains("filter")) return "evasion";
         return "moderation-general";
     }
+
+    /// <summary>Maps a free-text / heuristic category onto the softmax vocabulary index.</summary>
+    public static int CategoryIndex(string? category, NeuralModelKindChatMonitoring kind) =>
+        ChatMonitoringCategoryTaxonomy.IndexOf(kind, category);
 }
+

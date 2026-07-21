@@ -18,17 +18,23 @@ requires Ollama or an external ML runtime:
 
 | Monitor | When selected | Topology |
 |---|---|---|
-| **Moderation** (`hc-chat-monitoring-moderation-v2`) | Default for conduct / filter tickets | `48 → 20 → 30 → 24 → 18 → 2` |
-| **Tutoring** (`hc-chat-monitoring-tutoring-v2`) | Tutor-application style tickets (filter/context mentions tutor, tutoring, competency, application, learning, etc.) | `48 → 20 → 32 → 28 → 20 → 2` |
+| **Moderation** (`hc-chat-monitoring-moderation-v3`) | Default for conduct / filter tickets | `48 → 20 → 30 → 24 → 18 → 8` (2 sigmoid + 6 softmax categories) |
+| **Tutoring** (`hc-chat-monitoring-tutoring-v3`) | Tutor-application style tickets (filter/context mentions tutor, tutoring, competency, application, learning, etc.) | `48 → 20 → 32 → 28 → 20 → 6` (2 sigmoid + 4 softmax categories) |
 
 Inputs are 48 dense features (44 hashed unigram/bigram bins from requirement,
 thread context, and message, plus community vote, channel relevance, thread
-continuity, and prior score). Hidden layers use **leaky ReLU** with He/Kaiming
-initialization; outputs stay sigmoid and train with **binary cross-entropy**
-(per-example cost = evidence BCE + relevance BCE). Confidence blends output
-separation with cosine similarity against a small in-memory support set of
-recent training examples for that monitor. Category and reasoning strings are
-derived from the ticket requirement.
+continuity, and prior score). The network follows 3Blue1Brown-aligned learning:
+
+- **Hidden layers:** leaky ReLU with He/Kaiming initialization
+- **Evidence / relevance:** independent sigmoids + binary cross-entropy (not softmax —
+  these are not mutually exclusive classes)
+- **Category:** softmax + categorical cross-entropy over a fixed taxonomy
+- **Cost:** mini-batch average \(C = \frac{1}{n}\sum C_x\) with momentum SGD on \(-\nabla C\)
+
+Confidence blends evidence separation, support-set cosine similarity, and the
+softmax category peak so live scoring can run **without an LLM** when
+`Tickets:NeuralOnlyScoring` is enabled (or `OllamaEnabled` is false). Category
+and reasoning come from the network itself once trained.
 
 The selected monitor returns:
 
@@ -103,19 +109,19 @@ real messages.
 Synthetic admin training sessions accept mode `Both` (default), `Moderation`,
 or `Tutoring`. `Both` creates concurrent per-kind `ChatMonitoringNeuralModelRun`
 rows, each with its own worker/promotion replay and canonical checkpoint
-lineage (`RuntimeKind = HashedMlpLrelu`).
+lineage (`RuntimeKind = HashedMlpV3`).
 
 Training efficiency (synthetic sessions):
 
 1. **Teacher labels once per message** — LLM 1 returns `expectedScore` /
    `expectedRelevance` with the scenario when possible; otherwise one LLM-2
    label call fills missing targets. Those fixed labels are reused by both
-   monitors and across local epochs (no per-pass LLM grading).
-2. **Local cost stop** — each message trains with online SGD against the
-   teacher targets until evidence/relevance tolerances and BCE
-   `LossStopThreshold` are met (default up to 24 epochs). Session
-   `ReportJson` records per-stage timings and **average cost**
-   (mean final `TotalLoss` over trained examples).
+   monitors and across local epochs (no per-pass LLM grading). Category targets
+   map onto the softmax taxonomy for CE training.
+2. **Local average-cost stop** — mini-batch momentum SGD against teacher targets
+   until evidence/relevance tolerances and total average cost
+   `LossStopThreshold` are met. Session `ReportJson` records per-stage timings
+   and **average cost** (mean final mini-batch \(C\)).
 3. **Domain batching** — in `Both` mode each monitor trains matching-domain
    tickets plus a small configurable cross-domain sample (default 15%) as
    negative controls.
@@ -125,6 +131,15 @@ Training efficiency (synthetic sessions):
    full parameter-delta traces are sampled (default 2%).
 6. **LLM concurrency cap** — `Llm:MaxConcurrentRequests` (default 2) limits
    Ollama chat/embed parallelism.
+
+### Path to LLM-free operation
+
+| Role today | NN replacement |
+|---|---|
+| Live Ollama reviewer | `Tickets:NeuralOnlyScoring=true` — NN evidence/relevance/category/confidence only |
+| LLM-2 teacher labels | Staff-approved training examples + synthetic labels during bootstrap |
+| Keyword category strings | Softmax category head over `ChatMonitoringCategoryTaxonomy` |
+| Heuristic “good enough” stop | Average cost \(C\) + \(\nabla C\) tolerances |
 
 Independent LLM-2 audits remain optional at `NeuralNetTraining:AuditSampleRate`
 for quality monitoring only; they do not drive the cost function.
