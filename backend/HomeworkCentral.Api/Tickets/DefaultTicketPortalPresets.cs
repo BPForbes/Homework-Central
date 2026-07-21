@@ -73,7 +73,9 @@ public static class DefaultTicketPortalPresets
         {
             Id = "report-reason",
             Type = "longText",
-            Prompt = "Why is this being reported?",
+            Prompt =
+                "Why is this being reported? Describe what happened. Naming a known issue type "
+                + "(e.g. payment solicitation, harassment, spam) helps monitoring — unknown wording is still accepted.",
             Required = true,
         },
         new()

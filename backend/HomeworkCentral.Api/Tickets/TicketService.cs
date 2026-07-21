@@ -9,6 +9,7 @@ using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets.Preface;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,7 +25,8 @@ public sealed class TicketService(
     ITicketRecipientResolver recipientResolver,
     ITicketTrackingAnalyzer trackingAnalyzer,
     IChatMonitoringNeuralModelFactory chatMonitoringModels,
-    IVectorDocumentStore vectors) : ITicketService
+    IVectorDocumentStore vectors,
+    ITicketPrefaceCheckResolver prefaceChecks) : ITicketService
 {
     private static readonly Guid SystemInboxMessageId =
         Guid.Parse("00000000-0000-0000-0000-00000000c002");
@@ -148,7 +150,8 @@ public sealed class TicketService(
             throw new InvalidOperationException("Ticket portal is not available in your account scope.");
 
         List<TicketIntakeQuestionDto> schema = TicketJson.DeserializeIntakeSchema(portal.IntakeSchemaJson);
-        TicketIntakeValidator.ValidateAnswers(schema, request.Answers);
+        Dictionary<string, TicketPrefaceResult> prefaceResults =
+            TicketIntakeValidator.ValidateAnswers(schema, request.Answers, prefaceChecks, filterName: portal.FilterName);
 
         int displayNumber = portal.NextDisplayNumber;
         portal.NextDisplayNumber = checked(displayNumber + 1);
@@ -206,7 +209,7 @@ public sealed class TicketService(
             AiTrackingOptOut = aiOptOut,
             TrackingTemplateJson = aiOptOut
                 ? null
-                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers),
+                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers, prefaceResults),
         };
 
         db.CustomChannels.Add(chatChannel);

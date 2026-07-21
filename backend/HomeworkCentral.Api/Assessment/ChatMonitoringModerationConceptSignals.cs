@@ -1,3 +1,6 @@
+using System.Text.Json;
+using HomeworkCentral.Api.Tickets.Preface;
+
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
@@ -81,6 +84,47 @@ public static class ChatMonitoringModerationConceptSignals
             if (ChatMonitoringModerationConcepts.TryGet(normalized, out _)
                 || string.Equals(normalized, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
                 concept = normalized;
+        }
+
+        // Shared preface extractor (same engine as tutor subjects) before slug substring fallback.
+        if (concept is null)
+        {
+            foreach (string? text in texts)
+            {
+                if (string.IsNullOrWhiteSpace(text)) continue;
+                TicketPrefaceExtraction extraction = ModerationConceptPrefaceCheck.Instance.Extract(text);
+                if (!string.IsNullOrWhiteSpace(extraction.PrimaryCategory))
+                {
+                    concept = extraction.PrimaryCategory;
+                    break;
+                }
+
+                // Tracking templates may carry prefaceCategory from intake.
+                if (text.Contains("prefaceCategory", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(text);
+                        if (document.RootElement.TryGetProperty("prefaceCategory", out JsonElement cat)
+                            && cat.ValueKind == JsonValueKind.String
+                            && !string.IsNullOrWhiteSpace(cat.GetString()))
+                        {
+                            string fromTemplate = ChatMonitoringCategoryTaxonomy.NormalizeCategory(
+                                NeuralModelKindChatMonitoring.Moderation, cat.GetString()!);
+                            if (ChatMonitoringModerationConcepts.TryGet(fromTemplate, out _)
+                                || string.Equals(fromTemplate, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
+                            {
+                                concept = fromTemplate;
+                                break;
+                            }
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // fall through to slug parse
+                    }
+                }
+            }
         }
 
         concept ??= ParseConceptFromTexts(texts);

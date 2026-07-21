@@ -151,6 +151,12 @@ builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
         ? sp.GetRequiredService<OllamaTicketTrackingAnalyzer>()
         : sp.GetRequiredService<NullTicketTrackingAnalyzer>();
 });
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheck>(
+    HomeworkCentral.Api.Tickets.Preface.TutorSubjectPrefaceCheck.Instance);
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheck>(
+    HomeworkCentral.Api.Tickets.Preface.ModerationConceptPrefaceCheck.Instance);
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheckResolver,
+    HomeworkCentral.Api.Tickets.Preface.TicketPrefaceCheckResolver>();
 builder.Services.AddScoped<ITicketRecipientResolver, TicketRecipientResolver>();
 builder.Services.AddScoped<ITicketService, TicketService>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, HomeworkCentral.Api.Assessment.AssessmentQueue>();
