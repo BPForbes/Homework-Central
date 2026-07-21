@@ -2,9 +2,17 @@ using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Text.Json;
 
 namespace HomeworkCentral.Api.Assessment;
+
+public enum NeuralNetTrainingSessionRemovalResult
+{
+    Removed,
+    NotFound,
+    Running,
+}
 
 public interface INeuralNetTrainingService
 {
@@ -18,6 +26,7 @@ public interface INeuralNetTrainingService
     Task<string?> GetSessionReportAsync(Guid sessionId, NeuralModelKindChatMonitoring? chatMonitoringKind = null, CancellationToken ct = default);
     Task RunSyntheticSessionAsync(Guid sessionId, CancellationToken ct = default);
     Task<bool> RunNextSyntheticSessionAsync(CancellationToken ct = default);
+    Task<NeuralNetTrainingSessionRemovalResult> RemoveSessionAsync(Guid sessionId, CancellationToken ct = default);
 }
 
 public sealed class NeuralNetTrainingService(
@@ -157,6 +166,26 @@ public sealed class NeuralNetTrainingService(
         return sessions.Select(session => MapSession(session, runs.Where(run => run.SessionId == session.SessionId))).ToList();
     }
 
+    public async Task<NeuralNetTrainingSessionRemovalResult> RemoveSessionAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
+        // A single conditional DELETE is atomic against the worker's own claim UPDATE: whichever
+        // statement the database serializes first wins the row, so a session can never be removed
+        // out from under a run that has just started.
+        int removed = await db.NeuralNetTrainingSessions
+            .Where(x => x.SessionId == sessionId && x.Status != "Running")
+            .ExecuteDeleteAsync(ct);
+        if (removed == 0)
+        {
+            bool exists = await db.NeuralNetTrainingSessions.AsNoTracking().AnyAsync(x => x.SessionId == sessionId, ct);
+            await transaction.RollbackAsync(ct);
+            return exists ? NeuralNetTrainingSessionRemovalResult.Running : NeuralNetTrainingSessionRemovalResult.NotFound;
+        }
+        await db.ChatMonitoringNeuralModelRuns.Where(x => x.SessionId == sessionId).ExecuteDeleteAsync(ct);
+        await transaction.CommitAsync(ct);
+        return NeuralNetTrainingSessionRemovalResult.Removed;
+    }
+
     public async Task<string?> GetSessionReportAsync(Guid sessionId, NeuralModelKindChatMonitoring? chatMonitoringKind = null, CancellationToken ct = default)
     {
         if (chatMonitoringKind is not null)
@@ -193,9 +222,13 @@ public sealed class NeuralNetTrainingService(
         if (session is null) return;
         try
         {
-            List<(int TicketIndex, SyntheticTicket? Ticket)> tickets = [];
-            for (int ticketIndex = 1; ticketIndex <= session.RequestedTicketCount; ticketIndex++)
-                tickets.Add((ticketIndex, await GenerateSyntheticTicketAsync(session.Mode, ct)));
+            // Scenario generation is pure LLM/IO work with no shared DbContext or model state, so the
+            // tickets are generated concurrently instead of one awaited call at a time.
+            Task<SyntheticTicket?>[] generationTasks = Enumerable.Range(1, session.RequestedTicketCount)
+                .Select(_ => GenerateSyntheticTicketAsync(session.Mode, ct)).ToArray();
+            SyntheticTicket?[] generated = await Task.WhenAll(generationTasks);
+            List<(int TicketIndex, SyntheticTicket? Ticket)> tickets = generated
+                .Select((ticket, index) => (TicketIndex: index + 1, Ticket: ticket)).ToList();
 
             List<ChatMonitoringNeuralModelRun> runs = await db.ChatMonitoringNeuralModelRuns
                 .Where(x => x.SessionId == session.SessionId).OrderBy(x => x.ChatMonitoringKind).ToListAsync(ct);

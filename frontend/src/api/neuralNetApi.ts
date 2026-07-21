@@ -13,5 +13,6 @@ export const neuralNetApi = {
   getVisualizer: () => api.get<NeuralNetVisualizer>('/visualizer'),
   startTraining: (request: StartNeuralNetTrainingRequest) => api.post<NeuralNetTrainingSession>('/training', request),
   listTrainingSessions: () => api.get<NeuralNetTrainingSession[]>('/training'),
+  removeTrainingSession: (sessionId: string) => api.delete(`/training/${sessionId}`),
   downloadTrainingReport: (sessionId: string, chatMonitoringKind?: NeuralModelKindChatMonitoring) => api.get(`/training/${sessionId}/report`, { params: chatMonitoringKind ? { chatMonitoringKind } : undefined, responseType: 'blob' }),
 }
