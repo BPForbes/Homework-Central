@@ -21,6 +21,7 @@ public sealed record BackpropagationTrace(IReadOnlyList<SparseValue> ActivationG
 public sealed record ParameterDelta(int ParameterIndex, float ValueBefore, float Gradient, float Delta, float ValueAfter);
 public sealed record ParameterUpdateTrace(float LearningRate, string Optimizer, IReadOnlyList<ParameterDelta> Parameters);
 public sealed record TrainingIterationReplay(int Epoch, ForwardPropagationTrace BeforeUpdate, LossTrace LossBeforeUpdate, BackpropagationTrace Backward, ParameterUpdateTrace Update, ForwardPropagationTrace AfterUpdate, LossTrace LossAfterUpdate);
+public sealed record TicketStudentInferenceTrace(TicketStudentPrediction Prediction, ForwardPropagationTrace Forward);
 public sealed record TrainingPassTrace(IReadOnlyList<TrainingIterationReplay> Iterations);
 public sealed record NeuralNetParameterSnapshot(long? CanonicalGeneration, int LocalRevision, string NumericFormat, string Encoding, int ParameterCount, string PackedValues, string Checksum);
 public sealed record ReplayIntegrity(string CanonicalizationVersion, string HashAlgorithm, string TopologyChecksum, string InitialStateChecksum, string FinalStateChecksum, string ReportChecksum);

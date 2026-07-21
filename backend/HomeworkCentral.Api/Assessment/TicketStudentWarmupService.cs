@@ -4,11 +4,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Assessment;
 
-/// <summary>Rebuilds the isolated TorchSharp chat-monitor lineages and retrieval mirror from approved rows.</summary>
-public sealed class ChatMonitoringNeuralModelWarmupService(
+/// <summary>Rebuilds the tiny in-memory model and its retrieval mirror from approved DB rows.</summary>
+public sealed class TicketStudentWarmupService(
     IServiceScopeFactory scopeFactory,
-    IChatMonitoringNeuralModelFactory chatMonitoringModels,
-    ILogger<ChatMonitoringNeuralModelWarmupService> logger) : IHostedService
+    ITicketStudentModel student,
+    ILogger<TicketStudentWarmupService> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken ct)
     {
@@ -29,21 +29,19 @@ public sealed class ChatMonitoringNeuralModelWarmupService(
             {
                 string? message = row.MessageId is Guid id ? messages.GetValueOrDefault(id) : row.BootstrapMessage;
                 if (string.IsNullOrWhiteSpace(message)) continue;
-                string threadContext = row.ContextSnapshot ?? string.Empty;
-                IChatMonitoringNeuralModel model = chatMonitoringModels.Get(row.ChatMonitoringKind);
-                ChatMonitoringNeuralModelInput input = new(row.Requirement, threadContext, message, 0, 1, 0, .5f);
-                model.Train(input, new ChatMonitoringNeuralModelTargets((float)row.TargetScore, (float)row.TargetRelevance), row.Source == "Seed" ? 100 : 16);
+                string modelMessage = string.IsNullOrWhiteSpace(row.ContextSnapshot) ? message : $"{row.ContextSnapshot}\n<current_message>\n{message}\n</current_message>";
+                student.Train(new(row.Requirement, modelMessage, row.TargetScore, row.TargetRelevance, row.Category), row.Source == "Seed" ? 100 : 16);
                 await vectors.UpsertAsync(
-                    VectorNamespaces.TicketTrainingExample, message, ChatMonitoringFeatureEncoder.EmbedText(message), row.Category,
+                    VectorNamespaces.TicketTrainingExample, message, student.Embed(message), row.Category,
                     row.TrainingExampleId,
                     new { row.TrainingExampleId, row.MessageId, row.ScoreEventId, row.Category, row.TargetScore, row.TargetRelevance, row.Source }, ct);
                 loaded++;
             }
-            logger.LogInformation("Loaded {Count} approved chat-monitoring neural-model training examples from PostgreSQL.", loaded);
+            logger.LogInformation("Loaded {Count} approved ticket student training examples from PostgreSQL.", loaded);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Chat-monitoring neural-model warmup was skipped; inference will remain low confidence and use the reviewer.");
+            logger.LogWarning(ex, "Ticket student warmup was skipped; inference will remain low confidence and use the reviewer.");
         }
     }
 

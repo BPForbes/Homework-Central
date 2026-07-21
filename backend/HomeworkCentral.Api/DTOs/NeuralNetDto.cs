@@ -32,8 +32,8 @@ public sealed class NeuralNetDataManagementDto
 
 public sealed class NeuralNetVisualizerDto
 {
-    public int InputNodes { get; set; } = 48;
-    public int HiddenNodes { get; set; } = 84;
+    public int InputNodes { get; set; } = 256;
+    public int HiddenNodes { get; set; } = 8;
     public List<string> OutputNodes { get; set; } = ["Evidence score", "Relevance"];
     public string ModelVersion { get; set; } = "hc-student-mlp-v1";
     public int TrainingExamples { get; set; }
@@ -61,16 +61,4 @@ public sealed class NeuralNetTrainingSessionDto
     public DateTime? CompletedAtUtc { get; set; }
     public string? FailureReason { get; set; }
     public bool HasReport { get; set; }
-    public IReadOnlyList<ChatMonitoringNeuralModelRunDto> ChatMonitoringRuns { get; set; } = [];
-}
-
-public sealed class ChatMonitoringNeuralModelRunDto
-{
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; }
-    public string Status { get; set; } = string.Empty;
-    public long? CanonicalGeneration { get; set; }
-    public bool HasWorkerReplay { get; set; }
-    public bool HasPromotionReplay { get; set; }
-    public string? FailureReason { get; set; }
 }

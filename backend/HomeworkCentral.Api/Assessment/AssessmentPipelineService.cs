@@ -22,7 +22,7 @@ public interface IAssessmentPipelineService
 public sealed class AssessmentPipelineService(
     AppDbContext db,
     ILlmClient llm,
-    IChatMonitoringNeuralModelFactory chatMonitoringModels,
+    ITicketStudentModel student,
     IVectorDocumentStore vectors,
     IOptions<TicketOptions> options,
     ILogger<AssessmentPipelineService> logger) : IAssessmentPipelineService
@@ -59,7 +59,7 @@ public sealed class AssessmentPipelineService(
             return;
 
         TicketOptions ticketOptions = options.Value;
-        IReadOnlyList<float> embedding = ChatMonitoringFeatureEncoder.EmbedText(job.Content);
+        IReadOnlyList<float> embedding = student.Embed(job.Content);
         List<ChatMessage> recentMessages = await db.ChatMessages.AsNoTracking()
             .Where(message => message.RoomId == job.RoomId && message.MessageId != job.MessageId)
             .OrderByDescending(message => message.CreatedAtUtc)
@@ -82,18 +82,16 @@ public sealed class AssessmentPipelineService(
                 .FirstOrDefaultAsync(ct)
                 ?? Math.Clamp(ticketOptions.InitialConfidenceScore, 0, 1);
 
-            string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
+            string requirement = TicketStudentContext.BuildRequirement(watch, 4000);
             string modelRequirement = $"{requirement}\nRunning ticket confidence before this message: {previousScore:F3}.";
             string modelMessage = string.IsNullOrEmpty(contextSnapshot)
                 ? job.Content
                 : $"{contextSnapshot}\n<current_message>\n{job.Content}\n</current_message>";
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
-            ChatMonitoringNeuralModelPrediction prediction = model.Predict(new ChatMonitoringNeuralModelInput(
-                modelRequirement, contextSnapshot, job.Content, 0, 1, Math.Clamp(recentMessages.Count / 5f, 0, 1), (float)previousScore));
+            TicketStudentPrediction prediction = student.Predict(modelRequirement, modelMessage);
             bool reviewerInvoked = ticketOptions.OllamaEnabled && TicketReviewPolicy.ShouldReview(
                 prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
             IReadOnlyList<VectorDocument> similar = reviewerInvoked
-                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, "chat-monitoring-moderation", ct)
+                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, prediction.Category, ct)
                 : [];
             string? rawReview = reviewerInvoked
                 ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, modelRequirement, contextSnapshot, similar, ticketOptions.MaxMessageCharacters), ct)
@@ -102,12 +100,12 @@ public sealed class AssessmentPipelineService(
                                                    && TicketReviewerEvaluation.TryParse(rawReview, out TicketReviewerEvaluation parsed)
                 ? parsed : null;
             double evidence = review is TicketReviewerEvaluation reviewer
-                ? TicketReviewPolicy.Blend(prediction.Evidence, reviewer.ReviewerScore, ticketOptions.ReviewerBlendWeight)
-                : prediction.Evidence;
+                ? TicketReviewPolicy.Blend(prediction.EvidenceScore, reviewer.ReviewerScore, ticketOptions.ReviewerBlendWeight)
+                : prediction.EvidenceScore;
             double relevance = review is TicketReviewerEvaluation reviewerRelevance
                 ? TicketReviewPolicy.Blend(prediction.Relevance, reviewerRelevance.Relevance, ticketOptions.ReviewerBlendWeight)
                 : prediction.Relevance;
-            string reason = review?.Explanation ?? "TorchSharp moderation chat-monitor prediction.";
+            string reason = review?.Explanation ?? prediction.Reasoning;
 
             TicketConfidenceUpdate update = TicketConfidenceScoring.Update(
                 previousScore,
@@ -129,17 +127,17 @@ public sealed class AssessmentPipelineService(
                 Reason = reason,
                 EvaluatorModelVersion = review is null ? prediction.ModelVersion : $"{prediction.ModelVersion}+{ticketOptions.ModelName}",
                 RawEvaluationJson = JsonSerializer.Serialize(new { student = prediction, reviewer = rawReview }),
-                StudentScore = prediction.Evidence,
+                StudentScore = prediction.EvidenceScore,
                 StudentConfidence = prediction.Confidence,
                 StudentRelevance = prediction.Relevance,
-                StudentCategory = "chat-monitoring-moderation",
-                StudentReasoning = "TorchSharp moderation chat-monitor prediction.",
+                StudentCategory = prediction.Category,
+                StudentReasoning = prediction.Reasoning,
                 ContextSnapshot = contextSnapshot,
                 ReviewerInvoked = reviewerInvoked,
                 ReviewerScore = review?.ReviewerScore,
                 ReviewerConfidence = review?.ReviewerConfidence,
                 ReviewerRelevance = review?.Relevance,
-                CorrectionNeeded = review?.CorrectionNeeded == true || (review is TicketReviewerEvaluation r && Math.Abs(r.ReviewerScore - prediction.Evidence) >= 0.2),
+                CorrectionNeeded = review?.CorrectionNeeded == true || (review is TicketReviewerEvaluation r && Math.Abs(r.ReviewerScore - prediction.EvidenceScore) >= 0.2),
                 ReviewerExplanation = review?.Explanation,
                 ReviewerGuidance = review?.Guidance,
                 CreatedAtUtc = DateTime.UtcNow,
@@ -165,9 +163,9 @@ public sealed class AssessmentPipelineService(
                     evidenceConfidence = evidence,
                     relevance,
                     reason,
-                    studentScore = prediction.Evidence,
+                    studentScore = prediction.EvidenceScore,
                     studentConfidence = prediction.Confidence,
-                    studentCategory = "chat-monitoring-moderation",
+                    studentCategory = prediction.Category,
                     reviewerInvoked,
                     reviewerScore = review?.ReviewerScore,
                     contextMessageCount = recentMessages.Count,
@@ -188,7 +186,7 @@ public sealed class AssessmentPipelineService(
     private static string BuildReviewerPrompt(
         TicketUserWatch watch,
         AssessmentMessageJob job,
-        ChatMonitoringNeuralModelPrediction prediction,
+        TicketStudentPrediction prediction,
         string requirement,
         string contextSnapshot,
         IReadOnlyList<VectorDocument> similar,
@@ -219,10 +217,10 @@ public sealed class AssessmentPipelineService(
         builder.AppendLine("</recent_chat_context_untrusted>");
         builder.AppendLine("<student_output_untrusted>");
         builder.AppendLine($"requirement: {Truncate(requirement, 4000)}");
-        builder.AppendLine($"score: {prediction.Evidence:F4}");
+        builder.AppendLine($"score: {prediction.EvidenceScore:F4}");
         builder.AppendLine($"confidence: {prediction.Confidence:F4}");
         builder.AppendLine($"relevance: {prediction.Relevance:F4}");
-        builder.AppendLine($"category: chat-monitoring-{prediction.ChatMonitoringKind.ToString().ToLowerInvariant()}");
+        builder.AppendLine($"category: {prediction.Category}");
         builder.AppendLine("</student_output_untrusted>");
         builder.AppendLine("<approved_similar_examples_untrusted>");
         foreach (VectorDocument example in similar)

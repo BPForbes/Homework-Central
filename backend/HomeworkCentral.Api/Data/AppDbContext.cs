@@ -45,7 +45,6 @@ public partial class AppDbContext(
     public DbSet<NeuralNetTrainingSession> NeuralNetTrainingSessions => Set<NeuralNetTrainingSession>();
     public DbSet<NeuralNetCanonicalCheckpoint> NeuralNetCanonicalCheckpoints => Set<NeuralNetCanonicalCheckpoint>();
     public DbSet<NeuralNetTrainingPromotion> NeuralNetTrainingPromotions => Set<NeuralNetTrainingPromotion>();
-    public DbSet<ChatMonitoringNeuralModelRun> ChatMonitoringNeuralModelRuns => Set<ChatMonitoringNeuralModelRun>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
     public DbSet<ChatMessageVote> ChatMessageVotes => Set<ChatMessageVote>();
@@ -400,8 +399,6 @@ public partial class AppDbContext(
             e.HasIndex(x => x.MessageId);
             e.HasIndex(x => x.ScoreEventId).IsUnique();
             e.HasIndex(x => x.NeuralNetTrainingSessionId);
-            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).HasDefaultValue(HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation).IsRequired();
-            e.HasIndex(x => new { x.NeuralNetTrainingSessionId, x.ChatMonitoringKind });
             e.HasIndex(x => x.CanonicalGenerationApplied);
         });
 
@@ -419,11 +416,8 @@ public partial class AppDbContext(
 
         mb.Entity<NeuralNetCanonicalCheckpoint>(e =>
         {
-            e.HasKey(x => new { x.ChatMonitoringKind, x.Generation });
-            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            e.HasKey(x => x.Generation);
             e.Property(x => x.ModelVersion).HasMaxLength(64).IsRequired();
-            e.Property(x => x.ArchitectureVersion).HasMaxLength(64).IsRequired();
-            e.Property(x => x.RuntimeKind).HasMaxLength(32).IsRequired();
             e.Property(x => x.ParametersBase64).IsRequired();
             e.Property(x => x.Checksum).HasMaxLength(64).IsRequired();
         });
@@ -433,22 +427,10 @@ public partial class AppDbContext(
             e.HasKey(x => x.PromotionId);
             e.Property(x => x.PromotionId).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.Status).HasMaxLength(32).IsRequired();
-            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
             e.Property(x => x.FailureReason).HasMaxLength(1000);
-            e.HasIndex(x => new { x.ChatMonitoringKind, x.PromotionSequence }).IsUnique();
+            e.HasIndex(x => x.PromotionSequence).IsUnique();
             e.HasIndex(x => new { x.Status, x.LeaseExpiresAtUtc });
-            e.HasIndex(x => new { x.SessionId, x.ChatMonitoringKind }).IsUnique();
-        });
-
-        mb.Entity<ChatMonitoringNeuralModelRun>(e =>
-        {
-            e.HasKey(x => x.RunId);
-            e.Property(x => x.RunId).HasDefaultValueSql("gen_random_uuid()");
-            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
-            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
-            e.Property(x => x.FailureReason).HasMaxLength(1000);
-            e.HasIndex(x => new { x.SessionId, x.ChatMonitoringKind }).IsUnique();
-            e.HasIndex(x => new { x.Status, x.CreatedAtUtc });
+            e.HasIndex(x => x.SessionId).IsUnique();
         });
 
         mb.Entity<ChatAttachment>(e =>

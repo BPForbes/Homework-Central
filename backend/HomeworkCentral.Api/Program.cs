@@ -155,9 +155,7 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, H
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ILlmClient>(sp =>
     sp.GetRequiredService<HomeworkCentral.Api.Assessment.LlmClient>());
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IVectorDocumentStore, HomeworkCentral.Api.Assessment.VectorDocumentStore>();
-builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ModerationChatMonitorNeuralNet>();
-builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.TutoringChatMonitorNeuralNet>();
-builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IChatMonitoringNeuralModelFactory, HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelFactory>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ITicketStudentModel, HomeworkCentral.Api.Assessment.TicketStudentModel>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetCheckpointStore>();
@@ -165,7 +163,7 @@ builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetTrainingPromo
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingQueue, HomeworkCentral.Api.Assessment.NeuralNetTrainingQueue>();
 builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetTrainingWorker>();
 builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
-builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelWarmupService>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.TicketStudentWarmupService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAssessmentPipelineService, HomeworkCentral.Api.Assessment.AssessmentPipelineService>();

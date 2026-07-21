@@ -96,7 +96,6 @@ public class TicketModelTrainingExample
     public DateTime ApprovedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public Guid? NeuralNetTrainingSessionId { get; set; }
-    public HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; } = HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation;
     public long? CanonicalGenerationApplied { get; set; }
 }
 
@@ -119,11 +118,8 @@ public class NeuralNetTrainingSession
 /// <summary>Immutable canonical parameter snapshot for the tiny student model.</summary>
 public class NeuralNetCanonicalCheckpoint
 {
-    public HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; } = HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation;
     public long Generation { get; set; }
     public string ModelVersion { get; set; } = string.Empty;
-    public string ArchitectureVersion { get; set; } = string.Empty;
-    public string RuntimeKind { get; set; } = "TorchSharp";
     public string ParametersBase64 { get; set; } = string.Empty;
     public string Checksum { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; }
@@ -134,7 +130,6 @@ public class NeuralNetTrainingPromotion
 {
     public Guid PromotionId { get; set; }
     public Guid SessionId { get; set; }
-    public HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; } = HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation;
     public long PromotionSequence { get; set; }
     public string Status { get; set; } = "Pending";
     public int AttemptCount { get; set; }
@@ -145,23 +140,4 @@ public class NeuralNetTrainingPromotion
     public string? PromotionReportJson { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
-}
-
-/// <summary>
-/// One isolated execution of a preinstalled chat-monitoring network within a training session.
-/// A Both session owns exactly one Moderation run and one Tutoring run.
-/// </summary>
-public class ChatMonitoringNeuralModelRun
-{
-    public Guid RunId { get; set; }
-    public Guid SessionId { get; set; }
-    public HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; }
-    public string Status { get; set; } = "Queued";
-    public string? WorkerReplayJson { get; set; }
-    public string? PromotionReplayJson { get; set; }
-    public long? CanonicalGeneration { get; set; }
-    public DateTime CreatedAtUtc { get; set; }
-    public DateTime? StartedAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
-    public string? FailureReason { get; set; }
 }

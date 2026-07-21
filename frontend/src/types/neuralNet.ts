@@ -42,17 +42,7 @@ export interface NeuralNetTrainingSession {
   completedAtUtc?: string
   failureReason?: string
   hasReport: boolean
-  chatMonitoringRuns: ChatMonitoringNeuralModelRun[]
 }
 
 export type NeuralTrainingMode = 'Both' | 'Moderation' | 'Tutoring'
-export type NeuralModelKindChatMonitoring = 'Moderation' | 'Tutoring'
-export interface ChatMonitoringNeuralModelRun {
-  chatMonitoringKind: NeuralModelKindChatMonitoring
-  status: string
-  canonicalGeneration?: number
-  hasWorkerReplay: boolean
-  hasPromotionReplay: boolean
-  failureReason?: string
-}
 export interface StartNeuralNetTrainingRequest { ticketCount: number; maxPassesPerTicket: number; mode: NeuralTrainingMode }

@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { configureApiClient } from './configureApiClient'
-import type { NeuralModelKindChatMonitoring, NeuralNetDataManagement, NeuralNetTrainingFeedback, NeuralNetTrainingSession, NeuralNetVisualizer, StartNeuralNetTrainingRequest } from '../types/neuralNet'
+import type { NeuralNetDataManagement, NeuralNetTrainingFeedback, NeuralNetTrainingSession, NeuralNetVisualizer, StartNeuralNetTrainingRequest } from '../types/neuralNet'
 
 const api = axios.create({ baseURL: '/api/neural-net', withCredentials: true })
 configureApiClient(api)
@@ -14,5 +14,5 @@ export const neuralNetApi = {
   startTraining: (request: StartNeuralNetTrainingRequest) => api.post<NeuralNetTrainingSession>('/training', request),
   listTrainingSessions: () => api.get<NeuralNetTrainingSession[]>('/training'),
   removeTrainingSession: (sessionId: string) => api.delete(`/training/${sessionId}`),
-  downloadTrainingReport: (sessionId: string, chatMonitoringKind?: NeuralModelKindChatMonitoring) => api.get(`/training/${sessionId}/report`, { params: chatMonitoringKind ? { chatMonitoringKind } : undefined, responseType: 'blob' }),
+  downloadTrainingReport: (sessionId: string) => api.get(`/training/${sessionId}/report`, { responseType: 'blob' }),
 }
