@@ -154,6 +154,15 @@ public sealed class NeuralNetTrainingService(
             session.CompletedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
+        else
+        {
+            // A concurrent removal can land between the row being saved and it being enqueued above,
+            // finding nothing yet to pull from the queue. Re-checking here and undoing the enqueue if
+            // the row is already gone closes that race instead of leaving a stale ID occupying a slot.
+            bool stillQueued = await db.NeuralNetTrainingSessions.AsNoTracking()
+                .AnyAsync(x => x.SessionId == session.SessionId && x.Status == "Queued", ct);
+            if (!stillQueued) queue.TryRemove(session.SessionId);
+        }
         return MapSession(session);
     }
 
@@ -183,6 +192,9 @@ public sealed class NeuralNetTrainingService(
         }
         await db.ChatMonitoringNeuralModelRuns.Where(x => x.SessionId == sessionId).ExecuteDeleteAsync(ct);
         await transaction.CommitAsync(ct);
+        // If the session was still waiting (not yet claimed by the worker), this frees its slot in the
+        // bounded queue immediately instead of leaving a stale ID that blocks new requests until drained.
+        queue.TryRemove(sessionId);
         return NeuralNetTrainingSessionRemovalResult.Removed;
     }
 
