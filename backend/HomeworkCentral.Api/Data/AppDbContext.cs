@@ -395,12 +395,13 @@ public partial class AppDbContext(
             e.Property(x => x.ContextSnapshot).HasMaxLength(5000);
             e.Property(x => x.Category).HasMaxLength(64).IsRequired();
             e.Property(x => x.Source).HasMaxLength(32).IsRequired();
+            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16)
+                .HasDefaultValue(HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation).IsRequired();
             e.HasOne<ChatMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne<TicketMessageScore>().WithOne().HasForeignKey<TicketModelTrainingExample>(x => x.ScoreEventId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.MessageId);
             e.HasIndex(x => x.ScoreEventId).IsUnique();
             e.HasIndex(x => x.NeuralNetTrainingSessionId);
-            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).HasDefaultValue(HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation).IsRequired();
             e.HasIndex(x => new { x.NeuralNetTrainingSessionId, x.ChatMonitoringKind });
             e.HasIndex(x => x.CanonicalGenerationApplied);
         });
@@ -432,8 +433,8 @@ public partial class AppDbContext(
         {
             e.HasKey(x => x.PromotionId);
             e.Property(x => x.PromotionId).HasDefaultValueSql("gen_random_uuid()");
-            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
             e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
             e.Property(x => x.FailureReason).HasMaxLength(1000);
             e.HasIndex(x => new { x.ChatMonitoringKind, x.PromotionSequence }).IsUnique();
             e.HasIndex(x => new { x.Status, x.LeaseExpiresAtUtc });

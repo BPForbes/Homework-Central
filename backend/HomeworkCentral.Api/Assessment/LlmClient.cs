@@ -12,6 +12,8 @@ public class LlmOptions
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
     public int TimeoutSeconds { get; set; } = 60;
     public bool Enabled { get; set; } = true;
+    /// <summary>Caps concurrent Ollama chat/embed calls to reduce contention and tail latency.</summary>
+    public int MaxConcurrentRequests { get; set; } = 2;
 }
 
 public interface ILlmClient
@@ -28,6 +30,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+    private readonly SemaphoreSlim concurrency = new(Math.Clamp(options.Value.MaxConcurrentRequests, 1, 16));
     private readonly object availabilityGate = new();
     private DateTime? unavailableUntilUtc;
 
@@ -37,6 +40,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         if (!opts.Enabled || IsTemporarilyUnavailable())
             return null;
 
+        await concurrency.WaitAsync(ct);
         try
         {
             OllamaChatRequest body = new()
@@ -75,6 +79,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
             MarkTemporarilyUnavailable();
             return null;
         }
+        finally { concurrency.Release(); }
     }
 
     public async Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default)
@@ -83,6 +88,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         if (!opts.Enabled || string.IsNullOrWhiteSpace(text) || IsTemporarilyUnavailable())
             return [];
 
+        await concurrency.WaitAsync(ct);
         try
         {
             OllamaEmbedRequest body = new()
@@ -113,6 +119,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
             MarkTemporarilyUnavailable();
             // fall through to hash embed
         }
+        finally { concurrency.Release(); }
 
         return HashEmbed(text);
     }

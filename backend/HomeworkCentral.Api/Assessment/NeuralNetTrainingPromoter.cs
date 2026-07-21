@@ -8,7 +8,7 @@ namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
 /// Serially publishes canonical generations per chat-monitor kind. Worker candidates are diagnostic only;
-/// promotion always retrains a fresh session-local TorchSharp model from the approved examples.
+/// promotion always retrains a fresh session-local hashed-MLP model from the approved examples.
 /// </summary>
 public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpointStore checkpoints)
 {
@@ -87,7 +87,7 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
             ChatMonitoringNeuralModelRun? sourceRun = await db.ChatMonitoringNeuralModelRuns
                 .SingleOrDefaultAsync(x => x.SessionId == candidate.SessionId && x.ChatMonitoringKind == candidate.ChatMonitoringKind, ct);
             string sourceChecksum = NeuralNetReplaySerializer.ComputeSha256(sourceRun?.WorkerReplayJson ?? string.Empty);
-            PromotionValidationResult validation = new(true, ["Ordered lease held", "Examples not previously promoted", "TorchSharp replayed approved examples"], [], current?.Checksum ?? initial.Checksum, snapshot.Checksum, examples.Count, examples.Count * 12);
+            PromotionValidationResult validation = new(true, ["Ordered lease held", "Examples not previously promoted", "Hashed MLP replayed approved examples"], [], current?.Checksum ?? initial.Checksum, snapshot.Checksum, examples.Count, examples.Count * 12);
             ReplayIntegrity integrity = new("hc-replay-canonical-json-v1", "sha-256", string.Empty, initial.Checksum, snapshot.Checksum, string.Empty);
             ModelPromotionReplay replay = new(promotion.PromotionId, promotion.SessionId, sourceChecksum, new([]), initial, examples.Select(x => x.TrainingExampleId).ToList(), snapshot, validation, integrity);
             promotion.PromotionReportJson = JsonSerializer.Serialize(replay);

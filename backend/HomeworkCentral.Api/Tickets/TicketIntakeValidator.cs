@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Tickets.Preface;
 
 namespace HomeworkCentral.Api.Tickets;
 
@@ -77,11 +78,18 @@ public static class TicketIntakeValidator
             throw new InvalidOperationException("At most one AI opt-out question is allowed per portal.");
     }
 
-    public static void ValidateAnswers(
+    /// <summary>
+    /// Validates answers and runs any bound <see cref="ITicketPrefaceCheck"/> (tutor subjects,
+    /// mod concepts, or future custom-portal checks registered via DI).
+    /// </summary>
+    public static Dictionary<string, TicketPrefaceResult> ValidateAnswers(
         IReadOnlyList<TicketIntakeQuestionDto> schema,
-        IReadOnlyDictionary<string, JsonElement> answers)
+        Dictionary<string, JsonElement> answers,
+        ITicketPrefaceCheckResolver? prefaceChecks = null,
+        string? filterName = null)
     {
         ValidateSchema(schema);
+        Dictionary<string, TicketPrefaceResult> prefaceByQuestion = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (TicketIntakeQuestionDto question in schema)
         {
@@ -95,7 +103,25 @@ public static class TicketIntakeValidator
                 continue;
 
             ValidateAnswerValue(question, value);
+
+            ITicketPrefaceCheck? check = prefaceChecks?.Resolve(question.Id, filterName);
+            if (check is null || value.ValueKind != JsonValueKind.String)
+                continue;
+
+            TicketPrefaceResult processed = check.Process(value.GetString());
+            prefaceByQuestion[question.Id] = processed;
+            if (!processed.Ok)
+            {
+                throw new InvalidOperationException(
+                    processed.ErrorMessage
+                    ?? $"Could not verify the answer for '{question.Prompt}'. Please re-enter it.");
+            }
+
+            if (check.RewriteAnswerOnSuccess && !string.IsNullOrWhiteSpace(processed.CanonicalDisplay))
+                answers[question.Id] = JsonSerializer.SerializeToElement(processed.CanonicalDisplay);
         }
+
+        return prefaceByQuestion;
     }
 
     public static bool IsAiOptOut(

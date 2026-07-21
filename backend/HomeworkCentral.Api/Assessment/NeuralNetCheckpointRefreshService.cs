@@ -1,6 +1,6 @@
 namespace HomeworkCentral.Api.Assessment;
 
-/// <summary>Reloads each isolated TorchSharp monitor when another worker publishes its canonical generation.</summary>
+/// <summary>Reloads each isolated hashed-MLP chat monitor when another worker publishes its canonical generation.</summary>
 public sealed class NeuralNetCheckpointRefreshService(IServiceScopeFactory scopes, IChatMonitoringNeuralModelFactory chatMonitoringModels, ILogger<NeuralNetCheckpointRefreshService> logger) : BackgroundService
 {
     private readonly Dictionary<NeuralModelKindChatMonitoring, string> loadedChecksums = [];

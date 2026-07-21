@@ -7,7 +7,7 @@ namespace HomeworkCentral.Api.Assessment;
 public sealed class NeuralNetCheckpointStore(AppDbContext db)
 {
     public Task<NeuralNetCanonicalCheckpoint?> GetCurrentAsync(NeuralModelKindChatMonitoring chatMonitoringKind, CancellationToken ct) =>
-        db.NeuralNetCanonicalCheckpoints.Where(x => x.ChatMonitoringKind == chatMonitoringKind && x.RuntimeKind == "TorchSharp")
+        db.NeuralNetCanonicalCheckpoints.Where(x => x.ChatMonitoringKind == chatMonitoringKind && x.RuntimeKind == ChatMonitoringNeuralModelHashedMlp.RuntimeKind)
             .OrderByDescending(x => x.Generation).FirstOrDefaultAsync(ct);
 
     public async Task<long> PublishAsync(
@@ -24,7 +24,7 @@ public sealed class NeuralNetCheckpointStore(AppDbContext db)
             Generation = generation,
             ModelVersion = modelVersion,
             ArchitectureVersion = modelVersion,
-            RuntimeKind = "TorchSharp",
+            RuntimeKind = ChatMonitoringNeuralModelHashedMlp.RuntimeKind,
             ParametersBase64 = snapshot.PackedValues,
             Checksum = snapshot.Checksum,
             CreatedAtUtc = DateTime.UtcNow,

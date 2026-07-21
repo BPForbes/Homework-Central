@@ -40,8 +40,6 @@
     <PackageReference Include="Mime-Detective" Version="25.8.1" />
     <PackageReference Include="nClam" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
-    <PackageReference Include="TorchSharp" Version="0.107.0" />
-    <PackageReference Include="libtorch-cpu" Version="2.10.0" />
   </ItemGroup>
 
   <ItemGroup>

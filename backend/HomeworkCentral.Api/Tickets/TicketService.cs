@@ -9,6 +9,7 @@ using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets.Preface;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,7 +25,8 @@ public sealed class TicketService(
     ITicketRecipientResolver recipientResolver,
     ITicketTrackingAnalyzer trackingAnalyzer,
     IChatMonitoringNeuralModelFactory chatMonitoringModels,
-    IVectorDocumentStore vectors) : ITicketService
+    IVectorDocumentStore vectors,
+    ITicketPrefaceCheckResolver prefaceChecks) : ITicketService
 {
     private static readonly Guid SystemInboxMessageId =
         Guid.Parse("00000000-0000-0000-0000-00000000c002");
@@ -148,7 +150,8 @@ public sealed class TicketService(
             throw new InvalidOperationException("Ticket portal is not available in your account scope.");
 
         List<TicketIntakeQuestionDto> schema = TicketJson.DeserializeIntakeSchema(portal.IntakeSchemaJson);
-        TicketIntakeValidator.ValidateAnswers(schema, request.Answers);
+        Dictionary<string, TicketPrefaceResult> prefaceResults =
+            TicketIntakeValidator.ValidateAnswers(schema, request.Answers, prefaceChecks, filterName: portal.FilterName);
 
         int displayNumber = portal.NextDisplayNumber;
         portal.NextDisplayNumber = checked(displayNumber + 1);
@@ -206,7 +209,7 @@ public sealed class TicketService(
             AiTrackingOptOut = aiOptOut,
             TrackingTemplateJson = aiOptOut
                 ? null
-                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers),
+                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers, prefaceResults),
         };
 
         db.CustomChannels.Add(chatChannel);
@@ -524,6 +527,7 @@ public sealed class TicketService(
         TicketUserWatch watch = ticket.Watches.FirstOrDefault(x => x.TrackedUserId == score.TrackedUserId)
             ?? throw new InvalidOperationException("The score no longer has a matching ticket watch.");
         string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
+        NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
 
         TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
             .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
@@ -536,18 +540,19 @@ public sealed class TicketService(
                 Requirement = requirement, TargetScore = score.ReviewerScore.Value,
                 TargetRelevance = score.ReviewerRelevance.Value, Category = score.StudentCategory,
                 Source = "StaffApprovedReviewer", ApprovedAtUtc = now, ApprovedByUserId = actorUserId,
+                ChatMonitoringKind = chatMonitoringKind,
             };
             db.TicketModelTrainingExamples.Add(training);
             score.TrainingApprovedAtUtc = now;
             score.TrainingApprovedByUserId = actorUserId;
-            await db.SaveChangesAsync(ct);
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
             model.Train(new ChatMonitoringNeuralModelInput(requirement, string.Empty, message.RawContent, 0, 1, 0, .5f),
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(
                 VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
-                training.Category, training.TrainingExampleId,
-                new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source }, ct);
+                ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind), training.TrainingExampleId,
+                new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source, chatMonitoringKind }, ct);
+            await db.SaveChangesAsync(ct);
         }
 
         return MapMessageScore(score);

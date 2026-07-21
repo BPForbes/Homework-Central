@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Assessment;
 
-/// <summary>Rebuilds the isolated TorchSharp chat-monitor lineages and retrieval mirror from approved rows.</summary>
+/// <summary>Rebuilds the isolated hashed-MLP chat-monitor lineages and retrieval mirror from approved rows.</summary>
 public sealed class ChatMonitoringNeuralModelWarmupService(
     IServiceScopeFactory scopeFactory,
     IChatMonitoringNeuralModelFactory chatMonitoringModels,
@@ -34,9 +34,10 @@ public sealed class ChatMonitoringNeuralModelWarmupService(
                 ChatMonitoringNeuralModelInput input = new(row.Requirement, threadContext, message, 0, 1, 0, .5f);
                 model.Train(input, new ChatMonitoringNeuralModelTargets((float)row.TargetScore, (float)row.TargetRelevance), row.Source == "Seed" ? 100 : 16);
                 await vectors.UpsertAsync(
-                    VectorNamespaces.TicketTrainingExample, message, ChatMonitoringFeatureEncoder.EmbedText(message), row.Category,
+                    VectorNamespaces.TicketTrainingExample, message, ChatMonitoringFeatureEncoder.EmbedText(message),
+                    ChatMonitoringVectorKeys.LineagePositionId(row.ChatMonitoringKind),
                     row.TrainingExampleId,
-                    new { row.TrainingExampleId, row.MessageId, row.ScoreEventId, row.Category, row.TargetScore, row.TargetRelevance, row.Source }, ct);
+                    new { row.TrainingExampleId, row.MessageId, row.ScoreEventId, row.Category, row.TargetScore, row.TargetRelevance, row.Source, row.ChatMonitoringKind }, ct);
                 loaded++;
             }
             logger.LogInformation("Loaded {Count} approved chat-monitoring neural-model training examples from PostgreSQL.", loaded);

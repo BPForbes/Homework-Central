@@ -87,13 +87,27 @@ public sealed class AssessmentPipelineService(
             string modelMessage = string.IsNullOrEmpty(contextSnapshot)
                 ? job.Content
                 : $"{contextSnapshot}\n<current_message>\n{job.Content}\n</current_message>";
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
-            ChatMonitoringNeuralModelPrediction prediction = model.Predict(new ChatMonitoringNeuralModelInput(
-                modelRequirement, contextSnapshot, job.Content, 0, 1, Math.Clamp(recentMessages.Count / 5f, 0, 1), (float)previousScore));
-            bool reviewerInvoked = ticketOptions.OllamaEnabled && TicketReviewPolicy.ShouldReview(
-                prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
+            NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
+            SubjectSignalSnapshot subjectSignals = chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
+                ? ChatMonitoringSubjectSignals.ResolveFromTicket(watch, job.RoomId)
+                : ChatMonitoringSubjectSignals.Resolve([], ChatMonitoringSubjectSignals.ResolveChannelSubject(job.RoomId), 1f);
+            ChatMonitoringNeuralModelInput modelInput = ChatMonitoringNeuralModelInput.Create(
+                modelRequirement,
+                contextSnapshot,
+                job.Content,
+                communityVote: 0,
+                threadContinuity: Math.Clamp(recentMessages.Count / 5f, 0, 1),
+                priorScore: (float)previousScore,
+                subjectSignals);
+            ChatMonitoringNeuralModelPrediction prediction = model.Predict(modelInput);
+            string retrievalPositionId = ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind);
+            bool reviewerInvoked = !ticketOptions.NeuralOnlyScoring
+                && ticketOptions.OllamaEnabled
+                && TicketReviewPolicy.ShouldReview(
+                    prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
             IReadOnlyList<VectorDocument> similar = reviewerInvoked
-                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, "chat-monitoring-moderation", ct)
+                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, retrievalPositionId, ct)
                 : [];
             string? rawReview = reviewerInvoked
                 ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, modelRequirement, contextSnapshot, similar, ticketOptions.MaxMessageCharacters), ct)
@@ -107,7 +121,14 @@ public sealed class AssessmentPipelineService(
             double relevance = review is TicketReviewerEvaluation reviewerRelevance
                 ? TicketReviewPolicy.Blend(prediction.Relevance, reviewerRelevance.Relevance, ticketOptions.ReviewerBlendWeight)
                 : prediction.Relevance;
-            string reason = review?.Explanation ?? "TorchSharp moderation chat-monitor prediction.";
+            // Multi-subject policy: exact channel match (with cross-subject support) rewards more;
+            // related subjects mildly; unrelated channels barely move the ticket.
+            if (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring)
+                relevance = Math.Clamp(relevance * subjectSignals.RewardScale, 0, 1);
+            string reason = review?.Explanation
+                ?? (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
+                    ? AppendSubjectReason(prediction.Reasoning, subjectSignals)
+                    : prediction.Reasoning);
 
             TicketConfidenceUpdate update = TicketConfidenceScoring.Update(
                 previousScore,
@@ -132,8 +153,8 @@ public sealed class AssessmentPipelineService(
                 StudentScore = prediction.Evidence,
                 StudentConfidence = prediction.Confidence,
                 StudentRelevance = prediction.Relevance,
-                StudentCategory = "chat-monitoring-moderation",
-                StudentReasoning = "TorchSharp moderation chat-monitor prediction.",
+                StudentCategory = prediction.Category,
+                StudentReasoning = prediction.Reasoning,
                 ContextSnapshot = contextSnapshot,
                 ReviewerInvoked = reviewerInvoked,
                 ReviewerScore = review?.ReviewerScore,
@@ -167,7 +188,8 @@ public sealed class AssessmentPipelineService(
                     reason,
                     studentScore = prediction.Evidence,
                     studentConfidence = prediction.Confidence,
-                    studentCategory = "chat-monitoring-moderation",
+                    studentCategory = prediction.Category,
+                    chatMonitoringKind,
                     reviewerInvoked,
                     reviewerScore = review?.ReviewerScore,
                     contextMessageCount = recentMessages.Count,
@@ -222,7 +244,9 @@ public sealed class AssessmentPipelineService(
         builder.AppendLine($"score: {prediction.Evidence:F4}");
         builder.AppendLine($"confidence: {prediction.Confidence:F4}");
         builder.AppendLine($"relevance: {prediction.Relevance:F4}");
-        builder.AppendLine($"category: chat-monitoring-{prediction.ChatMonitoringKind.ToString().ToLowerInvariant()}");
+        builder.AppendLine($"category: {prediction.Category}");
+        builder.AppendLine($"reasoning: {Truncate(prediction.Reasoning, 300)}");
+        builder.AppendLine($"chat_monitoring_kind: {prediction.ChatMonitoringKind}");
         builder.AppendLine("</student_output_untrusted>");
         builder.AppendLine("<approved_similar_examples_untrusted>");
         foreach (VectorDocument example in similar)
@@ -233,6 +257,18 @@ public sealed class AssessmentPipelineService(
 
     private static string Truncate(string value, int maxCharacters) =>
         value.Length <= maxCharacters ? value : value[..maxCharacters];
+
+    private static string AppendSubjectReason(string reasoning, SubjectSignalSnapshot subjects)
+    {
+        if (subjects.AppliedGenerals.Count == 0 && subjects.ChannelGeneral is null)
+            return reasoning;
+        string applied = subjects.AppliedGenerals.Count == 0 ? "none" : string.Join(", ", subjects.AppliedGenerals);
+        string expertise = subjects.AppliedExpertise.Count == 0
+            ? string.Empty
+            : $"; expertise=[{string.Join(", ", subjects.AppliedExpertise)}]";
+        string channel = subjects.ChannelGeneral ?? "unscoped";
+        return $"{reasoning} Applied=[{applied}]{expertise}; channel={channel}; exact={subjects.ExactMatch:F2}; cross={subjects.CrossSubjectSupport:F2}; reward×{subjects.RewardScale:F2}.";
+    }
 
     private static string BuildContextSnapshot(IEnumerable<ChatMessage> messages)
     {

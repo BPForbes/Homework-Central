@@ -93,6 +93,8 @@ builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
 builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Configuration.GetSection("Llm"));
+builder.Services.Configure<HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions>(
+    builder.Configuration.GetSection("NeuralNetTraining"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.ClamAvOptions>(builder.Configuration.GetSection("ClamAv"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.AttachmentAccessOptions>(
@@ -149,6 +151,12 @@ builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
         ? sp.GetRequiredService<OllamaTicketTrackingAnalyzer>()
         : sp.GetRequiredService<NullTicketTrackingAnalyzer>();
 });
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheck>(
+    HomeworkCentral.Api.Tickets.Preface.TutorSubjectPrefaceCheck.Instance);
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheck>(
+    HomeworkCentral.Api.Tickets.Preface.ModerationConceptPrefaceCheck.Instance);
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheckResolver,
+    HomeworkCentral.Api.Tickets.Preface.TicketPrefaceCheckResolver>();
 builder.Services.AddScoped<ITicketRecipientResolver, TicketRecipientResolver>();
 builder.Services.AddScoped<ITicketService, TicketService>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, HomeworkCentral.Api.Assessment.AssessmentQueue>();

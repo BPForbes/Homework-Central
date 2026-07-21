@@ -13,4 +13,9 @@ public class TicketOptions
     public double StudentConfidenceThreshold { get; set; } = 0.75;
     public double ReviewerAuditRate { get; set; } = 0.10;
     public double ReviewerBlendWeight { get; set; } = 0.70;
+    /// <summary>
+    /// When true, live scoring never calls the LLM reviewer — the chat-monitor NN is authoritative
+    /// (evidence/relevance/category/confidence). Use once models are trained enough to drop Ollama.
+    /// </summary>
+    public bool NeuralOnlyScoring { get; set; } = false;
 }

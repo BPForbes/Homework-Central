@@ -116,14 +116,14 @@ public class NeuralNetTrainingSession
     public string? ReportJson { get; set; }
 }
 
-/// <summary>Immutable canonical parameter snapshot for the tiny student model.</summary>
+/// <summary>Immutable canonical parameter snapshot for one chat-monitoring model lineage.</summary>
 public class NeuralNetCanonicalCheckpoint
 {
     public HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; } = HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation;
     public long Generation { get; set; }
     public string ModelVersion { get; set; } = string.Empty;
     public string ArchitectureVersion { get; set; } = string.Empty;
-    public string RuntimeKind { get; set; } = "TorchSharp";
+    public string RuntimeKind { get; set; } = HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelHashedMlp.RuntimeKind;
     public string ParametersBase64 { get; set; } = string.Empty;
     public string Checksum { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; }
@@ -147,10 +147,7 @@ public class NeuralNetTrainingPromotion
     public DateTime? CompletedAtUtc { get; set; }
 }
 
-/// <summary>
-/// One isolated execution of a preinstalled chat-monitoring network within a training session.
-/// A Both session owns exactly one Moderation run and one Tutoring run.
-/// </summary>
+/// <summary>Per chat-monitor training run within a synthetic training session.</summary>
 public class ChatMonitoringNeuralModelRun
 {
     public Guid RunId { get; set; }

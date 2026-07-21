@@ -30,13 +30,41 @@ public sealed class NeuralNetDataManagementDto
     public Dictionary<string, int> CategoryCounts { get; set; } = [];
 }
 
+public sealed class NeuralNetVisualizerModelDto
+{
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
+    public IReadOnlyList<int> LayerWidths { get; set; } = [];
+    public IReadOnlyList<string> LayerLabels { get; set; } = [];
+    public int ParameterCount { get; set; }
+    public int SupportExamples { get; set; }
+    public int NodeCount { get; set; }
+
+    /// <summary>Stage-1 router widths for cascade g(f(x)).</summary>
+    public IReadOnlyList<int> Stage1LayerWidths { get; set; } = [30, 24, 8];
+
+    /// <summary>Human label for stage-1 (concept-context vs subject-context).</summary>
+    public string Stage1Role { get; set; } = "context-router";
+
+    /// <summary>Softmax category vocabulary size (excludes evidence/relevance).</summary>
+    public int CategoryCount { get; set; }
+
+    public string CascadeComposition { get; set; } = "g(f(x))";
+    public string ChainRuleSummary { get; set; } = "∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f)";
+    public string RuntimeKind { get; set; } = "HashedMlpV8";
+}
+
 public sealed class NeuralNetVisualizerDto
 {
-    public int InputNodes { get; set; } = 48;
-    public int HiddenNodes { get; set; } = 84;
+    public IReadOnlyList<NeuralNetVisualizerModelDto> Models { get; set; } = [];
     public List<string> OutputNodes { get; set; } = ["Evidence score", "Relevance"];
-    public string ModelVersion { get; set; } = "hc-student-mlp-v1";
     public int TrainingExamples { get; set; }
+
+    // Legacy single-graph fields kept for older clients; populated from the first model.
+    public int InputNodes { get; set; }
+    public int HiddenNodes { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
 }
 
 public sealed class StartNeuralNetTrainingRequest
