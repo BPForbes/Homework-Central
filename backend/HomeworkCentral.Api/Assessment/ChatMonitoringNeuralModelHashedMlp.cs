@@ -17,6 +17,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     public const string RuntimeKind = "HashedMlpV8";
     private const float LearningRate = .035f;
     private const float MomentumCoefficient = .9f;
+    /// <summary>Per-parameter gradient clip before momentum update (prevents ±Infinity weights).</summary>
+    private const float MaxAbsGradient = 5f;
+    /// <summary>Hard bound on weights/biases after each update.</summary>
+    private const float MaxAbsWeight = 25f;
+    /// <summary>Same bound used by <see cref="Sigmoid"/> so compact traces stay JSON-safe.</summary>
+    private const float MaxAbsLogit = 20f;
     private const float LeakyReluSlope = .01f;
     private readonly int[] layerWidths;
     private readonly string[] layerLabels;
@@ -191,12 +197,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 LossTrace lossBefore = new(
                     "bce+softmax-ce-avg-v1",
-                    evidenceLossSum / n,
-                    relevanceLossSum / n,
+                    NeuralNetFinite.OrZero(evidenceLossSum / n),
+                    NeuralNetFinite.OrZero(relevanceLossSum / n),
                     0,
-                    (evidenceLossSum + relevanceLossSum + categoryLossSum) / n,
+                    NeuralNetFinite.OrZero((evidenceLossSum + relevanceLossSum + categoryLossSum) / n),
                     n,
-                    categoryLossSum / n);
+                    NeuralNetFinite.OrZero(categoryLossSum / n));
                 ForwardPropagationTrace beforeForward = AverageOutputForward(
                     evidenceLogitSum / n, relevanceLogitSum / n, evidenceProbSum / n, relevanceProbSum / n);
 
@@ -204,16 +210,16 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 ApplyMomentumUpdateUnlocked(weightGrads, biasGrads, n);
                 float[]? parameterAfter = captureFull ? ReadParameters() : null;
                 float avgGradScale = 1f / n;
-                float gradientL2 = MathF.Sqrt((float)(gradSqSum * avgGradScale * avgGradScale));
+                float gradientL2 = NeuralNetFinite.OrZero(MathF.Sqrt((float)(gradSqSum * avgGradScale * avgGradScale)));
                 if (minNonZeroAbsGradient == float.MaxValue) minNonZeroAbsGradient = 0;
-                maxAbsGradient *= avgGradScale;
-                minNonZeroAbsGradient *= avgGradScale;
+                maxAbsGradient = NeuralNetFinite.OrZero(maxAbsGradient * avgGradScale);
+                minNonZeroAbsGradient = NeuralNetFinite.OrZero(minNonZeroAbsGradient * avgGradScale);
 
                 IReadOnlyList<ParameterDelta> deltas = captureFull
                     ? BuildParameterDeltas(parameterBefore!, parameterAfter!)
                     : [];
                 IReadOnlyList<SparseValue> gradients = captureFull
-                    ? deltas.Select(delta => new SparseValue(delta.ParameterIndex, delta.Gradient)).ToList()
+                    ? deltas.Select(delta => new SparseValue(delta.ParameterIndex, NeuralNetFinite.OrZero(delta.Gradient))).ToList()
                     : [];
                 GradientHealth health = new(
                     gradientL2 < 0.000001f,
@@ -252,12 +258,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 LossTrace lossAfter = new(
                     "bce+softmax-ce-avg-v1",
-                    afterEvidenceLoss / n,
-                    afterRelevanceLoss / n,
+                    NeuralNetFinite.OrZero(afterEvidenceLoss / n),
+                    NeuralNetFinite.OrZero(afterRelevanceLoss / n),
                     0,
-                    (afterEvidenceLoss + afterRelevanceLoss + afterCategoryLoss) / n,
+                    NeuralNetFinite.OrZero((afterEvidenceLoss + afterRelevanceLoss + afterCategoryLoss) / n),
                     n,
-                    afterCategoryLoss / n);
+                    NeuralNetFinite.OrZero(afterCategoryLoss / n));
                 ForwardPropagationTrace afterForward = AverageOutputForward(
                     afterEvidenceLogit / n, afterRelevanceLogit / n, afterEvidenceProb / n, afterRelevanceProb / n);
 
@@ -284,7 +290,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 }
             }
 
-            float finalAverageCost = iterations.Count == 0 ? 0f : iterations[^1].LossAfterUpdate.TotalLoss;
+            float finalAverageCost = iterations.Count == 0
+                ? 0f
+                : NeuralNetFinite.OrZero(iterations[^1].LossAfterUpdate.TotalLoss);
             return new TrainingPassTrace(iterations, n, finalAverageCost);
         }
     }
@@ -459,22 +467,26 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         {
             for (int i = 0; i < weights[layer].Length; i++)
             {
-                float avgGrad = weightGrads[layer][i] * invN;
-                weightVelocity[layer][i] = MomentumCoefficient * weightVelocity[layer][i] + avgGrad;
-                weights[layer][i] -= LearningRate * weightVelocity[layer][i];
+                float avgGrad = NeuralNetFinite.ClampFinite(weightGrads[layer][i] * invN, -MaxAbsGradient, MaxAbsGradient);
+                weightVelocity[layer][i] = MomentumCoefficient * NeuralNetFinite.OrZero(weightVelocity[layer][i]) + avgGrad;
+                weights[layer][i] = NeuralNetFinite.ClampFinite(
+                    weights[layer][i] - LearningRate * weightVelocity[layer][i], -MaxAbsWeight, MaxAbsWeight);
             }
 
             for (int i = 0; i < biases[layer].Length; i++)
             {
-                float avgGrad = biasGrads[layer][i] * invN;
-                biasVelocity[layer][i] = MomentumCoefficient * biasVelocity[layer][i] + avgGrad;
-                biases[layer][i] -= LearningRate * biasVelocity[layer][i];
+                float avgGrad = NeuralNetFinite.ClampFinite(biasGrads[layer][i] * invN, -MaxAbsGradient, MaxAbsGradient);
+                biasVelocity[layer][i] = MomentumCoefficient * NeuralNetFinite.OrZero(biasVelocity[layer][i]) + avgGrad;
+                biases[layer][i] = NeuralNetFinite.ClampFinite(
+                    biases[layer][i] - LearningRate * biasVelocity[layer][i], -MaxAbsWeight, MaxAbsWeight);
             }
         }
     }
 
     private static void TrackGradientMagnitude(float gradient, ref float maxAbs, ref float minNonZero, ref double gradSqSum)
     {
+        if (!float.IsFinite(gradient))
+            return;
         float abs = MathF.Abs(gradient);
         if (abs > maxAbs) maxAbs = abs;
         if (abs > 0f && abs < minNonZero) minNonZero = abs;
@@ -483,8 +495,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     private static ForwardPropagationTrace AverageOutputForward(float evidenceLogit, float relevanceLogit, float evidenceProbability, float relevanceProbability)
     {
-        float confidence = Math.Clamp(MathF.Abs(evidenceProbability - .5f) * 2f, .05f, .99f);
-        return new([], [], [], [], [], evidenceLogit, relevanceLogit, evidenceProbability, relevanceProbability, confidence);
+        float boundedEvidenceLogit = NeuralNetFinite.ClampFinite(evidenceLogit, -MaxAbsLogit, MaxAbsLogit);
+        float boundedRelevanceLogit = NeuralNetFinite.ClampFinite(relevanceLogit, -MaxAbsLogit, MaxAbsLogit);
+        float evidence = NeuralNetFinite.ClampFinite(evidenceProbability, 0f, 1f);
+        float relevance = NeuralNetFinite.ClampFinite(relevanceProbability, 0f, 1f);
+        float confidence = Math.Clamp(MathF.Abs(evidence - .5f) * 2f, .05f, .99f);
+        return new([], [], [], [], [], boundedEvidenceLogit, boundedRelevanceLogit, evidence, relevance, confidence);
     }
 
     private ForwardCache Forward(float[] features, bool captureTrace)
@@ -534,8 +550,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             {
                 for (int node = 0; node < preActivations[layer].Length; node++)
                 {
-                    nodePreActivations.Add(new SparseValue(nodeOffset + node, preActivations[layer][node]));
-                    nodeActivations.Add(new SparseValue(nodeOffset + node, activations[layer + 1][node]));
+                    nodePreActivations.Add(new SparseValue(nodeOffset + node, NeuralNetFinite.ClampFinite(preActivations[layer][node], -MaxAbsLogit * 4f, MaxAbsLogit * 4f)));
+                    nodeActivations.Add(new SparseValue(nodeOffset + node, NeuralNetFinite.OrZero(activations[layer + 1][node])));
                 }
 
                 nodeOffset += preActivations[layer].Length;
@@ -552,8 +568,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 {
                     for (int sourceIndex = 0; sourceIndex < sources; sourceIndex++)
                         edgeContributions.Add(new SparseValue(edgeOffset + target * sources + sourceIndex,
-                            source[sourceIndex] * weights[layer][target * sources + sourceIndex]));
-                    biasContributions.Add(new SparseValue(biasOffset + target, biases[layer][target]));
+                            NeuralNetFinite.OrZero(source[sourceIndex] * weights[layer][target * sources + sourceIndex])));
+                    biasContributions.Add(new SparseValue(biasOffset + target, NeuralNetFinite.OrZero(biases[layer][target])));
                 }
 
                 edgeOffset += targets * sources;
@@ -618,7 +634,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         for (int index = 0; index < before.Length; index++)
         {
             float delta = after[index] - before[index];
-            deltas.Add(new ParameterDelta(index, before[index], -delta / LearningRate, delta, after[index]));
+            deltas.Add(new ParameterDelta(
+                index,
+                NeuralNetFinite.OrZero(before[index]),
+                NeuralNetFinite.OrZero(-delta / LearningRate),
+                NeuralNetFinite.OrZero(delta),
+                NeuralNetFinite.OrZero(after[index])));
         }
 
         return deltas;

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HomeworkCentral.Api.Assessment;
 
@@ -10,7 +11,12 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public static class NeuralNetReplaySerializer
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+        // Training traces can still surface extreme floats; never fail the whole session on JSON.
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    };
 
     public static string Serialize(NeuralNetReplayReportV2 report) => JsonSerializer.Serialize(report, Options);
 

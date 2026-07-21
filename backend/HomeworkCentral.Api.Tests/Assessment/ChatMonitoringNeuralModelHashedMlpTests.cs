@@ -314,4 +314,58 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.True(NeuralNetTrainingPromoter.CanClaim("Promoting", now.AddSeconds(-1), now));
         Assert.False(NeuralNetTrainingPromoter.CanClaim("Promoted", null, now));
     }
+
+    [Fact]
+    public void Compact_training_traces_stay_json_serializable_without_non_finite_numbers()
+    {
+        // Unbounded logits previously overflowed to ±Infinity and caused
+        // System.Text.Json ArgumentException when persisting session/replay reports.
+        using TutoringChatMonitorNeuralNet model = new();
+        SubjectSignalSnapshot subjects = ChatMonitoringSubjectSignals.Resolve(
+            [SubjectMaskNames.Mathematics, SubjectMaskNames.Science],
+            SubjectMaskNames.Science);
+        ChatMonitoringNeuralModelInput input = ChatMonitoringNeuralModelInput.Create(
+            "Tutor math and science applicant.",
+            "Physics help thread with repeated strong evidence signals.",
+            "Use F=ma and solve for acceleration carefully with units.",
+            communityVote: 1f,
+            threadContinuity: 1f,
+            priorScore: 1f,
+            subjects);
+        List<ChatMonitoringNeuralModelTrainingExample> batch =
+        [
+            new(input, new ChatMonitoringNeuralModelTargets(.99f, .99f,
+                ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Tutoring, "tutoring-science")),
+                "tutoring-science"),
+            new(input with { Message = "Explain Newton second law again with free-body diagrams." },
+                new ChatMonitoringNeuralModelTargets(.95f, .9f,
+                    ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Tutoring, "tutoring-science")),
+                "tutoring-science"),
+        ];
+
+        TrainingPassTrace trace = model.TrainMiniBatchWithTrace(
+            batch,
+            epochs: 40,
+            detail: NeuralTrainingTraceDetail.Compact,
+            evidenceTolerance: 0f,
+            relevanceTolerance: 0f,
+            lossStopThreshold: 0f);
+
+        Assert.True(float.IsFinite(trace.FinalAverageCost));
+        foreach (TrainingIterationReplay iteration in trace.Iterations)
+        {
+            Assert.True(float.IsFinite(iteration.BeforeUpdate.EvidenceLogit));
+            Assert.True(float.IsFinite(iteration.BeforeUpdate.RelevanceLogit));
+            Assert.True(float.IsFinite(iteration.AfterUpdate.EvidenceLogit));
+            Assert.True(float.IsFinite(iteration.LossBeforeUpdate.TotalLoss));
+            Assert.True(float.IsFinite(iteration.LossAfterUpdate.TotalLoss));
+            Assert.True(float.IsFinite(iteration.Backward.GradientL2Norm));
+        }
+
+        string json = System.Text.Json.JsonSerializer.Serialize(
+            trace,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.DoesNotContain("Infinity", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("NaN", json, StringComparison.OrdinalIgnoreCase);
+    }
 }

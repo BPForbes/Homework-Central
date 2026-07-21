@@ -295,7 +295,7 @@ public sealed class NeuralNetTrainingService(
             await Task.WhenAll(runTasks);
             session.Status = "Completed";
             session.CompletedAtUtc = DateTime.UtcNow;
-            session.ReportJson = JsonSerializer.Serialize(timings.ToReport(), JsonOptions);
+            session.ReportJson = SerializeTrainingReport(timings);
             logger.LogInformation(
                 "Synthetic training session {SessionId} completed. LLM1={Llm1}ms labels={Labels}ms audits={Audits}ms train={Train}ms db={Db}ms vectors={Vectors}ms examples={Examples} audits={AuditCount}",
                 session.SessionId, timings.Llm1ScenarioMs, timings.TeacherLabelMs, timings.AuditMs, timings.TrainMs, timings.DbSaveMs, timings.VectorUpsertMs, timings.ExamplesPersisted, timings.AuditCount);
@@ -307,7 +307,7 @@ public sealed class NeuralNetTrainingService(
             session.Status = "Cancelled";
             session.CompletedAtUtc = DateTime.UtcNow;
             session.FailureReason = "Training cancelled.";
-            session.ReportJson = JsonSerializer.Serialize(timings.ToReport(), JsonOptions);
+            session.ReportJson = SerializeTrainingReport(timings);
             List<ChatMonitoringNeuralModelRun> runningRuns = await db.ChatMonitoringNeuralModelRuns
                 .Where(x => x.SessionId == session.SessionId && x.Status == "Running")
                 .ToListAsync(CancellationToken.None);
@@ -326,8 +326,21 @@ public sealed class NeuralNetTrainingService(
             session.Status = "Failed";
             session.CompletedAtUtc = DateTime.UtcNow;
             session.FailureReason = ex.Message.Length <= 1000 ? ex.Message : ex.Message[..1000];
-            session.ReportJson = JsonSerializer.Serialize(timings.ToReport(), JsonOptions);
+            session.ReportJson = SerializeTrainingReport(timings);
             await db.SaveChangesAsync(CancellationToken.None);
+        }
+    }
+
+    private string SerializeTrainingReport(TrainingSessionTimings timings)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(timings.ToReport(), JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to serialize neural-net training report.");
+            return """{"error":"report-serialization-failed"}""";
         }
     }
 
@@ -814,7 +827,11 @@ public sealed class NeuralNetTrainingService(
             FailureReason = x.FailureReason,
         }).ToList(),
     };
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    };
     private sealed record SyntheticTicket(string Category, string Requirement, string Message, string ContextSnapshot, double ExpectedScore, double ExpectedRelevance, IReadOnlyList<SyntheticThreadMessage> Messages);
     private sealed record SyntheticEvaluatorResult(string Verdict, double TargetScore, double TargetRelevance, string Feedback, double ApprovalEstimate, double EvaluatorConfidence);
     private sealed class ReplayBuilder
@@ -987,7 +1004,12 @@ public sealed class NeuralNetTrainingService(
         public void AddTrain(long ms) { lock (gate) TrainMs += ms; }
         public void AddDb(long ms) { lock (gate) DbSaveMs += ms; }
         public void AddVector(long ms) { lock (gate) VectorUpsertMs += ms; }
-        public void AddExampleCost(float totalLoss) { lock (gate) { CostSum += totalLoss; CostSamples++; } }
+        public void AddExampleCost(float totalLoss)
+        {
+            if (!float.IsFinite(totalLoss))
+                return;
+            lock (gate) { CostSum += totalLoss; CostSamples++; }
+        }
 
         public object ToReport() => new
         {
@@ -1000,7 +1022,7 @@ public sealed class NeuralNetTrainingService(
             llm2JsonRetries = Llm2JsonRetries,
             examplesPersisted = ExamplesPersisted,
             auditCount = AuditCount,
-            averageCost = CostSamples == 0 ? 0 : CostSum / CostSamples,
+            averageCost = CostSamples == 0 ? 0d : NeuralNetFinite.OrZero(CostSum / CostSamples),
             costSamples = CostSamples,
         };
     }
