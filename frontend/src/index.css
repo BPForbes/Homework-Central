@@ -4871,6 +4871,39 @@ a {
   color: var(--color-text-muted);
 }
 
+.ticket-watch-chip-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ticket-watch-chip-remove {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.ticket-watch-chip-remove:hover:not(:disabled) {
+  background: var(--color-danger);
+  color: var(--color-on-accent);
+}
+
+.ticket-watch-chip-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .ticket-chat-chrome-actions {
   display: flex;
   flex-wrap: wrap;

@@ -53,6 +53,18 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
     public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingSessionDto>>> GetTrainingSessions(CancellationToken ct) =>
         Ok(await training.GetTrainingSessionsAsync(ct));
 
+    [HttpDelete("training/{sessionId:guid}")]
+    public async Task<IActionResult> RemoveTrainingSession(Guid sessionId, CancellationToken ct)
+    {
+        NeuralNetTrainingSessionRemovalResult result = await training.RemoveSessionAsync(sessionId, ct);
+        return result switch
+        {
+            NeuralNetTrainingSessionRemovalResult.Removed => NoContent(),
+            NeuralNetTrainingSessionRemovalResult.Running => Conflict(new { message = "A running training session cannot be removed." }),
+            _ => NotFound(),
+        };
+    }
+
     [HttpGet("training/{sessionId:guid}/report")]
     public async Task<IActionResult> DownloadTrainingReport(Guid sessionId, [FromQuery] NeuralModelKindChatMonitoring? chatMonitoringKind, CancellationToken ct)
     {

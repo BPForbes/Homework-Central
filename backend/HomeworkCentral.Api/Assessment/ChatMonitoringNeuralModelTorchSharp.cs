@@ -76,9 +76,12 @@ public abstract class ChatMonitoringNeuralModelTorchSharp : IChatMonitoringNeura
         {
             List<TrainingIterationReplay> iterations = [];
             int boundedEpochs = Math.Clamp(epochs, 1, 100);
+            // An epoch's post-update forward pass and the next epoch's pre-update forward pass are the
+            // same weights/input, so the trace is carried forward instead of being recomputed from scratch.
+            // That halves the forward-pass (and per-parameter trace allocation) cost of a training pass.
+            ChatMonitoringNeuralModelInferenceTrace before = PredictUnlocked(example.Input);
             for (int epoch = 0; epoch < boundedEpochs; epoch++)
             {
-                ChatMonitoringNeuralModelInferenceTrace before = PredictUnlocked(example.Input);
                 LossTrace lossBefore = CreateLoss(before.Forward, example.Targets);
                 float[] parameterBefore = ReadParameters();
                 TrainOneEpochUnlocked(example.Input, example.Targets);
@@ -94,6 +97,7 @@ public abstract class ChatMonitoringNeuralModelTorchSharp : IChatMonitoringNeura
                 ChatMonitoringNeuralModelInferenceTrace after = PredictUnlocked(example.Input);
                 LossTrace lossAfter = CreateLoss(after.Forward, example.Targets);
                 iterations.Add(new TrainingIterationReplay(epoch, before.Forward, lossBefore, backward, update, after.Forward, lossAfter));
+                before = after;
             }
             return new TrainingPassTrace(iterations);
         }
