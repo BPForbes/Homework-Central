@@ -1,13 +1,20 @@
+using System.Text.Json;
 using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Tickets;
-using System.Text.Json;
+using HomeworkCentral.Api.Tickets.Preface;
 
 namespace HomeworkCentral.Api.Tests.Assessment;
 
 public class TutorSubjectTextProcessorTests
 {
+    private static readonly ITicketPrefaceCheckResolver Resolver = new TicketPrefaceCheckResolver(
+    [
+        TutorSubjectPrefaceCheck.Instance,
+        ModerationConceptPrefaceCheck.Instance,
+    ]);
+
     [Theory]
     [InlineData("Rust")]
     [InlineData("rust")]
@@ -73,7 +80,7 @@ public class TutorSubjectTextProcessorTests
             ["unpaid-ack"] = JsonSerializer.SerializeToElement("student1"),
         };
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => TicketIntakeValidator.ValidateAnswers(schema, bad));
+            () => TicketIntakeValidator.ValidateAnswers(schema, bad, Resolver, "Tutor"));
         Assert.Contains("re-enter", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         Dictionary<string, JsonElement> good = new()
@@ -81,7 +88,7 @@ public class TutorSubjectTextProcessorTests
             ["tutor-subjects"] = JsonSerializer.SerializeToElement("RUst, biology"),
             ["unpaid-ack"] = JsonSerializer.SerializeToElement("student1"),
         };
-        TicketIntakeValidator.ValidateAnswers(schema, good);
+        TicketIntakeValidator.ValidateAnswers(schema, good, Resolver, "Tutor");
         Assert.Equal("Rust, Biology", good["tutor-subjects"].GetString());
     }
 

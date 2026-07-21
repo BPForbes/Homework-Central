@@ -1,0 +1,484 @@
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace HomeworkCentral.Api.Tickets.Preface;
+
+/// <summary>
+/// Shared deterministic preface engine: tokenize, lowercase, alias map, Levenshtein spell-check.
+/// Tutor and mod specializations only supply vocabulary + policy (strict vs lenient, rewrite).
+/// Custom ticket types inherit this class and register via DI.
+/// </summary>
+public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
+{
+    private readonly Lazy<Vocabulary> _vocab;
+    private static readonly Regex TokenSplitter = TokenSplitterPattern();
+
+    protected VocabularyTicketPrefaceCheck()
+    {
+        _vocab = new Lazy<Vocabulary>(BuildVocabulary);
+    }
+
+    public abstract string CheckId { get; }
+    public abstract string QuestionId { get; }
+    public abstract string? FilterName { get; }
+    public abstract TicketPrefaceMode Mode { get; }
+    public abstract bool RewriteAnswerOnSuccess { get; }
+
+    /// <summary>User-facing noun for errors (e.g. "subject", "moderation concept").</summary>
+    protected abstract string CategoryNoun { get; }
+
+    /// <summary>Examples shown when asking the user to re-enter.</summary>
+    protected abstract string ReenterExamples { get; }
+
+    /// <summary>When categories are general-only, how to display them in CanonicalDisplay.</summary>
+    protected virtual string DisplayNameForCategory(string category) => category;
+
+    public TicketPrefaceResult Process(string? freeText) =>
+        ProcessCore(freeText, requireAllVerified: Mode == TicketPrefaceMode.Strict);
+
+    public TicketPrefaceResult ProcessStrict(string? freeText) =>
+        ProcessCore(freeText, requireAllVerified: true);
+
+    public TicketPrefaceResult ProcessLenient(string? freeText) =>
+        ProcessCore(freeText, requireAllVerified: false);
+
+    public TicketPrefaceExtraction Extract(string? freeText)
+    {
+        if (string.IsNullOrWhiteSpace(freeText))
+            return TicketPrefaceExtraction.Empty;
+
+        List<string> categories = [];
+        List<string> specifics = [];
+        List<TicketPrefaceHit> hits = [];
+
+        void AddEntry(VocabEntry entry, string matchedKey, string? rawToken = null)
+        {
+            if (!categories.Contains(entry.Category, StringComparer.OrdinalIgnoreCase))
+                categories.Add(entry.Category);
+            if (entry.IsSpecific
+                && !specifics.Contains(entry.Label, StringComparer.OrdinalIgnoreCase))
+            {
+                specifics.Add(entry.Label);
+            }
+
+            if (!hits.Any(h =>
+                    string.Equals(h.Category, entry.Category, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(h.Label, entry.Label, StringComparison.OrdinalIgnoreCase)))
+            {
+                hits.Add(new TicketPrefaceHit(entry.Category, entry.Label, entry.IsSpecific, matchedKey, rawToken));
+            }
+        }
+
+        foreach (string raw in SplitTokens(freeText))
+        {
+            TicketPrefaceTokenResult token = ResolveToken(raw);
+            if (!token.Verified
+                || string.IsNullOrWhiteSpace(token.Category)
+                || string.IsNullOrWhiteSpace(token.Label))
+            {
+                continue;
+            }
+
+            AddEntry(
+                new VocabEntry(token.Category, token.Label, token.IsSpecific),
+                token.NormalizedToken,
+                token.RawToken);
+        }
+
+        string padded = $" {NormalizeKey(freeText)} ";
+        string paddedCompact = $" {Compact(NormalizeKey(freeText))} ";
+        foreach (string key in _vocab.Value.KeysLongestFirst)
+        {
+            if (key.Length < 3)
+                continue;
+            if (!_vocab.Value.Exact.TryGetValue(key, out VocabEntry? entry) || entry is null)
+                continue;
+            if (!ContainsToken(padded, key) && !ContainsToken(paddedCompact, key))
+                continue;
+            AddEntry(entry, key);
+        }
+
+        string? primary = categories.Count > 0 ? categories[0] : null;
+        return new TicketPrefaceExtraction(categories, specifics, hits, primary);
+    }
+
+    protected abstract void RegisterVocabulary(VocabularyBuilder builder);
+
+    private Vocabulary BuildVocabulary()
+    {
+        VocabularyBuilder builder = new();
+        RegisterVocabulary(builder);
+        return new Vocabulary(builder.Entries);
+    }
+
+    private TicketPrefaceResult ProcessCore(string? freeText, bool requireAllVerified)
+    {
+        if (string.IsNullOrWhiteSpace(freeText))
+        {
+            return FailEmpty(requireAllVerified);
+        }
+
+        List<string> rawTokens = SplitTokens(freeText);
+        if (rawTokens.Count == 0)
+            return FailEmpty(requireAllVerified);
+
+        List<TicketPrefaceTokenResult> tokenResults = [];
+        List<string> categories = [];
+        List<string> specifics = [];
+        List<string> displayLabels = [];
+        List<string> failures = [];
+
+        foreach (string raw in rawTokens)
+        {
+            TicketPrefaceTokenResult resolved = ResolveToken(raw);
+            tokenResults.Add(resolved);
+            if (!resolved.Verified)
+            {
+                failures.Add(resolved.FailureReason ?? $"Could not verify “{raw}”.");
+                continue;
+            }
+
+            if (!categories.Contains(resolved.Category!, StringComparer.OrdinalIgnoreCase))
+                categories.Add(resolved.Category!);
+            if (!string.IsNullOrWhiteSpace(resolved.Label)
+                && !displayLabels.Contains(resolved.Label, StringComparer.OrdinalIgnoreCase))
+            {
+                displayLabels.Add(resolved.Label);
+            }
+
+            if (resolved.IsSpecific
+                && !string.IsNullOrWhiteSpace(resolved.Label)
+                && !specifics.Contains(resolved.Label, StringComparer.OrdinalIgnoreCase))
+            {
+                specifics.Add(resolved.Label);
+            }
+        }
+
+        if (requireAllVerified && failures.Count > 0)
+        {
+            string detail = string.Join(" ", failures);
+            return new TicketPrefaceResult(
+                Ok: false,
+                Categories: [],
+                SpecificLabels: [],
+                PrimaryCategory: null,
+                CanonicalDisplay: string.Empty,
+                ErrorMessage:
+                    $"{detail} Please re-enter your {CategoryNoun}(s) using known topics "
+                    + $"(for example: {ReenterExamples}). Separate multiple with commas.",
+                Tokens: tokenResults);
+        }
+
+        if (categories.Count == 0)
+        {
+            if (!requireAllVerified)
+            {
+                // Lenient narrative: prose-scan the full text for known categories.
+                TicketPrefaceExtraction extraction = Extract(freeText);
+                if (extraction.Categories.Count > 0)
+                {
+                    return new TicketPrefaceResult(
+                        Ok: true,
+                        Categories: extraction.Categories,
+                        SpecificLabels: extraction.SpecificLabels,
+                        PrimaryCategory: extraction.PrimaryCategory,
+                        CanonicalDisplay: freeText.Trim(),
+                        ErrorMessage: null,
+                        Tokens: tokenResults);
+                }
+
+                return new TicketPrefaceResult(
+                    Ok: true,
+                    Categories: [],
+                    SpecificLabels: [],
+                    PrimaryCategory: null,
+                    CanonicalDisplay: freeText.Trim(),
+                    ErrorMessage: null,
+                    Tokens: tokenResults);
+            }
+
+            return new TicketPrefaceResult(
+                Ok: false,
+                Categories: [],
+                SpecificLabels: [],
+                PrimaryCategory: null,
+                CanonicalDisplay: string.Empty,
+                ErrorMessage:
+                    $"None of the entered {CategoryNoun}s could be verified. Please re-enter using known topics "
+                    + $"(for example: {ReenterExamples}).",
+                Tokens: tokenResults);
+        }
+
+        if (!requireAllVerified)
+        {
+            // Merge prose hits so narrative reasons still surface concepts beyond list tokens.
+            TicketPrefaceExtraction extraction = Extract(freeText);
+            foreach (string category in extraction.Categories)
+            {
+                if (!categories.Contains(category, StringComparer.OrdinalIgnoreCase))
+                    categories.Add(category);
+            }
+
+            foreach (string label in extraction.SpecificLabels)
+            {
+                if (!specifics.Contains(label, StringComparer.OrdinalIgnoreCase))
+                    specifics.Add(label);
+            }
+        }
+
+        string display = requireAllVerified
+            ? (displayLabels.Count > 0
+                ? string.Join(", ", displayLabels)
+                : string.Join(", ", categories.Select(DisplayNameForCategory)))
+            : freeText.Trim();
+
+        return new TicketPrefaceResult(
+            Ok: true,
+            Categories: categories,
+            SpecificLabels: specifics,
+            PrimaryCategory: categories[0],
+            CanonicalDisplay: display,
+            ErrorMessage: null,
+            Tokens: tokenResults);
+    }
+
+    private TicketPrefaceResult FailEmpty(bool requireAllVerified) =>
+        new(
+            Ok: !requireAllVerified,
+            Categories: [],
+            SpecificLabels: [],
+            PrimaryCategory: null,
+            CanonicalDisplay: string.Empty,
+            ErrorMessage: requireAllVerified
+                ? $"Please enter at least one {CategoryNoun}."
+                : null,
+            Tokens: []);
+
+    private TicketPrefaceTokenResult ResolveToken(string raw)
+    {
+        string normalized = NormalizeKey(raw);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return new TicketPrefaceTokenResult(
+                raw, normalized, null, null, false, false,
+                $"Could not verify “{raw.Trim()}” (empty after normalizing).");
+        }
+
+        Vocabulary vocab = _vocab.Value;
+        if (vocab.Exact.TryGetValue(normalized, out VocabEntry? exact) && exact is not null)
+        {
+            return new TicketPrefaceTokenResult(
+                raw, normalized, exact.Category, exact.Label, true, exact.IsSpecific, null);
+        }
+
+        int maxDistance = MaxEditDistance(normalized.Length);
+        if (maxDistance <= 0)
+        {
+            return new TicketPrefaceTokenResult(
+                raw, normalized, null, null, false, false,
+                $"Could not verify “{raw.Trim()}”. Please re-enter that {CategoryNoun}.");
+        }
+
+        List<(VocabEntry Entry, int Distance)> candidates = [];
+        foreach ((string key, VocabEntry entry) in vocab.Exact)
+        {
+            if (Math.Abs(key.Length - normalized.Length) > maxDistance)
+                continue;
+            int distance = Levenshtein(normalized, key);
+            if (distance > 0 && distance <= maxDistance)
+                candidates.Add((entry, distance));
+        }
+
+        if (candidates.Count == 0)
+        {
+            return new TicketPrefaceTokenResult(
+                raw, normalized, null, null, false, false,
+                $"Could not verify “{raw.Trim()}”. Please re-enter that {CategoryNoun}.");
+        }
+
+        int best = candidates.Min(c => c.Distance);
+        List<VocabEntry> bestEntries = candidates
+            .Where(c => c.Distance == best)
+            .Select(c => c.Entry)
+            .DistinctBy(e => $"{e.Category}:{e.Label}", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        List<string> distinctCategories = bestEntries
+            .Select(e => e.Category)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (distinctCategories.Count > 1)
+        {
+            string options = string.Join(" or ", bestEntries.Select(e => e.Label).Distinct(StringComparer.OrdinalIgnoreCase));
+            return new TicketPrefaceTokenResult(
+                raw, normalized, null, null, false, false,
+                $"Could not verify “{raw.Trim()}” (ambiguous — did you mean {options}?). Please re-enter that {CategoryNoun}.");
+        }
+
+        VocabEntry match = bestEntries.OrderByDescending(e => e.IsSpecific).First();
+        return new TicketPrefaceTokenResult(
+            raw, normalized, match.Category, match.Label, true, match.IsSpecific, null);
+    }
+
+    private static List<string> SplitTokens(string freeText)
+    {
+        string[] parts = TokenSplitter.Split(freeText);
+        List<string> tokens = parts
+            .Select(p => p.Trim())
+            .Where(p => p.Length > 0)
+            .ToList();
+
+        if (tokens.Count > 0)
+            return tokens;
+
+        string single = freeText.Trim();
+        return string.IsNullOrEmpty(single) ? [] : [single];
+    }
+
+    protected static string NormalizeKey(string value)
+    {
+        string lower = value.Trim().ToLowerInvariant();
+        lower = lower
+            .Replace("c++", "cplusplus", StringComparison.Ordinal)
+            .Replace("c#", "csharp", StringComparison.Ordinal)
+            .Replace(".net", "dotnet", StringComparison.Ordinal)
+            .Replace("node.js", "nodejs", StringComparison.Ordinal);
+
+        StringBuilder builder = new(lower.Length);
+        char prev = '\0';
+        foreach (char ch in lower.Normalize(NormalizationForm.FormKC))
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(ch);
+                prev = ch;
+            }
+            else if (ch is ' ' or '-' or '_' or '/' or '\\' or '&' or '+')
+            {
+                if (prev != ' ' && builder.Length > 0)
+                {
+                    builder.Append(' ');
+                    prev = ' ';
+                }
+            }
+        }
+
+        return Regex.Replace(builder.ToString().Trim(), @"\s+", " ");
+    }
+
+    protected static string Compact(string normalized) =>
+        normalized.Replace(" ", string.Empty, StringComparison.Ordinal);
+
+    private static bool ContainsToken(string paddedLowerHaystack, string needle)
+    {
+        if (string.IsNullOrEmpty(needle) || paddedLowerHaystack.Length < needle.Length + 2)
+            return false;
+
+        int index = 0;
+        while ((index = paddedLowerHaystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            char before = paddedLowerHaystack[index - 1];
+            char after = index + needle.Length < paddedLowerHaystack.Length
+                ? paddedLowerHaystack[index + needle.Length]
+                : ' ';
+            bool boundaryBefore = !char.IsLetterOrDigit(before);
+            bool boundaryAfter = !char.IsLetterOrDigit(after);
+            if (boundaryBefore && boundaryAfter)
+                return true;
+            index += needle.Length;
+        }
+
+        return false;
+    }
+
+    private static int MaxEditDistance(int length) => length switch
+    {
+        <= 3 => 0,
+        <= 5 => 1,
+        _ => 2,
+    };
+
+    private static int Levenshtein(string a, string b)
+    {
+        int n = a.Length;
+        int m = b.Length;
+        if (n == 0) return m;
+        if (m == 0) return n;
+
+        Span<int> prev = stackalloc int[m + 1];
+        Span<int> curr = stackalloc int[m + 1];
+        for (int j = 0; j <= m; j++)
+            prev[j] = j;
+
+        for (int i = 1; i <= n; i++)
+        {
+            curr[0] = i;
+            for (int j = 1; j <= m; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                curr[j] = Math.Min(
+                    Math.Min(curr[j - 1] + 1, prev[j] + 1),
+                    prev[j - 1] + cost);
+            }
+
+            Span<int> swap = prev;
+            prev = curr;
+            curr = swap;
+        }
+
+        return prev[m];
+    }
+
+    [GeneratedRegex(@"[,;|/]+|\s+&\s+|\s+and\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TokenSplitterPattern();
+
+    protected sealed record VocabEntry(string Category, string Label, bool IsSpecific);
+
+    protected sealed class VocabularyBuilder
+    {
+        private readonly Dictionary<string, VocabEntry> _exact = new(StringComparer.Ordinal);
+
+        public void Add(string alias, string category, string label, bool isSpecific = false)
+        {
+            string key = NormalizeKey(alias);
+            if (string.IsNullOrWhiteSpace(key))
+                return;
+
+            Register(key, category, label, isSpecific);
+            string compact = Compact(key);
+            if (!string.Equals(compact, key, StringComparison.Ordinal))
+                Register(compact, category, label, isSpecific);
+        }
+
+        private void Register(string key, string category, string label, bool isSpecific)
+        {
+            if (_exact.TryGetValue(key, out VocabEntry? existing) && existing is not null)
+            {
+                if (!string.Equals(existing.Category, category, StringComparison.OrdinalIgnoreCase))
+                    return;
+                if (!existing.IsSpecific && isSpecific)
+                    _exact[key] = new VocabEntry(category, label, true);
+                return;
+            }
+
+            _exact[key] = new VocabEntry(category, label, isSpecific);
+        }
+
+        internal IReadOnlyDictionary<string, VocabEntry> Entries => _exact;
+    }
+
+    private sealed class Vocabulary
+    {
+        public Vocabulary(IReadOnlyDictionary<string, VocabEntry> exact)
+        {
+            Exact = exact.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+            KeysLongestFirst = Exact.Keys
+                .OrderByDescending(k => k.Length)
+                .ThenBy(k => k, StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        public Dictionary<string, VocabEntry> Exact { get; }
+        public string[] KeysLongestFirst { get; }
+    }
+}

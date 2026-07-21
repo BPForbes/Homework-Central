@@ -60,17 +60,24 @@ mildly, unrelated reward-only.”
 
 ### Tutor subject text processing
 
-Tutor intake (`tutor-subjects`) is normalized by a deterministic processor
-(`TutorSubjectTextProcessor`) — not a separate neural cascade:
+Ticket free-text preface checks share one vocabulary engine
+(`VocabularyTicketPrefaceCheck`) registered via DI as `ITicketPrefaceCheck`:
 
+| Portal | Check | Question | Mode |
+|---|---|---|---|
+| Tutor | `TutorSubjectPrefaceCheck` | `tutor-subjects` | Strict (re-enter on fail) |
+| Mod-Mail | `ModerationConceptPrefaceCheck` | `report-reason` | Lenient (never blocks) |
+
+Custom portals can register additional implementations without forking intake.
+
+Behavior:
 - Lowercases input (so `Rust` / `RUst` / … all match)
-- Maps expertise aliases onto Mask-C generals (`biology` → Science, `rust` → ComputerScience)
-- Keeps specific expertise labels for the tutoring subject-context router
-  (hashed into 16 extra stage-1 inputs; topology `46 → 32 → 8`)
-- Spell-checks against the known subject/expertise vocabulary (Levenshtein)
-- Rejects unverified tokens and asks the applicant to re-enter
-- Stores the verified display list (e.g. `Biology, Rust`) while Mask-C multi-hots
-  still use the parent generals
+- Maps aliases onto categories (`biology` → Science, `rust` → ComputerScience;
+  reporter phrases → fine moderation concept slugs)
+- Keeps specific labels for cascade stage-1 inputs
+- Spell-checks against the known vocabulary (Levenshtein)
+- Tutor rejects unverified tokens; mod keeps narrative and soft-extracts concepts
+- Tracking templates store `prefaceCategory` / `prefaceSpecifics` when available
 
 Custom rooms/categories are out of scope for now.
 
