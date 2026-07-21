@@ -104,7 +104,32 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
         float evidenceTolerance = 0f,
         float relevanceTolerance = 0f,
-        float lossStopThreshold = 0f)
+        float lossStopThreshold = 0f) =>
+        TrainMiniBatchWithTrace(
+            examples,
+            epochs,
+            detail,
+            evidenceTolerance,
+            relevanceTolerance,
+            lossStopThreshold,
+            resolveBatch: null,
+            onSampleInputGradients: null);
+
+    /// <summary>
+    /// Mini-batch SGD with optional cascade hooks. When <paramref name="resolveBatch"/> is set,
+    /// it is invoked at the start of each epoch (so f(x) can be refreshed). When
+    /// <paramref name="onSampleInputGradients"/> is set, it receives ∂C_x/∂x per sample after
+    /// backprop and before the stage-2 weight update — used to chain-rule into f.
+    /// </summary>
+    internal TrainingPassTrace TrainMiniBatchWithTrace(
+        IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> examples,
+        int epochs,
+        NeuralTrainingTraceDetail detail,
+        float evidenceTolerance,
+        float relevanceTolerance,
+        float lossStopThreshold,
+        Func<IReadOnlyList<ChatMonitoringNeuralModelTrainingExample>>? resolveBatch,
+        Action<IReadOnlyList<float[]>>? onSampleInputGradients)
     {
         if (examples is null || examples.Count == 0)
             throw new ArgumentException("Mini-batch training requires at least one example.", nameof(examples));
@@ -112,24 +137,37 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         lock (gate)
         {
             int n = examples.Count;
-            float[][] encoded = examples.Select(example => ChatMonitoringFeatureEncoder.Encode(example.Input)).ToArray();
-            int[] categoryIndices = examples.Select(ResolveCategoryIndex).ToArray();
             float[][] weightGrads = weights.Select(layer => new float[layer.Length]).ToArray();
             float[][] biasGrads = biases.Select(layer => new float[layer.Length]).ToArray();
             List<TrainingIterationReplay> iterations = [];
             int boundedEpochs = Math.Clamp(epochs, 1, 100);
             bool earlyStopEnabled = evidenceTolerance > 0f || relevanceTolerance > 0f || lossStopThreshold > 0f;
             bool captureFull = detail == NeuralTrainingTraceDetail.Full;
-            string optimizer = n == 1 ? "momentum-SGD" : "momentum-mini-batch-SGD";
+            string optimizer = onSampleInputGradients is null
+                ? (n == 1 ? "momentum-SGD" : "momentum-mini-batch-SGD")
+                : (n == 1 ? "momentum-cascade-chain-rule-SGD" : "momentum-cascade-chain-rule-mini-batch-SGD");
+
+            float[][]? lastEncoded = null;
+            int[]? lastCategoryIndices = null;
 
             for (int epoch = 0; epoch < boundedEpochs; epoch++)
             {
+                IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> batch = resolveBatch?.Invoke() ?? examples;
+                if (batch.Count != n)
+                    throw new InvalidOperationException("Cascade resolveBatch must preserve mini-batch size.");
+
+                float[][] encoded = batch.Select(example => ChatMonitoringFeatureEncoder.Encode(example.Input)).ToArray();
+                int[] categoryIndices = batch.Select(ResolveCategoryIndex).ToArray();
+                lastEncoded = encoded;
+                lastCategoryIndices = categoryIndices;
+
                 ClearGradients(weightGrads, biasGrads);
                 float evidenceLossSum = 0, relevanceLossSum = 0, categoryLossSum = 0;
                 float evidenceProbSum = 0, relevanceProbSum = 0, evidenceLogitSum = 0, relevanceLogitSum = 0;
                 float maxAbsGradient = 0;
                 float minNonZeroAbsGradient = float.MaxValue;
                 double gradSqSum = 0;
+                float[][] inputGradients = new float[n][];
 
                 for (int i = 0; i < n; i++)
                 {
@@ -140,13 +178,16 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     relevanceProbSum += relevance;
                     evidenceLogitSum += cache.PreActivations[^1][0];
                     relevanceLogitSum += cache.PreActivations[^1][1];
-                    evidenceLossSum += BinaryCrossEntropy(evidence, examples[i].Targets.Evidence);
-                    relevanceLossSum += BinaryCrossEntropy(relevance, examples[i].Targets.Relevance);
+                    evidenceLossSum += BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
+                    relevanceLossSum += BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
                     categoryLossSum += CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
-                    ChatMonitoringNeuralModelTargets targets = examples[i].Targets with { CategoryIndex = categoryIndices[i] };
-                    AccumulateGradientsUnlocked(cache, targets, weightGrads, biasGrads,
+                    ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
+                    inputGradients[i] = AccumulateGradientsUnlocked(cache, targets, weightGrads, biasGrads,
                         ref maxAbsGradient, ref minNonZeroAbsGradient, ref gradSqSum);
                 }
+
+                // Chain rule into stage-1 before stage-2 θ update (same forward activations).
+                onSampleInputGradients?.Invoke(inputGradients);
 
                 LossTrace lossBefore = new(
                     "bce+softmax-ce-avg-v1",
@@ -202,11 +243,11 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     afterRelevanceProb += relevance;
                     afterEvidenceLogit += afterCache.PreActivations[^1][0];
                     afterRelevanceLogit += afterCache.PreActivations[^1][1];
-                    afterEvidenceLoss += BinaryCrossEntropy(evidence, examples[i].Targets.Evidence);
-                    afterRelevanceLoss += BinaryCrossEntropy(relevance, examples[i].Targets.Relevance);
+                    afterEvidenceLoss += BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
+                    afterRelevanceLoss += BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
                     afterCategoryLoss += CategoricalCrossEntropy(afterCache.Activations[^1], categoryIndices[i]);
-                    meanAbsEvidenceError += MathF.Abs(evidence - examples[i].Targets.Evidence);
-                    meanAbsRelevanceError += MathF.Abs(relevance - examples[i].Targets.Relevance);
+                    meanAbsEvidenceError += MathF.Abs(evidence - batch[i].Targets.Evidence);
+                    meanAbsRelevanceError += MathF.Abs(relevance - batch[i].Targets.Relevance);
                 }
 
                 LossTrace lossAfter = new(
@@ -232,12 +273,15 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 }
             }
 
-            for (int i = 0; i < n; i++)
+            if (lastEncoded is not null && lastCategoryIndices is not null)
             {
-                string category = categoryLabels[categoryIndices[i]];
-                support.Add(new SupportExample(encoded[i], category));
-                if (support.Count > 512)
-                    support.RemoveAt(0);
+                for (int i = 0; i < n; i++)
+                {
+                    string category = categoryLabels[lastCategoryIndices[i]];
+                    support.Add(new SupportExample(lastEncoded[i], category));
+                    if (support.Count > 512)
+                        support.RemoveAt(0);
+                }
             }
 
             float finalAverageCost = iterations.Count == 0 ? 0f : iterations[^1].LossAfterUpdate.TotalLoss;
@@ -353,7 +397,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         }
     }
 
-    private void AccumulateGradientsUnlocked(
+    /// <summary>Backprop through g; returns ∂C/∂x (input-feature gradients) for chain rule into f.</summary>
+    private float[] AccumulateGradientsUnlocked(
         ForwardCache cache,
         ChatMonitoringNeuralModelTargets targets,
         float[][] weightGrads,
@@ -402,6 +447,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
             activationGradients[layer] = nextGradient;
         }
+
+        return activationGradients[0];
     }
 
     /// <summary>Heavy-ball momentum on averaged mini-batch gradients: v ← μv + ∇C, θ ← θ − ηv.</summary>
@@ -723,10 +770,11 @@ public sealed class TutoringEvidenceScorerNeuralNet : ChatMonitoringNeuralModelH
 }
 
 /// <summary>
-/// Tutoring cascade: stage-1 <see cref="TutoringSubjectContextRouter"/> embeds multi-subject
-/// application/channel relatedness; stage-2 <see cref="TutoringEvidenceScorerNeuralNet"/>
-/// scores evidence/relevance/category. Example: applied Math+Science, Physics channel →
-/// stage-1 raises cross-subject support; stage-2 can reward a strong physics answer more.
+/// Tutoring cascade g(f(x)): stage-1 <see cref="TutoringSubjectContextRouter"/> is f;
+/// stage-2 <see cref="TutoringEvidenceScorerNeuralNet"/> is g. Training uses the chain rule
+/// ∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f) where ∂C/∂f is backprop through g's cascade input slots (78–85).
+/// Example: applied Math+Science, Physics channel → f raises cross-subject context; g can
+/// reward a strong physics answer more.
 /// </summary>
 public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTelemetry
 {
@@ -735,6 +783,9 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
     private readonly object gate = new();
 
     public NeuralModelKindChatMonitoring Kind => NeuralModelKindChatMonitoring.Tutoring;
+
+    /// <summary>Stage-1 parameter L2 (diagnostics / cascade chain-rule tests).</summary>
+    public float RouterParameterL2Norm => router.ParameterL2Norm();
 
     public ChatMonitoringNeuralModelPrediction Predict(ChatMonitoringNeuralModelInput input)
     {
@@ -748,12 +799,7 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
 
     public void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12)
     {
-        lock (gate)
-        {
-            SubjectSignalSnapshot snapshot = SnapshotFrom(input);
-            router.Train(snapshot, Math.Max(2, epochs / 3));
-            scorer.Train(Enrich(input, snapshot), targets, epochs);
-        }
+        _ = TrainWithTrace(new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"), epochs);
     }
 
     public TrainingPassTrace TrainWithTrace(
@@ -773,17 +819,57 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
         float relevanceTolerance = 0f,
         float lossStopThreshold = 0f)
     {
+        if (examples is null || examples.Count == 0)
+            throw new ArgumentException("Mini-batch training requires at least one example.", nameof(examples));
+
         lock (gate)
         {
-            List<ChatMonitoringNeuralModelTrainingExample> enriched = [];
-            foreach (ChatMonitoringNeuralModelTrainingExample example in examples)
-            {
-                SubjectSignalSnapshot snapshot = SnapshotFrom(example.Input);
-                router.Train(snapshot, 3);
-                enriched.Add(example with { Input = Enrich(example.Input, snapshot) });
-            }
+            List<SubjectSignalSnapshot> snapshots = examples.Select(example => SnapshotFrom(example.Input)).ToList();
+            List<TutoringSubjectContextRouter.ForwardCache>? forwardStates = null;
+            float[][] routerWeightGrads = router.CreateWeightGradientBuffers();
+            float[][] routerBiasGrads = router.CreateBiasGradientBuffers();
 
-            return scorer.TrainMiniBatchWithTrace(enriched, epochs, detail, evidenceTolerance, relevanceTolerance, lossStopThreshold);
+            return scorer.TrainMiniBatchWithTrace(
+                examples,
+                epochs,
+                detail,
+                evidenceTolerance,
+                relevanceTolerance,
+                lossStopThreshold,
+                resolveBatch: () =>
+                {
+                    forwardStates = new List<TutoringSubjectContextRouter.ForwardCache>(examples.Count);
+                    List<ChatMonitoringNeuralModelTrainingExample> enriched = new(examples.Count);
+                    for (int i = 0; i < examples.Count; i++)
+                    {
+                        TutoringSubjectContextRouter.ForwardCache state = router.ForwardCacheFor(snapshots[i]);
+                        forwardStates.Add(state);
+                        enriched.Add(examples[i] with
+                        {
+                            Input = EnrichWithContext(examples[i].Input, snapshots[i], state.Output),
+                        });
+                    }
+
+                    return enriched;
+                },
+                onSampleInputGradients: inputGradients =>
+                {
+                    if (forwardStates is null || forwardStates.Count != inputGradients.Count)
+                        throw new InvalidOperationException("Cascade forward states were not captured for this epoch.");
+
+                    TutoringSubjectContextRouter.ClearGradientBuffers(routerWeightGrads, routerBiasGrads);
+                    for (int i = 0; i < inputGradients.Count; i++)
+                    {
+                        // ∂C/∂f = ∂C/∂x[78:86] — chain rule through g(f(x)).
+                        ReadOnlySpan<float> dCdF = inputGradients[i].AsSpan(
+                            TutoringSubjectContextRouter.CascadeFeatureStart,
+                            TutoringSubjectContextRouter.OutputSize);
+                        router.AccumulateFromOutputGradient(
+                            forwardStates[i], dCdF, routerWeightGrads, routerBiasGrads);
+                    }
+
+                    router.ApplyMomentumUpdate(routerWeightGrads, routerBiasGrads, examples.Count);
+                });
         }
     }
 
@@ -802,6 +888,15 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
     {
         SubjectSignalSnapshot snap = snapshot ?? SnapshotFrom(input);
         float[] context = router.Forward(snap);
+        return EnrichWithContext(input, snap, context);
+    }
+
+    private static ChatMonitoringNeuralModelInput EnrichWithContext(
+        ChatMonitoringNeuralModelInput input,
+        SubjectSignalSnapshot snap,
+        ReadOnlySpan<float> cascadeContext)
+    {
+        float[] context = cascadeContext.ToArray();
         ChatMonitoringNeuralModelInput baseInput = ChatMonitoringNeuralModelInput.Create(
             input.Requirement,
             input.ThreadContext,
@@ -813,7 +908,6 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
             context);
         return baseInput with
         {
-            // Preserve community/prior overrides from the caller when present.
             CommunityVote = input.CommunityVote,
             PriorScore = input.PriorScore,
         };

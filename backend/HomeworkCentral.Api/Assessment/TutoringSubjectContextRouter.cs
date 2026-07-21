@@ -1,10 +1,10 @@
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
-/// Stage-1 tutoring cascade net: maps multi-subject application + channel signals into an
-/// 8-d subject-context embedding for the evidence scorer. Learns relatedness structure
-/// (e.g. Physics/Science supported by Mathematics) without needing the full text encoder.
-/// Topology: 30 → 24 → 8.
+/// Stage-1 of the tutoring cascade: f(x). Maps multi-subject application + channel signals
+/// into an 8-d embedding consumed by stage-2 g. Topology: 30 → 24 → 8 (tanh).
+/// Trained end-to-end via the chain rule: ∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f) where ∂C/∂f comes
+/// from backprop through g's cascade input slots.
 /// </summary>
 public sealed class TutoringSubjectContextRouter : IDisposable
 {
@@ -61,63 +61,116 @@ public sealed class TutoringSubjectContextRouter : IDisposable
         return values;
     }
 
-    public static float[] BuildRouterTargets(SubjectSignalSnapshot snapshot) =>
-    [
-        snapshot.ExactMatch,
-        snapshot.RelatedMatch,
-        snapshot.CrossSubjectSupport,
-        snapshot.AppliedCountNorm,
-        snapshot.EffectiveChannelRelevance,
-        Math.Clamp(snapshot.RewardScale / 1.15f, 0f, 1f),
-        snapshot.ChannelGeneral is null ? 0f : (ChatMonitoringSubjectSignals.GeneralIndex(snapshot.ChannelGeneral) + 1f) / 14f,
-        Math.Clamp(snapshot.AppliedGenerals.Count / 13f, 0f, 1f),
-    ];
-
-    public float[] Forward(SubjectSignalSnapshot snapshot)
+    public ForwardCache ForwardCacheFor(SubjectSignalSnapshot snapshot)
     {
-        lock (gate) return ForwardUnlocked(BuildRouterInput(snapshot)).Activations[^1].ToArray();
+        lock (gate) return ForwardUnlocked(BuildRouterInput(snapshot));
     }
 
-    public void Train(SubjectSignalSnapshot snapshot, int epochs = 4)
+    public float[] Forward(SubjectSignalSnapshot snapshot) => ForwardCacheFor(snapshot).Output.ToArray();
+
+    /// <summary>
+    /// Accumulate ∇θ_f from upstream ∂C/∂f (chain rule through g(f(x))).
+    /// Must use the same <see cref="ForwardCache"/> that produced f for g's forward pass.
+    /// </summary>
+    public void AccumulateFromOutputGradient(
+        ForwardCache state,
+        ReadOnlySpan<float> dLossDf,
+        float[][] weightGrads,
+        float[][] biasGrads)
     {
-        float[] input = BuildRouterInput(snapshot);
-        float[] targets = BuildRouterTargets(snapshot);
+        if (dLossDf.Length < OutputSize)
+            throw new ArgumentException($"Expected at least {OutputSize} upstream gradients.", nameof(dLossDf));
+        if (weightGrads.Length != weights.Length || biasGrads.Length != biases.Length)
+            throw new ArgumentException("Gradient buffer rank does not match router layers.");
+
         lock (gate)
         {
-            for (int epoch = 0; epoch < Math.Clamp(epochs, 1, 20); epoch++)
+            float[][] activationGradients = new float[state.Activations.Length][];
+            activationGradients[^1] = new float[OutputSize];
+            for (int i = 0; i < OutputSize; i++)
+                activationGradients[^1][i] = dLossDf[i];
+
+            for (int layer = weights.Length - 1; layer >= 0; layer--)
             {
-                ForwardCache cache = ForwardUnlocked(input);
-                float[] output = cache.Activations[^1];
-                float[][] grads = new float[cache.Activations.Length][];
-                grads[^1] = new float[OutputSize];
-                for (int i = 0; i < OutputSize; i++)
-                    grads[^1][i] = output[i] - targets[i];
-
-                for (int layer = weights.Length - 1; layer >= 0; layer--)
+                float[] upstream = activationGradients[layer + 1];
+                float[] source = state.Activations[layer];
+                float[] next = new float[source.Length];
+                int sources = widths[layer];
+                int targetsCount = widths[layer + 1];
+                for (int target = 0; target < targetsCount; target++)
                 {
-                    float[] upstream = grads[layer + 1];
-                    float[] source = cache.Activations[layer];
-                    float[] next = new float[source.Length];
-                    int sources = widths[layer];
-                    int targetsCount = widths[layer + 1];
-                    for (int target = 0; target < targetsCount; target++)
+                    // f = tanh(z); ∂C/∂z = (∂C/∂f) · (1 − f²)
+                    float gradient = upstream[target] * TanhDerivativeFromActivation(state.Activations[layer + 1][target]);
+                    biasGrads[layer][target] += gradient;
+                    for (int sourceIndex = 0; sourceIndex < sources; sourceIndex++)
                     {
-                        float gradient = upstream[target] * TanhDerivativeFromActivation(cache.Activations[layer + 1][target]);
-                        biasVelocity[layer][target] = Momentum * biasVelocity[layer][target] + gradient;
-                        biases[layer][target] -= LearningRate * biasVelocity[layer][target];
-                        for (int sourceIndex = 0; sourceIndex < sources; sourceIndex++)
-                        {
-                            int weightIndex = target * sources + sourceIndex;
-                            float weightGrad = gradient * source[sourceIndex];
-                            weightVelocity[layer][weightIndex] = Momentum * weightVelocity[layer][weightIndex] + weightGrad;
-                            weights[layer][weightIndex] -= LearningRate * weightVelocity[layer][weightIndex];
-                            next[sourceIndex] += gradient * weights[layer][weightIndex];
-                        }
+                        int weightIndex = target * sources + sourceIndex;
+                        weightGrads[layer][weightIndex] += gradient * source[sourceIndex];
+                        // Use pre-update weights for ∂C/∂a_source (correct chain rule).
+                        next[sourceIndex] += gradient * weights[layer][weightIndex];
                     }
+                }
 
-                    grads[layer] = next;
+                activationGradients[layer] = next;
+            }
+        }
+    }
+
+    public float[][] CreateWeightGradientBuffers() => weights.Select(layer => new float[layer.Length]).ToArray();
+    public float[][] CreateBiasGradientBuffers() => biases.Select(layer => new float[layer.Length]).ToArray();
+
+    public static void ClearGradientBuffers(float[][] weightGrads, float[][] biasGrads)
+    {
+        for (int layer = 0; layer < weightGrads.Length; layer++)
+        {
+            Array.Clear(weightGrads[layer]);
+            Array.Clear(biasGrads[layer]);
+        }
+    }
+
+    /// <summary>Mini-batch momentum SGD: v ← μv + (1/n)Σ∇, θ ← θ − ηv.</summary>
+    public void ApplyMomentumUpdate(float[][] weightGrads, float[][] biasGrads, int batchSize)
+    {
+        float invN = 1f / Math.Max(1, batchSize);
+        lock (gate)
+        {
+            for (int layer = 0; layer < weights.Length; layer++)
+            {
+                for (int i = 0; i < weights[layer].Length; i++)
+                {
+                    float avgGrad = weightGrads[layer][i] * invN;
+                    weightVelocity[layer][i] = Momentum * weightVelocity[layer][i] + avgGrad;
+                    weights[layer][i] -= LearningRate * weightVelocity[layer][i];
+                }
+
+                for (int i = 0; i < biases[layer].Length; i++)
+                {
+                    float avgGrad = biasGrads[layer][i] * invN;
+                    biasVelocity[layer][i] = Momentum * biasVelocity[layer][i] + avgGrad;
+                    biases[layer][i] -= LearningRate * biasVelocity[layer][i];
                 }
             }
+        }
+    }
+
+    public float ParameterL2Norm()
+    {
+        lock (gate)
+        {
+            double sum = 0;
+            foreach (float[] layer in weights)
+            {
+                foreach (float value in layer)
+                    sum += value * value;
+            }
+
+            foreach (float[] layer in biases)
+            {
+                foreach (float value in layer)
+                    sum += value * value;
+            }
+
+            return MathF.Sqrt((float)sum);
         }
     }
 
@@ -149,5 +202,10 @@ public sealed class TutoringSubjectContextRouter : IDisposable
 
     private static float TanhDerivativeFromActivation(float activation) => 1f - activation * activation;
 
-    private sealed record ForwardCache(float[][] Activations);
+    public sealed class ForwardCache
+    {
+        internal ForwardCache(float[][] activations) => Activations = activations;
+        internal float[][] Activations { get; }
+        public ReadOnlySpan<float> Output => Activations[^1];
+    }
 }

@@ -26,11 +26,16 @@ multi-hot + count**, **channel-subject multi-hot**, exact/related/cross-subject
 relatedness (e.g. Physics/Science boosted when Mathematics was also applied), and an
 8-d **cascade stage-1 embedding** for tutoring.
 
-Tutoring uses a **neural cascade**:
+Tutoring uses a **neural cascade** composed as \(g(f(x))\):
 
-1. **Subject-context router** — learns multi-subject application ↔ channel alignment
-2. **Evidence scorer** — predicts evidence, relevance, and subject category using text
-   plus the router embedding
+1. **\(f\)** — subject-context router (`30 → 24 → 8`) embeds multi-subject application ↔ channel
+2. **\(g\)** — evidence scorer predicts evidence, relevance, and subject category from text **plus** \(f(x)\)
+
+Training applies the **chain rule**. With cost \(C\) on the scorer outputs,
+\(\frac{\partial C}{\partial \theta_f} = \frac{\partial C}{\partial f}\frac{\partial f}{\partial \theta_f}\),
+where \(\partial C/\partial f\) is the backprop gradient into cascade feature slots 78–85.
+Stage-1 is no longer trained with a separate supervised target; it only moves when stage-2
+loss requires a different subject-context embedding.
 
 Reward policy still scales ticket relevance by relatedness tier (exact + cross-subject
 support > related-only > unrelated), matching “monitor applied strictly, related
@@ -42,6 +47,7 @@ The network follows 3Blue1Brown-aligned learning:
 - **Evidence / relevance:** independent sigmoids + binary cross-entropy
 - **Category:** softmax + categorical CE over all Mask-C subjects + competency
 - **Cost:** mini-batch average \(C = \frac{1}{n}\sum C_x\) with momentum SGD on \(-\nabla C\)
+  (cascade: joint update of \(\theta_g\) and \(\theta_f\) each epoch)
 
 Confidence blends evidence separation, support-set cosine similarity, and the
 softmax category peak so live scoring can run **without an LLM** when

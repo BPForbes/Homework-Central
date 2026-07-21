@@ -59,6 +59,30 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
+    public void Cascade_chain_rule_updates_stage1_from_stage2_loss()
+    {
+        using TutoringChatMonitorNeuralNet tutoring = new();
+        SubjectSignalSnapshot subjects = ChatMonitoringSubjectSignals.Resolve(
+            [SubjectMaskNames.Mathematics, SubjectMaskNames.Science],
+            SubjectMaskNames.Science);
+        ChatMonitoringNeuralModelInput input = ChatMonitoringNeuralModelInput.Create(
+            "Tutor math and science applicant.",
+            "Physics help thread.",
+            "Use F=ma and solve for acceleration.",
+            0, .5f, .5f, subjects);
+        float routerBefore = tutoring.RouterParameterL2Norm;
+        TrainingPassTrace trace = tutoring.TrainWithTrace(
+            new(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+                ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Tutoring, "tutoring-science")),
+                "tutoring-science"),
+            epochs: 8,
+            detail: NeuralTrainingTraceDetail.Compact);
+        Assert.Contains("cascade-chain-rule", trace.Iterations[0].Update.Optimizer);
+        Assert.NotEqual(routerBefore, tutoring.RouterParameterL2Norm);
+        Assert.True(tutoring.Predict(input).Evidence > .5f);
+    }
+
+    [Fact]
     public void Mini_batch_average_cost_uses_sample_count_and_moves_predictions()
     {
         using ModerationChatMonitorNeuralNet model = new();
