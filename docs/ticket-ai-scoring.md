@@ -57,6 +57,19 @@ Reward policy still scales ticket relevance by relatedness tier (exact + cross-s
 support > related-only > unrelated), matching “monitor applied strictly, related
 mildly, unrelated reward-only.”
 
+### Tutor subject text processing
+
+Tutor intake (`tutor-subjects`) is normalized by a deterministic processor
+(`TutorSubjectTextProcessor`) — not a separate neural cascade:
+
+- Lowercases input (so `Rust` / `RUst` / … all match)
+- Maps expertise aliases onto Mask-C generals (`biology` → Science, `rust` → ComputerScience)
+- Spell-checks against the known subject/expertise vocabulary (Levenshtein)
+- Rejects unverified tokens and asks the applicant to re-enter
+- Stores the canonical Mask-C display list (e.g. `Science, Computer Science`)
+
+Custom rooms/categories are out of scope for now.
+
 The network follows 3Blue1Brown-aligned learning:
 
 - **Hidden layers:** leaky ReLU with He/Kaiming initialization (scorer); tanh router

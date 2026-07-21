@@ -53,7 +53,11 @@ public static class ChatMonitoringSubjectSignals
         { Key(SubjectMaskNames.Medicine, SubjectMaskNames.Education), .3f },
     };
 
-    private static readonly (string Needle, string Mask)[] SubjectNeedles =
+    /// <summary>
+    /// Channel-id needles only (ordered longest-first). Free-text subject parsing uses
+    /// <see cref="TutorSubjectTextProcessor"/> so aliases like biology→Science and rust→ComputerScience apply.
+    /// </summary>
+    private static readonly (string Needle, string Mask)[] ChannelNeedles =
     [
         ("computer science", SubjectMaskNames.ComputerScience),
         ("computerscience", SubjectMaskNames.ComputerScience),
@@ -222,7 +226,7 @@ public static class ChatMonitoringSubjectSignals
         }
 
         string lower = value.ToLowerInvariant();
-        foreach ((string needle, string mask) in SubjectNeedles)
+        foreach ((string needle, string mask) in ChannelNeedles)
         {
             if (lower.Contains(needle, StringComparison.Ordinal))
                 return mask;
@@ -257,38 +261,8 @@ public static class ChatMonitoringSubjectSignals
         }
     }
 
-    private static IEnumerable<string> ParseSubjectsFromText(string text)
-    {
-        string lower = $" {text.ToLowerInvariant()} ";
-        HashSet<string> found = new(StringComparer.OrdinalIgnoreCase);
-        foreach ((string needle, string mask) in SubjectNeedles)
-        {
-            if (found.Contains(SubjectMaskNames.ComputerScience) && mask == SubjectMaskNames.Science && needle == "science")
-                continue;
-            if (ContainsToken(lower, needle))
-                found.Add(mask);
-        }
-
-        return found;
-    }
-
-    private static bool ContainsToken(string paddedLowerHaystack, string needle)
-    {
-        int index = 0;
-        while ((index = paddedLowerHaystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
-        {
-            char before = paddedLowerHaystack[index - 1];
-            char after = paddedLowerHaystack[index + needle.Length];
-            bool boundaryBefore = !char.IsLetterOrDigit(before);
-            bool boundaryAfter = !char.IsLetterOrDigit(after);
-            // "math" must not match inside "mathematics" — require boundary after unless needle is a prefix phrase.
-            if (boundaryBefore && (boundaryAfter || needle.Length > 4))
-                return true;
-            index += needle.Length;
-        }
-
-        return false;
-    }
+    private static IEnumerable<string> ParseSubjectsFromText(string text) =>
+        TutorSubjectTextProcessor.ExtractGeneralMasks(text);
 
     private static string? TutoringSlugToMask(string slug) => slug switch
     {
