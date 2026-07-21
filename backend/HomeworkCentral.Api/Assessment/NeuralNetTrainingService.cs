@@ -183,6 +183,9 @@ public sealed class NeuralNetTrainingService(
         }
         await db.ChatMonitoringNeuralModelRuns.Where(x => x.SessionId == sessionId).ExecuteDeleteAsync(ct);
         await transaction.CommitAsync(ct);
+        // If the session was still waiting (not yet claimed by the worker), this frees its slot in the
+        // bounded queue immediately instead of leaving a stale ID that blocks new requests until drained.
+        queue.TryRemove(sessionId);
         return NeuralNetTrainingSessionRemovalResult.Removed;
     }
 
