@@ -13,24 +13,37 @@ Every ticket/user sequence starts at `0.5`:
 - `0.5` means uncertain or neutral.
 - `1` means high confidence that observed messages meet the condition.
 
-The first pass is a tiny deterministic C# neural student (256 hashed inputs,
-one 8-neuron hidden layer, and evidence/relevance outputs). It does not require
-Ollama or an external ML runtime. The student returns:
+The first pass uses one of two isolated CPU hashed-MLP chat monitors. Neither
+requires Ollama or an external ML runtime:
+
+| Monitor | When selected | Topology |
+|---|---|---|
+| **Moderation** (`hc-chat-monitoring-moderation-v1`) | Default for conduct / filter tickets | `48 → 20 → 30 → 24 → 18 → 2` |
+| **Tutoring** (`hc-chat-monitoring-tutoring-v1`) | Tutor-application style tickets (filter/context mentions tutor, tutoring, competency, application, learning, etc.) | `48 → 20 → 32 → 28 → 20 → 2` |
+
+Inputs are 48 dense features (44 hashed unigram/bigram bins from requirement,
+thread context, and message, plus community vote, channel relevance, thread
+continuity, and prior score). Outputs are evidence and relevance. Confidence
+blends output separation with cosine similarity against a small in-memory
+support set of recent training examples for that monitor. Category and
+reasoning strings are derived from the ticket requirement.
+
+The selected monitor returns:
 
 ```json
 {
   "studentScore": 0.0,
   "studentConfidence": 0.0,
   "relevance": 0.0,
-  "category": "spam"
+  "category": "profanity"
 }
 ```
 
 Student confidence below `0.75` is sent to `qwen3:0.6b` for review. Ten percent
 of higher-confidence results are also selected by a deterministic UUID sample
 for auditing. When the reviewer is available, its score receives the configured
-70% blend weight. If Ollama is unavailable, the bounded student result is still
-recorded and processing continues.
+70% blend weight. If Ollama is unavailable, the bounded chat-monitor result is
+still recorded and processing continues.
 
 Application code calculates the update:
 
@@ -74,22 +87,29 @@ The ticket analysis API returns the newest 200 events in chronological order.
 The ticket UI displays the current score and ten newest deltas. AI analysis no
 longer auto-approves a suggested decision.
 
-## Reviewer training and vector retrieval
+## Dual-model training and vector retrieval
 
-`TicketModelTrainingExamples` is the authoritative training ledger. Live rows
-reference both the existing `ChatMessages.MessageId` and the score-event UUID,
-so message text is not duplicated. They store the frozen requirement, approved
-target score/relevance, category, source, approver, and timestamp. Bootstrap
-rows are migration-seeded and are the only rows containing inline text because
-they do not correspond to real messages.
+`TicketModelTrainingExamples` is the authoritative training ledger and stores a
+`ChatMonitoringKind` (`Moderation` or `Tutoring`) so each example trains only
+its matching lineage. Live rows reference both the existing
+`ChatMessages.MessageId` and the score-event UUID, so message text is not
+duplicated. They store the frozen requirement, approved target score/relevance,
+category, source, approver, and timestamp. Bootstrap rows are migration-seeded
+and are the only rows containing inline text because they do not correspond to
+real messages.
+
+Synthetic admin training sessions accept mode `Both` (default), `Moderation`,
+or `Tutoring`. `Both` creates concurrent per-kind `ChatMonitoringNeuralModelRun`
+rows, each with its own worker/promotion replay and canonical checkpoint
+lineage (`RuntimeKind = HashedMlp`).
 
 Reviewer corrections require staff approval before training, preventing an
-injected message from automatically poisoning the model. At startup the student
-rebuilds its small in-memory weights from approved rows. Each row is mirrored
-under the `ticket_training_example` vector namespace using a local 64-float
-embedding. An Ollama review receives the three nearest approved examples from
-the same category as untrusted context. PostgreSQL remains authoritative; the
-vector namespace is retrieval-only.
+injected message from automatically poisoning the model. At startup each
+chat-monitor lineage rebuilds its in-memory weights from approved rows for that
+kind. Each row is mirrored under the `ticket_training_example` vector namespace
+using the shared 48-float hashed embedding. An Ollama review receives the three
+nearest approved examples from the same chat-monitor category as untrusted
+context. PostgreSQL remains authoritative; the vector namespace is retrieval-only.
 
 Tune `StudentConfidenceThreshold`, `ReviewerAuditRate`, and
 `ReviewerBlendWeight` under `Tickets`; matching Docker variables are documented

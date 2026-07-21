@@ -23,12 +23,23 @@ export interface NeuralNetDataManagement {
   categoryCounts: Record<string, number>
 }
 
+export interface NeuralNetVisualizerModel {
+  chatMonitoringKind: NeuralModelKindChatMonitoring
+  modelVersion: string
+  layerWidths: number[]
+  layerLabels: string[]
+  parameterCount: number
+  supportExamples: number
+  nodeCount: number
+}
+
 export interface NeuralNetVisualizer {
+  models: NeuralNetVisualizerModel[]
+  outputNodes: string[]
+  trainingExamples: number
   inputNodes: number
   hiddenNodes: number
-  outputNodes: string[]
   modelVersion: string
-  trainingExamples: number
 }
 
 export interface NeuralNetTrainingSession {

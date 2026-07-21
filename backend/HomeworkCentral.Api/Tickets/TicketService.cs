@@ -524,6 +524,7 @@ public sealed class TicketService(
         TicketUserWatch watch = ticket.Watches.FirstOrDefault(x => x.TrackedUserId == score.TrackedUserId)
             ?? throw new InvalidOperationException("The score no longer has a matching ticket watch.");
         string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
+        NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
 
         TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
             .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
@@ -536,19 +537,19 @@ public sealed class TicketService(
                 Requirement = requirement, TargetScore = score.ReviewerScore.Value,
                 TargetRelevance = score.ReviewerRelevance.Value, Category = score.StudentCategory,
                 Source = "StaffApprovedReviewer", ApprovedAtUtc = now, ApprovedByUserId = actorUserId,
-                ChatMonitoringKind = NeuralModelKindChatMonitoring.Moderation,
+                ChatMonitoringKind = chatMonitoringKind,
             };
             db.TicketModelTrainingExamples.Add(training);
             score.TrainingApprovedAtUtc = now;
             score.TrainingApprovedByUserId = actorUserId;
             await db.SaveChangesAsync(ct);
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
             model.Train(new ChatMonitoringNeuralModelInput(requirement, string.Empty, message.RawContent, 0, 1, 0, .5f),
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(
                 VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
                 training.Category, training.TrainingExampleId,
-                new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source }, ct);
+                new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source, chatMonitoringKind }, ct);
         }
 
         return MapMessageScore(score);

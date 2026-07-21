@@ -87,13 +87,15 @@ public sealed class AssessmentPipelineService(
             string modelMessage = string.IsNullOrEmpty(contextSnapshot)
                 ? job.Content
                 : $"{contextSnapshot}\n<current_message>\n{job.Content}\n</current_message>";
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
+            NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
             ChatMonitoringNeuralModelPrediction prediction = model.Predict(new ChatMonitoringNeuralModelInput(
                 modelRequirement, contextSnapshot, job.Content, 0, 1, Math.Clamp(recentMessages.Count / 5f, 0, 1), (float)previousScore));
+            string retrievalCategory = $"chat-monitoring-{chatMonitoringKind.ToString().ToLowerInvariant()}";
             bool reviewerInvoked = ticketOptions.OllamaEnabled && TicketReviewPolicy.ShouldReview(
                 prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
             IReadOnlyList<VectorDocument> similar = reviewerInvoked
-                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, "chat-monitoring-moderation", ct)
+                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, retrievalCategory, ct)
                 : [];
             string? rawReview = reviewerInvoked
                 ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, modelRequirement, contextSnapshot, similar, ticketOptions.MaxMessageCharacters), ct)
@@ -107,7 +109,7 @@ public sealed class AssessmentPipelineService(
             double relevance = review is TicketReviewerEvaluation reviewerRelevance
                 ? TicketReviewPolicy.Blend(prediction.Relevance, reviewerRelevance.Relevance, ticketOptions.ReviewerBlendWeight)
                 : prediction.Relevance;
-            string reason = review?.Explanation ?? "Hashed-MLP moderation chat-monitor prediction.";
+            string reason = review?.Explanation ?? prediction.Reasoning;
 
             TicketConfidenceUpdate update = TicketConfidenceScoring.Update(
                 previousScore,
@@ -132,8 +134,8 @@ public sealed class AssessmentPipelineService(
                 StudentScore = prediction.Evidence,
                 StudentConfidence = prediction.Confidence,
                 StudentRelevance = prediction.Relevance,
-                StudentCategory = "chat-monitoring-moderation",
-                StudentReasoning = "Hashed-MLP moderation chat-monitor prediction.",
+                StudentCategory = prediction.Category,
+                StudentReasoning = prediction.Reasoning,
                 ContextSnapshot = contextSnapshot,
                 ReviewerInvoked = reviewerInvoked,
                 ReviewerScore = review?.ReviewerScore,
@@ -167,7 +169,8 @@ public sealed class AssessmentPipelineService(
                     reason,
                     studentScore = prediction.Evidence,
                     studentConfidence = prediction.Confidence,
-                    studentCategory = "chat-monitoring-moderation",
+                    studentCategory = prediction.Category,
+                    chatMonitoringKind,
                     reviewerInvoked,
                     reviewerScore = review?.ReviewerScore,
                     contextMessageCount = recentMessages.Count,
@@ -222,7 +225,9 @@ public sealed class AssessmentPipelineService(
         builder.AppendLine($"score: {prediction.Evidence:F4}");
         builder.AppendLine($"confidence: {prediction.Confidence:F4}");
         builder.AppendLine($"relevance: {prediction.Relevance:F4}");
-        builder.AppendLine($"category: chat-monitoring-{prediction.ChatMonitoringKind.ToString().ToLowerInvariant()}");
+        builder.AppendLine($"category: {prediction.Category}");
+        builder.AppendLine($"reasoning: {Truncate(prediction.Reasoning, 300)}");
+        builder.AppendLine($"chat_monitoring_kind: {prediction.ChatMonitoringKind}");
         builder.AppendLine("</student_output_untrusted>");
         builder.AppendLine("<approved_similar_examples_untrusted>");
         foreach (VectorDocument example in similar)

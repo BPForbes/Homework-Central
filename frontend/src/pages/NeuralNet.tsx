@@ -20,27 +20,50 @@ function viewForPath(pathname: string): NeuralView {
   return 'feedback'
 }
 
-function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer; replay: ReplayReport | null }) {
-  const [selected, setSelected] = useState('evidence')
-  const [zoom, setZoom] = useState(1)
-  const hidden = replay?.finalState?.hiddenBias ?? replay?.initialState?.hiddenBias ?? Array.from({ length: visualizer.hiddenNodes }, (_, index) => (index - 3) / 8)
-  const inputs = ['Ticket requirement', 'Prior score', 'Chat context', 'Current message']
-  const outputs = visualizer.outputNodes
-  const edges = zoom > 1.15
+function NetworkGraph({ visualizer }: { visualizer: NeuralNetVisualizer; replay: ReplayReport | null }) {
+  const models = visualizer.models?.length ? visualizer.models : [{
+    chatMonitoringKind: 'Moderation' as NeuralModelKindChatMonitoring,
+    modelVersion: visualizer.modelVersion,
+    layerWidths: [visualizer.inputNodes, visualizer.hiddenNodes, 2],
+    layerLabels: ['input', 'hidden', 'output'],
+    parameterCount: 0,
+    supportExamples: 0,
+    nodeCount: visualizer.inputNodes + visualizer.hiddenNodes + 2,
+  }]
+  const [selectedKind, setSelectedKind] = useState<NeuralModelKindChatMonitoring>(models[0].chatMonitoringKind)
+  const [selected, setSelected] = useState('Evidence score')
+  const model = models.find(item => item.chatMonitoringKind === selectedKind) ?? models[0]
+  const layerWidths = model.layerWidths.length ? model.layerWidths : [48, 20, 30, 24, 18, 2]
+  const layerLabels = model.layerLabels.length === layerWidths.length
+    ? model.layerLabels
+    : layerWidths.map((_, index) => index === 0 ? 'input' : index === layerWidths.length - 1 ? 'output' : `hidden-${index}`)
+  const layerX = (index: number) => 90 + index * (1260 / Math.max(1, layerWidths.length - 1))
+  const nodeY = (layerSize: number, nodeIndex: number) => 70 + nodeIndex * (540 / Math.max(1, layerSize - 1))
   return <section className="sm-panel neural-graph-panel">
-    <div className="sm-panel-header"><h3><FontAwesomeIcon icon={faDiagramProject} /> Interactive model map</h3></div>
-    <p className="dashboard-hint">This is a clear, grouped view of the fixed low-memory model. Select a node to inspect it; zoom reveals its representative connections. Imported training reports replay recorded bias states.</p>
-    <label className="sm-label" htmlFor="neural-zoom">Detail level {zoom.toFixed(1)}×</label>
-    <input id="neural-zoom" className="neural-zoom" type="range" min="1" max="1.6" step="0.1" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} />
-    <svg className="neural-graph" viewBox="0 0 900 360" role="img" aria-label="Layered neural network graph">
-      {edges && hidden.map((_, index) => inputs.map((__, inputIndex) => <line key={`i-${inputIndex}-${index}`} x1="190" y1={75 + inputIndex * 72} x2="410" y2={45 + index * 38} className="neural-edge" style={{ opacity: 0.2 + Math.abs(hidden[index] ?? 0) * 0.45 }} />))}
-      {edges && hidden.map((_, index) => outputs.map((__, outputIndex) => <line key={`o-${index}-${outputIndex}`} x1="490" y1={45 + index * 38} x2="710" y2={120 + outputIndex * 110} className="neural-edge" style={{ opacity: 0.25 + Math.abs(hidden[index] ?? 0) * 0.45 }} />))}
-      <text x="70" y="26" className="neural-layer-label">Inputs</text><text x="390" y="26" className="neural-layer-label">Hidden layer</text><text x="700" y="70" className="neural-layer-label">Outputs</text>
-      {inputs.map((label, index) => <g key={label} onClick={() => setSelected(label)} className="neural-node-group"><rect x="35" y={50 + index * 72} width="155" height="42" rx="12" className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} /><text x="112" y={76 + index * 72} textAnchor="middle" className="neural-node-text">{label}</text></g>)}
-      {hidden.map((bias, index) => <g key={index} onClick={() => setSelected(`Hidden neuron ${index + 1}`)} className="neural-node-group"><circle cx="450" cy={55 + index * 38} r="15" className={`neural-node ${selected === `Hidden neuron ${index + 1}` ? 'neural-node--selected' : ''}`} style={{ opacity: 0.65 + Math.min(Math.abs(bias ?? 0), .35) }} /><title>{`Hidden neuron ${index + 1}, bias ${(bias ?? 0).toFixed(3)}`}</title></g>)}
-      {outputs.map((label, index) => <g key={label} onClick={() => setSelected(label)} className="neural-node-group"><rect x="710" y={100 + index * 110} width="155" height="48" rx="12" className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} /><text x="787" y={130 + index * 110} textAnchor="middle" className="neural-node-text">{label}</text></g>)}
+    <div className="sm-panel-header"><h3><FontAwesomeIcon icon={faDiagramProject} /> Dual chat-monitor map</h3></div>
+    <p className="dashboard-hint">Separate Moderation and Tutoring hashed-MLP lineages. Select a monitor to inspect its fixed topology ({model.modelVersion}; {model.parameterCount} parameters; {model.supportExamples} support examples).</p>
+    <div className="sm-form-actions">{models.map(item => <button key={item.chatMonitoringKind} type="button" className={item.chatMonitoringKind === model.chatMonitoringKind ? 'btn-primary' : 'btn-secondary'} onClick={() => { setSelectedKind(item.chatMonitoringKind); setSelected(item.chatMonitoringKind === 'Tutoring' ? 'Evidence score' : 'Evidence score') }}>{item.chatMonitoringKind} · {item.layerWidths.join('→')}</button>)}</div>
+    <svg className="neural-graph neural-graph--replay" viewBox="0 0 1440 680" role="img" aria-label={`${model.chatMonitoringKind} chat-monitoring neural network`}>
+      {layerLabels.map((label, layerIndex) => <text key={`label-${label}`} x={layerX(layerIndex)} y="28" textAnchor="middle" className="neural-layer-label">{label.replace(/-/g, ' ')}</text>)}
+      {layerWidths.slice(0, -1).flatMap((width, layerIndex) => Array.from({ length: Math.min(width, 12) }, (_, source) => Array.from({ length: Math.min(layerWidths[layerIndex + 1], 12) }, (_, target) => <line key={`e-${layerIndex}-${source}-${target}`} x1={layerX(layerIndex)} y1={nodeY(Math.min(width, 12), source)} x2={layerX(layerIndex + 1)} y2={nodeY(Math.min(layerWidths[layerIndex + 1], 12), target)} className="neural-edge" style={{ opacity: 0.12 }} />)))}
+      {layerWidths.flatMap((width, layerIndex) => {
+        const shown = Math.min(width, 12)
+        return Array.from({ length: shown }, (_, nodeIndex) => {
+          const isOutput = layerIndex === layerWidths.length - 1
+          const label = isOutput ? (nodeIndex === 0 ? 'Evidence score' : 'Relevance') : `${layerLabels[layerIndex]} ${nodeIndex + 1}`
+          const x = layerX(layerIndex)
+          const y = nodeY(shown, nodeIndex)
+          return <g key={`${layerIndex}-${nodeIndex}`} onClick={() => setSelected(label)} className="neural-node-group">
+            {isOutput
+              ? <rect x={x - 70} y={y - 18} width="140" height="36" rx="10" className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} />
+              : <circle cx={x} cy={y} r={layerIndex === 0 ? 10 : 14} className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} />}
+            {(isOutput || shown <= 8) && <text x={x} y={isOutput ? y + 5 : y + 32} textAnchor="middle" className="neural-node-text">{isOutput ? label : (layerIndex === 0 ? `f${nodeIndex}` : `${nodeIndex + 1}`)}</text>}
+            {shown < width && nodeIndex === shown - 1 && <text x={x} y={y + 48} textAnchor="middle" className="neural-layer-label">+{width - shown}</text>}
+          </g>
+        })
+      })}
     </svg>
-    <p className="dashboard-hint"><strong>Selected:</strong> {selected}. {selected.includes('Hidden') ? `Activation proxy (bias): ${(hidden[Number(selected.split(' ')[selected.split(' ').length - 1]) - 1] ?? 0).toFixed(3)}` : 'Feature/output group shown at semantic zoom.'} {replay && ` Replay session ${replay.sessionId ?? 'imported'} loaded.`}</p>
+    <p className="dashboard-hint"><strong>Selected:</strong> {selected}. {model.chatMonitoringKind} monitor · {model.nodeCount} nodes · outputs {visualizer.outputNodes.join(', ')}.</p>
   </section>
 }
 

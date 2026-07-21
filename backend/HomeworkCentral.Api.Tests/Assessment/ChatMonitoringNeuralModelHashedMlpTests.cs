@@ -83,6 +83,27 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
+    public void Support_similarity_raises_confidence_after_training()
+    {
+        using ModerationChatMonitorNeuralNet model = new();
+        ChatMonitoringNeuralModelInput input = new("Monitor for harassment and insults.", "Prior insults.", "You are worthless.", 0, 1f, .6f, .5f);
+        ChatMonitoringNeuralModelPrediction before = model.Predict(input);
+        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f), 30);
+        ChatMonitoringNeuralModelPrediction after = model.Predict(input);
+        Assert.True(after.Confidence >= before.Confidence);
+        Assert.False(string.IsNullOrWhiteSpace(after.Category));
+        Assert.False(string.IsNullOrWhiteSpace(after.Reasoning));
+        Assert.Contains("harass", after.Category, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Ticket_context_routes_tutoring_filters_to_tutoring_monitor()
+    {
+        Assert.Equal(NeuralModelKindChatMonitoring.Tutoring, ChatMonitoringTicketContext.ResolveKind("Tutor application competency", "learning"));
+        Assert.Equal(NeuralModelKindChatMonitoring.Moderation, ChatMonitoringTicketContext.ResolveKind("Profanity filter", "moderation"));
+    }
+
+    [Fact]
     public void Community_sampling_and_promotion_leasing_are_deterministic()
     {
         SyntheticCommunityIntent intent = new(.9f, 30, .1f, ["helpful"]);

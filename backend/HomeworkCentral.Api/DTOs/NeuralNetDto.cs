@@ -30,13 +30,28 @@ public sealed class NeuralNetDataManagementDto
     public Dictionary<string, int> CategoryCounts { get; set; } = [];
 }
 
+public sealed class NeuralNetVisualizerModelDto
+{
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public NeuralModelKindChatMonitoring ChatMonitoringKind { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
+    public IReadOnlyList<int> LayerWidths { get; set; } = [];
+    public IReadOnlyList<string> LayerLabels { get; set; } = [];
+    public int ParameterCount { get; set; }
+    public int SupportExamples { get; set; }
+    public int NodeCount { get; set; }
+}
+
 public sealed class NeuralNetVisualizerDto
 {
-    public int InputNodes { get; set; } = 48;
-    public int HiddenNodes { get; set; } = 84;
+    public IReadOnlyList<NeuralNetVisualizerModelDto> Models { get; set; } = [];
     public List<string> OutputNodes { get; set; } = ["Evidence score", "Relevance"];
-    public string ModelVersion { get; set; } = "hc-student-mlp-v1";
     public int TrainingExamples { get; set; }
+
+    // Legacy single-graph fields kept for older clients; populated from the first model.
+    public int InputNodes { get; set; }
+    public int HiddenNodes { get; set; }
+    public string ModelVersion { get; set; } = string.Empty;
 }
 
 public sealed class StartNeuralNetTrainingRequest

@@ -64,6 +64,7 @@ public sealed class NeuralNetTrainingService(
             ?? throw new InvalidOperationException("The score's tracking context is unavailable.");
         string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
         string modelMessage = ComposeModelMessage(score.ContextSnapshot, message);
+        NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
         TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
             .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
         if (training is null)
@@ -75,16 +76,17 @@ public sealed class NeuralNetTrainingService(
                 Requirement = requirement, TargetScore = score.ReviewerScore.Value, TargetRelevance = score.ReviewerRelevance.Value,
                 Category = score.StudentCategory, Source = "StaffApprovedReviewer", ApprovedAtUtc = now, ApprovedByUserId = actorUserId,
                 ContextSnapshot = score.ContextSnapshot,
+                ChatMonitoringKind = chatMonitoringKind,
             };
             score.TrainingApprovedAtUtc = now;
             score.TrainingApprovedByUserId = actorUserId;
             db.TicketModelTrainingExamples.Add(training);
             await db.SaveChangesAsync(ct);
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
             model.Train(new ChatMonitoringNeuralModelInput(requirement, score.ContextSnapshot ?? string.Empty, message, 0, 1, 0, .5f),
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(VectorNamespaces.TicketTrainingExample, message, ChatMonitoringFeatureEncoder.EmbedText(message), training.Category,
-                training.TrainingExampleId, new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source }, ct);
+                training.TrainingExampleId, new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source, chatMonitoringKind }, ct);
         }
         return Map(score, message);
     }
@@ -118,10 +120,35 @@ public sealed class NeuralNetTrainingService(
         };
     }
 
-    public async Task<NeuralNetVisualizerDto> GetVisualizerAsync(CancellationToken ct = default) => new()
+    public async Task<NeuralNetVisualizerDto> GetVisualizerAsync(CancellationToken ct = default)
     {
-        TrainingExamples = await db.TicketModelTrainingExamples.CountAsync(ct),
-    };
+        int trainingExamples = await db.TicketModelTrainingExamples.CountAsync(ct);
+        List<NeuralNetVisualizerModelDto> models = chatMonitoringModels.Resolve(NeuralTrainingMode.Both)
+            .Select(model =>
+            {
+                ChatMonitoringNeuralModelStateSnapshot state = ((IChatMonitoringNeuralModelTelemetry)model).GetStateSnapshot();
+                NeuralNetTopologySnapshot topology = ((IChatMonitoringNeuralModelTelemetry)model).GetTopologySnapshot();
+                return new NeuralNetVisualizerModelDto
+                {
+                    ChatMonitoringKind = state.ChatMonitoringKind,
+                    ModelVersion = state.ModelVersion,
+                    LayerWidths = state.LayerWidths,
+                    LayerLabels = state.LayerLabels,
+                    ParameterCount = state.ParameterCount,
+                    SupportExamples = state.SupportExamples,
+                    NodeCount = topology.Nodes.Count,
+                };
+            }).ToList();
+        NeuralNetVisualizerModelDto primary = models[0];
+        return new NeuralNetVisualizerDto
+        {
+            Models = models,
+            TrainingExamples = trainingExamples,
+            InputNodes = primary.LayerWidths[0],
+            HiddenNodes = primary.LayerWidths.Skip(1).Take(primary.LayerWidths.Count - 2).Sum(),
+            ModelVersion = primary.ModelVersion,
+        };
+    }
 
     public async Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(
         StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default)

@@ -12,9 +12,11 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     public const string RuntimeKind = "HashedMlp";
     private const float LearningRate = .035f;
     private readonly int[] layerWidths;
+    private readonly string[] layerLabels;
     private readonly float[][] weights;
     private readonly float[][] biases;
     private readonly NeuralNetTopologySnapshot topology;
+    private readonly List<SupportExample> support = [];
     private readonly object gate = new();
 
     protected ChatMonitoringNeuralModelHashedMlp(
@@ -29,6 +31,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     {
         Kind = kind;
         ModelVersion = modelVersion;
+        this.layerLabels = layerLabels.ToArray();
         layerWidths = [ChatMonitoringFeatureEncoder.FeatureCount, firstHidden, secondHidden, thirdHidden, fourthHidden, 2];
         weights = new float[layerWidths.Length - 1][];
         biases = new float[layerWidths.Length - 1][];
@@ -43,11 +46,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 weights[layer][i] = (float)((random.NextDouble() - .5) * .08);
         }
 
-        topology = BuildTopology(layerLabels);
+        topology = BuildTopology(this.layerLabels);
     }
 
     public NeuralModelKindChatMonitoring Kind { get; }
     public string ModelVersion { get; }
+    public IReadOnlyList<string> LayerLabels => layerLabels;
 
     public ChatMonitoringNeuralModelPrediction Predict(ChatMonitoringNeuralModelInput input)
     {
@@ -68,14 +72,15 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     {
         lock (gate)
         {
+            float[] features = ChatMonitoringFeatureEncoder.Encode(example.Input);
             List<TrainingIterationReplay> iterations = [];
             int boundedEpochs = Math.Clamp(epochs, 1, 100);
-            ChatMonitoringNeuralModelInferenceTrace before = PredictUnlocked(example.Input);
+            ChatMonitoringNeuralModelInferenceTrace before = PredictUnlocked(example.Input, features);
             for (int epoch = 0; epoch < boundedEpochs; epoch++)
             {
                 LossTrace lossBefore = CreateLoss(before.Forward, example.Targets);
                 float[] parameterBefore = ReadParameters();
-                TrainOneEpochUnlocked(ChatMonitoringFeatureEncoder.Encode(example.Input), example.Targets);
+                TrainOneEpochUnlocked(features, example.Targets);
                 float[] parameterAfter = ReadParameters();
                 IReadOnlyList<ParameterDelta> deltas = BuildParameterDeltas(parameterBefore, parameterAfter);
                 IReadOnlyList<SparseValue> gradients = deltas.Select(delta => new SparseValue(delta.ParameterIndex, delta.Gradient)).ToList();
@@ -87,11 +92,18 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     gradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Weight).ToList(),
                     gradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Bias).ToList(),
                     gradientL2, health);
-                ChatMonitoringNeuralModelInferenceTrace after = PredictUnlocked(example.Input);
+                ChatMonitoringNeuralModelInferenceTrace after = PredictUnlocked(example.Input, features);
                 iterations.Add(new TrainingIterationReplay(epoch, before.Forward, lossBefore, backward,
                     new ParameterUpdateTrace(LearningRate, "SGD", deltas), after.Forward, CreateLoss(after.Forward, example.Targets)));
                 before = after;
             }
+
+            string category = string.IsNullOrWhiteSpace(example.Category) || example.Category == "general"
+                ? ChatMonitoringTicketContext.DetectCategory(example.Input.Requirement, Kind)
+                : example.Category;
+            support.Add(new SupportExample(features, category));
+            if (support.Count > 512)
+                support.RemoveAt(0);
 
             return new TrainingPassTrace(iterations);
         }
@@ -116,8 +128,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         lock (gate)
         {
             float[] parameters = ReadParameters();
-            return new ChatMonitoringNeuralModelStateSnapshot(Kind, ModelVersion, layerWidths, parameters.Length,
-                MathF.Sqrt(parameters.Sum(value => value * value)));
+            return new ChatMonitoringNeuralModelStateSnapshot(
+                Kind, ModelVersion, layerWidths, layerLabels, parameters.Length,
+                MathF.Sqrt(parameters.Sum(value => value * value)), support.Count);
         }
     }
 
@@ -140,15 +153,39 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     public void Dispose() { }
 
-    private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(ChatMonitoringNeuralModelInput input)
+    private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(ChatMonitoringNeuralModelInput input, float[]? encoded = null)
     {
-        ForwardCache cache = Forward(ChatMonitoringFeatureEncoder.Encode(input), captureTrace: true);
+        float[] features = encoded ?? ChatMonitoringFeatureEncoder.Encode(input);
+        ForwardCache cache = Forward(features, captureTrace: true);
         float evidence = cache.Activations[^1][0];
         float relevance = cache.Activations[^1][1];
-        float confidence = Math.Clamp(MathF.Abs(evidence - .5f) * 2f, .05f, .99f);
+        double supportSimilarity = support.Count == 0 ? 0 : support.Max(item => Cosine(features, item.Features));
+        double separation = Math.Abs(evidence - .5f) * 2;
+        float confidence = (float)Math.Clamp(separation * (.35 + .65 * supportSimilarity), .05, .99);
+        string category = ChatMonitoringTicketContext.DetectCategory(input.Requirement, Kind);
+        string reasoning = supportSimilarity >= .55
+            ? $"Chat-monitor pattern match for {category}; reviewer recommended when confidence is below threshold."
+            : $"Limited training support for {category}; reviewer recommended.";
         return new ChatMonitoringNeuralModelInferenceTrace(
-            new ChatMonitoringNeuralModelPrediction(evidence, relevance, confidence, Kind, ModelVersion), cache.Trace!);
+            new ChatMonitoringNeuralModelPrediction(evidence, relevance, confidence, Kind, ModelVersion, category, reasoning),
+            cache.Trace!);
     }
+
+    private static double Cosine(float[] left, float[] right)
+    {
+        double dot = 0, leftNorm = 0, rightNorm = 0;
+        int length = Math.Min(left.Length, right.Length);
+        for (int index = 0; index < length; index++)
+        {
+            dot += left[index] * right[index];
+            leftNorm += left[index] * left[index];
+            rightNorm += right[index] * right[index];
+        }
+
+        return leftNorm <= 0 || rightNorm <= 0 ? 0 : Math.Clamp(dot / Math.Sqrt(leftNorm * rightNorm), 0, 1);
+    }
+
+    private sealed record SupportExample(float[] Features, string Category);
 
     private void TrainOneEpochUnlocked(float[] features, ChatMonitoringNeuralModelTargets targets)
     {

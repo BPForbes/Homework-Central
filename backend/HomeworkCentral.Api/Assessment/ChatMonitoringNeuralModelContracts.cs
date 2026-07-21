@@ -22,7 +22,9 @@ public sealed record ChatMonitoringNeuralModelPrediction(
     float Relevance,
     float Confidence,
     NeuralModelKindChatMonitoring ChatMonitoringKind,
-    string ModelVersion);
+    string ModelVersion,
+    string Category,
+    string Reasoning);
 
 public sealed record ChatMonitoringNeuralModelTrainingExample(
     ChatMonitoringNeuralModelInput Input,
@@ -37,8 +39,10 @@ public sealed record ChatMonitoringNeuralModelStateSnapshot(
     NeuralModelKindChatMonitoring ChatMonitoringKind,
     string ModelVersion,
     IReadOnlyList<int> LayerWidths,
+    IReadOnlyList<string> LayerLabels,
     int ParameterCount,
-    float ParameterL2Norm);
+    float ParameterL2Norm,
+    int SupportExamples);
 
 public interface IChatMonitoringNeuralModel
 {
