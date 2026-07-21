@@ -35,6 +35,7 @@ public static partial class TutorSubjectTextProcessor
             return new ProcessResult(
                 Ok: false,
                 GeneralMasks: [],
+                ExpertiseLabels: [],
                 CanonicalDisplay: string.Empty,
                 ErrorMessage: "Please enter at least one subject to tutor in.",
                 Tokens: []);
@@ -46,6 +47,7 @@ public static partial class TutorSubjectTextProcessor
             return new ProcessResult(
                 Ok: false,
                 GeneralMasks: [],
+                ExpertiseLabels: [],
                 CanonicalDisplay: string.Empty,
                 ErrorMessage: "Please enter at least one subject to tutor in.",
                 Tokens: []);
@@ -53,6 +55,8 @@ public static partial class TutorSubjectTextProcessor
 
         List<SubjectTokenResult> tokenResults = [];
         List<string> generals = [];
+        List<string> expertiseLabels = [];
+        List<string> displayLabels = [];
         List<string> failures = [];
 
         foreach (string raw in rawTokens)
@@ -67,6 +71,18 @@ public static partial class TutorSubjectTextProcessor
 
             if (!generals.Contains(resolved.GeneralMask!, StringComparer.OrdinalIgnoreCase))
                 generals.Add(resolved.GeneralMask!);
+            if (!string.IsNullOrWhiteSpace(resolved.MatchedLabel)
+                && !displayLabels.Contains(resolved.MatchedLabel, StringComparer.OrdinalIgnoreCase))
+            {
+                displayLabels.Add(resolved.MatchedLabel);
+            }
+
+            if (resolved.IsSpecificExpertise
+                && !string.IsNullOrWhiteSpace(resolved.MatchedLabel)
+                && !expertiseLabels.Contains(resolved.MatchedLabel, StringComparer.OrdinalIgnoreCase))
+            {
+                expertiseLabels.Add(resolved.MatchedLabel);
+            }
         }
 
         if (requireAllVerified && failures.Count > 0)
@@ -75,6 +91,7 @@ public static partial class TutorSubjectTextProcessor
             return new ProcessResult(
                 Ok: false,
                 GeneralMasks: [],
+                ExpertiseLabels: [],
                 CanonicalDisplay: string.Empty,
                 ErrorMessage:
                     $"{detail} Please re-enter your subject(s) using known topics "
@@ -87,6 +104,7 @@ public static partial class TutorSubjectTextProcessor
             return new ProcessResult(
                 Ok: false,
                 GeneralMasks: [],
+                ExpertiseLabels: [],
                 CanonicalDisplay: string.Empty,
                 ErrorMessage:
                     "None of the entered subjects could be verified. Please re-enter using known topics "
@@ -94,46 +112,84 @@ public static partial class TutorSubjectTextProcessor
                 Tokens: tokenResults);
         }
 
-        string display = string.Join(", ", generals.Select(DisplayNameForMask));
+        // Prefer specific labels (Biology, Rust) so intake keeps the fine category while
+        // GeneralMasks still carries the Mask-C parent for tutoring signals.
+        string display = displayLabels.Count > 0
+            ? string.Join(", ", displayLabels)
+            : string.Join(", ", generals.Select(DisplayNameForMask));
         return new ProcessResult(
             Ok: true,
             GeneralMasks: generals,
+            ExpertiseLabels: expertiseLabels,
             CanonicalDisplay: display,
             ErrorMessage: null,
             Tokens: tokenResults);
     }
 
     /// <summary>
-    /// Lenient extraction for monitoring/signals: verified list tokens plus vocabulary
-    /// needles found inside prose (so “Tutor math and science applicant” still maps).
+    /// Lenient extraction for monitoring/signals: Mask-C generals plus specific expertise
+    /// labels (biology, rust, …) from list tokens and prose needles.
     /// </summary>
-    public static IReadOnlyList<string> ExtractGeneralMasks(string? freeText)
+    public static SubjectExtraction ExtractSubjects(string? freeText)
     {
         if (string.IsNullOrWhiteSpace(freeText))
-            return [];
+            return SubjectExtraction.Empty;
 
-        List<string> found = [];
-        foreach (string mask in ProcessLenient(freeText).GeneralMasks)
+        List<string> generals = [];
+        List<string> expertise = [];
+        List<SubjectHit> hits = [];
+
+        void AddEntry(VocabEntry entry, string matchedKey, string? rawToken = null)
         {
-            if (!found.Contains(mask, StringComparer.OrdinalIgnoreCase))
-                found.Add(mask);
+            if (!generals.Contains(entry.GeneralMask, StringComparer.OrdinalIgnoreCase))
+                generals.Add(entry.GeneralMask);
+            if (entry.IsSpecificExpertise
+                && !expertise.Contains(entry.Label, StringComparer.OrdinalIgnoreCase))
+            {
+                expertise.Add(entry.Label);
+            }
+
+            if (!hits.Any(h =>
+                    string.Equals(h.GeneralMask, entry.GeneralMask, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(h.Label, entry.Label, StringComparison.OrdinalIgnoreCase)))
+            {
+                hits.Add(new SubjectHit(entry.GeneralMask, entry.Label, entry.IsSpecificExpertise, matchedKey, rawToken));
+            }
+        }
+
+        ProcessResult listParse = ProcessLenient(freeText);
+        foreach (SubjectTokenResult token in listParse.Tokens.Where(t => t.Verified))
+        {
+            if (string.IsNullOrWhiteSpace(token.GeneralMask) || string.IsNullOrWhiteSpace(token.MatchedLabel))
+                continue;
+            AddEntry(
+                new VocabEntry(token.GeneralMask, token.MatchedLabel, token.IsSpecificExpertise),
+                token.NormalizedToken,
+                token.RawToken);
         }
 
         string padded = $" {NormalizeKey(freeText)} ";
         string paddedCompact = $" {Compact(NormalizeKey(freeText))} ";
         foreach (string key in Vocab.Value.KeysLongestFirst)
         {
+            // Skip ultra-short prose needles (c, go) — too noisy inside sentences.
+            if (key.Length < 3)
+                continue;
             if (!Vocab.Value.Exact.TryGetValue(key, out VocabEntry? entry) || entry is null)
                 continue;
-            if (found.Contains(entry.GeneralMask, StringComparer.OrdinalIgnoreCase))
+            if (!ContainsToken(padded, key) && !ContainsToken(paddedCompact, key))
                 continue;
-
-            if (ContainsToken(padded, key) || ContainsToken(paddedCompact, key))
-                found.Add(entry.GeneralMask);
+            AddEntry(entry, key);
         }
 
-        return found;
+        return new SubjectExtraction(generals, expertise, hits);
     }
+
+    public static IReadOnlyList<string> ExtractGeneralMasks(string? freeText) =>
+        ExtractSubjects(freeText).GeneralMasks;
+
+    public static IReadOnlyList<string> ExtractExpertiseLabels(string? freeText) =>
+        ExtractSubjects(freeText).ExpertiseLabels;
 
     private static bool ContainsToken(string paddedLowerHaystack, string needle)
     {
@@ -163,14 +219,15 @@ public static partial class TutorSubjectTextProcessor
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return new SubjectTokenResult(
-                raw, normalized, null, null, false,
+                raw, normalized, null, null, false, false,
                 $"Could not verify “{raw.Trim()}” (empty after normalizing).");
         }
 
         Vocabulary vocab = Vocab.Value;
         if (vocab.Exact.TryGetValue(normalized, out VocabEntry? exact) && exact is not null)
         {
-            return new SubjectTokenResult(raw, normalized, exact.GeneralMask, exact.Label, true, null);
+            return new SubjectTokenResult(
+                raw, normalized, exact.GeneralMask, exact.Label, true, exact.IsSpecificExpertise, null);
         }
 
         // Spell-check: case is already folded; Levenshtein covers typos only.
@@ -178,7 +235,7 @@ public static partial class TutorSubjectTextProcessor
         if (maxDistance <= 0)
         {
             return new SubjectTokenResult(
-                raw, normalized, null, null, false,
+                raw, normalized, null, null, false, false,
                 $"Could not verify “{raw.Trim()}”. Please re-enter that subject.");
         }
 
@@ -195,7 +252,7 @@ public static partial class TutorSubjectTextProcessor
         if (candidates.Count == 0)
         {
             return new SubjectTokenResult(
-                raw, normalized, null, null, false,
+                raw, normalized, null, null, false, false,
                 $"Could not verify “{raw.Trim()}”. Please re-enter that subject.");
         }
 
@@ -203,19 +260,28 @@ public static partial class TutorSubjectTextProcessor
         List<VocabEntry> bestEntries = candidates
             .Where(c => c.Distance == best)
             .Select(c => c.Entry)
-            .DistinctBy(e => e.GeneralMask, StringComparer.OrdinalIgnoreCase)
+            .DistinctBy(e => $"{e.GeneralMask}:{e.Label}", StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (bestEntries.Count > 1)
+        // Ambiguous if multiple generals OR multiple distinct expertise labels at same distance.
+        List<string> distinctGenerals = bestEntries
+            .Select(e => e.GeneralMask)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (distinctGenerals.Count > 1)
         {
             string options = string.Join(" or ", bestEntries.Select(e => e.Label).Distinct(StringComparer.OrdinalIgnoreCase));
             return new SubjectTokenResult(
-                raw, normalized, null, null, false,
+                raw, normalized, null, null, false, false,
                 $"Could not verify “{raw.Trim()}” (ambiguous — did you mean {options}?). Please re-enter that subject.");
         }
 
-        VocabEntry match = bestEntries[0];
-        return new SubjectTokenResult(raw, normalized, match.GeneralMask, match.Label, true, null);
+        // Prefer a specific expertise match over a general-only alias at the same distance.
+        VocabEntry match = bestEntries
+            .OrderByDescending(e => e.IsSpecificExpertise)
+            .First();
+        return new SubjectTokenResult(
+            raw, normalized, match.GeneralMask, match.Label, true, match.IsSpecificExpertise, null);
     }
 
     private static List<string> SplitTokens(string freeText)
@@ -331,16 +397,16 @@ public static partial class TutorSubjectTextProcessor
     {
         Dictionary<string, VocabEntry> exact = new(StringComparer.Ordinal);
 
-        void Add(string alias, string generalMask, string label)
+        void Add(string alias, string generalMask, string label, bool isSpecific = false)
         {
             string key = NormalizeKey(alias);
             if (string.IsNullOrWhiteSpace(key))
                 return;
 
-            Register(exact, key, generalMask, label);
+            Register(exact, key, generalMask, label, isSpecific);
             string compact = Compact(key);
             if (!string.Equals(compact, key, StringComparison.Ordinal))
-                Register(exact, compact, generalMask, label);
+                Register(exact, compact, generalMask, label, isSpecific);
         }
 
         // Mask-C generals + common aliases (case folded via NormalizeKey).
@@ -383,68 +449,68 @@ public static partial class TutorSubjectTextProcessor
                     continue;
 
                 string display = ExpertiseDisplayName(field.Name);
-                Add(field.Name, generalMask, display);
-                Add(display, generalMask, display);
-                Add(ChatRoomCatalog.ToDisplayName(field.Name), generalMask, display);
+                Add(field.Name, generalMask, display, isSpecific: true);
+                Add(display, generalMask, display, isSpecific: true);
+                Add(ChatRoomCatalog.ToDisplayName(field.Name), generalMask, display, isSpecific: true);
             }
         }
 
         // Extra aliases not present as field names.
-        Add("js", SubjectMaskNames.ComputerScience, "JavaScript");
-        Add("ts", SubjectMaskNames.ComputerScience, "TypeScript");
-        Add("cpp", SubjectMaskNames.ComputerScience, "C++");
-        Add("c plus plus", SubjectMaskNames.ComputerScience, "C++");
-        Add("golang", SubjectMaskNames.ComputerScience, "Go");
-        Add("postgres", SubjectMaskNames.ComputerScience, "PostgreSQL");
-        Add("k8s", SubjectMaskNames.ComputerScience, "Kubernetes");
-        Add("cyber security", SubjectMaskNames.ComputerScience, "Cyber Security");
-        Add("cybersecurity", SubjectMaskNames.ComputerScience, "Cyber Security");
-        Add("opsys", SubjectMaskNames.ComputerScience, "Operating Systems");
-        Add("os", SubjectMaskNames.ComputerScience, "Operating Systems");
-        Add("frontend", SubjectMaskNames.ComputerScience, "Frontend");
-        Add("front end", SubjectMaskNames.ComputerScience, "Frontend");
-        Add("back end", SubjectMaskNames.ComputerScience, "Backend");
-        Add("apis", SubjectMaskNames.ComputerScience, "APIs");
-        Add("rest", SubjectMaskNames.ComputerScience, "APIs");
-        Add("sql", SubjectMaskNames.ComputerScience, "PostgreSQL");
+        Add("js", SubjectMaskNames.ComputerScience, "JavaScript", isSpecific: true);
+        Add("ts", SubjectMaskNames.ComputerScience, "TypeScript", isSpecific: true);
+        Add("cpp", SubjectMaskNames.ComputerScience, "C++", isSpecific: true);
+        Add("c plus plus", SubjectMaskNames.ComputerScience, "C++", isSpecific: true);
+        Add("golang", SubjectMaskNames.ComputerScience, "Go", isSpecific: true);
+        Add("postgres", SubjectMaskNames.ComputerScience, "PostgreSQL", isSpecific: true);
+        Add("k8s", SubjectMaskNames.ComputerScience, "Kubernetes", isSpecific: true);
+        Add("cyber security", SubjectMaskNames.ComputerScience, "Cyber Security", isSpecific: true);
+        Add("cybersecurity", SubjectMaskNames.ComputerScience, "Cyber Security", isSpecific: true);
+        Add("opsys", SubjectMaskNames.ComputerScience, "Operating Systems", isSpecific: true);
+        Add("os", SubjectMaskNames.ComputerScience, "Operating Systems", isSpecific: true);
+        Add("frontend", SubjectMaskNames.ComputerScience, "Frontend", isSpecific: true);
+        Add("front end", SubjectMaskNames.ComputerScience, "Frontend", isSpecific: true);
+        Add("back end", SubjectMaskNames.ComputerScience, "Backend", isSpecific: true);
+        Add("apis", SubjectMaskNames.ComputerScience, "APIs", isSpecific: true);
+        Add("rest", SubjectMaskNames.ComputerScience, "APIs", isSpecific: true);
+        Add("sql", SubjectMaskNames.ComputerScience, "PostgreSQL", isSpecific: true);
         Add("ml", SubjectMaskNames.ComputerScience, "Computer Science");
         Add("ai", SubjectMaskNames.ComputerScience, "Computer Science");
         Add("machine learning", SubjectMaskNames.ComputerScience, "Computer Science");
         Add("data structures", SubjectMaskNames.ComputerScience, "Computer Science");
         Add("algorithms", SubjectMaskNames.ComputerScience, "Computer Science");
 
-        Add("bio", SubjectMaskNames.Science, "Biology");
-        Add("chem", SubjectMaskNames.Science, "Chemistry");
-        Add("phys", SubjectMaskNames.Science, "Physics");
-        Add("psych", SubjectMaskNames.Science, "Psychology");
+        Add("bio", SubjectMaskNames.Science, "Biology", isSpecific: true);
+        Add("chem", SubjectMaskNames.Science, "Chemistry", isSpecific: true);
+        Add("phys", SubjectMaskNames.Science, "Physics", isSpecific: true);
+        Add("psych", SubjectMaskNames.Science, "Psychology", isSpecific: true);
 
-        Add("calc", SubjectMaskNames.Mathematics, "Calculus");
-        Add("trig", SubjectMaskNames.Mathematics, "Trigonometry");
-        Add("stats", SubjectMaskNames.Mathematics, "Statistics");
-        Add("lin alg", SubjectMaskNames.Mathematics, "Linear Algebra");
-        Add("linear alg", SubjectMaskNames.Mathematics, "Linear Algebra");
-        Add("diff eq", SubjectMaskNames.Mathematics, "Differential Equations");
-        Add("ode", SubjectMaskNames.Mathematics, "Differential Equations");
+        Add("calc", SubjectMaskNames.Mathematics, "Calculus", isSpecific: true);
+        Add("trig", SubjectMaskNames.Mathematics, "Trigonometry", isSpecific: true);
+        Add("stats", SubjectMaskNames.Mathematics, "Statistics", isSpecific: true);
+        Add("lin alg", SubjectMaskNames.Mathematics, "Linear Algebra", isSpecific: true);
+        Add("linear alg", SubjectMaskNames.Mathematics, "Linear Algebra", isSpecific: true);
+        Add("diff eq", SubjectMaskNames.Mathematics, "Differential Equations", isSpecific: true);
+        Add("ode", SubjectMaskNames.Mathematics, "Differential Equations", isSpecific: true);
 
-        Add("asl", SubjectMaskNames.Languages, "American Sign Language");
-        Add("mandarin chinese", SubjectMaskNames.Languages, "Mandarin");
-        Add("chinese", SubjectMaskNames.Languages, "Mandarin");
+        Add("asl", SubjectMaskNames.Languages, "American Sign Language", isSpecific: true);
+        Add("mandarin chinese", SubjectMaskNames.Languages, "Mandarin", isSpecific: true);
+        Add("chinese", SubjectMaskNames.Languages, "Mandarin", isSpecific: true);
 
-        Add("us history", SubjectMaskNames.History, "US History");
-        Add("u.s. history", SubjectMaskNames.History, "US History");
-        Add("american history", SubjectMaskNames.History, "US History");
-        Add("world hist", SubjectMaskNames.History, "World History");
+        Add("us history", SubjectMaskNames.History, "US History", isSpecific: true);
+        Add("u.s. history", SubjectMaskNames.History, "US History", isSpecific: true);
+        Add("american history", SubjectMaskNames.History, "US History", isSpecific: true);
+        Add("world hist", SubjectMaskNames.History, "World History", isSpecific: true);
 
-        Add("mech eng", SubjectMaskNames.Engineering, "Mechanical Engineering");
-        Add("electrical eng", SubjectMaskNames.Engineering, "Electrical Engineering");
-        Add("civil eng", SubjectMaskNames.Engineering, "Civil Engineering");
-        Add("chem eng", SubjectMaskNames.Engineering, "Chemical Engineering");
-        Add("aero", SubjectMaskNames.Engineering, "Aerospace Engineering");
+        Add("mech eng", SubjectMaskNames.Engineering, "Mechanical Engineering", isSpecific: true);
+        Add("electrical eng", SubjectMaskNames.Engineering, "Electrical Engineering", isSpecific: true);
+        Add("civil eng", SubjectMaskNames.Engineering, "Civil Engineering", isSpecific: true);
+        Add("chem eng", SubjectMaskNames.Engineering, "Chemical Engineering", isSpecific: true);
+        Add("aero", SubjectMaskNames.Engineering, "Aerospace Engineering", isSpecific: true);
 
-        Add("micro econ", SubjectMaskNames.Economics, "Microeconomics");
-        Add("macro econ", SubjectMaskNames.Economics, "Macroeconomics");
-        Add("micro", SubjectMaskNames.Economics, "Microeconomics");
-        Add("macro", SubjectMaskNames.Economics, "Macroeconomics");
+        Add("micro econ", SubjectMaskNames.Economics, "Microeconomics", isSpecific: true);
+        Add("macro econ", SubjectMaskNames.Economics, "Macroeconomics", isSpecific: true);
+        Add("micro", SubjectMaskNames.Economics, "Microeconomics", isSpecific: true);
+        Add("macro", SubjectMaskNames.Economics, "Macroeconomics", isSpecific: true);
 
         return new Vocabulary(exact);
     }
@@ -453,17 +519,24 @@ public static partial class TutorSubjectTextProcessor
         Dictionary<string, VocabEntry> exact,
         string key,
         string generalMask,
-        string label)
+        string label,
+        bool isSpecific)
     {
-        if (exact.TryGetValue(key, out VocabEntry? existing)
-            && existing is not null
-            && !string.Equals(existing.GeneralMask, generalMask, StringComparison.OrdinalIgnoreCase))
+        if (exact.TryGetValue(key, out VocabEntry? existing) && existing is not null)
         {
-            // Prefer the first registration; aliases are hand-ordered with generals/expertise first.
+            if (!string.Equals(existing.GeneralMask, generalMask, StringComparison.OrdinalIgnoreCase))
+            {
+                // Prefer the first registration; aliases are hand-ordered with generals/expertise first.
+                return;
+            }
+
+            // Upgrade a general-only alias to a specific expertise label when available.
+            if (!existing.IsSpecificExpertise && isSpecific)
+                exact[key] = new VocabEntry(generalMask, label, true);
             return;
         }
 
-        exact[key] = new VocabEntry(generalMask, label);
+        exact[key] = new VocabEntry(generalMask, label, isSpecific);
     }
 
     private static IEnumerable<(string GeneralMask, Type ExpertiseType)> ExpertiseTypes()
@@ -526,7 +599,7 @@ public static partial class TutorSubjectTextProcessor
     [GeneratedRegex(@"[,;|/]+|\s+&\s+|\s+and\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TokenSplitterPattern();
 
-    private sealed record VocabEntry(string GeneralMask, string Label);
+    private sealed record VocabEntry(string GeneralMask, string Label, bool IsSpecificExpertise);
 
     private sealed class Vocabulary
     {
@@ -543,17 +616,34 @@ public static partial class TutorSubjectTextProcessor
         public string[] KeysLongestFirst { get; }
     }
 
+    public sealed record SubjectHit(
+        string GeneralMask,
+        string Label,
+        bool IsSpecificExpertise,
+        string MatchedKey,
+        string? RawToken = null);
+
+    public sealed record SubjectExtraction(
+        IReadOnlyList<string> GeneralMasks,
+        IReadOnlyList<string> ExpertiseLabels,
+        IReadOnlyList<SubjectHit> Hits)
+    {
+        public static SubjectExtraction Empty { get; } = new([], [], []);
+    }
+
     public sealed record SubjectTokenResult(
         string RawToken,
         string NormalizedToken,
         string? GeneralMask,
         string? MatchedLabel,
         bool Verified,
+        bool IsSpecificExpertise,
         string? FailureReason);
 
     public sealed record ProcessResult(
         bool Ok,
         IReadOnlyList<string> GeneralMasks,
+        IReadOnlyList<string> ExpertiseLabels,
         string CanonicalDisplay,
         string? ErrorMessage,
         IReadOnlyList<SubjectTokenResult> Tokens);

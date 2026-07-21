@@ -2,13 +2,16 @@ namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
 /// Stage-1 of the tutoring cascade: f(x). Maps multi-subject application + channel signals
-/// into an 8-d embedding consumed by stage-2 g. Topology: 30 → 24 → 8 (tanh).
-/// Trained end-to-end via the chain rule: ∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f) where ∂C/∂f comes
-/// from backprop through g's cascade input slots.
+/// plus hashed specific expertise labels (biology, rust, …) into an 8-d embedding for stage-2 g.
+/// Topology: 46 → 32 → 8 (tanh). Trained end-to-end via the chain rule:
+/// ∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f) where ∂C/∂f comes from backprop through g's cascade input slots.
 /// </summary>
 public sealed class TutoringSubjectContextRouter : IDisposable
 {
-    public const int InputSize = 30;
+    public const int ExpertiseHashBins = 16;
+    public const int BaseInputSize = 30;
+    public const int InputSize = BaseInputSize + ExpertiseHashBins;
+    public const int HiddenSize = 32;
     public const int OutputSize = 8;
     public const int CascadeFeatureStart = 78;
 
@@ -18,7 +21,7 @@ public sealed class TutoringSubjectContextRouter : IDisposable
     private readonly float[][] biases;
     private readonly float[][] weightVelocity;
     private readonly float[][] biasVelocity;
-    private readonly int[] widths = [InputSize, 24, OutputSize];
+    private readonly int[] widths = [InputSize, HiddenSize, OutputSize];
     private readonly object gate = new();
 
     public TutoringSubjectContextRouter(int seed = 0x53554231)
@@ -58,7 +61,24 @@ public sealed class TutoringSubjectContextRouter : IDisposable
                 values[17 + i] = 1f;
         }
 
+        // Slots 30–45: hashed specific expertise (biology, rust, …) so the cascade sees
+        // fine categories without a separate NN stage or custom rooms.
+        foreach (string label in snapshot.AppliedExpertise)
+            AddExpertiseHash(values, label);
+
         return values;
+    }
+
+    private static void AddExpertiseHash(float[] values, string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return;
+        string key = label.Trim().ToLowerInvariant();
+        uint hash = 2166136261;
+        foreach (char character in key)
+            hash = (hash ^ character) * 16777619;
+        int index = BaseInputSize + (int)(hash % ExpertiseHashBins);
+        values[index] = Math.Clamp(values[index] + 1f, 0f, 1f);
     }
 
     public ForwardCache ForwardCacheFor(SubjectSignalSnapshot snapshot)

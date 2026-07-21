@@ -106,17 +106,23 @@ public static class ChatMonitoringSubjectSignals
     public static SubjectSignalSnapshot Resolve(
         IReadOnlyList<string> appliedGenerals,
         string? channelGeneral,
-        float fallbackChannelRelevance = .5f)
+        float fallbackChannelRelevance = .5f,
+        IReadOnlyList<string>? appliedExpertise = null)
     {
         List<string> applied = appliedGenerals
             .Where(s => GeneralIndex(s) >= 0)
             .Select(CanonicalMask)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        List<string> expertise = (appliedExpertise ?? [])
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         float countNorm = Math.Clamp(applied.Count / 6f, 0f, 1f);
         if (string.IsNullOrWhiteSpace(channelGeneral) || GeneralIndex(channelGeneral) < 0)
         {
-            return new SubjectSignalSnapshot(applied, null, 0f, 0f, 0f, countNorm,
+            return new SubjectSignalSnapshot(applied, expertise, null, 0f, 0f, 0f, countNorm,
                 Math.Clamp(fallbackChannelRelevance, 0f, 1f), 1f);
         }
 
@@ -147,18 +153,18 @@ public static class ChatMonitoringSubjectSignals
             : relatedMatch >= .35f ? .4f
             : .15f;
 
-        return new SubjectSignalSnapshot(applied, channel, exactMatch, relatedMatch, crossSupport, countNorm, effective, rewardScale);
+        return new SubjectSignalSnapshot(applied, expertise, channel, exactMatch, relatedMatch, crossSupport, countNorm, effective, rewardScale);
     }
 
     public static SubjectSignalSnapshot ResolveFromTicket(TicketUserWatch watch, string? roomId, float fallbackChannelRelevance = .5f)
     {
-        IReadOnlyList<string> applied = ParseAppliedSubjects(
+        TutorSubjectTextProcessor.SubjectExtraction extraction = ParseAppliedExtraction(
             watch.Ticket.FilterName,
             watch.Ticket.TrackingTemplateJson,
             watch.Ticket.Portal.TrackingInstructions,
             watch.ContextLabel);
         string? channel = ResolveChannelSubject(roomId);
-        return Resolve(applied, channel, fallbackChannelRelevance);
+        return Resolve(extraction.GeneralMasks, channel, fallbackChannelRelevance, extraction.ExpertiseLabels);
     }
 
     public static SubjectSignalSnapshot ResolveFromSynthetic(
@@ -167,7 +173,10 @@ public static class ChatMonitoringSubjectSignals
         string channel,
         float messageChannelRelevance)
     {
-        List<string> applied = ParseSubjectsFromText($"{category} {requirement}").ToList();
+        TutorSubjectTextProcessor.SubjectExtraction extraction =
+            TutorSubjectTextProcessor.ExtractSubjects($"{category} {requirement}");
+        List<string> applied = extraction.GeneralMasks.ToList();
+        List<string> expertise = extraction.ExpertiseLabels.ToList();
         if (applied.Count == 0)
         {
             string fromCategory = ChatMonitoringCategoryTaxonomy.NormalizeCategory(NeuralModelKindChatMonitoring.Tutoring, category);
@@ -176,20 +185,47 @@ public static class ChatMonitoringSubjectSignals
         }
 
         string? channelGeneral = ResolveChannelSubject(channel);
-        return Resolve(applied, channelGeneral, messageChannelRelevance);
+        return Resolve(applied, channelGeneral, messageChannelRelevance, expertise);
     }
 
-    public static IReadOnlyList<string> ParseAppliedSubjects(params string?[] texts)
+    public static IReadOnlyList<string> ParseAppliedSubjects(params string?[] texts) =>
+        ParseAppliedExtraction(texts).GeneralMasks;
+
+    public static TutorSubjectTextProcessor.SubjectExtraction ParseAppliedExtraction(params string?[] texts)
     {
-        List<string> found = [];
+        List<string> generals = [];
+        List<string> expertise = [];
+        List<TutorSubjectTextProcessor.SubjectHit> hits = [];
+
+        void Merge(TutorSubjectTextProcessor.SubjectExtraction extraction)
+        {
+            foreach (string general in extraction.GeneralMasks)
+            {
+                if (!generals.Contains(general, StringComparer.OrdinalIgnoreCase))
+                    generals.Add(general);
+            }
+
+            foreach (string label in extraction.ExpertiseLabels)
+            {
+                if (!expertise.Contains(label, StringComparer.OrdinalIgnoreCase))
+                    expertise.Add(label);
+            }
+
+            foreach (TutorSubjectTextProcessor.SubjectHit hit in extraction.Hits)
+            {
+                if (!hits.Any(h =>
+                        string.Equals(h.GeneralMask, hit.GeneralMask, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(h.Label, hit.Label, StringComparison.OrdinalIgnoreCase)))
+                {
+                    hits.Add(hit);
+                }
+            }
+        }
+
         foreach (string? text in texts)
         {
             if (string.IsNullOrWhiteSpace(text)) continue;
-            foreach (string subject in ParseSubjectsFromText(text))
-            {
-                if (!found.Contains(subject, StringComparer.OrdinalIgnoreCase))
-                    found.Add(subject);
-            }
+            Merge(TutorSubjectTextProcessor.ExtractSubjects(text));
 
             if (text.Contains("tutor-subjects", StringComparison.OrdinalIgnoreCase)
                 || text.Contains("\"intake\"", StringComparison.OrdinalIgnoreCase))
@@ -197,11 +233,8 @@ public static class ChatMonitoringSubjectSignals
                 try
                 {
                     using JsonDocument document = JsonDocument.Parse(text);
-                    foreach (string subject in ExtractTutorSubjectsFromTemplate(document.RootElement))
-                    {
-                        if (!found.Contains(subject, StringComparer.OrdinalIgnoreCase))
-                            found.Add(subject);
-                    }
+                    foreach (string subjectText in ExtractTutorSubjectTextsFromTemplate(document.RootElement))
+                        Merge(TutorSubjectTextProcessor.ExtractSubjects(subjectText));
                 }
                 catch (JsonException)
                 {
@@ -210,7 +243,7 @@ public static class ChatMonitoringSubjectSignals
             }
         }
 
-        return found;
+        return new TutorSubjectTextProcessor.SubjectExtraction(generals, expertise, hits);
     }
 
     public static string? ResolveChannelSubject(string? roomOrChannel)
@@ -237,7 +270,7 @@ public static class ChatMonitoringSubjectSignals
         return null;
     }
 
-    private static IEnumerable<string> ExtractTutorSubjectsFromTemplate(JsonElement root)
+    private static IEnumerable<string> ExtractTutorSubjectTextsFromTemplate(JsonElement root)
     {
         if (!root.TryGetProperty("intake", out JsonElement intake) || intake.ValueKind != JsonValueKind.Array)
             yield break;
@@ -250,19 +283,14 @@ public static class ChatMonitoringSubjectSignals
                 continue;
             if (!item.TryGetProperty("answer", out JsonElement answer))
                 continue;
-            string text = answer.ValueKind switch
+            yield return answer.ValueKind switch
             {
                 JsonValueKind.String => answer.GetString() ?? string.Empty,
                 JsonValueKind.Array => string.Join(" ", answer.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString())),
                 _ => answer.ToString(),
             };
-            foreach (string subject in ParseSubjectsFromText(text))
-                yield return subject;
         }
     }
-
-    private static IEnumerable<string> ParseSubjectsFromText(string text) =>
-        TutorSubjectTextProcessor.ExtractGeneralMasks(text);
 
     private static string? TutoringSlugToMask(string slug) => slug switch
     {
@@ -303,6 +331,7 @@ public static class ChatMonitoringSubjectSignals
 
 public sealed record SubjectSignalSnapshot(
     IReadOnlyList<string> AppliedGenerals,
+    IReadOnlyList<string> AppliedExpertise,
     string? ChannelGeneral,
     float ExactMatch,
     float RelatedMatch,

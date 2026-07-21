@@ -19,7 +19,7 @@ requires Ollama or an external ML runtime:
 | Monitor | When selected | Topology |
 |---|---|---|
 | **Moderation cascade** (`…-moderation-evidence-v8` + concept router) | Default for conduct / filter tickets | Stage-1 router `30 → 24 → 8` concept/family context; stage-2 `86 → 48 → 72 → 64 → 56 → 103` (100 fine concepts + catch-all) |
-| **Tutoring cascade** (`…-tutoring-evidence-v8` + subject router) | Tutor-application tickets | Stage-1 router `30 → 24 → 8` subject context; stage-2 `86 → 40 → 56 → 48 → 40 → 16` |
+| **Tutoring cascade** (`…-tutoring-evidence-v8` + subject router) | Tutor-application tickets | Stage-1 router `46 → 32 → 8` subject + expertise-hash context; stage-2 `86 → 40 → 56 → 48 → 40 → 16` |
 
 Inputs are 86 dense features: hashed text, community/prior metadata, **applied-subject
 multi-hot + count**, **channel-subject multi-hot**, exact/related/cross-subject
@@ -49,7 +49,8 @@ and explicit exclusions.
 
 ### Tutoring cascade
 
-1. **\(f\)** — subject-context router (`30 → 24 → 8`) embeds multi-subject application ↔ channel
+1. **\(f\)** — subject-context router (`46 → 32 → 8`) embeds multi-subject application ↔ channel
+   plus hashed specific expertise labels from the subject extractor
 2. **\(g\)** — evidence scorer predicts evidence, relevance, and subject category from text
    **plus** \(f(x)\)
 
@@ -64,9 +65,12 @@ Tutor intake (`tutor-subjects`) is normalized by a deterministic processor
 
 - Lowercases input (so `Rust` / `RUst` / … all match)
 - Maps expertise aliases onto Mask-C generals (`biology` → Science, `rust` → ComputerScience)
+- Keeps specific expertise labels for the tutoring subject-context router
+  (hashed into 16 extra stage-1 inputs; topology `46 → 32 → 8`)
 - Spell-checks against the known subject/expertise vocabulary (Levenshtein)
 - Rejects unverified tokens and asks the applicant to re-enter
-- Stores the canonical Mask-C display list (e.g. `Science, Computer Science`)
+- Stores the verified display list (e.g. `Biology, Rust`) while Mask-C multi-hots
+  still use the parent generals
 
 Custom rooms/categories are out of scope for now.
 

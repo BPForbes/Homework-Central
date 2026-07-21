@@ -1051,6 +1051,8 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
 
     private static SubjectSignalSnapshot SnapshotFrom(ChatMonitoringNeuralModelInput input)
     {
+        TutorSubjectTextProcessor.SubjectExtraction extraction =
+            ChatMonitoringSubjectSignals.ParseAppliedExtraction(input.Requirement, input.ThreadContext);
         List<string> applied = [];
         if (input.AppliedSubjectMultiHot is not null)
         {
@@ -1062,7 +1064,7 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
         }
 
         if (applied.Count == 0)
-            applied.AddRange(ChatMonitoringSubjectSignals.ParseAppliedSubjects(input.Requirement, input.ThreadContext));
+            applied.AddRange(extraction.GeneralMasks);
 
         string? channel = null;
         if (input.ChannelSubjectMultiHot is not null)
@@ -1079,6 +1081,10 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
         }
 
         channel ??= ChatMonitoringSubjectSignals.ResolveChannelSubject(input.Requirement);
-        return ChatMonitoringSubjectSignals.Resolve(applied, channel, input.ChannelRelevance);
+        return ChatMonitoringSubjectSignals.Resolve(
+            applied,
+            channel,
+            input.ChannelRelevance,
+            extraction.ExpertiseLabels);
     }
 }

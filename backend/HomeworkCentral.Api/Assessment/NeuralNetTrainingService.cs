@@ -142,7 +142,9 @@ public sealed class NeuralNetTrainingService(
                     ParameterCount = state.ParameterCount,
                     SupportExamples = state.SupportExamples,
                     NodeCount = topology.Nodes.Count,
-                    Stage1LayerWidths = [30, 24, 8],
+                    Stage1LayerWidths = tutoring
+                        ? [TutoringSubjectContextRouter.InputSize, TutoringSubjectContextRouter.HiddenSize, TutoringSubjectContextRouter.OutputSize]
+                        : [ModerationConceptContextRouter.InputSize, 24, ModerationConceptContextRouter.OutputSize],
                     Stage1Role = tutoring ? "subject-context router" : "concept-context router",
                     CategoryCount = tutoring
                         ? ChatMonitoringCategoryTaxonomy.Tutoring.Length
