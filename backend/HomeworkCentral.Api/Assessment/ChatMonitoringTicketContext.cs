@@ -49,9 +49,32 @@ public static class ChatMonitoringTicketContext
         string value = requirement.ToLowerInvariant();
         if (kind == NeuralModelKindChatMonitoring.Tutoring)
         {
-            if (value.Contains("math") || value.Contains("algebra") || value.Contains("quadratic")) return "tutoring-math";
-            if (value.Contains("science") || value.Contains("biology") || value.Contains("chemistry")) return "tutoring-science";
-            if (value.Contains("english") || value.Contains("writing") || value.Contains("essay")) return "tutoring-english";
+            if (ContainsAny(value, "computer science", "computerscience", "programming", "coding", "python", "java", "software"))
+                return "tutoring-computer-science";
+            if (ContainsAny(value, "math", "algebra", "calculus", "geometry", "trigonometry", "statistics"))
+                return "tutoring-mathematics";
+            if (ContainsAny(value, "biology", "chemistry", "physics", "science", "psychology", "philosophy"))
+                return "tutoring-science";
+            if (ContainsAny(value, "english", "spanish", "french", "german", "language", "writing", "essay", "asl"))
+                return "tutoring-languages";
+            if (ContainsAny(value, "history", "civics", "geography"))
+                return "tutoring-history";
+            if (ContainsAny(value, "business", "marketing", "management", "entrepreneur"))
+                return "tutoring-business";
+            if (ContainsAny(value, "art", "drawing", "painting", "design"))
+                return "tutoring-art";
+            if (ContainsAny(value, "music", "band", "choir", "orchestra"))
+                return "tutoring-music";
+            if (ContainsAny(value, "engineering", "mechanical", "electrical", "civil"))
+                return "tutoring-engineering";
+            if (ContainsAny(value, "medicine", "anatomy", "medical", "nursing", "health"))
+                return "tutoring-medicine";
+            if (ContainsAny(value, "finance", "investing", "accounting", "banking"))
+                return "tutoring-finance";
+            if (ContainsAny(value, "economics", "microeconomics", "macroeconomics"))
+                return "tutoring-economics";
+            if (ContainsAny(value, "education", "curriculum", "pedagogy", "teaching"))
+                return "tutoring-education";
             return "tutoring-competency";
         }
 
@@ -61,6 +84,17 @@ public static class ChatMonitoringTicketContext
         if (value.Contains("harass") || value.Contains("insult") || value.Contains("abuse")) return "harassment";
         if (value.Contains("evad") || value.Contains("filter")) return "evasion";
         return "moderation-general";
+    }
+
+    private static bool ContainsAny(string haystack, params string[] needles)
+    {
+        foreach (string needle in needles)
+        {
+            if (haystack.Contains(needle, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>Maps a free-text / heuristic category onto the softmax vocabulary index.</summary>

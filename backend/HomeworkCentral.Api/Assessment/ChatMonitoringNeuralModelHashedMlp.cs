@@ -14,7 +14,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeuralModelTelemetry
 {
-    public const string RuntimeKind = "HashedMlpV3";
+    public const string RuntimeKind = "HashedMlpV5";
     private const float LearningRate = .035f;
     private const float MomentumCoefficient = .9f;
     private const float LeakyReluSlope = .01f;
@@ -689,25 +689,31 @@ public sealed class ModerationChatMonitorNeuralNet : ChatMonitoringNeuralModelHa
     public ModerationChatMonitorNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Moderation,
-            "hc-chat-monitoring-moderation-v3",
+            "hc-chat-monitoring-moderation-v5",
             20, 30, 24, 18,
             ["input", "current-conduct", "behavior-history", "report-correlation", "moderation-decision", "output"],
             ChatMonitoringCategoryTaxonomy.Moderation,
-            seed: 0x4D4F4433)
+            seed: 0x4D4F4435)
     {
     }
 }
 
+/// <summary>
+/// Tutoring monitor sized for all Mask-C general subjects (13) plus competency.
+/// Wider hidden layers feed the larger softmax head with enough capacity for
+/// subject-separated concepts.
+/// Topology: 48 → 36 → 52 → 44 → 36 → 16.
+/// </summary>
 public sealed class TutoringChatMonitorNeuralNet : ChatMonitoringNeuralModelHashedMlp
 {
     public TutoringChatMonitorNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Tutoring,
-            "hc-chat-monitoring-tutoring-v3",
-            20, 32, 28, 20,
+            "hc-chat-monitoring-tutoring-v5",
+            36, 52, 44, 36,
             ["input", "current-subject-response", "learning-thread-history", "application-correlation", "tutoring-decision", "output"],
             ChatMonitoringCategoryTaxonomy.Tutoring,
-            seed: 0x54555433)
+            seed: 0x54555435)
     {
     }
 }

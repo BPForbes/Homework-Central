@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Assessment;
+using HomeworkCentral.Api.Authorization;
 
 namespace HomeworkCentral.Api.Tests.Assessment;
 
@@ -52,13 +53,36 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using TutoringChatMonitorNeuralNet tutoring = new();
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
-        // 48+20+30+24+18+8 = 148 ; 48+20+32+28+20+6 = 154
+        // 48+20+30+24+18+8 = 148 moderation
+        // Tutoring: 48+36+52+44+36+16 = 232 (13 subjects + competency, wider hidden stack)
         Assert.Equal(148, moderationTopology.Nodes.Count);
-        Assert.Equal(154, tutoringTopology.Nodes.Count);
-        Assert.Equal("hc-chat-monitoring-moderation-v3", moderationTopology.ModelVersion);
-        Assert.Equal("hc-chat-monitoring-tutoring-v3", tutoringTopology.ModelVersion);
+        Assert.Equal(232, tutoringTopology.Nodes.Count);
+        Assert.Equal("hc-chat-monitoring-moderation-v5", moderationTopology.ModelVersion);
+        Assert.Equal("hc-chat-monitoring-tutoring-v5", tutoringTopology.ModelVersion);
         Assert.Contains(moderationTopology.Nodes, node => node.Label == "harassment");
-        Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-math");
+        Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-mathematics");
+        Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-history");
+        Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-computer-science");
+        Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-business");
+        Assert.Equal([48, 36, 52, 44, 36, 16], tutoring.GetStateSnapshot().LayerWidths);
+        Assert.Equal(ChatMonitoringCategoryTaxonomy.Tutoring.Length + 2, tutoring.GetStateSnapshot().LayerWidths[^1]);
+        Assert.True(tutoringTopology.Edges.Count > moderationTopology.Edges.Count);
+    }
+
+    [Fact]
+    public void Tutoring_taxonomy_covers_every_general_subject_tag()
+    {
+        foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories)
+        {
+            string slug = ChatMonitoringCategoryTaxonomy.SubjectToTutoringSlug(subject.ExpertiseMaskName);
+            Assert.Contains(slug, ChatMonitoringCategoryTaxonomy.Tutoring);
+            Assert.Equal(slug, ChatMonitoringCategoryTaxonomy.Label(
+                NeuralModelKindChatMonitoring.Tutoring,
+                ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Tutoring, subject.ExpertiseMaskName)));
+        }
+
+        Assert.Equal("tutoring-mathematics", ChatMonitoringCategoryTaxonomy.NormalizeCategory(NeuralModelKindChatMonitoring.Tutoring, "tutoring-math"));
+        Assert.Equal("tutoring-languages", ChatMonitoringCategoryTaxonomy.NormalizeCategory(NeuralModelKindChatMonitoring.Tutoring, "tutoring-english"));
     }
 
     [Fact]
@@ -92,11 +116,11 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using ModerationChatMonitorNeuralNet moderation = new();
         using TutoringChatMonitorNeuralNet tutoring = new();
         ChatMonitoringNeuralModelInput input = new("Monitor math tutoring.", "A student asked for help.", "The quadratic formula is useful here.", .2f, .9f, .5f, .4f);
-        TrainingPassTrace trace = tutoring.TrainWithTrace(new(input, new ChatMonitoringNeuralModelTargets(.8f, .9f, 0), "tutoring-math"), 2);
+        TrainingPassTrace trace = tutoring.TrainWithTrace(new(input, new ChatMonitoringNeuralModelTargets(.8f, .9f, 0), "tutoring-mathematics"), 2);
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
         Assert.Equal(2, trace.Iterations.Count);
-        Assert.Equal(154, tutoringTopology.Nodes.Count);
+        Assert.Equal(232, tutoringTopology.Nodes.Count);
         Assert.Equal(148, moderationTopology.Nodes.Count);
         Assert.Contains(tutoringTopology.Nodes, node => node.LayerId == "learning-thread-history");
         Assert.Contains(moderationTopology.Nodes, node => node.LayerId == "behavior-history");
