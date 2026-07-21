@@ -199,8 +199,9 @@ public sealed class NeuralNetTrainingService(
 
             List<ChatMonitoringNeuralModelRun> runs = await db.ChatMonitoringNeuralModelRuns
                 .Where(x => x.SessionId == session.SessionId).OrderBy(x => x.ChatMonitoringKind).ToListAsync(ct);
-            foreach (ChatMonitoringNeuralModelRun run in runs)
-                await RunChatMonitoringModelAsync(session, run, tickets, ct);
+            using SemaphoreSlim persistenceGate = new(1, 1);
+            List<Task> runTasks = runs.Select(run => RunChatMonitoringModelAsync(session, run, tickets, persistenceGate, ct)).ToList();
+            await Task.WhenAll(runTasks);
             session.Status = "Completed";
             session.CompletedAtUtc = DateTime.UtcNow;
             session.ReportJson = null;
@@ -220,6 +221,7 @@ public sealed class NeuralNetTrainingService(
         NeuralNetTrainingSession session,
         ChatMonitoringNeuralModelRun run,
         IReadOnlyList<(int TicketIndex, SyntheticTicket? Ticket)> tickets,
+        SemaphoreSlim persistenceGate,
         CancellationToken ct)
     {
         IChatMonitoringNeuralModelTelemetry telemetry = chatMonitoringModels.Get(run.ChatMonitoringKind) as IChatMonitoringNeuralModelTelemetry
@@ -227,7 +229,7 @@ public sealed class NeuralNetTrainingService(
         ReplayBuilder replay = new(session, telemetry);
         run.Status = "Running";
         run.StartedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await PersistAsync(persistenceGate, ct);
         try
         {
             foreach ((int ticketIndex, SyntheticTicket? generated) in tickets)
@@ -273,11 +275,16 @@ public sealed class NeuralNetTrainingService(
                                 NeuralNetTrainingSessionId = session.SessionId, ChatMonitoringKind = run.ChatMonitoringKind,
                                 ContextSnapshot = generated.ContextSnapshot,
                             };
-                            db.TicketModelTrainingExamples.Add(record);
-                            await db.SaveChangesAsync(ct);
-                            await vectors.UpsertAsync(VectorNamespaces.TicketTrainingExample, message.Content,
-                                ChatMonitoringFeatureEncoder.EmbedText(message.Content), generated.Category, record.TrainingExampleId,
-                                new { record.TrainingExampleId, record.Category, record.TargetScore, record.TargetRelevance, record.Source, record.ChatMonitoringKind }, ct);
+                            await persistenceGate.WaitAsync(ct);
+                            try
+                            {
+                                db.TicketModelTrainingExamples.Add(record);
+                                await db.SaveChangesAsync(ct);
+                                await vectors.UpsertAsync(VectorNamespaces.TicketTrainingExample, message.Content,
+                                    ChatMonitoringFeatureEncoder.EmbedText(message.Content), generated.Category, record.TrainingExampleId,
+                                    new { record.TrainingExampleId, record.Category, record.TargetScore, record.TargetRelevance, record.Source, record.ChatMonitoringKind }, ct);
+                            }
+                            finally { persistenceGate.Release(); }
                         }
                         replay.AddPass(ticketIndex, message, pass, generated, initialInference, evaluation, community, trainingTrace, lgtm);
                         if (lgtm) break;
@@ -297,7 +304,14 @@ public sealed class NeuralNetTrainingService(
             run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(replay.Build(ReplayCompletionStatus.Failed, new("training", "unhandled", Truncate(ex.Message, 1000))));
             throw;
         }
-        finally { await db.SaveChangesAsync(CancellationToken.None); }
+        finally { await PersistAsync(persistenceGate, CancellationToken.None); }
+    }
+
+    private async Task PersistAsync(SemaphoreSlim persistenceGate, CancellationToken ct)
+    {
+        await persistenceGate.WaitAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        finally { persistenceGate.Release(); }
     }
 
     private IQueryable<TicketMessageScore> PendingQuery() => db.TicketMessageScores
