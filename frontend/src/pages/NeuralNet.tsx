@@ -156,9 +156,9 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
       <p className="dashboard-hint neural-cascade-detail-label">
         Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Click a node to inspect.
       </p>
-      <svg className="neural-graph neural-graph--replay neural-graph--cascade-detail" viewBox="0 0 1440 680" role="img" aria-label={`${model.chatMonitoringKind} stage-2 scorer`}>
+      <svg className="neural-graph neural-graph--replay neural-graph--cascade-detail" viewBox="0 0 1440 680" role="group" aria-label={`${model.chatMonitoringKind} stage-2 scorer`}>
         {layerLabels.map((label, layerIndex) => (
-          <text key={`label-${label}`} x={layerX(layerIndex)} y="28" textAnchor="middle" className="neural-layer-label">
+          <text key={`label-${layerIndex}-${label}`} x={layerX(layerIndex)} y="28" textAnchor="middle" className="neural-layer-label">
             {label.replace(/-/g, ' ')}
           </text>
         ))}
@@ -187,7 +187,20 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
             const x = layerX(layerIndex)
             const y = nodeY(shown, nodeIndex)
             return (
-              <g key={`${layerIndex}-${nodeIndex}`} onClick={() => setSelected(label)} className="neural-node-group">
+              <g
+                key={`${layerIndex}-${nodeIndex}`}
+                role="button"
+                tabIndex={0}
+                aria-label={label}
+                onClick={() => setSelected(label)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelected(label)
+                  }
+                }}
+                className="neural-node-group"
+              >
                 {isOutput
                   ? <rect x={x - 70} y={y - 18} width="140" height="36" rx="10" className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} />
                   : <circle cx={x} cy={y} r={layerIndex === 0 ? 10 : 14} className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} />}

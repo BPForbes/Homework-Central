@@ -22,7 +22,7 @@ public interface ILlmClient
     Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default);
 }
 
-public sealed class LlmClient : ILlmClient
+public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> options) : ILlmClient
 {
     private static readonly TimeSpan OfflineBackoff = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -30,18 +30,9 @@ public sealed class LlmClient : ILlmClient
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
-    private readonly HttpClient httpClient;
-    private readonly IOptions<LlmOptions> options;
-    private readonly SemaphoreSlim concurrency;
+    private readonly SemaphoreSlim concurrency = new(Math.Clamp(options.Value.MaxConcurrentRequests, 1, 16));
     private readonly object availabilityGate = new();
     private DateTime? unavailableUntilUtc;
-
-    public LlmClient(HttpClient httpClient, IOptions<LlmOptions> options)
-    {
-        this.httpClient = httpClient;
-        this.options = options;
-        concurrency = new SemaphoreSlim(Math.Clamp(options.Value.MaxConcurrentRequests, 1, 16));
-    }
 
     public async Task<string?> ChatJsonAsync(string systemPrompt, string userPrompt, CancellationToken ct = default)
     {

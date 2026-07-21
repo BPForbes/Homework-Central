@@ -123,7 +123,7 @@ public class NeuralNetCanonicalCheckpoint
     public long Generation { get; set; }
     public string ModelVersion { get; set; } = string.Empty;
     public string ArchitectureVersion { get; set; } = string.Empty;
-    public string RuntimeKind { get; set; } = "HashedMlp";
+    public string RuntimeKind { get; set; } = HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelHashedMlp.RuntimeKind;
     public string ParametersBase64 { get; set; } = string.Empty;
     public string Checksum { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; }

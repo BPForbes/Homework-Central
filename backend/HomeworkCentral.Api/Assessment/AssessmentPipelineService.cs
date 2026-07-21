@@ -125,7 +125,10 @@ public sealed class AssessmentPipelineService(
             // related subjects mildly; unrelated channels barely move the ticket.
             if (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring)
                 relevance = Math.Clamp(relevance * subjectSignals.RewardScale, 0, 1);
-            string reason = review?.Explanation ?? AppendSubjectReason(prediction.Reasoning, subjectSignals);
+            string reason = review?.Explanation
+                ?? (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
+                    ? AppendSubjectReason(prediction.Reasoning, subjectSignals)
+                    : prediction.Reasoning);
 
             TicketConfidenceUpdate update = TicketConfidenceScoring.Update(
                 previousScore,

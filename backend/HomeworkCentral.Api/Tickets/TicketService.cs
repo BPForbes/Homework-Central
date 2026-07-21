@@ -542,7 +542,6 @@ public sealed class TicketService(
             db.TicketModelTrainingExamples.Add(training);
             score.TrainingApprovedAtUtc = now;
             score.TrainingApprovedByUserId = actorUserId;
-            await db.SaveChangesAsync(ct);
             IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
             model.Train(new ChatMonitoringNeuralModelInput(requirement, string.Empty, message.RawContent, 0, 1, 0, .5f),
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
@@ -550,6 +549,7 @@ public sealed class TicketService(
                 VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
                 ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind), training.TrainingExampleId,
                 new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source, chatMonitoringKind }, ct);
+            await db.SaveChangesAsync(ct);
         }
 
         return MapMessageScore(score);

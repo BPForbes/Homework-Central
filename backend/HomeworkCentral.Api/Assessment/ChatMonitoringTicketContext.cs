@@ -39,9 +39,12 @@ public static class ChatMonitoringTicketContext
         return value.Contains("tutor")
             || value.Contains("tutoring")
             || value.Contains("competency")
-            || value.Contains("application")
+            || value.Contains("tutor application")
+            || value.Contains("tutoring application")
             || value.Contains("subject-help")
-            || value.Contains("learning");
+            || value.Contains("subject help")
+            || value.Contains("learning thread")
+            || value.Contains("learning monitor");
     }
 
     public static string DetectCategory(string requirement, NeuralModelKindChatMonitoring kind)

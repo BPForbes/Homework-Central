@@ -475,7 +475,7 @@ public sealed class NeuralNetTrainingService(
         SyntheticEvaluatorResult? audit = null;
         for (int attempt = 0; attempt < 3 && audit is null; attempt++)
         {
-            timings.Llm2JsonRetries += attempt > 0 ? 1 : 0;
+            if (attempt > 0) timings.AddLlm2Retry();
             audit = await EvaluateSyntheticTicketAsync(generated with { Message = message.Content, Requirement = requirement }, prediction, ct);
         }
         auditWatch.Stop();
@@ -934,6 +934,7 @@ public sealed class NeuralNetTrainingService(
 
         public void AddTeacherLabel(long ms) { lock (gate) TeacherLabelMs += ms; }
         public void AddAudit(long ms) { lock (gate) { AuditMs += ms; AuditCount++; } }
+        public void AddLlm2Retry() { lock (gate) Llm2JsonRetries++; }
         public void AddTrain(long ms) { lock (gate) TrainMs += ms; }
         public void AddDb(long ms) { lock (gate) DbSaveMs += ms; }
         public void AddVector(long ms) { lock (gate) VectorUpsertMs += ms; }

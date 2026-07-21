@@ -40,7 +40,7 @@ export interface NeuralNetVisualizerModel {
 }
 
 export interface NeuralNetVisualizer {
-  models: NeuralNetVisualizerModel[]
+  models?: NeuralNetVisualizerModel[]
   outputNodes: string[]
   trainingExamples: number
   inputNodes: number

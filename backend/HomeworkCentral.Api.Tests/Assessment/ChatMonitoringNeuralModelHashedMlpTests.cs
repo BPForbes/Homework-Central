@@ -259,7 +259,8 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using ModerationChatMonitorNeuralNet moderation = new();
         using TutoringChatMonitorNeuralNet tutoring = new();
         ChatMonitoringNeuralModelInput input = new("Monitor for harassment.", "Repeated insults.", "You are worthless.", 0, 1f, .6f, .5f);
-        moderation.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f, 3), 20);
+        moderation.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), 20);
         ChatMonitoringNeuralModelPrediction moderationAfter = moderation.Predict(input);
         ChatMonitoringNeuralModelPrediction tutoringUntrained = tutoring.Predict(input);
         Assert.NotEqual(moderationAfter.Evidence, tutoringUntrained.Evidence);
@@ -273,7 +274,8 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using ModerationChatMonitorNeuralNet model = new();
         ChatMonitoringNeuralModelInput input = new("Monitor for harassment.", "Repeated insults in chat.", "You are worthless.", 0, 1f, .6f, .5f);
         ChatMonitoringNeuralModelPrediction before = model.Predict(input);
-        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f, 3), 40);
+        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), 40);
         ChatMonitoringNeuralModelPrediction after = model.Predict(input);
         Assert.True(after.Evidence > before.Evidence);
         Assert.True(after.Relevance > before.Relevance);
@@ -285,7 +287,8 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using ModerationChatMonitorNeuralNet model = new();
         ChatMonitoringNeuralModelInput input = new("Monitor for harassment and insults.", "Prior insults.", "You are worthless.", 0, 1f, .6f, .5f);
         ChatMonitoringNeuralModelPrediction before = model.Predict(input);
-        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f, 3), 30);
+        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), 30);
         ChatMonitoringNeuralModelPrediction after = model.Predict(input);
         Assert.True(after.Confidence >= before.Confidence);
         Assert.False(string.IsNullOrWhiteSpace(after.Category));
