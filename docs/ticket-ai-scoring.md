@@ -18,21 +18,29 @@ requires Ollama or an external ML runtime:
 
 | Monitor | When selected | Topology |
 |---|---|---|
-| **Moderation** (`hc-chat-monitoring-moderation-v5`) | Default for conduct / filter tickets | `48 → 20 → 30 → 24 → 18 → 8` (2 sigmoid + 6 softmax categories) |
-| **Tutoring** (`hc-chat-monitoring-tutoring-v5`) | Tutor-application style tickets | `48 → 36 → 52 → 44 → 36 → 16` (2 sigmoid + 13 general subjects + competency; wider hidden stack) |
+| **Moderation** (`hc-chat-monitoring-moderation-v7`) | Default for conduct / filter tickets | `86 → 24 → 36 → 28 → 20 → 8` |
+| **Tutoring cascade** (`…-tutoring-evidence-v7` + subject router) | Tutor-application tickets | Stage-1 router `30 → 24 → 8` subject context; stage-2 `86 → 40 → 56 → 48 → 40 → 16` |
 
-Inputs are 48 dense features (44 hashed unigram/bigram bins from requirement,
-thread context, and message, plus community vote, channel relevance, thread
-continuity, and prior score). The network follows 3Blue1Brown-aligned learning:
+Inputs are 86 dense features: hashed text, community/prior metadata, **applied-subject
+multi-hot + count**, **channel-subject multi-hot**, exact/related/cross-subject
+relatedness (e.g. Physics/Science boosted when Mathematics was also applied), and an
+8-d **cascade stage-1 embedding** for tutoring.
 
-- **Hidden layers:** leaky ReLU with He/Kaiming initialization
-- **Evidence / relevance:** independent sigmoids + binary cross-entropy (not softmax —
-  these are not mutually exclusive classes)
-- **Category:** softmax + categorical cross-entropy. Moderation uses conduct classes;
-  Tutoring uses every Mask-C general subject tag
-  (Mathematics, Science, Computer Science, Languages, History, Business, Art, Music,
-  Engineering, Medicine, Finance, Economics, Education) plus `tutoring-competency`.
-  Tutoring hidden widths are enlarged so the larger subject head has enough capacity.
+Tutoring uses a **neural cascade**:
+
+1. **Subject-context router** — learns multi-subject application ↔ channel alignment
+2. **Evidence scorer** — predicts evidence, relevance, and subject category using text
+   plus the router embedding
+
+Reward policy still scales ticket relevance by relatedness tier (exact + cross-subject
+support > related-only > unrelated), matching “monitor applied strictly, related
+mildly, unrelated reward-only.”
+
+The network follows 3Blue1Brown-aligned learning:
+
+- **Hidden layers:** leaky ReLU with He/Kaiming initialization (scorer); tanh router
+- **Evidence / relevance:** independent sigmoids + binary cross-entropy
+- **Category:** softmax + categorical CE over all Mask-C subjects + competency
 - **Cost:** mini-batch average \(C = \frac{1}{n}\sum C_x\) with momentum SGD on \(-\nabla C\)
 
 Confidence blends evidence separation, support-set cosine similarity, and the
@@ -113,7 +121,7 @@ real messages.
 Synthetic admin training sessions accept mode `Both` (default), `Moderation`,
 or `Tutoring`. `Both` creates concurrent per-kind `ChatMonitoringNeuralModelRun`
 rows, each with its own worker/promotion replay and canonical checkpoint
-lineage (`RuntimeKind = HashedMlpV5`).
+lineage (`RuntimeKind = HashedMlpV7`).
 
 Training efficiency (synthetic sessions):
 

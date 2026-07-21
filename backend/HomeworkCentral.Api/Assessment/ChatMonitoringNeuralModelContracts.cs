@@ -13,7 +13,52 @@ public sealed record ChatMonitoringNeuralModelInput(
     float CommunityVote,
     float ChannelRelevance,
     float ThreadContinuity,
-    float PriorScore);
+    float PriorScore,
+    float AppliedSubjectCountNorm = 0f,
+    float ExactSubjectMatch = 0f,
+    float RelatedSubjectMatch = 0f,
+    float CrossSubjectSupport = 0f,
+    IReadOnlyList<float>? AppliedSubjectMultiHot = null,
+    IReadOnlyList<float>? ChannelSubjectMultiHot = null,
+    IReadOnlyList<float>? CascadeContext = null)
+{
+    public static ChatMonitoringNeuralModelInput Create(
+        string requirement,
+        string threadContext,
+        string message,
+        float communityVote,
+        float threadContinuity,
+        float priorScore,
+        SubjectSignalSnapshot subjects,
+        IReadOnlyList<float>? cascadeContext = null) =>
+        new(
+            requirement,
+            threadContext,
+            message,
+            communityVote,
+            subjects.EffectiveChannelRelevance,
+            threadContinuity,
+            priorScore,
+            subjects.AppliedCountNorm,
+            subjects.ExactMatch,
+            subjects.RelatedMatch,
+            subjects.CrossSubjectSupport,
+            ToMultiHot(subjects.AppliedGenerals),
+            ToMultiHot(subjects.ChannelGeneral is null ? [] : [subjects.ChannelGeneral]),
+            cascadeContext);
+
+    private static float[] ToMultiHot(IReadOnlyList<string> generals)
+    {
+        float[] hot = new float[ChatMonitoringSubjectSignals.GeneralSubjectCount];
+        foreach (string general in generals)
+        {
+            int index = ChatMonitoringSubjectSignals.GeneralIndex(general);
+            if (index >= 0) hot[index] = 1f;
+        }
+
+        return hot;
+    }
+}
 
 /// <summary>
 /// Supervised targets. Evidence/relevance use sigmoid+BCE; <see cref="CategoryIndex"/> uses

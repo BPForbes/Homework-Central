@@ -327,16 +327,27 @@ public sealed class NeuralNetTrainingService(
                 foreach (SyntheticThreadMessage message in generated.Messages)
                 {
                     string requirement = $"{generated.Requirement}\nChannel: {message.Channel}\nAuthor role: {message.AuthorRole}";
-                    ChatMonitoringNeuralModelInput input = new(requirement, generated.ContextSnapshot, message.Content, 0,
-                        message.ChannelRelevance, message.MessageIndex / 8f, 0);
+                    SubjectSignalSnapshot subjectSignals = run.ChatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
+                        ? ChatMonitoringSubjectSignals.ResolveFromSynthetic(generated.Category, generated.Requirement, message.Channel, message.ChannelRelevance)
+                        : ChatMonitoringSubjectSignals.Resolve([], ChatMonitoringSubjectSignals.ResolveChannelSubject(message.Channel), message.ChannelRelevance);
+                    ChatMonitoringNeuralModelInput input = ChatMonitoringNeuralModelInput.Create(
+                        requirement,
+                        generated.ContextSnapshot,
+                        message.Content,
+                        communityVote: 0,
+                        threadContinuity: message.MessageIndex / 8f,
+                        priorScore: 0,
+                        subjectSignals);
                     ChatMonitoringNeuralModelInferenceTrace initialInference = telemetry.PredictWithTrace(input);
                     ChatMonitoringNeuralModelPrediction prediction = initialInference.Prediction;
 
                     SyntheticEvaluatorResult evaluation = ResolveTeacherEvaluation(generated, message, prediction, run.ChatMonitoringKind);
                     int seed = HashCode.Combine(session.SessionId, ticketIndex, message.MessageIndex, 1, (int)run.ChatMonitoringKind);
                     SyntheticCommunityResolution community = SyntheticCommunitySignalResolver.Resolve(message.CommunityIntent,
-                        (float)evaluation.ApprovalEstimate, (float)evaluation.EvaluatorConfidence, (float)evaluation.TargetScore, message.ChannelRelevance, seed);
+                        (float)evaluation.ApprovalEstimate, (float)evaluation.EvaluatorConfidence, (float)evaluation.TargetScore, subjectSignals.EffectiveChannelRelevance, seed);
                     evaluation = evaluation with { TargetScore = community.ResolvedEvidence };
+                    if (run.ChatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring)
+                        evaluation = evaluation with { TargetRelevance = Math.Clamp(evaluation.TargetRelevance * subjectSignals.RewardScale, 0, 1) };
 
                     bool withinTolerance = Math.Abs(prediction.Evidence - evaluation.TargetScore) <= Options.EvidenceTolerance
                         && Math.Abs(prediction.Relevance - evaluation.TargetRelevance) <= Options.RelevanceTolerance;

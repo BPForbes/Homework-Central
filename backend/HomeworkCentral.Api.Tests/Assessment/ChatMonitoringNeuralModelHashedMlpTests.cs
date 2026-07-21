@@ -22,6 +22,43 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
+    public void Multi_subject_physics_answer_gets_math_cross_support_boost()
+    {
+        SubjectSignalSnapshot snapshot = ChatMonitoringSubjectSignals.Resolve(
+            [SubjectMaskNames.Mathematics, SubjectMaskNames.Science],
+            SubjectMaskNames.Science);
+        Assert.Equal(1f, snapshot.ExactMatch);
+        Assert.True(snapshot.CrossSubjectSupport >= .8f);
+        Assert.True(snapshot.RewardScale > .9f);
+        Assert.True(snapshot.EffectiveChannelRelevance > .85f);
+
+        SubjectSignalSnapshot unrelated = ChatMonitoringSubjectSignals.Resolve(
+            [SubjectMaskNames.Mathematics],
+            SubjectMaskNames.Art);
+        Assert.True(unrelated.RewardScale < snapshot.RewardScale);
+    }
+
+    [Fact]
+    public void Tutoring_cascade_enriches_with_stage1_context()
+    {
+        using TutoringChatMonitorNeuralNet tutoring = new();
+        SubjectSignalSnapshot subjects = ChatMonitoringSubjectSignals.Resolve(
+            [SubjectMaskNames.Mathematics, SubjectMaskNames.Science],
+            SubjectMaskNames.Science);
+        ChatMonitoringNeuralModelInput input = ChatMonitoringNeuralModelInput.Create(
+            "Tutor math and science applicant.",
+            "Physics help thread.",
+            "Use F=ma and solve for acceleration.",
+            0, .5f, .5f, subjects);
+        tutoring.Train(input, new ChatMonitoringNeuralModelTargets(.85f, .9f, ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Tutoring, "tutoring-science")), 12);
+        ChatMonitoringNeuralModelPrediction prediction = tutoring.Predict(input);
+        Assert.False(string.IsNullOrWhiteSpace(prediction.Category));
+        Assert.True(prediction.Evidence > .4f);
+        Assert.Equal(86, tutoring.GetStateSnapshot().LayerWidths[0]);
+        Assert.Contains(tutoring.GetTopologySnapshot().Nodes, node => node.Label == "cascade-subject-context-0");
+    }
+
+    [Fact]
     public void Mini_batch_average_cost_uses_sample_count_and_moves_predictions()
     {
         using ModerationChatMonitorNeuralNet model = new();
@@ -53,18 +90,18 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using TutoringChatMonitorNeuralNet tutoring = new();
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
-        // 48+20+30+24+18+8 = 148 moderation
-        // Tutoring: 48+36+52+44+36+16 = 232 (13 subjects + competency, wider hidden stack)
-        Assert.Equal(148, moderationTopology.Nodes.Count);
-        Assert.Equal(232, tutoringTopology.Nodes.Count);
-        Assert.Equal("hc-chat-monitoring-moderation-v5", moderationTopology.ModelVersion);
-        Assert.Equal("hc-chat-monitoring-tutoring-v5", tutoringTopology.ModelVersion);
+        // Moderation: 86+24+36+28+20+8 = 202
+        // Tutoring evidence: 86+40+56+48+40+16 = 286
+        Assert.Equal(202, moderationTopology.Nodes.Count);
+        Assert.Equal(286, tutoringTopology.Nodes.Count);
+        Assert.Equal("hc-chat-monitoring-moderation-v7", moderationTopology.ModelVersion);
+        Assert.Equal("hc-chat-monitoring-tutoring-evidence-v7", tutoringTopology.ModelVersion);
         Assert.Contains(moderationTopology.Nodes, node => node.Label == "harassment");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-mathematics");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-history");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-computer-science");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-business");
-        Assert.Equal([48, 36, 52, 44, 36, 16], tutoring.GetStateSnapshot().LayerWidths);
+        Assert.Equal([86, 40, 56, 48, 40, 16], tutoring.GetStateSnapshot().LayerWidths);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Tutoring.Length + 2, tutoring.GetStateSnapshot().LayerWidths[^1]);
         Assert.True(tutoringTopology.Edges.Count > moderationTopology.Edges.Count);
     }
@@ -120,8 +157,8 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
         Assert.Equal(2, trace.Iterations.Count);
-        Assert.Equal(232, tutoringTopology.Nodes.Count);
-        Assert.Equal(148, moderationTopology.Nodes.Count);
+        Assert.Equal(286, tutoringTopology.Nodes.Count);
+        Assert.Equal(202, moderationTopology.Nodes.Count);
         Assert.Contains(tutoringTopology.Nodes, node => node.LayerId == "learning-thread-history");
         Assert.Contains(moderationTopology.Nodes, node => node.LayerId == "behavior-history");
         Assert.All(trace.Iterations, iteration => Assert.NotEmpty(iteration.Update.Parameters));

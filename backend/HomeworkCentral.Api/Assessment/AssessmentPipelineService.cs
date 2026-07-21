@@ -89,8 +89,18 @@ public sealed class AssessmentPipelineService(
                 : $"{contextSnapshot}\n<current_message>\n{job.Content}\n</current_message>";
             NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
             IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
-            ChatMonitoringNeuralModelPrediction prediction = model.Predict(new ChatMonitoringNeuralModelInput(
-                modelRequirement, contextSnapshot, job.Content, 0, 1, Math.Clamp(recentMessages.Count / 5f, 0, 1), (float)previousScore));
+            SubjectSignalSnapshot subjectSignals = chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
+                ? ChatMonitoringSubjectSignals.ResolveFromTicket(watch, job.RoomId)
+                : ChatMonitoringSubjectSignals.Resolve([], ChatMonitoringSubjectSignals.ResolveChannelSubject(job.RoomId), 1f);
+            ChatMonitoringNeuralModelInput modelInput = ChatMonitoringNeuralModelInput.Create(
+                modelRequirement,
+                contextSnapshot,
+                job.Content,
+                communityVote: 0,
+                threadContinuity: Math.Clamp(recentMessages.Count / 5f, 0, 1),
+                priorScore: (float)previousScore,
+                subjectSignals);
+            ChatMonitoringNeuralModelPrediction prediction = model.Predict(modelInput);
             string retrievalPositionId = ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind);
             bool reviewerInvoked = !ticketOptions.NeuralOnlyScoring
                 && ticketOptions.OllamaEnabled
@@ -111,7 +121,11 @@ public sealed class AssessmentPipelineService(
             double relevance = review is TicketReviewerEvaluation reviewerRelevance
                 ? TicketReviewPolicy.Blend(prediction.Relevance, reviewerRelevance.Relevance, ticketOptions.ReviewerBlendWeight)
                 : prediction.Relevance;
-            string reason = review?.Explanation ?? prediction.Reasoning;
+            // Multi-subject policy: exact channel match (with cross-subject support) rewards more;
+            // related subjects mildly; unrelated channels barely move the ticket.
+            if (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring)
+                relevance = Math.Clamp(relevance * subjectSignals.RewardScale, 0, 1);
+            string reason = review?.Explanation ?? AppendSubjectReason(prediction.Reasoning, subjectSignals);
 
             TicketConfidenceUpdate update = TicketConfidenceScoring.Update(
                 previousScore,
@@ -240,6 +254,15 @@ public sealed class AssessmentPipelineService(
 
     private static string Truncate(string value, int maxCharacters) =>
         value.Length <= maxCharacters ? value : value[..maxCharacters];
+
+    private static string AppendSubjectReason(string reasoning, SubjectSignalSnapshot subjects)
+    {
+        if (subjects.AppliedGenerals.Count == 0 && subjects.ChannelGeneral is null)
+            return reasoning;
+        string applied = subjects.AppliedGenerals.Count == 0 ? "none" : string.Join(", ", subjects.AppliedGenerals);
+        string channel = subjects.ChannelGeneral ?? "unscoped";
+        return $"{reasoning} Applied=[{applied}]; channel={channel}; exact={subjects.ExactMatch:F2}; cross={subjects.CrossSubjectSupport:F2}; reward×{subjects.RewardScale:F2}.";
+    }
 
     private static string BuildContextSnapshot(IEnumerable<ChatMessage> messages)
     {

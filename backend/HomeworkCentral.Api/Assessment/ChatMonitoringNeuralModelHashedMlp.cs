@@ -14,7 +14,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeuralModelTelemetry
 {
-    public const string RuntimeKind = "HashedMlpV5";
+    public const string RuntimeKind = "HashedMlpV7";
     private const float LearningRate = .035f;
     private const float MomentumCoefficient = .9f;
     private const float LeakyReluSlope = .01f;
@@ -588,12 +588,21 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         List<ReplayNode> nodes = [];
         for (int input = 0; input < layerWidths[0]; input++)
         {
-            string label = input < 44 ? $"feature-{input}" : input switch
+            string label = input switch
             {
+                < 44 => $"feature-{input}",
                 44 => "community-vote",
                 45 => "channel-relevance",
                 46 => "thread-continuity",
-                _ => "prior-score",
+                47 => "prior-score",
+                48 => "applied-subject-count",
+                49 => "exact-subject-match",
+                50 => "related-subject-match",
+                51 => "cross-subject-support",
+                >= 52 and < 65 => $"applied-{ChatMonitoringSubjectSignals.GeneralSubjectsInOrder[input - 52]}",
+                >= 65 and < 78 => $"channel-{ChatMonitoringSubjectSignals.GeneralSubjectsInOrder[input - 65]}",
+                >= 78 and < 86 => $"cascade-subject-context-{input - 78}",
+                _ => $"feature-{input}",
             };
             nodes.Add(new ReplayNode(nodes.Count, $"input-{input}", layerLabels[0], label, input, false));
         }
@@ -689,31 +698,157 @@ public sealed class ModerationChatMonitorNeuralNet : ChatMonitoringNeuralModelHa
     public ModerationChatMonitorNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Moderation,
-            "hc-chat-monitoring-moderation-v5",
-            20, 30, 24, 18,
+            "hc-chat-monitoring-moderation-v7",
+            24, 36, 28, 20,
             ["input", "current-conduct", "behavior-history", "report-correlation", "moderation-decision", "output"],
             ChatMonitoringCategoryTaxonomy.Moderation,
-            seed: 0x4D4F4435)
+            seed: 0x4D4F4437)
+    {
+    }
+}
+
+/// <summary>Stage-2 tutoring evidence scorer (text + subject features + cascade context).</summary>
+public sealed class TutoringEvidenceScorerNeuralNet : ChatMonitoringNeuralModelHashedMlp
+{
+    public TutoringEvidenceScorerNeuralNet()
+        : base(
+            NeuralModelKindChatMonitoring.Tutoring,
+            "hc-chat-monitoring-tutoring-evidence-v7",
+            40, 56, 48, 40,
+            ["input", "current-subject-response", "learning-thread-history", "application-correlation", "tutoring-decision", "output"],
+            ChatMonitoringCategoryTaxonomy.Tutoring,
+            seed: 0x54555437)
     {
     }
 }
 
 /// <summary>
-/// Tutoring monitor sized for all Mask-C general subjects (13) plus competency.
-/// Wider hidden layers feed the larger softmax head with enough capacity for
-/// subject-separated concepts.
-/// Topology: 48 → 36 → 52 → 44 → 36 → 16.
+/// Tutoring cascade: stage-1 <see cref="TutoringSubjectContextRouter"/> embeds multi-subject
+/// application/channel relatedness; stage-2 <see cref="TutoringEvidenceScorerNeuralNet"/>
+/// scores evidence/relevance/category. Example: applied Math+Science, Physics channel →
+/// stage-1 raises cross-subject support; stage-2 can reward a strong physics answer more.
 /// </summary>
-public sealed class TutoringChatMonitorNeuralNet : ChatMonitoringNeuralModelHashedMlp
+public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTelemetry
 {
-    public TutoringChatMonitorNeuralNet()
-        : base(
-            NeuralModelKindChatMonitoring.Tutoring,
-            "hc-chat-monitoring-tutoring-v5",
-            36, 52, 44, 36,
-            ["input", "current-subject-response", "learning-thread-history", "application-correlation", "tutoring-decision", "output"],
-            ChatMonitoringCategoryTaxonomy.Tutoring,
-            seed: 0x54555435)
+    private readonly TutoringSubjectContextRouter router = new();
+    private readonly TutoringEvidenceScorerNeuralNet scorer = new();
+    private readonly object gate = new();
+
+    public NeuralModelKindChatMonitoring Kind => NeuralModelKindChatMonitoring.Tutoring;
+
+    public ChatMonitoringNeuralModelPrediction Predict(ChatMonitoringNeuralModelInput input)
     {
+        lock (gate) return scorer.Predict(Enrich(input));
+    }
+
+    public ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input)
+    {
+        lock (gate) return scorer.PredictWithTrace(Enrich(input));
+    }
+
+    public void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12)
+    {
+        lock (gate)
+        {
+            SubjectSignalSnapshot snapshot = SnapshotFrom(input);
+            router.Train(snapshot, Math.Max(2, epochs / 3));
+            scorer.Train(Enrich(input, snapshot), targets, epochs);
+        }
+    }
+
+    public TrainingPassTrace TrainWithTrace(
+        ChatMonitoringNeuralModelTrainingExample example,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f) =>
+        TrainMiniBatchWithTrace([example], epochs, detail, evidenceTolerance, relevanceTolerance, lossStopThreshold);
+
+    public TrainingPassTrace TrainMiniBatchWithTrace(
+        IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> examples,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f)
+    {
+        lock (gate)
+        {
+            List<ChatMonitoringNeuralModelTrainingExample> enriched = [];
+            foreach (ChatMonitoringNeuralModelTrainingExample example in examples)
+            {
+                SubjectSignalSnapshot snapshot = SnapshotFrom(example.Input);
+                router.Train(snapshot, 3);
+                enriched.Add(example with { Input = Enrich(example.Input, snapshot) });
+            }
+
+            return scorer.TrainMiniBatchWithTrace(enriched, epochs, detail, evidenceTolerance, relevanceTolerance, lossStopThreshold);
+        }
+    }
+
+    public NeuralNetTopologySnapshot GetTopologySnapshot() => scorer.GetTopologySnapshot();
+    public NeuralNetParameterSnapshot GetParameterSnapshot(long? canonicalGeneration, int localRevision) =>
+        scorer.GetParameterSnapshot(canonicalGeneration, localRevision);
+    public ChatMonitoringNeuralModelStateSnapshot GetStateSnapshot() => scorer.GetStateSnapshot();
+    public void LoadParameterSnapshot(NeuralNetParameterSnapshot snapshot) => scorer.LoadParameterSnapshot(snapshot);
+    public void Dispose()
+    {
+        router.Dispose();
+        scorer.Dispose();
+    }
+
+    private ChatMonitoringNeuralModelInput Enrich(ChatMonitoringNeuralModelInput input, SubjectSignalSnapshot? snapshot = null)
+    {
+        SubjectSignalSnapshot snap = snapshot ?? SnapshotFrom(input);
+        float[] context = router.Forward(snap);
+        ChatMonitoringNeuralModelInput baseInput = ChatMonitoringNeuralModelInput.Create(
+            input.Requirement,
+            input.ThreadContext,
+            input.Message,
+            input.CommunityVote,
+            input.ThreadContinuity,
+            input.PriorScore,
+            snap,
+            context);
+        return baseInput with
+        {
+            // Preserve community/prior overrides from the caller when present.
+            CommunityVote = input.CommunityVote,
+            PriorScore = input.PriorScore,
+        };
+    }
+
+    private static SubjectSignalSnapshot SnapshotFrom(ChatMonitoringNeuralModelInput input)
+    {
+        List<string> applied = [];
+        if (input.AppliedSubjectMultiHot is not null)
+        {
+            for (int i = 0; i < Math.Min(input.AppliedSubjectMultiHot.Count, ChatMonitoringSubjectSignals.GeneralSubjectCount); i++)
+            {
+                if (input.AppliedSubjectMultiHot[i] >= .5f)
+                    applied.Add(ChatMonitoringSubjectSignals.GeneralSubjectsInOrder[i]);
+            }
+        }
+
+        if (applied.Count == 0)
+            applied.AddRange(ChatMonitoringSubjectSignals.ParseAppliedSubjects(input.Requirement, input.ThreadContext));
+
+        string? channel = null;
+        if (input.ChannelSubjectMultiHot is not null)
+        {
+            float best = 0;
+            for (int i = 0; i < Math.Min(input.ChannelSubjectMultiHot.Count, ChatMonitoringSubjectSignals.GeneralSubjectCount); i++)
+            {
+                if (input.ChannelSubjectMultiHot[i] > best)
+                {
+                    best = input.ChannelSubjectMultiHot[i];
+                    channel = ChatMonitoringSubjectSignals.GeneralSubjectsInOrder[i];
+                }
+            }
+        }
+
+        channel ??= ChatMonitoringSubjectSignals.ResolveChannelSubject(input.Requirement);
+        return ChatMonitoringSubjectSignals.Resolve(applied, channel, input.ChannelRelevance);
     }
 }
