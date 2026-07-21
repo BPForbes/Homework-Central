@@ -93,6 +93,8 @@ builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
 builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Configuration.GetSection("Llm"));
+builder.Services.Configure<HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions>(
+    builder.Configuration.GetSection("NeuralNetTraining"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.ClamAvOptions>(builder.Configuration.GetSection("ClamAv"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.AttachmentAccessOptions>(

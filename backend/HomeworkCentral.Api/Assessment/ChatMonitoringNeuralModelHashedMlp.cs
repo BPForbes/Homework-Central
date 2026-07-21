@@ -6,11 +6,15 @@ namespace HomeworkCentral.Api.Assessment;
 /// CPU-only hashed MLP for a preinstalled chat-monitoring model. Features come from
 /// <see cref="ChatMonitoringFeatureEncoder"/> (48 dense inputs). Separate Moderation and
 /// Tutoring subclasses keep independent weights, topologies, and checkpoint lineages.
+/// Hidden layers use leaky ReLU (3Blue1Brown-style cheap nonlinearities with He init);
+/// sigmoid outputs pair with binary cross-entropy so the output gradient simplifies to
+/// prediction − target.
 /// </summary>
 public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeuralModelTelemetry
 {
-    public const string RuntimeKind = "HashedMlp";
+    public const string RuntimeKind = "HashedMlpLrelu";
     private const float LearningRate = .035f;
+    private const float LeakyReluSlope = .01f;
     private readonly int[] layerWidths;
     private readonly string[] layerLabels;
     private readonly float[][] weights;
@@ -42,8 +46,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             int targets = layerWidths[layer + 1];
             weights[layer] = new float[targets * sources];
             biases[layer] = new float[targets];
+            // He / Kaiming normal-ish init for leaky-ReLU hidden layers; smaller scale for sigmoid output.
+            float scale = layer == layerWidths.Length - 2
+                ? MathF.Sqrt(1f / sources)
+                : MathF.Sqrt(2f / sources);
             for (int i = 0; i < weights[layer].Length; i++)
-                weights[layer][i] = (float)((random.NextDouble() - .5) * .08);
+                weights[layer][i] = (float)((random.NextDouble() * 2d - 1d) * scale);
         }
 
         topology = BuildTopology(this.layerLabels);
@@ -68,7 +76,13 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         _ = TrainWithTrace(new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"), epochs);
     }
 
-    public TrainingPassTrace TrainWithTrace(ChatMonitoringNeuralModelTrainingExample example, int epochs = 12)
+    public TrainingPassTrace TrainWithTrace(
+        ChatMonitoringNeuralModelTrainingExample example,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f)
     {
         lock (gate)
         {
@@ -76,26 +90,51 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             List<TrainingIterationReplay> iterations = [];
             int boundedEpochs = Math.Clamp(epochs, 1, 100);
             ChatMonitoringNeuralModelInferenceTrace before = PredictUnlocked(example.Input, features);
+            bool earlyStopEnabled = evidenceTolerance > 0f || relevanceTolerance > 0f || lossStopThreshold > 0f;
             for (int epoch = 0; epoch < boundedEpochs; epoch++)
             {
                 LossTrace lossBefore = CreateLoss(before.Forward, example.Targets);
-                float[] parameterBefore = ReadParameters();
-                TrainOneEpochUnlocked(features, example.Targets);
-                float[] parameterAfter = ReadParameters();
-                IReadOnlyList<ParameterDelta> deltas = BuildParameterDeltas(parameterBefore, parameterAfter);
-                IReadOnlyList<SparseValue> gradients = deltas.Select(delta => new SparseValue(delta.ParameterIndex, delta.Gradient)).ToList();
-                float gradientL2 = MathF.Sqrt(gradients.Sum(gradient => gradient.Value * gradient.Value));
-                GradientHealth health = new(gradientL2 < 0.000001f, gradientL2 > 1000f, 0.000001f, 1000f,
-                    gradients.Count == 0 ? 0 : gradients.Max(gradient => MathF.Abs(gradient.Value)),
-                    gradients.Where(gradient => gradient.Value != 0).Select(gradient => MathF.Abs(gradient.Value)).DefaultIfEmpty(0).Min());
+                bool captureFull = detail == NeuralTrainingTraceDetail.Full;
+                float[]? parameterBefore = captureFull ? ReadParameters() : null;
+                float gradientL2 = TrainOneEpochUnlocked(features, example.Targets, out float maxAbsGradient, out float minNonZeroAbsGradient);
+                float[]? parameterAfter = captureFull ? ReadParameters() : null;
+                IReadOnlyList<ParameterDelta> deltas = captureFull
+                    ? BuildParameterDeltas(parameterBefore!, parameterAfter!)
+                    : [];
+                IReadOnlyList<SparseValue> gradients = captureFull
+                    ? deltas.Select(delta => new SparseValue(delta.ParameterIndex, delta.Gradient)).ToList()
+                    : [];
+                GradientHealth health = new(
+                    gradientL2 < 0.000001f,
+                    gradientL2 > 1000f,
+                    0.000001f,
+                    1000f,
+                    captureFull
+                        ? (gradients.Count == 0 ? 0 : gradients.Max(gradient => MathF.Abs(gradient.Value)))
+                        : maxAbsGradient,
+                    captureFull
+                        ? gradients.Where(gradient => gradient.Value != 0).Select(gradient => MathF.Abs(gradient.Value)).DefaultIfEmpty(0).Min()
+                        : minNonZeroAbsGradient);
                 BackpropagationTrace backward = new([], [],
                     gradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Weight).ToList(),
                     gradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Bias).ToList(),
                     gradientL2, health);
-                ChatMonitoringNeuralModelInferenceTrace after = PredictUnlocked(example.Input, features);
+                // Compact mode still needs post-update probabilities for loss/early-stop without full node traces.
+                ChatMonitoringNeuralModelInferenceTrace after = captureFull || epoch == boundedEpochs - 1 || earlyStopEnabled
+                    ? PredictUnlocked(example.Input, features)
+                    : PredictUnlockedLight(example.Input, features);
+                LossTrace lossAfter = CreateLoss(after.Forward, example.Targets);
                 iterations.Add(new TrainingIterationReplay(epoch, before.Forward, lossBefore, backward,
-                    new ParameterUpdateTrace(LearningRate, "SGD", deltas), after.Forward, CreateLoss(after.Forward, example.Targets)));
+                    new ParameterUpdateTrace(LearningRate, "SGD", deltas), after.Forward, lossAfter));
                 before = after;
+
+                if (earlyStopEnabled
+                    && MathF.Abs(after.Prediction.Evidence - example.Targets.Evidence) <= evidenceTolerance
+                    && MathF.Abs(after.Prediction.Relevance - example.Targets.Relevance) <= relevanceTolerance
+                    && (lossStopThreshold <= 0f || lossAfter.TotalLoss <= lossStopThreshold))
+                {
+                    break;
+                }
             }
 
             string category = string.IsNullOrWhiteSpace(example.Category) || example.Category == "general"
@@ -157,6 +196,26 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     {
         float[] features = encoded ?? ChatMonitoringFeatureEncoder.Encode(input);
         ForwardCache cache = Forward(features, captureTrace: true);
+        return BuildInference(input, features, cache);
+    }
+
+    /// <summary>Forward pass with a minimal output-only trace for compact epoch bookkeeping.</summary>
+    private ChatMonitoringNeuralModelInferenceTrace PredictUnlockedLight(ChatMonitoringNeuralModelInput input, float[] encoded)
+    {
+        ForwardCache cache = Forward(encoded, captureTrace: false);
+        float evidence = cache.Activations[^1][0];
+        float relevance = cache.Activations[^1][1];
+        float confidence = Math.Clamp(MathF.Abs(evidence - .5f) * 2f, .05f, .99f);
+        ForwardPropagationTrace forward = new([], [], [], [], [],
+            cache.PreActivations[^1][0], cache.PreActivations[^1][1], evidence, relevance, confidence);
+        string category = ChatMonitoringTicketContext.DetectCategory(input.Requirement, Kind);
+        return new ChatMonitoringNeuralModelInferenceTrace(
+            new ChatMonitoringNeuralModelPrediction(evidence, relevance, confidence, Kind, ModelVersion, category, "compact"),
+            forward);
+    }
+
+    private ChatMonitoringNeuralModelInferenceTrace BuildInference(ChatMonitoringNeuralModelInput input, float[] features, ForwardCache cache)
+    {
         float evidence = cache.Activations[^1][0];
         float relevance = cache.Activations[^1][1];
         double supportSimilarity = support.Count == 0 ? 0 : support.Max(item => Cosine(features, item.Features));
@@ -187,12 +246,20 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     private sealed record SupportExample(float[] Features, string Category);
 
-    private void TrainOneEpochUnlocked(float[] features, ChatMonitoringNeuralModelTargets targets)
+    private float TrainOneEpochUnlocked(
+        float[] features,
+        ChatMonitoringNeuralModelTargets targets,
+        out float maxAbsGradient,
+        out float minNonZeroAbsGradient)
     {
         ForwardCache cache = Forward(features, captureTrace: false);
         float[] output = cache.Activations[^1];
+        // Sigmoid + BCE: ∂L/∂z = σ(z) − y (3Blue1Brown / standard ML identity).
         float[][] activationGradients = new float[cache.Activations.Length][];
         activationGradients[^1] = [output[0] - Math.Clamp(targets.Evidence, 0, 1), output[1] - Math.Clamp(targets.Relevance, 0, 1)];
+        double gradSq = 0;
+        maxAbsGradient = 0;
+        minNonZeroAbsGradient = float.MaxValue;
         for (int layer = weights.Length - 1; layer >= 0; layer--)
         {
             float[] upstream = activationGradients[layer + 1];
@@ -200,26 +267,37 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             float[] nextGradient = new float[source.Length];
             int sources = layerWidths[layer];
             int targetsCount = layerWidths[layer + 1];
+            bool hiddenLayer = layer < weights.Length - 1;
             for (int target = 0; target < targetsCount; target++)
             {
                 float gradient = upstream[target];
-                if (layer < weights.Length - 1)
-                {
-                    float activation = cache.Activations[layer + 1][target];
-                    gradient *= 1f - activation * activation;
-                }
+                if (hiddenLayer)
+                    gradient *= LeakyReluDerivative(cache.PreActivations[layer][target]);
+
+                float abs = MathF.Abs(gradient);
+                if (abs > maxAbsGradient) maxAbsGradient = abs;
+                if (abs > 0f && abs < minNonZeroAbsGradient) minNonZeroAbsGradient = abs;
+                gradSq += gradient * gradient;
 
                 biases[layer][target] -= LearningRate * gradient;
                 for (int sourceIndex = 0; sourceIndex < sources; sourceIndex++)
                 {
                     int weightIndex = target * sources + sourceIndex;
+                    float weightGradient = gradient * source[sourceIndex];
+                    float weightAbs = MathF.Abs(weightGradient);
+                    if (weightAbs > maxAbsGradient) maxAbsGradient = weightAbs;
+                    if (weightAbs > 0f && weightAbs < minNonZeroAbsGradient) minNonZeroAbsGradient = weightAbs;
+                    gradSq += weightGradient * weightGradient;
                     nextGradient[sourceIndex] += gradient * weights[layer][weightIndex];
-                    weights[layer][weightIndex] -= LearningRate * gradient * source[sourceIndex];
+                    weights[layer][weightIndex] -= LearningRate * weightGradient;
                 }
             }
 
             activationGradients[layer] = nextGradient;
         }
+
+        if (minNonZeroAbsGradient == float.MaxValue) minNonZeroAbsGradient = 0;
+        return MathF.Sqrt((float)gradSq);
     }
 
     private ForwardCache Forward(float[] features, bool captureTrace)
@@ -243,7 +321,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 layerPre[target] = sum;
                 layerAct[target] = outputLayer
                     ? 1f / (1f + MathF.Exp(-Math.Clamp(sum, -20f, 20f)))
-                    : MathF.Tanh(sum);
+                    : LeakyRelu(sum);
             }
 
             preActivations[layer] = layerPre;
@@ -296,6 +374,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
         return new ForwardCache(activations, preActivations, trace);
     }
+
+    private static float LeakyRelu(float value) => value >= 0f ? value : LeakyReluSlope * value;
+    private static float LeakyReluDerivative(float preActivation) => preActivation >= 0f ? 1f : LeakyReluSlope;
 
     private IReadOnlyList<ParameterDelta> BuildParameterDeltas(float[] before, float[] after)
     {
@@ -417,10 +498,10 @@ public sealed class ModerationChatMonitorNeuralNet : ChatMonitoringNeuralModelHa
     public ModerationChatMonitorNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Moderation,
-            "hc-chat-monitoring-moderation-v1",
+            "hc-chat-monitoring-moderation-v2",
             20, 30, 24, 18,
             ["input", "current-conduct", "behavior-history", "report-correlation", "moderation-decision", "output"],
-            seed: 0x4D4F4431)
+            seed: 0x4D4F4432)
     {
     }
 }
@@ -431,10 +512,10 @@ public sealed class TutoringChatMonitorNeuralNet : ChatMonitoringNeuralModelHash
     public TutoringChatMonitorNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Tutoring,
-            "hc-chat-monitoring-tutoring-v1",
+            "hc-chat-monitoring-tutoring-v2",
             20, 32, 28, 20,
             ["input", "current-subject-response", "learning-thread-history", "application-correlation", "tutoring-decision", "output"],
-            seed: 0x54555431)
+            seed: 0x54555432)
     {
     }
 }

@@ -548,7 +548,7 @@ public sealed class TicketService(
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(
                 VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
-                training.Category, training.TrainingExampleId,
+                ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind), training.TrainingExampleId,
                 new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source, chatMonitoringKind }, ct);
         }
 

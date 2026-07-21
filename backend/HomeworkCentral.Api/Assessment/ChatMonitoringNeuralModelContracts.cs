@@ -54,7 +54,13 @@ public interface IChatMonitoringNeuralModel
 public interface IChatMonitoringNeuralModelTelemetry : IChatMonitoringNeuralModel, IDisposable
 {
     ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input);
-    TrainingPassTrace TrainWithTrace(ChatMonitoringNeuralModelTrainingExample example, int epochs = 12);
+    TrainingPassTrace TrainWithTrace(
+        ChatMonitoringNeuralModelTrainingExample example,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f);
     NeuralNetTopologySnapshot GetTopologySnapshot();
     NeuralNetParameterSnapshot GetParameterSnapshot(long? canonicalGeneration, int localRevision);
     ChatMonitoringNeuralModelStateSnapshot GetStateSnapshot();

@@ -18,15 +18,17 @@ requires Ollama or an external ML runtime:
 
 | Monitor | When selected | Topology |
 |---|---|---|
-| **Moderation** (`hc-chat-monitoring-moderation-v1`) | Default for conduct / filter tickets | `48 → 20 → 30 → 24 → 18 → 2` |
-| **Tutoring** (`hc-chat-monitoring-tutoring-v1`) | Tutor-application style tickets (filter/context mentions tutor, tutoring, competency, application, learning, etc.) | `48 → 20 → 32 → 28 → 20 → 2` |
+| **Moderation** (`hc-chat-monitoring-moderation-v2`) | Default for conduct / filter tickets | `48 → 20 → 30 → 24 → 18 → 2` |
+| **Tutoring** (`hc-chat-monitoring-tutoring-v2`) | Tutor-application style tickets (filter/context mentions tutor, tutoring, competency, application, learning, etc.) | `48 → 20 → 32 → 28 → 20 → 2` |
 
 Inputs are 48 dense features (44 hashed unigram/bigram bins from requirement,
 thread context, and message, plus community vote, channel relevance, thread
-continuity, and prior score). Outputs are evidence and relevance. Confidence
-blends output separation with cosine similarity against a small in-memory
-support set of recent training examples for that monitor. Category and
-reasoning strings are derived from the ticket requirement.
+continuity, and prior score). Hidden layers use **leaky ReLU** with He/Kaiming
+initialization; outputs stay sigmoid and train with **binary cross-entropy**
+(per-example cost = evidence BCE + relevance BCE). Confidence blends output
+separation with cosine similarity against a small in-memory support set of
+recent training examples for that monitor. Category and reasoning strings are
+derived from the ticket requirement.
 
 The selected monitor returns:
 
@@ -101,16 +103,42 @@ real messages.
 Synthetic admin training sessions accept mode `Both` (default), `Moderation`,
 or `Tutoring`. `Both` creates concurrent per-kind `ChatMonitoringNeuralModelRun`
 rows, each with its own worker/promotion replay and canonical checkpoint
-lineage (`RuntimeKind = HashedMlp`).
+lineage (`RuntimeKind = HashedMlpLrelu`).
+
+Training efficiency (synthetic sessions):
+
+1. **Teacher labels once per message** — LLM 1 returns `expectedScore` /
+   `expectedRelevance` with the scenario when possible; otherwise one LLM-2
+   label call fills missing targets. Those fixed labels are reused by both
+   monitors and across local epochs (no per-pass LLM grading).
+2. **Local cost stop** — each message trains with online SGD against the
+   teacher targets until evidence/relevance tolerances and BCE
+   `LossStopThreshold` are met (default up to 24 epochs). Session
+   `ReportJson` records per-stage timings and **average cost**
+   (mean final `TotalLoss` over trained examples).
+3. **Domain batching** — in `Both` mode each monitor trains matching-domain
+   tickets plus a small configurable cross-domain sample (default 15%) as
+   negative controls.
+4. **Batched persistence** — training examples and vector upserts flush in
+   bounded batches (default 50) under a shared gate.
+5. **Compact replay** — bulk runs record loss / gradient-norm traces;
+   full parameter-delta traces are sampled (default 2%).
+6. **LLM concurrency cap** — `Llm:MaxConcurrentRequests` (default 2) limits
+   Ollama chat/embed parallelism.
+
+Independent LLM-2 audits remain optional at `NeuralNetTraining:AuditSampleRate`
+for quality monitoring only; they do not drive the cost function.
 
 Reviewer corrections require staff approval before training, preventing an
 injected message from automatically poisoning the model. At startup each
 chat-monitor lineage rebuilds its in-memory weights from approved rows for that
 kind. Each row is mirrored under the `ticket_training_example` vector namespace
-using the shared 48-float hashed embedding. An Ollama review receives the three
-nearest approved examples from the same chat-monitor category as untrusted
-context. PostgreSQL remains authoritative; the vector namespace is retrieval-only.
+using the shared 48-float hashed embedding and a lineage `PositionId`
+(`chat-monitoring-moderation` or `chat-monitoring-tutoring`). Live Ollama
+reviews retrieve the three nearest approved examples for that same lineage
+position. PostgreSQL remains authoritative; the vector namespace is retrieval-only.
 
 Tune `StudentConfidenceThreshold`, `ReviewerAuditRate`, and
 `ReviewerBlendWeight` under `Tickets`; matching Docker variables are documented
-in `.env.example`.
+in `.env.example`. Synthetic training knobs live under `NeuralNetTraining` in
+`appsettings.json`.

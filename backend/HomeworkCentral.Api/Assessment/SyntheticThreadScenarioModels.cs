@@ -14,4 +14,8 @@ public sealed record SyntheticThreadMessage(
     string Content,
     bool IsDistractor,
     float ChannelRelevance,
-    SyntheticCommunityIntent CommunityIntent);
+    SyntheticCommunityIntent CommunityIntent,
+    float? TeacherEvidence = null,
+    float? TeacherRelevance = null,
+    float? TeacherApprovalEstimate = null,
+    float? TeacherConfidence = null);

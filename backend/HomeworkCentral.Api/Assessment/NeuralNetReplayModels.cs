@@ -1,6 +1,7 @@
 namespace HomeworkCentral.Api.Assessment;
 
 public enum NeuralTrainingMode { Both, Moderation, Tutoring }
+public enum NeuralTrainingTraceDetail { Full, Compact }
 public enum ReplayCompletionStatus { Completed, Cancelled, Failed, Partial }
 public enum ReplayPhase { Llm1Input, InitialForward, Llm2Evaluation, VoteResolution, EpochForward, LossCalculation, BackwardPropagation, ParameterUpdate, PostUpdateForward, FinalVerdict }
 public enum ReplayPayloadKind { Llm1Input, Forward, Evaluation, Loss, Backpropagation, ParameterUpdate, VoteGeneration, VoteEvaluation, VoteSampling, FinalVerdict }

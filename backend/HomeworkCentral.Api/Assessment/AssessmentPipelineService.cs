@@ -91,11 +91,11 @@ public sealed class AssessmentPipelineService(
             IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
             ChatMonitoringNeuralModelPrediction prediction = model.Predict(new ChatMonitoringNeuralModelInput(
                 modelRequirement, contextSnapshot, job.Content, 0, 1, Math.Clamp(recentMessages.Count / 5f, 0, 1), (float)previousScore));
-            string retrievalCategory = $"chat-monitoring-{chatMonitoringKind.ToString().ToLowerInvariant()}";
+            string retrievalPositionId = ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind);
             bool reviewerInvoked = ticketOptions.OllamaEnabled && TicketReviewPolicy.ShouldReview(
                 prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
             IReadOnlyList<VectorDocument> similar = reviewerInvoked
-                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, retrievalCategory, ct)
+                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, retrievalPositionId, ct)
                 : [];
             string? rawReview = reviewerInvoked
                 ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, modelRequirement, contextSnapshot, similar, ticketOptions.MaxMessageCharacters), ct)

@@ -20,6 +20,31 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
+    public void Compact_training_records_loss_without_parameter_deltas_and_can_early_stop()
+    {
+        using ModerationChatMonitorNeuralNet model = new();
+        ChatMonitoringNeuralModelInput input = new("Monitor for harassment.", "Repeated insults.", "You are worthless.", 0, 1f, .6f, .5f);
+        TrainingPassTrace trace = model.TrainWithTrace(
+            new(input, new ChatMonitoringNeuralModelTargets(.95f, .9f), "harassment"),
+            epochs: 40,
+            detail: NeuralTrainingTraceDetail.Compact,
+            evidenceTolerance: 0.2f,
+            relevanceTolerance: 0.2f,
+            lossStopThreshold: 0.8f);
+        Assert.True(trace.Iterations.Count >= 1);
+        Assert.True(trace.Iterations.Count <= 40);
+        Assert.All(trace.Iterations, iteration => Assert.Empty(iteration.Update.Parameters));
+        Assert.True(trace.Iterations[^1].LossAfterUpdate.TotalLoss > 0f);
+    }
+
+    [Fact]
+    public void Lineage_vector_keys_are_stable_per_monitor()
+    {
+        Assert.Equal("chat-monitoring-moderation", ChatMonitoringVectorKeys.LineagePositionId(NeuralModelKindChatMonitoring.Moderation));
+        Assert.Equal("chat-monitoring-tutoring", ChatMonitoringVectorKeys.LineagePositionId(NeuralModelKindChatMonitoring.Tutoring));
+    }
+
+    [Fact]
     public void Specialized_models_have_separate_fixed_topologies_and_real_updates()
     {
         using ModerationChatMonitorNeuralNet moderation = new();
@@ -31,7 +56,8 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.Equal(2, trace.Iterations.Count);
         Assert.Equal(150, tutoringTopology.Nodes.Count);
         Assert.Equal(142, moderationTopology.Nodes.Count);
-        Assert.NotEqual(moderationTopology.ModelVersion, tutoringTopology.ModelVersion);
+        Assert.Equal("hc-chat-monitoring-moderation-v2", moderationTopology.ModelVersion);
+        Assert.Equal("hc-chat-monitoring-tutoring-v2", tutoringTopology.ModelVersion);
         Assert.Contains(tutoringTopology.Nodes, node => node.LayerId == "learning-thread-history");
         Assert.Contains(moderationTopology.Nodes, node => node.LayerId == "behavior-history");
         Assert.All(trace.Iterations, iteration => Assert.NotEmpty(iteration.Update.Parameters));
