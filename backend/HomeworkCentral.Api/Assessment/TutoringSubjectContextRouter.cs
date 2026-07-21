@@ -3,12 +3,12 @@ namespace HomeworkCentral.Api.Assessment;
 /// <summary>
 /// Stage-1 of the tutoring cascade: f(x). Maps multi-subject application + channel signals
 /// plus hashed specific expertise labels (biology, rust, …) into an 8-d embedding for stage-2 g.
-/// Topology: 46 → 32 → 8 (tanh). Trained end-to-end via the chain rule:
+/// Topology: 62 → 32 → 8 (tanh). Trained end-to-end via the chain rule:
 /// ∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f) where ∂C/∂f comes from backprop through g's cascade input slots.
 /// </summary>
 public sealed class TutoringSubjectContextRouter : IDisposable
 {
-    public const int ExpertiseHashBins = 16;
+    public const int ExpertiseHashBins = 32;
     public const int BaseInputSize = 30;
     public const int InputSize = BaseInputSize + ExpertiseHashBins;
     public const int HiddenSize = 32;
@@ -61,7 +61,7 @@ public sealed class TutoringSubjectContextRouter : IDisposable
                 values[17 + i] = 1f;
         }
 
-        // Slots 30–45: hashed specific expertise (biology, rust, …) so the cascade sees
+        // Slots 30–61: hashed specific expertise (biology, rust, …) so the cascade sees
         // fine categories without a separate NN stage or custom rooms.
         foreach (string label in snapshot.AppliedExpertise)
             AddExpertiseHash(values, label);

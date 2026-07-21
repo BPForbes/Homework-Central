@@ -101,7 +101,8 @@ public class TicketPrefaceCheckTests
             SubjectMaskNames.Science,
             appliedExpertise: ["Biology", "Rust"]);
         float[] routerInput = TutoringSubjectContextRouter.BuildRouterInput(snapshot);
-        Assert.Equal(46, routerInput.Length);
+        Assert.Equal(TutoringSubjectContextRouter.InputSize, routerInput.Length);
+        Assert.Equal(62, routerInput.Length);
         Assert.True(routerInput.Skip(TutoringSubjectContextRouter.BaseInputSize).Sum() >= 1f);
     }
 }

@@ -22,7 +22,9 @@ public static class TicketTrackingTemplateBuilder
         List<string> prefaceSpecifics = [];
         if (prefaceResults is not null)
         {
-            foreach (TicketPrefaceResult result in prefaceResults.Values)
+            foreach (TicketPrefaceResult result in prefaceResults
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => kv.Value))
             {
                 if (string.IsNullOrWhiteSpace(prefaceCategory) && !string.IsNullOrWhiteSpace(result.PrimaryCategory))
                     prefaceCategory = result.PrimaryCategory;

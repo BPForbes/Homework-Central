@@ -302,7 +302,26 @@ public sealed class NeuralNetTrainingService(
             await db.SaveChangesAsync(ct);
             await promoter.QueueSessionAsync(session.SessionId, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            session.Status = "Cancelled";
+            session.CompletedAtUtc = DateTime.UtcNow;
+            session.FailureReason = "Training cancelled.";
+            session.ReportJson = JsonSerializer.Serialize(timings.ToReport(), JsonOptions);
+            List<ChatMonitoringNeuralModelRun> runningRuns = await db.ChatMonitoringNeuralModelRuns
+                .Where(x => x.SessionId == session.SessionId && x.Status == "Running")
+                .ToListAsync(CancellationToken.None);
+            foreach (ChatMonitoringNeuralModelRun run in runningRuns)
+            {
+                run.Status = "Cancelled";
+                run.CompletedAtUtc = DateTime.UtcNow;
+                run.FailureReason ??= "Training cancelled.";
+            }
+
+            await db.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
         {
             session.Status = "Failed";
             session.CompletedAtUtc = DateTime.UtcNow;
@@ -399,7 +418,10 @@ public sealed class NeuralNetTrainingService(
                 try { await FlushTrainMiniBatchAsync(session, run, telemetry, replay, batch, pendingTrain, timings, CancellationToken.None); }
                 catch { /* best-effort drain */ }
             }
-            await batch.FlushAsync(CancellationToken.None);
+
+            try { await batch.FlushAsync(CancellationToken.None); }
+            catch { /* best-effort drain; still record failed run below */ }
+
             run.Status = "Failed";
             run.CompletedAtUtc = DateTime.UtcNow;
             run.FailureReason = Truncate(ex.Message, 1000);
@@ -615,13 +637,29 @@ public sealed class NeuralNetTrainingService(
                 labeled);
         }
 
-        const string systemPrompt = "Generate short fictional moderation-ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Scores are 0 to 1. Never include real personal data.";
-        string? response = await llm.ChatJsonAsync(systemPrompt, "Create one varied school-chat moderation example.", ct);
+        const string moderationFallbackPrompt =
+            "Generate short fictional moderation-ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Scores are 0 to 1. Never include real personal data.";
+        const string tutoringFallbackPrompt =
+            "Generate short fictional tutor-application ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Use tutoring categories such as tutoring-mathematics or tutoring-science. Scores are 0 to 1. Never include real personal data.";
+        // Both: randomly pick a domain so fallback tickets stay usable by either lineage.
+        bool preferTutoring = mode switch
+        {
+            NeuralTrainingMode.Tutoring => true,
+            NeuralTrainingMode.Moderation => false,
+            _ => Random.Shared.Next(2) == 1,
+        };
+        string systemPrompt = preferTutoring ? tutoringFallbackPrompt : moderationFallbackPrompt;
+        string userPrompt = preferTutoring
+            ? "Create one varied school-chat tutor-application example."
+            : "Create one varied school-chat moderation example.";
+        string? response = await llm.ChatJsonAsync(systemPrompt, userPrompt, ct);
         if (string.IsNullOrWhiteSpace(response)) return null;
         try
         {
             using JsonDocument document = JsonDocument.Parse(response);
             JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
             string category = GetString(root, "category"), requirement = GetString(root, "requirement"), message = GetString(root, "message");
             if (string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(requirement) || string.IsNullOrWhiteSpace(message)) return null;
             float evidence = (float)GetUnit(root, "expectedScore", .5);
@@ -891,27 +929,36 @@ public sealed class NeuralNetTrainingService(
 
         public async Task FlushAsync(CancellationToken ct)
         {
-            if (examples.Count == 0) return;
-            List<TicketModelTrainingExample> toSave = [.. examples];
-            List<(string Content, IReadOnlyList<float> Embedding, string PositionId, Guid CanonicalId, object Metadata)> toUpsert = [.. pendingVectors];
-            examples.Clear();
-            pendingVectors.Clear();
+            if (examples.Count == 0 && pendingVectors.Count == 0) return;
 
             await persistenceGate.WaitAsync(ct);
             try
             {
-                db.TicketModelTrainingExamples.AddRange(toSave);
-                System.Diagnostics.Stopwatch dbWatch = System.Diagnostics.Stopwatch.StartNew();
-                await db.SaveChangesAsync(ct);
-                dbWatch.Stop();
-                timings.AddDb(dbWatch.ElapsedMilliseconds);
-                timings.ExamplesPersisted += toSave.Count;
+                if (examples.Count > 0)
+                {
+                    List<TicketModelTrainingExample> toSave = [.. examples];
+                    db.TicketModelTrainingExamples.AddRange(toSave);
+                    System.Diagnostics.Stopwatch dbWatch = System.Diagnostics.Stopwatch.StartNew();
+                    await db.SaveChangesAsync(ct);
+                    dbWatch.Stop();
+                    timings.AddDb(dbWatch.ElapsedMilliseconds);
+                    timings.ExamplesPersisted += toSave.Count;
+                    // Drop only after a successful DB commit so a failed save can retry.
+                    examples.Clear();
+                }
+
+                if (pendingVectors.Count == 0) return;
 
                 System.Diagnostics.Stopwatch vectorWatch = System.Diagnostics.Stopwatch.StartNew();
-                foreach ((string content, IReadOnlyList<float> embedding, string positionId, Guid canonicalId, object metadata) in toUpsert)
+                while (pendingVectors.Count > 0)
                 {
-                    await vectors.UpsertAsync(VectorNamespaces.TicketTrainingExample, content, embedding, positionId, canonicalId, metadata, ct);
+                    (string content, IReadOnlyList<float> embedding, string positionId, Guid canonicalId, object metadata) =
+                        pendingVectors[0];
+                    await vectors.UpsertAsync(
+                        VectorNamespaces.TicketTrainingExample, content, embedding, positionId, canonicalId, metadata, ct);
+                    pendingVectors.RemoveAt(0);
                 }
+
                 vectorWatch.Stop();
                 timings.AddVector(vectorWatch.ElapsedMilliseconds);
             }

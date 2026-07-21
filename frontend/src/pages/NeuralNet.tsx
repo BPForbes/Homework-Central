@@ -24,7 +24,7 @@ function cascadeMeta(model: NeuralNetVisualizerModel) {
   const stage1 = model.stage1LayerWidths?.length
     ? model.stage1LayerWidths
     : model.chatMonitoringKind === 'Tutoring'
-      ? [46, 32, 8]
+      ? [62, 32, 8]
       : [30, 24, 8]
   const stage2 = model.layerWidths.length ? model.layerWidths : [86, 48, 72, 64, 56, 103]
   const role = model.stage1Role ?? (model.chatMonitoringKind === 'Tutoring' ? 'subject-context router' : 'concept-context router')

@@ -19,7 +19,7 @@ requires Ollama or an external ML runtime:
 | Monitor | When selected | Topology |
 |---|---|---|
 | **Moderation cascade** (`…-moderation-evidence-v8` + concept router) | Default for conduct / filter tickets | Stage-1 router `30 → 24 → 8` concept/family context; stage-2 `86 → 48 → 72 → 64 → 56 → 103` (100 fine concepts + catch-all) |
-| **Tutoring cascade** (`…-tutoring-evidence-v8` + subject router) | Tutor-application tickets | Stage-1 router `46 → 32 → 8` subject + expertise-hash context; stage-2 `86 → 40 → 56 → 48 → 40 → 16` |
+| **Tutoring cascade** (`…-tutoring-evidence-v8` + subject router) | Tutor-application tickets | Stage-1 router `62 → 32 → 8` subject + expertise-hash context; stage-2 `86 → 40 → 56 → 48 → 40 → 16` |
 
 Inputs are 86 dense features: hashed text, community/prior metadata, **applied-subject
 multi-hot + count**, **channel-subject multi-hot**, exact/related/cross-subject
@@ -49,7 +49,7 @@ and explicit exclusions.
 
 ### Tutoring cascade
 
-1. **\(f\)** — subject-context router (`46 → 32 → 8`) embeds multi-subject application ↔ channel
+1. **\(f\)** — subject-context router (`62 → 32 → 8`) embeds multi-subject application ↔ channel
    plus hashed specific expertise labels from the subject extractor
 2. **\(g\)** — evidence scorer predicts evidence, relevance, and subject category from text
    **plus** \(f(x)\)
