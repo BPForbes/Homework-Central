@@ -132,6 +132,7 @@ public sealed class NeuralNetTrainingService(
             {
                 ChatMonitoringNeuralModelStateSnapshot state = ((IChatMonitoringNeuralModelTelemetry)model).GetStateSnapshot();
                 NeuralNetTopologySnapshot topology = ((IChatMonitoringNeuralModelTelemetry)model).GetTopologySnapshot();
+                bool tutoring = state.ChatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring;
                 return new NeuralNetVisualizerModelDto
                 {
                     ChatMonitoringKind = state.ChatMonitoringKind,
@@ -141,6 +142,14 @@ public sealed class NeuralNetTrainingService(
                     ParameterCount = state.ParameterCount,
                     SupportExamples = state.SupportExamples,
                     NodeCount = topology.Nodes.Count,
+                    Stage1LayerWidths = [30, 24, 8],
+                    Stage1Role = tutoring ? "subject-context router" : "concept-context router",
+                    CategoryCount = tutoring
+                        ? ChatMonitoringCategoryTaxonomy.Tutoring.Length
+                        : ChatMonitoringCategoryTaxonomy.Moderation.Length,
+                    CascadeComposition = "g(f(x))",
+                    ChainRuleSummary = "∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f)",
+                    RuntimeKind = ChatMonitoringNeuralModelHashedMlp.RuntimeKind,
                 };
             }).ToList();
         NeuralNetVisualizerModelDto primary = models[0];

@@ -40,6 +40,19 @@ public sealed class NeuralNetVisualizerModelDto
     public int ParameterCount { get; set; }
     public int SupportExamples { get; set; }
     public int NodeCount { get; set; }
+
+    /// <summary>Stage-1 router widths for cascade g(f(x)).</summary>
+    public IReadOnlyList<int> Stage1LayerWidths { get; set; } = [30, 24, 8];
+
+    /// <summary>Human label for stage-1 (concept-context vs subject-context).</summary>
+    public string Stage1Role { get; set; } = "context-router";
+
+    /// <summary>Softmax category vocabulary size (excludes evidence/relevance).</summary>
+    public int CategoryCount { get; set; }
+
+    public string CascadeComposition { get; set; } = "g(f(x))";
+    public string ChainRuleSummary { get; set; } = "∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f)";
+    public string RuntimeKind { get; set; } = "HashedMlpV8";
 }
 
 public sealed class NeuralNetVisualizerDto

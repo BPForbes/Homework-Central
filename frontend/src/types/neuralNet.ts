@@ -31,6 +31,12 @@ export interface NeuralNetVisualizerModel {
   parameterCount: number
   supportExamples: number
   nodeCount: number
+  stage1LayerWidths?: number[]
+  stage1Role?: string
+  categoryCount?: number
+  cascadeComposition?: string
+  chainRuleSummary?: string
+  runtimeKind?: string
 }
 
 export interface NeuralNetVisualizer {
