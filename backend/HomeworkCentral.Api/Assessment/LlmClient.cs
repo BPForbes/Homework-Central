@@ -22,16 +22,19 @@ public interface ILlmClient
 
 public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> options) : ILlmClient
 {
+    private static readonly TimeSpan OfflineBackoff = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+    private readonly object availabilityGate = new();
+    private DateTime? unavailableUntilUtc;
 
     public async Task<string?> ChatJsonAsync(string systemPrompt, string userPrompt, CancellationToken ct = default)
     {
         LlmOptions opts = options.Value;
-        if (!opts.Enabled)
+        if (!opts.Enabled || IsTemporarilyUnavailable())
             return null;
 
         try
@@ -69,6 +72,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            MarkTemporarilyUnavailable();
             return null;
         }
     }
@@ -76,7 +80,7 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
     public async Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default)
     {
         LlmOptions opts = options.Value;
-        if (!opts.Enabled || string.IsNullOrWhiteSpace(text))
+        if (!opts.Enabled || string.IsNullOrWhiteSpace(text) || IsTemporarilyUnavailable())
             return [];
 
         try
@@ -106,10 +110,23 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            MarkTemporarilyUnavailable();
             // fall through to hash embed
         }
 
         return HashEmbed(text);
+    }
+
+    private bool IsTemporarilyUnavailable()
+    {
+        lock (availabilityGate)
+            return unavailableUntilUtc is DateTime until && until > DateTime.UtcNow;
+    }
+
+    private void MarkTemporarilyUnavailable()
+    {
+        lock (availabilityGate)
+            unavailableUntilUtc = DateTime.UtcNow.Add(OfflineBackoff);
     }
 
     /// <summary>Deterministic fallback embedding when the LLM service is offline.</summary>
