@@ -14,7 +14,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeuralModelTelemetry
 {
-    public const string RuntimeKind = "HashedMlpV7";
+    public const string RuntimeKind = "HashedMlpV8";
     private const float LearningRate = .035f;
     private const float MomentumCoefficient = .9f;
     private const float LeakyReluSlope = .01f;
@@ -648,7 +648,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 51 => "cross-subject-support",
                 >= 52 and < 65 => $"applied-{ChatMonitoringSubjectSignals.GeneralSubjectsInOrder[input - 52]}",
                 >= 65 and < 78 => $"channel-{ChatMonitoringSubjectSignals.GeneralSubjectsInOrder[input - 65]}",
-                >= 78 and < 86 => $"cascade-subject-context-{input - 78}",
+                >= 78 and < 86 => $"cascade-context-{input - 78}",
                 _ => $"feature-{input}",
             };
             nodes.Add(new ReplayNode(nodes.Count, $"input-{input}", layerLabels[0], label, input, false));
@@ -740,18 +740,154 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private sealed record ForwardCache(float[][] Activations, float[][] PreActivations, ForwardPropagationTrace? Trace);
 }
 
-public sealed class ModerationChatMonitorNeuralNet : ChatMonitoringNeuralModelHashedMlp
+/// <summary>Stage-2 moderation evidence scorer (text + cascade concept-context embedding).</summary>
+public sealed class ModerationEvidenceScorerNeuralNet : ChatMonitoringNeuralModelHashedMlp
 {
-    public ModerationChatMonitorNeuralNet()
+    public ModerationEvidenceScorerNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Moderation,
-            "hc-chat-monitoring-moderation-v7",
-            24, 36, 28, 20,
+            "hc-chat-monitoring-moderation-evidence-v8",
+            48, 72, 64, 56,
             ["input", "current-conduct", "behavior-history", "report-correlation", "moderation-decision", "output"],
             ChatMonitoringCategoryTaxonomy.Moderation,
-            seed: 0x4D4F4437)
+            seed: 0x4D4F4438)
     {
     }
+}
+
+/// <summary>
+/// Moderation cascade g(f(x)): stage-1 <see cref="ModerationConceptContextRouter"/> is f
+/// (reported concept + family/relatedness); stage-2 <see cref="ModerationEvidenceScorerNeuralNet"/>
+/// is g over 100 fine concepts + catch-all. Training uses the chain rule
+/// ∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f) with ∂C/∂f from cascade slots 78–85.
+/// </summary>
+public sealed class ModerationChatMonitorNeuralNet : IChatMonitoringNeuralModelTelemetry
+{
+    private readonly ModerationConceptContextRouter router = new();
+    private readonly ModerationEvidenceScorerNeuralNet scorer = new();
+    private readonly object gate = new();
+
+    public NeuralModelKindChatMonitoring Kind => NeuralModelKindChatMonitoring.Moderation;
+
+    /// <summary>Stage-1 parameter L2 (diagnostics / cascade chain-rule tests).</summary>
+    public float RouterParameterL2Norm => router.ParameterL2Norm();
+
+    public ChatMonitoringNeuralModelPrediction Predict(ChatMonitoringNeuralModelInput input)
+    {
+        lock (gate) return scorer.Predict(Enrich(input));
+    }
+
+    public ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input)
+    {
+        lock (gate) return scorer.PredictWithTrace(Enrich(input));
+    }
+
+    public void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12)
+    {
+        _ = TrainWithTrace(new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"), epochs);
+    }
+
+    public TrainingPassTrace TrainWithTrace(
+        ChatMonitoringNeuralModelTrainingExample example,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f) =>
+        TrainMiniBatchWithTrace([example], epochs, detail, evidenceTolerance, relevanceTolerance, lossStopThreshold);
+
+    public TrainingPassTrace TrainMiniBatchWithTrace(
+        IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> examples,
+        int epochs = 12,
+        NeuralTrainingTraceDetail detail = NeuralTrainingTraceDetail.Full,
+        float evidenceTolerance = 0f,
+        float relevanceTolerance = 0f,
+        float lossStopThreshold = 0f)
+    {
+        if (examples is null || examples.Count == 0)
+            throw new ArgumentException("Mini-batch training requires at least one example.", nameof(examples));
+
+        lock (gate)
+        {
+            List<ModerationConceptSnapshot> snapshots = examples
+                .Select(example => SnapshotFrom(example.Input, example.Category))
+                .ToList();
+            List<ModerationConceptContextRouter.ForwardCache>? forwardStates = null;
+            float[][] routerWeightGrads = router.CreateWeightGradientBuffers();
+            float[][] routerBiasGrads = router.CreateBiasGradientBuffers();
+
+            return scorer.TrainMiniBatchWithTrace(
+                examples,
+                epochs,
+                detail,
+                evidenceTolerance,
+                relevanceTolerance,
+                lossStopThreshold,
+                resolveBatch: () =>
+                {
+                    forwardStates = new List<ModerationConceptContextRouter.ForwardCache>(examples.Count);
+                    List<ChatMonitoringNeuralModelTrainingExample> enriched = new(examples.Count);
+                    for (int i = 0; i < examples.Count; i++)
+                    {
+                        ModerationConceptContextRouter.ForwardCache state = router.ForwardCacheFor(snapshots[i]);
+                        forwardStates.Add(state);
+                        enriched.Add(examples[i] with
+                        {
+                            Input = EnrichWithContext(examples[i].Input, state.Output),
+                        });
+                    }
+
+                    return enriched;
+                },
+                onSampleInputGradients: inputGradients =>
+                {
+                    if (forwardStates is null || forwardStates.Count != inputGradients.Count)
+                        throw new InvalidOperationException("Cascade forward states were not captured for this epoch.");
+
+                    ModerationConceptContextRouter.ClearGradientBuffers(routerWeightGrads, routerBiasGrads);
+                    for (int i = 0; i < inputGradients.Count; i++)
+                    {
+                        ReadOnlySpan<float> dCdF = inputGradients[i].AsSpan(
+                            ModerationConceptContextRouter.CascadeFeatureStart,
+                            ModerationConceptContextRouter.OutputSize);
+                        router.AccumulateFromOutputGradient(
+                            forwardStates[i], dCdF, routerWeightGrads, routerBiasGrads);
+                    }
+
+                    router.ApplyMomentumUpdate(routerWeightGrads, routerBiasGrads, examples.Count);
+                });
+        }
+    }
+
+    public NeuralNetTopologySnapshot GetTopologySnapshot() => scorer.GetTopologySnapshot();
+    public NeuralNetParameterSnapshot GetParameterSnapshot(long? canonicalGeneration, int localRevision) =>
+        scorer.GetParameterSnapshot(canonicalGeneration, localRevision);
+    public ChatMonitoringNeuralModelStateSnapshot GetStateSnapshot() => scorer.GetStateSnapshot();
+    public void LoadParameterSnapshot(NeuralNetParameterSnapshot snapshot) => scorer.LoadParameterSnapshot(snapshot);
+    public void Dispose()
+    {
+        router.Dispose();
+        scorer.Dispose();
+    }
+
+    private ChatMonitoringNeuralModelInput Enrich(ChatMonitoringNeuralModelInput input, string? categoryHint = null)
+    {
+        ModerationConceptSnapshot snap = SnapshotFrom(input, categoryHint);
+        float[] context = router.Forward(snap);
+        return EnrichWithContext(input, context);
+    }
+
+    private static ChatMonitoringNeuralModelInput EnrichWithContext(
+        ChatMonitoringNeuralModelInput input,
+        ReadOnlySpan<float> cascadeContext) =>
+        input with { CascadeContext = cascadeContext.ToArray() };
+
+    private static ModerationConceptSnapshot SnapshotFrom(ChatMonitoringNeuralModelInput input, string? categoryHint = null) =>
+        ChatMonitoringModerationConceptSignals.Resolve(
+            categoryHint,
+            input.Requirement,
+            input.ThreadContext,
+            input.Message);
 }
 
 /// <summary>Stage-2 tutoring evidence scorer (text + subject features + cascade context).</summary>
@@ -760,11 +896,11 @@ public sealed class TutoringEvidenceScorerNeuralNet : ChatMonitoringNeuralModelH
     public TutoringEvidenceScorerNeuralNet()
         : base(
             NeuralModelKindChatMonitoring.Tutoring,
-            "hc-chat-monitoring-tutoring-evidence-v7",
+            "hc-chat-monitoring-tutoring-evidence-v8",
             40, 56, 48, 40,
             ["input", "current-subject-response", "learning-thread-history", "application-correlation", "tutoring-decision", "output"],
             ChatMonitoringCategoryTaxonomy.Tutoring,
-            seed: 0x54555437)
+            seed: 0x54555438)
     {
     }
 }

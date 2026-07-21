@@ -8,11 +8,12 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     [Fact]
     public void Checkpoint_round_trip_preserves_moderation_prediction()
     {
-        using ModerationChatMonitorNeuralNet source = new();
+        // Canonical checkpoints store stage-2 scorer weights; stage-1 router relearns online.
+        using ModerationEvidenceScorerNeuralNet source = new();
         ChatMonitoringNeuralModelInput input = new("Monitor for cussing.", "Prior conduct was reported.", "That was a rude curse.", 0, .9f, .4f, .5f);
         source.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f, ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "profanity")), 8);
         NeuralNetParameterSnapshot snapshot = source.GetParameterSnapshot(4, 8);
-        using ModerationChatMonitorNeuralNet restored = new();
+        using ModerationEvidenceScorerNeuralNet restored = new();
         restored.LoadParameterSnapshot(snapshot);
         ChatMonitoringNeuralModelPrediction expected = source.Predict(input);
         ChatMonitoringNeuralModelPrediction actual = restored.Predict(input);
@@ -55,7 +56,7 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.False(string.IsNullOrWhiteSpace(prediction.Category));
         Assert.True(prediction.Evidence > .4f);
         Assert.Equal(86, tutoring.GetStateSnapshot().LayerWidths[0]);
-        Assert.Contains(tutoring.GetTopologySnapshot().Nodes, node => node.Label == "cascade-subject-context-0");
+        Assert.Contains(tutoring.GetTopologySnapshot().Nodes, node => node.Label == "cascade-context-0");
     }
 
     [Fact]
@@ -83,14 +84,39 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
+    public void Moderation_cascade_chain_rule_updates_concept_router()
+    {
+        using ModerationChatMonitorNeuralNet moderation = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor reportedConcept=payment-solicitation with related tip-pressure.",
+            "Help thread.",
+            "I know the answer, but send me $10 first.",
+            0, 1f, .5f, .5f);
+        float routerBefore = moderation.RouterParameterL2Norm;
+        TrainingPassTrace trace = moderation.TrainWithTrace(
+            new(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+                ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "payment-solicitation")),
+                "payment-solicitation"),
+            epochs: 8,
+            detail: NeuralTrainingTraceDetail.Compact);
+        Assert.Contains("cascade-chain-rule", trace.Iterations[0].Update.Optimizer);
+        Assert.NotEqual(routerBefore, moderation.RouterParameterL2Norm);
+        Assert.Contains(moderation.GetTopologySnapshot().Nodes, node => node.Label == "cascade-context-0");
+        Assert.Contains(moderation.GetTopologySnapshot().Nodes, node => node.Label == "payment-solicitation");
+    }
+
+    [Fact]
     public void Mini_batch_average_cost_uses_sample_count_and_moves_predictions()
     {
         using ModerationChatMonitorNeuralNet model = new();
         ChatMonitoringNeuralModelTrainingExample[] batch =
         [
-            new(new("Monitor for harassment.", "Insults.", "You are worthless.", 0, 1f, .6f, .5f), new(.95f, .9f, 3), "harassment"),
-            new(new("Monitor for profanity.", "Cussing.", "That was a damn insult.", 0, 1f, .5f, .5f), new(.9f, .85f, 1), "profanity"),
-            new(new("Monitor for spam.", "Flood.", "Buy coins now buy coins now.", 0, .8f, .4f, .5f), new(.8f, .7f, 0), "spam"),
+            new(new("Monitor for persistent-unwanted-contact.", "Insults.", "You are worthless.", 0, 1f, .6f, .5f),
+                new(.95f, .9f, ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), "harassment"),
+            new(new("Monitor for tip-pressure.", "Tips.", "Tips are expected for the last step.", 0, 1f, .5f, .5f),
+                new(.9f, .85f, ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "tip-pressure")), "tip-pressure"),
+            new(new("Monitor for fake-engagement spam flood.", "Flood.", "Buy coins now buy coins now.", 0, .8f, .4f, .5f),
+                new(.8f, .7f, ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "spam")), "spam"),
         ];
         TrainingPassTrace trace = model.TrainMiniBatchWithTrace(batch, epochs: 20, detail: NeuralTrainingTraceDetail.Compact);
         Assert.Equal(3, trace.BatchSize);
@@ -114,20 +140,39 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using TutoringChatMonitorNeuralNet tutoring = new();
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
-        // Moderation: 86+24+36+28+20+8 = 202
+        // Moderation evidence: 86+48+72+64+56+103 = 429
         // Tutoring evidence: 86+40+56+48+40+16 = 286
-        Assert.Equal(202, moderationTopology.Nodes.Count);
+        Assert.Equal(429, moderationTopology.Nodes.Count);
         Assert.Equal(286, tutoringTopology.Nodes.Count);
-        Assert.Equal("hc-chat-monitoring-moderation-v7", moderationTopology.ModelVersion);
-        Assert.Equal("hc-chat-monitoring-tutoring-evidence-v7", tutoringTopology.ModelVersion);
-        Assert.Contains(moderationTopology.Nodes, node => node.Label == "harassment");
+        Assert.Equal("hc-chat-monitoring-moderation-evidence-v8", moderationTopology.ModelVersion);
+        Assert.Equal("hc-chat-monitoring-tutoring-evidence-v8", tutoringTopology.ModelVersion);
+        Assert.Equal(100, ChatMonitoringModerationConcepts.Slugs.Count);
+        Assert.Equal(101, ChatMonitoringCategoryTaxonomy.Moderation.Length);
+        Assert.Contains(moderationTopology.Nodes, node => node.Label == "payment-solicitation");
+        Assert.Contains(moderationTopology.Nodes, node => node.Label == "moderation-general");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-mathematics");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-history");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-computer-science");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-business");
+        Assert.Equal([86, 48, 72, 64, 56, 103], moderation.GetStateSnapshot().LayerWidths);
         Assert.Equal([86, 40, 56, 48, 40, 16], tutoring.GetStateSnapshot().LayerWidths);
+        Assert.Equal(ChatMonitoringCategoryTaxonomy.Moderation.Length + 2, moderation.GetStateSnapshot().LayerWidths[^1]);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Tutoring.Length + 2, tutoring.GetStateSnapshot().LayerWidths[^1]);
-        Assert.True(tutoringTopology.Edges.Count > moderationTopology.Edges.Count);
+        Assert.True(moderationTopology.Edges.Count > tutoringTopology.Edges.Count);
+    }
+
+    [Fact]
+    public void Moderation_taxonomy_normalizes_legacy_and_exposes_related_concepts()
+    {
+        Assert.Equal("persistent-unwanted-contact",
+            ChatMonitoringCategoryTaxonomy.NormalizeCategory(NeuralModelKindChatMonitoring.Moderation, "harassment"));
+        Assert.Equal("violent-intent",
+            ChatMonitoringCategoryTaxonomy.NormalizeCategory(NeuralModelKindChatMonitoring.Moderation, "threat"));
+        Assert.Equal("payment-solicitation",
+            ChatMonitoringCategoryTaxonomy.NormalizeCategory(NeuralModelKindChatMonitoring.Moderation, "payment-solicitation"));
+        Assert.Contains("tip-pressure", ChatMonitoringModerationConcepts.RelatedConcepts("payment-solicitation"));
+        Assert.Equal(ChatMonitoringModerationConcepts.Families.Financial,
+            ChatMonitoringModerationConcepts.FamilyOf("tip-solicitation"));
     }
 
     [Fact]
@@ -150,9 +195,10 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     public void Compact_training_records_loss_without_parameter_deltas()
     {
         using ModerationChatMonitorNeuralNet model = new();
-        ChatMonitoringNeuralModelInput input = new("Monitor for harassment.", "Repeated insults.", "You are worthless.", 0, 1f, .6f, .5f);
+        ChatMonitoringNeuralModelInput input = new("Monitor for persistent-unwanted-contact.", "Repeated insults.", "You are worthless.", 0, 1f, .6f, .5f);
         TrainingPassTrace trace = model.TrainWithTrace(
-            new(input, new ChatMonitoringNeuralModelTargets(.95f, .9f, 3), "harassment"),
+            new(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+                ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), "harassment"),
             epochs: 40,
             detail: NeuralTrainingTraceDetail.Compact,
             evidenceTolerance: 0.2f,
@@ -182,7 +228,7 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
         Assert.Equal(2, trace.Iterations.Count);
         Assert.Equal(286, tutoringTopology.Nodes.Count);
-        Assert.Equal(202, moderationTopology.Nodes.Count);
+        Assert.Equal(429, moderationTopology.Nodes.Count);
         Assert.Contains(tutoringTopology.Nodes, node => node.LayerId == "learning-thread-history");
         Assert.Contains(moderationTopology.Nodes, node => node.LayerId == "behavior-history");
         Assert.All(trace.Iterations, iteration => Assert.NotEmpty(iteration.Update.Parameters));

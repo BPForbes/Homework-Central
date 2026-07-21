@@ -7,18 +7,15 @@ namespace HomeworkCentral.Api.Assessment;
 /// is the 3Blue1Brown multi-class path; keyword heuristics remain only as a bootstrap labeler
 /// when no trained category target is supplied.
 /// Tutoring categories mirror every Mask-C general subject in <see cref="SubjectExpertiseCatalog"/>.
+/// Moderation categories are the fine-grained concepts in <see cref="ChatMonitoringModerationConcepts"/>.
 /// </summary>
 public static class ChatMonitoringCategoryTaxonomy
 {
-    public static readonly string[] Moderation =
-    [
-        "spam",
-        "profanity",
-        "threat",
-        "harassment",
-        "evasion",
-        "moderation-general",
-    ];
+    /// <summary>
+    /// 100 precise moderation concepts + catch-all. Prefer fine slugs (e.g. payment-solicitation)
+    /// over legacy broad labels (spam, profanity, …) which <see cref="NormalizeCategory"/> remaps.
+    /// </summary>
+    public static readonly string[] Moderation = ChatMonitoringModerationConcepts.SoftmaxLabels.ToArray();
 
     /// <summary>
     /// One softmax class per claimable general subject, plus a competency catch-all.
@@ -69,15 +66,14 @@ public static class ChatMonitoringCategoryTaxonomy
         return labels[index];
     }
 
-    /// <summary>Maps legacy / free-text category strings onto the current tutoring slug set.</summary>
+    /// <summary>Maps free-text / legacy category strings onto the current softmax vocabulary.</summary>
     public static string NormalizeCategory(NeuralModelKindChatMonitoring kind, string category)
     {
         string raw = category.Trim();
         string value = raw.ToLowerInvariant();
-        if (kind != NeuralModelKindChatMonitoring.Tutoring)
-            return value;
+        if (kind == NeuralModelKindChatMonitoring.Moderation)
+            return NormalizeModerationCategory(value);
 
-        // Exact Mask-C subject names first (avoids "ComputerScience" → "science").
         foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories
             .OrderByDescending(s => s.ExpertiseMaskName.Length))
         {
@@ -96,7 +92,6 @@ public static class ChatMonitoringCategoryTaxonomy
         if (Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)))
             return value;
 
-        // Longest subject-stem containment (computer science before science).
         string? bestSlug = null;
         int bestLength = -1;
         foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories)
@@ -121,6 +116,34 @@ public static class ChatMonitoringCategoryTaxonomy
         return value.StartsWith("tutoring-", StringComparison.Ordinal)
             ? value
             : "tutoring-competency";
+    }
+
+    private static string NormalizeModerationCategory(string value)
+    {
+        string mapped = ChatMonitoringModerationConcepts.MapLegacyBroadLabel(value);
+        if (string.Equals(mapped, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
+            return ChatMonitoringModerationConcepts.CatchAll;
+        if (ChatMonitoringModerationConcepts.TryGet(mapped, out _))
+            return mapped;
+
+        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
+        {
+            if (string.Equals(slug, value, StringComparison.OrdinalIgnoreCase))
+                return slug;
+        }
+
+        string? best = null;
+        int bestLength = -1;
+        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
+        {
+            if (value.Contains(slug, StringComparison.OrdinalIgnoreCase) && slug.Length > bestLength)
+            {
+                best = slug;
+                bestLength = slug.Length;
+            }
+        }
+
+        return best ?? ChatMonitoringModerationConcepts.CatchAll;
     }
 
     public static string SubjectToTutoringSlug(string subjectMaskName) => subjectMaskName switch

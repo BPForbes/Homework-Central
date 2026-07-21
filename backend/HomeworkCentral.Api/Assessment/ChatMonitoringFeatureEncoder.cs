@@ -7,7 +7,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// 46 thread continuity; 47 prior score; 48 applied-subject count (norm);
 /// 49 exact channel match; 50 related match; 51 cross-subject support;
 /// 52–64 applied-subject multi-hot (13 Mask-C); 65–77 channel-subject multi-hot;
-/// 78–85 tutoring cascade stage-1 subject-context embedding (zeros for moderation).
+/// 78–85 cascade stage-1 embedding (concept-context for moderation; subject-context for tutoring).
 /// </summary>
 public static class ChatMonitoringFeatureEncoder
 {

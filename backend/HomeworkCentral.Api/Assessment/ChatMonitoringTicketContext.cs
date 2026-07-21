@@ -78,12 +78,37 @@ public static class ChatMonitoringTicketContext
             return "tutoring-competency";
         }
 
-        if (value.Contains("spam") || value.Contains("flood")) return "spam";
-        if (value.Contains("profan") || value.Contains("cuss")) return "profanity";
-        if (value.Contains("threat") || value.Contains("harm")) return "threat";
-        if (value.Contains("harass") || value.Contains("insult") || value.Contains("abuse")) return "harassment";
-        if (value.Contains("evad") || value.Contains("filter")) return "evasion";
-        return "moderation-general";
+        // Prefer an explicit fine-grained slug mentioned in the ticket text.
+        string? bestSlug = null;
+        int bestLength = -1;
+        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
+        {
+            if (value.Contains(slug, StringComparison.Ordinal) && slug.Length > bestLength)
+            {
+                bestSlug = slug;
+                bestLength = slug.Length;
+            }
+        }
+
+        if (bestSlug is not null)
+            return bestSlug;
+
+        if (ContainsAny(value, "tip pressure", "tip-pressure", "guilt tip")) return "tip-pressure";
+        if (ContainsAny(value, "tip solicit", "tip-solicit", "tips expected", "send tip")) return "tip-solicitation";
+        if (ContainsAny(value, "pay me", "payment solicit", "pay for help", "paywalled")) return "payment-solicitation";
+        if (ContainsAny(value, "cash app", "paypal", "venmo", "crypto", "gift card")) return "off-platform-payment";
+        if (ContainsAny(value, "impersonat", "pretend to be staff", "fake mod")) return "staff-impersonation";
+        if (ContainsAny(value, "doxx", "doxing", "home address", "phone number leak")) return "doxxing";
+        if (ContainsAny(value, "groom", "minor", "underage")) return "grooming-escalation";
+        if (ContainsAny(value, "threat", "kill you", "hurt you", "violent")) return "violent-intent";
+        if (ContainsAny(value, "malware", "password", "account takeover", "phishing")) return "credential-theft";
+        if (ContainsAny(value, "brigad", "mass report", "sockpuppet", "vote manip")) return "coordinated-brigading";
+        if (ContainsAny(value, "harass", "insult", "dogpil", "unwanted contact")) return "persistent-unwanted-contact";
+        if (ContainsAny(value, "misinfo", "fake news", "fabricated source")) return "fabricated-source";
+        if (ContainsAny(value, "spam", "flood")) return "fake-engagement";
+        if (ContainsAny(value, "profan", "cuss")) return ChatMonitoringModerationConcepts.CatchAll;
+        if (ContainsAny(value, "evad", "filter bypass")) return "security-control-bypass";
+        return ChatMonitoringModerationConcepts.CatchAll;
     }
 
     private static bool ContainsAny(string haystack, params string[] needles)

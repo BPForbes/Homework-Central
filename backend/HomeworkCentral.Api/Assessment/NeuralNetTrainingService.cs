@@ -732,11 +732,23 @@ public sealed class NeuralNetTrainingService(
 
     private static bool IsModelDomainMatch(NeuralModelKindChatMonitoring chatMonitoringKind, string category)
     {
-        bool moderationScenario = category.Contains("moderation", StringComparison.OrdinalIgnoreCase)
+        bool tutoringScenario = category.Contains("tutor", StringComparison.OrdinalIgnoreCase)
+            || category.Contains("competency", StringComparison.OrdinalIgnoreCase)
+            || category.StartsWith("tutoring-", StringComparison.OrdinalIgnoreCase);
+        if (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring)
+            return tutoringScenario;
+
+        string normalized = ChatMonitoringCategoryTaxonomy.NormalizeCategory(
+            NeuralModelKindChatMonitoring.Moderation, category);
+        if (ChatMonitoringModerationConcepts.TryGet(normalized, out _)
+            || string.Equals(normalized, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
+            return true;
+
+        return category.Contains("moderation", StringComparison.OrdinalIgnoreCase)
             || category.Contains("harassment", StringComparison.OrdinalIgnoreCase)
             || category.Contains("profanity", StringComparison.OrdinalIgnoreCase)
-            || category.Contains("spam", StringComparison.OrdinalIgnoreCase);
-        return chatMonitoringKind == NeuralModelKindChatMonitoring.Moderation ? moderationScenario : !moderationScenario;
+            || category.Contains("spam", StringComparison.OrdinalIgnoreCase)
+            || !tutoringScenario;
     }
 
     private static NeuralNetTrainingSessionDto MapSession(NeuralNetTrainingSession session, IEnumerable<ChatMonitoringNeuralModelRun>? runs = null) => new()
