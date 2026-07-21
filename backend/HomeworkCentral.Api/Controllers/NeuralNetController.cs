@@ -54,10 +54,11 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         Ok(await training.GetTrainingSessionsAsync(ct));
 
     [HttpGet("training/{sessionId:guid}/report")]
-    public async Task<IActionResult> DownloadTrainingReport(Guid sessionId, CancellationToken ct)
+    public async Task<IActionResult> DownloadTrainingReport(Guid sessionId, [FromQuery] NeuralModelKindChatMonitoring? chatMonitoringKind, CancellationToken ct)
     {
-        string? report = await training.GetSessionReportAsync(sessionId, ct);
-        return string.IsNullOrWhiteSpace(report) ? NotFound() : File(System.Text.Encoding.UTF8.GetBytes(report), "application/json", $"neural-net-training-{sessionId:N}.json");
+        string? report = await training.GetSessionReportAsync(sessionId, chatMonitoringKind, ct);
+        string kindSuffix = chatMonitoringKind is null ? string.Empty : $"-{chatMonitoringKind.Value.ToString().ToLowerInvariant()}";
+        return string.IsNullOrWhiteSpace(report) ? NotFound() : File(System.Text.Encoding.UTF8.GetBytes(report), "application/json", $"neural-net-training-{sessionId:N}{kindSuffix}.json");
     }
 
     private Guid? GetUserId()

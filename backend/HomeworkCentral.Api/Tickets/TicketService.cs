@@ -23,7 +23,7 @@ public sealed class TicketService(
     IAccessScopeAccessor accessScope,
     ITicketRecipientResolver recipientResolver,
     ITicketTrackingAnalyzer trackingAnalyzer,
-    ITicketStudentModel student,
+    IChatMonitoringNeuralModelFactory chatMonitoringModels,
     IVectorDocumentStore vectors) : ITicketService
 {
     private static readonly Guid SystemInboxMessageId =
@@ -523,7 +523,7 @@ public sealed class TicketService(
             ?? throw new InvalidOperationException("The referenced message no longer exists.");
         TicketUserWatch watch = ticket.Watches.FirstOrDefault(x => x.TrackedUserId == score.TrackedUserId)
             ?? throw new InvalidOperationException("The score no longer has a matching ticket watch.");
-        string requirement = TicketStudentContext.BuildRequirement(watch, 4000);
+        string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
 
         TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
             .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
@@ -541,9 +541,11 @@ public sealed class TicketService(
             score.TrainingApprovedAtUtc = now;
             score.TrainingApprovedByUserId = actorUserId;
             await db.SaveChangesAsync(ct);
-            student.Train(new(requirement, message.RawContent, training.TargetScore, training.TargetRelevance, training.Category));
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(NeuralModelKindChatMonitoring.Moderation);
+            model.Train(new ChatMonitoringNeuralModelInput(requirement, string.Empty, message.RawContent, 0, 1, 0, .5f),
+                new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(
-                VectorNamespaces.TicketTrainingExample, message.RawContent, student.Embed(message.RawContent),
+                VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
                 training.Category, training.TrainingExampleId,
                 new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source }, ct);
         }
