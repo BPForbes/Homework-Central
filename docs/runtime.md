@@ -7,6 +7,8 @@ development on an 8 GiB Windows 11 workstation while still documenting the
 service boundaries that matter in larger deployments. This document owns:
 
 - application hot paths that reduce repeated database work and browser memory;
+- asymptotic (Big-O) time and space characteristics of those hot paths, and
+  whether they can be improved;
 - bounded shared-memory choices in the backend and PostgreSQL;
 - the current RabbitMQ decision and the outbox requirement for a future broker;
 - ClamAV resource tradeoffs and native-service alternatives;
@@ -160,6 +162,92 @@ resource limits, and launcher heap behavior.
 Database work in one request is batched, projected, or cached. Do not run
 parallel operations on the same EF `DbContext`; use separate contexts only for
 independent work that is safe to run concurrently.
+
+### Asymptotic analysis (hot paths)
+
+Asymptotic notes belong in this document (or a short cross-link from the owning
+feature doc). Do **not** put time/space Big-O comments on individual functions in
+source; keep source comments for intent, trust boundaries, and operational
+constraints. See the Comment Documentation Guide.
+
+#### Variables
+
+| Symbol | Meaning |
+|---|---|
+| `L` | Message / answer text length (characters) |
+| `T` | Tokens after encoding (feature encoder caps fields) |
+| `K` | Active mentions in a send |
+| `U` | Eligible users in the sender’s account-class scope |
+| `M` | Messages in a page / retained client list (`≤100` API page, `≤250` client) |
+| `A` | Attachments on a message |
+| `R` | Catalog rooms |
+| `C` | Custom channels in the snapshot store |
+| `W` | Active assessment watches for a tracked user |
+| `F` | Neural feature width (fixed, currently 86) |
+| `P` | Dense MLP parameter / edge count for a stage-2 model |
+| `B` | Mini-batch size |
+| `E` | Local training epochs |
+| `S` | In-memory support examples (capped, currently 512) |
+| `D` | Vector documents scanned for similarity (capped, currently 200) |
+| `V` | Preface vocabulary keys |
+| `Q` | Intake questions on a portal |
+| `G` | Moderation concept slug count |
+| `Rule` | Access / mention rules on a channel or portal |
+
+#### Chat
+
+| Hot path | Time | Space | Improvable? | Improvement direction |
+|---|---|---|---|---|
+| Message send without mentions | `O(L + A)` plus DB I/O | `O(A)` | No for current page sizes | — |
+| Message send with mentions | Dominated by recipient resolve: `O(U + K·U)` | `O(U + K)` | **Yes** | Index usernames/`UserId` once; avoid full `U` scan per mention token |
+| Mentions / ticket recipient resolve (DevAdmin fan-out) | `O(N_tenants · U)` load | `O(U)` | **Yes** | Short-TTL scoped eligible-user cache |
+| Catalog room id lookup (`FindById`) | `O(R)` linear scan | Static | **Yes** | Room-id dictionary / frozen map |
+| Accessible nav build | `O(R² + C·Rule)` if each room re-scans catalog | `O(R + C)` | **Yes** | Filter with definition overload + `O(1)` id lookup |
+| Chat history page | DB order `O(M log M)` + map `O(M · (A_i + votes_i))` | `O(M)` | No at fixed page size | Split queries already avoid join blowup |
+| Client live append dedupe (`useChatRoom`) | `O(M)` membership per live message → bursty `O(M²)` | `O(M)` capped 250 | **Yes** | Keep a `Set` of message ids beside the array |
+
+#### Tickets and preface
+
+| Hot path | Time | Space | Improvable? | Improvement direction |
+|---|---|---|---|---|
+| Open ticket (core persist) | Intake `O(Q)` + channel/watches + nav refresh `O(C)` | `O(Q + W)` | Mild | `HashSet` for watch de-dupe when `W` grows |
+| Open-ticket inbox recipient resolve | Same as chat mentions: `O(U + Rule·U)` | `O(U)` | **Yes** | Same username/`UserId` indexes as chat |
+| Preface vocabulary phrase hits | `O(V · L)` (`Contains` over keys) | `O(V)` | **Yes** | Trie / Aho-Corasick |
+| Preface fuzzy token match (Levenshtein) | Worst `O(Tok · V · ℓ²)` | `O(V)` | **Yes** | Length-bucketed index / BK-tree; fuzzy only on exact miss |
+
+#### Assessment / neural
+
+| Hot path | Time | Space | Improvable? | Improvement direction |
+|---|---|---|---|---|
+| Feature encode | `O(T)` into fixed `F` bins | `O(F)` | No | Fixed hash width is intentional |
+| Stage-2 forward / backprop | `Θ(P)` dense matmuls | Activations `O(Σ hidden)` | No for dense MLP | Architecture cost |
+| Predict + support cosine | Forward `O(P)` + support `O(S · F)` | `O(F + S·F)` | **Yes** | Skip dense forward-trace on hot path; prototypes / capped support vs full scan |
+| Support eviction (`RemoveAt(0)`) | `O(S)` | `O(S · F)` | **Yes** | Ring buffer / queue for `O(1)` eviction |
+| Moderation concept text scan | `O(G · L)` slug `Contains` | `O(L)` | **Yes** | Automaton / single token pass |
+| Vector similarity retrieve | `O(D · F)` + sort `O(D log D)` | `O(D · F)` | **Yes at scale** | ANN / pgvector when `D` grows past hundreds |
+| Mini-batch train | `O(E · B · (T + P + P_router))` | Gradients `O(P)` | Mild | Keep Full param-delta traces rare |
+
+#### Identity / infrastructure
+
+| Hot path | Time | Space | Improvable? | Improvement direction |
+|---|---|---|---|---|
+| Effective mask read (request-cached) | `O(1)` after first rebuild | `O(1)` | No | — |
+| Effective mask rebuild | `O(roles + subjects + hierarchy)` | `O(roles + subjects)` | Mild | Write-path only |
+| Authorization catalog seed / current check | Catalog-sized counts and compares | Process cache | No for request path | Startup / provision only |
+| Custom channel store refresh | `O(C · Rule)` | `O(C)` + room-id dict | Mild | Incremental snapshot if `C` becomes huge |
+| Custom channel lookup by room id | `O(1)` | — | No | — |
+
+#### Highest-ROI improvements (not yet required)
+
+1. Chat nav / catalog: `O(1)` room-id lookup; stop `O(R²)` nav filtering.
+2. Mention and ticket recipient resolve: hash maps for username/`UserId`; short-TTL eligible-user cache.
+3. Neural predict: no dense forward-trace on the hot path; cheaper support similarity; ring-buffer support.
+4. Preface / moderation concept matching: automaton or trie instead of `O(V·L)` / `O(G·L)`.
+5. Frontend chat: id-set for live message dedupe.
+
+When changing these hot paths, update this section and answer in review: what are
+the time and space complexities, and can they be improved without harming
+correctness or trust boundaries?
 
 ### Shared memory
 

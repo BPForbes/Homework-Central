@@ -85,11 +85,14 @@ Before approving or merging changes, reviewers must check:
    state, personal authorship, or implementation chronology.
 6. **Complexity thresholds** — functions exceeding warning bands are reviewed for
    simplification; functions exceeding hard limits are refactored.
-7. **Canonical docs** — user-facing or operator-facing knowledge is added to the
+7. **Asymptotic cost** — new or changed algorithms and hot paths state time and
+   space complexity (Big-O) in review or in `docs/runtime.md`, and answer whether
+   the cost can be improved. Do not put Big-O comments on individual functions.
+8. **Canonical docs** — user-facing or operator-facing knowledge is added to the
    most relevant existing Markdown file.
-8. **Cross-references** — source comments point to stable docs only when the code
+9. **Cross-references** — source comments point to stable docs only when the code
    cannot carry the full rationale safely.
-9. **Tests as documentation** — behavior encoded in comments or Markdown has
+10. **Tests as documentation** — behavior encoded in comments or Markdown has
    corresponding tests when it is executable behavior.
 
 ## Documentation decision guide
@@ -101,6 +104,7 @@ Use the smallest durable documentation surface that captures the information.
 | Clarify a non-obvious line or block | Inline comment near the code | Tenant filter intentionally omits tenant ID for shared chat traffic. |
 | Explain public API contract | XML doc or exported TypeScript type doc | `IChatRoomAccessService.CanAccessRoom` authorization contract. |
 | Explain architecture or trust boundary | Existing feature Markdown in `docs/` | `docs/identity.md`, `docs/chat.md`, `docs/tickets.md`. |
+| Record hot-path time/space cost | `docs/runtime.md` asymptotic section | Mention fan-out `O(U + K·U)`; nav lookup improvements. |
 | Record a decision and alternatives | ADR | Choice to keep built-in chat rooms catalog-driven. |
 | Describe operations or incident response | Runbook | Restoring Postgres, rotating captcha secrets, handling failed migrations. |
 | Explain local setup | `README.md`, `SETUP.md`, or script comments | App ports/reset commands; optional contributor tool installs in `SETUP.md`. |
@@ -656,6 +660,9 @@ Style rules:
 - Avoid authoring-process language.
 - Keep comments close to the code they constrain.
 - Delete comments made obsolete by clearer names or simpler structure.
+- Do **not** put asymptotic time or space complexity (Big-O) on individual
+  functions. Record those notes in `docs/runtime.md` (or a short cross-link from
+  the owning feature doc) instead.
 
 Example:
 
@@ -1255,8 +1262,10 @@ Use this checklist before submitting or approving a change:
 - [ ] Closed-set decisions use pattern matching instead of large `if` chains.
 - [ ] Functions stay below hard complexity limits or have an approved exception.
 - [ ] Warning-band complexity has been considered for decomposition.
+- [ ] Algorithm / hot-path changes state time and space complexity (Big-O) and
+      whether cost can be improved; updates go to `docs/runtime.md`, not function comments.
 - [ ] Comments explain project-specific why, constraints, or risks.
-- [ ] Comments avoid self-reference and authoring-process language.
+- [ ] Comments avoid self-reference, authoring-process language, and Big-O annotations.
 - [ ] XML docs exist for public contracts and security-sensitive abstractions.
 - [ ] Markdown updates went to the canonical existing document.
 - [ ] ADRs were added for consequential architecture decisions.

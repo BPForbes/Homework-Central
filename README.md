@@ -153,7 +153,7 @@ Architecture, trust boundaries, and engineering standards live under
 | [`docs/identity.md`](docs/identity.md) | Authentication, sessions, account classes, tenant visibility |
 | [`docs/chat.md`](docs/chat.md) | Chat categories, rooms, messages, attachments |
 | [`docs/tickets.md`](docs/tickets.md) | Ticket portals, Trial Tutor, votes, AI scoring |
-| [`docs/runtime.md`](docs/runtime.md) | Runtime efficiency, service tradeoffs, Windows Docker resources |
+| [`docs/runtime.md`](docs/runtime.md) | Runtime efficiency, asymptotic hot-path cost, Docker resources |
 | [`design.md`](design.md) | UI design tokens and motion |
 | [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md) | Kubernetes deployment |
 

@@ -46,6 +46,24 @@ reviews:
         - Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
           structural readability score below the accepted threshold must be split into cohesive,
           precisely named subfunctions unless an approved exception applies.
+        - Do not put time/space Big-O comments on individual functions. Record asymptotic notes
+          in `docs/runtime.md` (or a short cross-link from the owning feature doc).
+
+        ## Asymptotic analysis (required for algorithm / hot-path changes)
+
+        When reviewing new or changed algorithms, loops over collections, lookups, or
+        data-structure choices, evaluate:
+
+        1. What are the **time** and **space** complexities (Big-O) in meaningful variables
+           (messages, users, mentions, rooms, vocabulary size, batch size, feature width, etc.)?
+        2. Can the cost be **improved** without breaking correctness, trust boundaries, or APIs?
+        3. Flag nested scans that yield `O(n²)` where a dictionary, set, or automaton would be
+           linear expected cost.
+        4. If a documented hot path changes, require an update to
+           `docs/runtime.md` § Asymptotic analysis.
+
+        Asymptotic cost is separate from cognitive/cyclomatic readability limits; evaluate both.
+        Baseline hot-path table: `docs/runtime.md`.
 
         ## System documentation (docs/*)
 
@@ -104,9 +122,11 @@ reviews:
 
         ## Complexity analysis (required)
 
-        For every new or changed function/method under review, run a complexity
-        analysis and report findings when thresholds are approached or exceeded
-        (see Comment Documentation Guide § Function readability and complexity):
+        Evaluate **two** kinds of complexity for every new or changed in-scope function:
+
+        ### A) Cognitive / structural readability (Comment Documentation Guide)
+
+        Report findings when thresholds are approached or exceeded:
 
         Hard complexity gates apply to C# under `backend/` (`*.cs`).
 
@@ -130,6 +150,19 @@ reviews:
         module doc under `docs/`. Prefer decomposition around authorization,
         validation, persistence, DTO mapping, and similar seams.
 
+        ### B) Asymptotic time and space (required for algorithms / hot paths)
+
+        For loops, lookups, scans, sorting, graph/text matching, neural paths, and
+        collection fan-out, answer in the review:
+
+        - What is the **time** complexity?
+        - What is the **space** complexity?
+        - Can this be improved (dictionary/set/automaton/index/cache) without harming
+          correctness or trust boundaries?
+
+        Do **not** suggest adding Big-O comments onto the functions themselves. If the
+        change affects a hot path, require updating `docs/runtime.md` § Asymptotic analysis.
+
         For system questions (tenancy, chat access, tickets, uploads), consult
         `docs/identity.md`, `docs/chat.md`, `docs/tickets.md`, or `docs/runtime.md`.
 
@@ -141,7 +174,9 @@ reviews:
 
         ## Complexity analysis (required)
 
-        For every new or changed function under review, run a complexity analysis.
+        Evaluate **two** kinds of complexity for every new or changed in-scope function:
+
+        ### A) Cognitive / structural readability
 
         Hard complexity gates apply to non-UI TypeScript modules (`*.ts`) such as
         API clients, protocol/state-machine hooks, and pure utilities — same metric
@@ -150,6 +185,18 @@ reviews:
         Hard complexity gates do **not** apply to React component files (`*.tsx`);
         still note clearly excessive nesting or mixed protocol logic that should
         move into `*.ts` helpers/hooks.
+
+        ### B) Asymptotic time and space
+
+        For collection scans, merges, dedupe, and protocol hot paths, answer:
+
+        - What is the time complexity?
+        - What is the space complexity?
+        - Can this be improved?
+
+        Do not request Big-O comments on the functions themselves. Update
+        `docs/runtime.md` when client hot paths change (for example chat message
+        retention / live dedupe).
 
         For system questions, consult the matching file under `docs/*`.
 

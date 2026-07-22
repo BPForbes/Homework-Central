@@ -20,7 +20,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 | Identity | [identity.md](./identity.md) | Auth, sessions, captcha, account classes, tenancy |
 | Chat | [chat.md](./chat.md) | Rooms, messages, SignalR, uploads, ClamAV, downloads |
 | Tickets | [tickets.md](./tickets.md) | Portals, preface checks, votes, neural scoring, NeuralNet admin |
-| Runtime | [runtime.md](./runtime.md) | Hot paths, queues, Docker profiles, Windows resources |
+| Runtime | [runtime.md](./runtime.md) | Hot paths, asymptotic cost, queues, Docker profiles, Windows resources |
 
 ## Design and deployment
 
@@ -35,7 +35,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 | Authentication, sessions, account classes, tenant visibility | [`identity.md`](./identity.md) |
 | Chat rooms, messages, uploads, scanning, downloads | [`chat.md`](./chat.md) |
 | Ticket portals, Trial Tutor, votes, AI scoring | [`tickets.md`](./tickets.md) |
-| Runtime efficiency, service tradeoffs, Windows Docker resources | [`runtime.md`](./runtime.md) |
+| Runtime efficiency, asymptotic hot-path cost, service tradeoffs, Windows Docker resources | [`runtime.md`](./runtime.md) |
 | Design tokens and motion | [`design.md`](../design.md) |
 | Kubernetes deployment | [`deploy/kubernetes/README.md`](../deploy/kubernetes/README.md) |
 

@@ -36,6 +36,26 @@ Hard rules:
 - Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
   structural readability score below the accepted threshold must be split into cohesive,
   precisely named subfunctions unless an approved exception applies.
+- Do **not** put time/space Big-O comments on individual functions. Record asymptotic
+  notes in [`docs/runtime.md`](./docs/runtime.md) (or a short cross-link from the owning
+  feature doc).
+
+## Asymptotic analysis (time and space)
+
+When generating or changing algorithms, hot paths, loops over collections, or
+data-structure choices, perform asymptotic analysis before finishing:
+
+1. State the **time** and **space** complexity in Big-O using meaningful variables
+   (messages, users, mentions, rooms, vocabulary size, batch size, feature width, etc.).
+2. Ask: **can this be improved** without breaking correctness, trust boundaries, or
+   existing API contracts?
+3. Prefer linear (or better) expected cost for lookups that are naturally key-based;
+   flag nested scans that yield `O(n²)` where a dictionary/set/automaton would be `O(n)`.
+4. If the change alters a documented hot path, update
+   [`docs/runtime.md`](./docs/runtime.md#asymptotic-analysis-hot-paths).
+
+Cognitive/cyclomatic readability limits (Comment Documentation Guide) are separate
+from asymptotic cost. Both must be considered.
 
 ## Optional local tooling
 
