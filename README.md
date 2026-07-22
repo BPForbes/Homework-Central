@@ -88,6 +88,8 @@ On **Windows**, the API and frontend each open in a **separate terminal window**
 
 The browser opens automatically when servers are ready.
 
+The API uses **`dotnet watch`** by default so a `git pull` (or local edits) rebuilds/restarts without closing the terminal. That is process restart / .NET Hot Reload, not Vite-style HMR. Set `HC_API_WATCH=0` for a one-shot `dotnet run`. After pulling migrations, unset `HC_SKIP_DEV_WARMUP` (or restart once) so schema updates apply.
+
 ---
 
 ## Common commands
