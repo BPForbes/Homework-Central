@@ -52,8 +52,8 @@ reviews:
         - Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
           structural readability score below the accepted threshold must be split into cohesive,
           precisely named subfunctions unless an approved exception applies.
-        - Do not put time/space Big-O comments on individual functions. Record asymptotic notes
-          in `docs/runtime.md` (or a short cross-link from the owning feature doc).
+        - Hot-path optimization seams must note brief **time** and **space** Big-O next to
+          the data-structure or algorithm choice; keep the full table in `docs/runtime.md`.
 
         ## Asymptotic analysis (required for algorithm / hot-path changes)
 
@@ -62,10 +62,11 @@ reviews:
 
         1. What are the **time** and **space** complexities (Big-O) in meaningful variables
            (messages, users, mentions, rooms, vocabulary size, batch size, feature width, etc.)?
-        2. Can the cost be **improved** without breaking correctness, trust boundaries, or APIs?
-        3. Flag nested scans that yield `O(n²)` where a dictionary, set, or automaton would be
+        2. Is a brief Time/Space note present on the hot-path seam in source?
+        3. Can the cost be **improved** without breaking correctness, trust boundaries, or APIs?
+        4. Flag nested scans that yield `O(n²)` where a dictionary, set, or automaton would be
            linear expected cost.
-        4. If a documented hot path changes, require an update to
+        5. If a documented hot path changes, require an update to
            `docs/runtime.md` § Asymptotic analysis.
 
         Asymptotic cost is separate from cognitive/cyclomatic readability limits; evaluate both.
@@ -166,8 +167,8 @@ reviews:
         - Can this be improved (dictionary/set/automaton/index/cache) without harming
           correctness or trust boundaries?
 
-        Do **not** suggest adding Big-O comments onto the functions themselves. If the
-        change affects a hot path, require updating `docs/runtime.md` § Asymptotic analysis.
+        Require a brief Time/Space Big-O note on the hot-path seam and an update to
+        `docs/runtime.md` § Asymptotic analysis when the path changes.
 
         For system questions (tenancy, chat access, tickets, uploads), consult
         `docs/identity.md`, `docs/chat.md`, `docs/tickets.md`, or `docs/runtime.md`.
@@ -200,7 +201,7 @@ reviews:
         - What is the space complexity?
         - Can this be improved?
 
-        Do not request Big-O comments on the functions themselves. Update
+        Require a brief Time/Space Big-O note on the client hot-path seam and update
         `docs/runtime.md` when client hot paths change (for example chat message
         retention / live dedupe).
 

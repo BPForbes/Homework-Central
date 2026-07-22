@@ -50,7 +50,9 @@ public sealed class MentionRecipientResolver(
         HashSet<Guid> recipients = [];
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(senderAccountClass, senderTenantDatabaseName, ct);
         // Mentions resolve many @username tokens against one scoped load; the map
-        // keeps username lookup off a repeated linear scan. See docs/chat.md.
+        // keeps username lookup off a repeated linear scan.
+        // Time: load O(U), username hit O(1); role/@everyone still O(U).
+        // Space: O(U + K). See docs/runtime.md.
         Dictionary<string, UserMaskSnapshot> eligibleUsersByUsername = new(StringComparer.OrdinalIgnoreCase);
         foreach (UserMaskSnapshot user in eligibleUsers)
             eligibleUsersByUsername.TryAdd(user.Username, user);
@@ -311,7 +313,8 @@ public sealed class MentionRecipientResolver(
 
     /// <summary>
     /// Loads master masks with one username dictionary for the batch — avoids a Users
-    /// query per mask row when filtering DevAdmin. See docs/chat.md.
+    /// query per mask row when filtering DevAdmin.
+    /// Time: one username query + O(U) assemble. Space: O(U). See docs/chat.md.
     /// </summary>
     private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
     {

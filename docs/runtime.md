@@ -167,10 +167,10 @@ independent work that is safe to run concurrently.
 
 ### Asymptotic analysis (hot paths)
 
-Asymptotic notes belong in this document (or a short cross-link from the owning
-feature doc). Do **not** put time/space Big-O comments on individual functions in
-source; keep source comments for intent, trust boundaries, and operational
-constraints. See the Comment Documentation Guide.
+Asymptotic notes belong in this document (full table, status, and improvement
+discussion). Hot-path optimization seams in source also carry a brief Time/Space
+Big-O note next to the data-structure or algorithm choice, using the variable
+legend below. See the Comment Documentation Guide.
 
 #### Variables
 
@@ -185,6 +185,7 @@ constraints. See the Comment Documentation Guide.
 | `R` | Catalog rooms |
 | `C` | Custom channels in the snapshot store |
 | `W` | Active assessment watches for a tracked user |
+| `Tok` | Tokens in a preface/moderation haystack after normalize/split |
 | `F` | Neural feature width (fixed, currently 86) |
 | `P` | Dense MLP parameter / edge count for a stage-2 model |
 | `B` | Mini-batch size |
@@ -214,7 +215,7 @@ constraints. See the Comment Documentation Guide.
 |---|---|---|---|
 | Open ticket (core persist) | Intake `O(Q)` + channel/watches + nav refresh `O(C)` | `O(Q + W)` | Mild: `HashSet` for watch de-dupe if `W` grows |
 | Open-ticket inbox recipient resolve | `UserId` dictionary `O(1)` for allowed-user rules; role rules still `O(U)` | `O(U)` | User-id index applied; ticket master load no longer N+1 |
-| Preface vocabulary phrase hits | Word-window lookups into `Exact` ≈ `O(W²)` windows (`W` = tokens in answer), not `O(V·L)` over all keys | `O(V)` vocab | Optimized toward answer length |
+| Preface vocabulary phrase hits | Word-window lookups into `Exact` ≈ `O(Tok²)` windows, not `O(V·L)` over all keys | `O(V)` vocab | Optimized toward answer length |
 | Preface fuzzy token match (Levenshtein) | Worst `O(Tok · V · ℓ²)` | `O(V)` | Still improvable (length-bucket / BK-tree) |
 
 #### Assessment / neural
@@ -225,7 +226,7 @@ constraints. See the Comment Documentation Guide.
 | Stage-2 forward / backprop | `Θ(P)` dense matmuls | Activations `O(Σ hidden)` | Architecture cost |
 | Predict + support cosine | Forward `O(P)` + support `O(S · F)` | `O(F + S·F)` | Support scan still full; prototypes remain optional later |
 | Support eviction | `O(1)` `Queue.Dequeue` | `O(S · F)` | Optimized (was `RemoveAt(0)`) |
-| Moderation concept text scan | Word/hyphen windows + `TryGet` ≈ `O(W · window)` | `O(L)` | Optimized (was `O(G · L)` slug `Contains`) |
+| Moderation concept text scan | Word/hyphen windows + `TryGet` ≈ `O(Tok · window)` | `O(L)` | Optimized (was `O(G · L)` slug `Contains`) |
 | Vector similarity retrieve | `O(D · F)` + sort `O(D log D)` | `O(D · F)` | Fine at `D≤200`; ANN later at scale |
 | Mini-batch train | `O(E · B · (T + P + P_router))` | Gradients `O(P)` | Keep Full param-delta traces rare |
 

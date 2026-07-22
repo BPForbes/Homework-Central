@@ -33,7 +33,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly float[][] biasVelocity;
     private readonly NeuralNetTopologySnapshot topology;
     // FIFO support set: train enqueues examples and drops the oldest past 512.
-    // Queue.Dequeue avoids shifting a List on every eviction. See docs/runtime.md.
+    // Eviction time: O(1) Queue.Dequeue (was List.RemoveAt(0)). Space: O(S·F). See docs/runtime.md.
     private readonly Queue<SupportExample> support = new();
     private readonly object gate = new();
 

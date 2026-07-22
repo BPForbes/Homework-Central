@@ -178,7 +178,9 @@ public static class ChatMonitoringModerationConceptSignals
 
     /// <summary>
     /// Maps free text to a moderation concept slug: longest Exact hyphen windows via
-    /// <c>TryGet</c> win over shorter tokens. Prefer Exact dictionary hits. See docs/chat.md.
+    /// <c>TryGet</c> win over shorter tokens. Prefer Exact dictionary hits.
+    /// Time ≈ O(Tok · window) Exact lookups (was O(G·L) slug Contains). Space: O(L).
+    /// See docs/chat.md and docs/runtime.md.
     /// </summary>
     private static string? ParseConceptFromTexts(IReadOnlyList<string?> texts)
     {

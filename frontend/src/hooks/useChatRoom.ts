@@ -52,6 +52,7 @@ function rebuildKnownMessageIds(knownMessageIds: Set<string>, messages: ChatMess
 
 // Live SignalR appends check the Set instead of scanning the messages array.
 // Cap rebuild keeps membership aligned after the 250-message retain trim.
+// Time: O(1) membership; trim rebuild O(M). Space: O(M) capped at 250. See docs/runtime.md.
 function appendLiveMessage(
   previousMessages: ChatMessage[],
   message: ChatMessage,
@@ -267,7 +268,7 @@ export function useChatRoom(
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const isTypingRef = useRef(false)
-  // Membership set for live dedupe; see appendLiveMessage and docs/runtime.md.
+  // Membership set for live dedupe (O(1) has/add); see appendLiveMessage and docs/runtime.md.
   const knownMessageIdsRef = useRef<Set<string>>(new Set())
 
   const addMessage = useCallback((message: ChatMessage) => {
