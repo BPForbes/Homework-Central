@@ -1278,7 +1278,7 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 
 ### Related docs
 
-- [docs/runtime.md](runtime.md) — assessment queue, local resource limits, Ollama concurrency, and service tradeoffs
+- [docs/runtime.md](runtime.md) — assessment queue, local resource limits, Ollama concurrency, service tradeoffs, and asymptotic costs for preface/neural/recipient paths
 - [docs/chat.md](chat.md) — room categories, access bits, portal visibility, ticket attachments, scanning, and download safety
 - [docs/identity.md](identity.md) — JWT, account class, developer login, and account-class visibility
 - [docs/README.md](README.md) — documentation index

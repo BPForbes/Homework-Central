@@ -878,6 +878,7 @@ limit is the effective default application limit.
 - [Tickets and assessment](tickets.md) — ticket portals, ticket chat channels,
   watches, votes, neural scoring, and reviewer fallback.
 - [Runtime and operations](runtime.md) — ClamAV service choice, local service
-  topology, and Docker resource guidance for the opt-in antivirus profile.
+  topology, Docker resource guidance, and asymptotic hot-path costs (mentions,
+  nav, client message retention).
 - [Comment Documentation Guide](COMMENT_DOCUMENTATION_GUIDE.md)
   — durable documentation and source-comment standards.
