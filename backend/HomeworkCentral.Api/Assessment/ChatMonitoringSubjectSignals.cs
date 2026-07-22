@@ -185,23 +185,27 @@ public static class ChatMonitoringSubjectSignals
             CalculateRewardScale(exact, relatedMatch, crossSupport));
     }
 
-    private static float CalculateEffectiveChannelRelevance(bool exact, float relatedMatch, float crossSupport) =>
-        exact switch
-        {
-            true => Math.Clamp(.85f + .15f * crossSupport, 0f, 1f),
-            false when relatedMatch >= .7f => .55f + .3f * relatedMatch,
-            false when relatedMatch >= .35f => .3f + .25f * relatedMatch,
-            _ => .1f,
-        };
+    private static float CalculateEffectiveChannelRelevance(bool exact, float relatedMatch, float crossSupport)
+    {
+        if (exact)
+            return Math.Clamp(.85f + .15f * crossSupport, 0f, 1f);
+        if (relatedMatch >= .7f)
+            return .55f + .3f * relatedMatch;
+        if (relatedMatch >= .35f)
+            return .3f + .25f * relatedMatch;
+        return .1f;
+    }
 
-    private static float CalculateRewardScale(bool exact, float relatedMatch, float crossSupport) =>
-        exact switch
-        {
-            true => Math.Clamp(.9f + .2f * crossSupport, 0f, 1.15f),
-            false when relatedMatch >= .7f => .65f,
-            false when relatedMatch >= .35f => .4f,
-            _ => .15f,
-        };
+    private static float CalculateRewardScale(bool exact, float relatedMatch, float crossSupport)
+    {
+        if (exact)
+            return Math.Clamp(.9f + .2f * crossSupport, 0f, 1.15f);
+        if (relatedMatch >= .7f)
+            return .65f;
+        if (relatedMatch >= .35f)
+            return .4f;
+        return .15f;
+    }
 
     public static SubjectSignalSnapshot ResolveFromTicket(TicketUserWatch watch, string? roomId, float fallbackChannelRelevance = .5f)
     {

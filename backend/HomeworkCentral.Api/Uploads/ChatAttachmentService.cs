@@ -153,7 +153,8 @@ public sealed class ChatAttachmentService(
         }
 
         UploadOptions uploadOptions = options.Value;
-        string fullPath = Path.Combine(uploadOptions.RootPath, attachment.StoragePath);
+        if (!TryResolveStoragePath(uploadOptions.RootPath, attachment.StoragePath, out string fullPath))
+            return null;
         if (!File.Exists(fullPath))
             return null;
 
@@ -181,9 +182,11 @@ public sealed class ChatAttachmentService(
             throw new InvalidOperationException("Cannot delete an attachment linked to a message.");
 
         UploadOptions uploadOptions = options.Value;
-        string fullPath = Path.Combine(uploadOptions.RootPath, attachment.StoragePath);
-        if (File.Exists(fullPath))
+        if (TryResolveStoragePath(uploadOptions.RootPath, attachment.StoragePath, out string fullPath)
+            && File.Exists(fullPath))
+        {
             File.Delete(fullPath);
+        }
 
         db.ChatAttachments.Remove(attachment);
         await db.SaveChangesAsync(ct);
@@ -226,7 +229,8 @@ public sealed class ChatAttachmentService(
     {
         Directory.CreateDirectory(uploadOptions.RootPath);
         string storageName = $"{attachmentId:N}_{safeName}";
-        string fullPath = Path.Combine(uploadOptions.RootPath, storageName);
+        if (!TryResolveStoragePath(uploadOptions.RootPath, storageName, out string fullPath))
+            throw new InvalidOperationException("Attachment storage path is invalid.");
 
         await using (Stream saveStream = file.OpenReadStream())
         await using (FileStream fileStream = File.Create(fullPath))
@@ -235,6 +239,31 @@ public sealed class ChatAttachmentService(
         }
 
         return storageName;
+    }
+
+    /// <summary>
+    /// Joins <paramref name="relativeStoragePath"/> under the upload root only when the
+    /// relative segment is not rooted (Path.Combine would otherwise drop the root).
+    /// </summary>
+    private static bool TryResolveStoragePath(string rootPath, string relativeStoragePath, out string fullPath)
+    {
+        fullPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(relativeStoragePath) || Path.IsPathRooted(relativeStoragePath))
+            return false;
+
+        string combined = Path.Combine(rootPath, relativeStoragePath);
+        string rootFull = Path.GetFullPath(rootPath);
+        string candidateFull = Path.GetFullPath(combined);
+        string rootPrefix = rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!candidateFull.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(candidateFull, rootFull, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        fullPath = candidateFull;
+        return true;
     }
 
     private async Task PersistAttachmentMetadataAsync(ChatAttachment attachment, CancellationToken ct)

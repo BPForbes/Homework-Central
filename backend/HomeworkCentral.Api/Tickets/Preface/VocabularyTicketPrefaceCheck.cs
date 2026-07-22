@@ -139,11 +139,9 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
         if (rawTokens.Count == 0)
             return FailEmpty(requireAllVerified);
 
-        return requireAllVerified switch
-        {
-            true => ProcessStrictTokens(rawTokens),
-            false => ProcessLenientNarrative(freeText, rawTokens),
-        };
+        if (requireAllVerified)
+            return ProcessStrictTokens(rawTokens);
+        return ProcessLenientNarrative(freeText, rawTokens);
     }
 
     private TicketPrefaceResult ProcessStrictTokens(IReadOnlyList<string> rawTokens)
