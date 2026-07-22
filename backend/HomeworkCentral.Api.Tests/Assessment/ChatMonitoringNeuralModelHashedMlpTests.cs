@@ -159,6 +159,38 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Moderation.Length + 2, moderation.GetStateSnapshot().LayerWidths[^1]);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Tutoring.Length + 2, tutoring.GetStateSnapshot().LayerWidths[^1]);
         Assert.True(moderationTopology.Edges.Count > tutoringTopology.Edges.Count);
+        // Dense MLP edges exceed the old student-model cap (4096); keep within cascade-aware V2 limits.
+        Assert.Equal(21544, moderationTopology.Edges.Count);
+        Assert.Equal(10928, tutoringTopology.Edges.Count);
+        Assert.True(moderationTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
+        Assert.True(tutoringTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
+        Assert.True(moderationTopology.Nodes.Count <= NeuralNetReplaySerializer.MaxNodes);
+        Assert.True(tutoringTopology.Nodes.Count <= NeuralNetReplaySerializer.MaxNodes);
+        AssertReplayValidates(moderation);
+        AssertReplayValidates(tutoring);
+    }
+
+    private static void AssertReplayValidates(IChatMonitoringNeuralModelTelemetry model)
+    {
+        NeuralNetTopologySnapshot topology = model.GetTopologySnapshot();
+        NeuralNetParameterSnapshot parameters = model.GetParameterSnapshot(null, 0);
+        ReplayIntegrity placeholder = new("hc-replay-canonical-json-v1", "sha-256", "", parameters.Checksum, parameters.Checksum, "");
+        NeuralNetReplayReportV2 draft = new(
+            "2.0",
+            Guid.NewGuid(),
+            ReplayCompletionStatus.Completed,
+            topology,
+            new ReplayStringTable([]),
+            new TrainingProvenance(topology.ModelVersion, "hashed-text-48-v1", "bce+softmax-ce-avg-v1", "momentum-mini-batch-SGD", .035f, 1, "hc-xoshiro256ss-v1", 0, "replay-v2-worker-v1"),
+            parameters,
+            [],
+            [],
+            new ReplayPayloadCollections([], [], [], [], [], [], [], [], [], []),
+            parameters,
+            placeholder,
+            null);
+        ReplayIntegrity integrity = NeuralNetReplaySerializer.CreateIntegrity(topology, parameters, parameters, NeuralNetReplaySerializer.Serialize(draft));
+        NeuralNetReplaySerializer.Validate(draft with { Integrity = integrity });
     }
 
     [Fact]

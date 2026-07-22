@@ -1,9 +1,10 @@
 import type { NeuralNetReplay } from '../types/neuralNetReplay'
 
-const maximumBytes = 20 * 1024 * 1024
+// Dense cascade scorers (moderation ≈ 21k edges) plus full training traces need room.
+const maximumBytes = 64 * 1024 * 1024
 const maximumFrames = 100_000
-const maximumNodes = 512
-const maximumEdges = 4096
+const maximumNodes = 2048
+const maximumEdges = 65536
 
 export function parseReplayImport(text: string): NeuralNetReplay {
   if (text.length > maximumBytes) throw new Error('The replay file is too large.')

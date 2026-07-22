@@ -438,7 +438,15 @@ public sealed class NeuralNetTrainingService(
             run.Status = "Failed";
             run.CompletedAtUtc = DateTime.UtcNow;
             run.FailureReason = Truncate(ex.Message, 1000);
-            run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(replay.Build(ReplayCompletionStatus.Failed, new("training", "unhandled", Truncate(ex.Message, 1000)), Options.LocalEpochs));
+            try
+            {
+                run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(replay.Build(ReplayCompletionStatus.Failed, new("training", "unhandled", Truncate(ex.Message, 1000)), Options.LocalEpochs));
+            }
+            catch (Exception replayEx)
+            {
+                // Keep the original FailureReason; do not replace it with a secondary replay-build error.
+                logger.LogWarning(replayEx, "Failed to serialize neural-net worker replay after training failure.");
+            }
             throw;
         }
         finally { await PersistAsync(persistenceGate, timings, CancellationToken.None); }
