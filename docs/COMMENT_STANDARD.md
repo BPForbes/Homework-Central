@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This standard defines how Homework Central code and documentation explain project
-behavior, architecture, trust boundaries, operations, and maintenance decisions.
+Homework Central code and documentation must explain project behavior,
+architecture, trust boundaries, operations, and maintenance decisions.
 
 It applies to:
 
@@ -872,18 +872,21 @@ constants, not every assertion.
 
 ## Analyzer and CI expectations
 
-CI and analyzers should enforce as much of this standard as practical.
+Current CI enforces backend build/test, raw SQL rejection in backend application
+code, frontend lint, and frontend build. Other items in this section are review
+expectations unless matching analyzers or checks are added.
 
-Required expectations:
+Review and automation expectations:
 
-- C# `var` usage is rejected in hand-authored code.
-- Formatting and lint checks run for backend and frontend code.
+- Hand-authored C# local variables avoid `var`; reviewers reject violations
+  until an analyzer exists.
+- Formatting and lint checks run where configured.
 - Tests cover changed executable behavior.
-- Security checks reject unsafe raw SQL in backend application code.
-- Markdown links are kept valid when files move.
+- Existing CI rejects unsafe raw SQL in backend application code.
+- Markdown links stay valid when files move.
 - Complexity warnings are reviewed before merge.
-- Hard complexity limit failures block merge unless an approved exception is
-  documented.
+- Hard complexity limit failures should block merge unless an approved exception
+  is documented.
 
 Analyzer limitations do not weaken the policy. Reviewers must enforce standards
 that tools cannot fully detect, especially misleading names, missing trust-boundary
