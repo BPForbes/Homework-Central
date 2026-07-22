@@ -3,4 +3,6 @@
 When editing C# files under `backend/`:
 
 - Do not use `var`. Always write explicit types for locals, foreach variables, and deconstruction targets.
+- Prefer pattern matching (`switch` expressions, property/relational patterns) over large `if` / `else if` chains for closed-set decisions such as intake types, scan statuses, and account classes.
 - Match existing naming, primary constructors, and file-scoped namespaces in the project.
+- Before adding or changing comments, XML docs, Markdown, naming, or function structure, read and follow [`docs/COMMENT_STANDARD.md`](../../docs/COMMENT_STANDARD.md).
