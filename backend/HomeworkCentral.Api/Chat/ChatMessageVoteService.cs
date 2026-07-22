@@ -38,17 +38,39 @@ public sealed class ChatMessageVoteService(
         short value,
         CancellationToken ct = default)
     {
-        if (value is not (1 or -1))
-            throw new InvalidOperationException("Vote value must be 1 or -1.");
+        AssertSupportedVoteValue(value);
 
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
-        if (MentionPermissions.IsGuest(BitMask.FromBase64(masks.RoleMask, 64)))
-            throw new InvalidOperationException("Guests cannot vote.");
+        AssertVotingRoleAllowed(masks);
 
         ChatMessage? message = await db.ChatMessages.FirstOrDefaultAsync(m => m.MessageId == messageId, ct);
         if (message is null)
             return null;
 
+        await AssertUserCanVoteOnMessageAsync(message, userId, masks, ct);
+        await ApplyVoteUpsertOrToggleAsync(messageId, userId, value, ct);
+
+        return await BroadcastVoteUpdateAsync(message, userId, ct);
+    }
+
+    private static void AssertSupportedVoteValue(short value)
+    {
+        if (value is not (1 or -1))
+            throw new InvalidOperationException("Vote value must be 1 or -1.");
+    }
+
+    private static void AssertVotingRoleAllowed(EffectiveMaskDto masks)
+    {
+        if (MentionPermissions.IsGuest(BitMask.FromBase64(masks.RoleMask, 64)))
+            throw new InvalidOperationException("Guests cannot vote.");
+    }
+
+    private async Task AssertUserCanVoteOnMessageAsync(
+        ChatMessage message,
+        Guid userId,
+        EffectiveMaskDto masks,
+        CancellationToken ct)
+    {
         if (!chatRoomAccess.CanAccessRoom(masks, userId, message.RoomId))
             throw new InvalidOperationException("You cannot access this room.");
 
@@ -57,59 +79,72 @@ public sealed class ChatMessageVoteService(
 
         if (message.SenderId == userId)
             throw new InvalidOperationException("You cannot vote on your own message.");
+    }
 
-        ChatMessageVote? existing = await db.ChatMessageVotes
+    private async Task ApplyVoteUpsertOrToggleAsync(
+        Guid messageId,
+        Guid userId,
+        short value,
+        CancellationToken ct)
+    {
+        ChatMessageVote? existingVote = await db.ChatMessageVotes
             .FirstOrDefaultAsync(v => v.MessageId == messageId && v.UserId == userId, ct);
 
-        if (existing is not null && existing.Value == value)
+        if (existingVote is not null)
         {
-            db.ChatMessageVotes.Remove(existing);
-            await db.SaveChangesAsync(ct);
-            return await BroadcastVoteUpdateAsync(message, userId, ct);
+            await ToggleOrUpdateExistingVoteAsync(existingVote, value, ct);
+            return;
         }
 
-        if (existing is null)
+        await InsertFirstVoteAsync(messageId, userId, value, ct);
+    }
+
+    private async Task InsertFirstVoteAsync(
+        Guid messageId,
+        Guid userId,
+        short value,
+        CancellationToken ct)
+    {
+        ChatMessageVote insertedVote = new ChatMessageVote
         {
-            ChatMessageVote inserted = new ChatMessageVote
-            {
-                MessageId = messageId,
-                UserId = userId,
-                Value = value,
-                UpdatedAtUtc = DateTime.UtcNow,
-            };
-            db.ChatMessageVotes.Add(inserted);
+            MessageId = messageId,
+            UserId = userId,
+            Value = value,
+            UpdatedAtUtc = DateTime.UtcNow,
+        };
+        db.ChatMessageVotes.Add(insertedVote);
 
-            try
-            {
-                await db.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException ex) when (IsDuplicateVote(ex))
-            {
-                db.Entry(inserted).State = EntityState.Detached;
-                existing = await db.ChatMessageVotes
-                    .FirstOrDefaultAsync(v => v.MessageId == messageId && v.UserId == userId, ct);
-                if (existing is null)
-                    throw;
-
-                if (existing.Value == value)
-                {
-                    db.ChatMessageVotes.Remove(existing);
-                    await db.SaveChangesAsync(ct);
-                    return await BroadcastVoteUpdateAsync(message, userId, ct);
-                }
-
-                existing.Value = value;
-                existing.UpdatedAtUtc = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
-            }
-        }
-        else
+        try
         {
-            existing.Value = value;
-            existing.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
-        return await BroadcastVoteUpdateAsync(message, userId, ct);
+        catch (DbUpdateException ex) when (IsDuplicateVote(ex))
+        {
+            db.Entry(insertedVote).State = EntityState.Detached;
+
+            // Unique violations mean a concurrent request inserted the first vote after
+            // the initial read, so the normal toggle/update rules still decide the state.
+            ChatMessageVote? existingVote = await db.ChatMessageVotes
+                .FirstOrDefaultAsync(v => v.MessageId == messageId && v.UserId == userId, ct);
+            if (existingVote is null)
+                throw;
+
+            await ToggleOrUpdateExistingVoteAsync(existingVote, value, ct);
+        }
+    }
+
+    private async Task ToggleOrUpdateExistingVoteAsync(ChatMessageVote existingVote, short value, CancellationToken ct)
+    {
+        if (existingVote.Value == value)
+        {
+            db.ChatMessageVotes.Remove(existingVote);
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        existingVote.Value = value;
+        existingVote.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task<MessageVoteDto> BroadcastVoteUpdateAsync(
@@ -129,16 +164,23 @@ public sealed class ChatMessageVoteService(
         List<ChatMessageVote> votes = await db.ChatMessageVotes.AsNoTracking()
             .Where(v => v.MessageId == message.MessageId)
             .ToListAsync(ct);
-        int ups = votes.Count(v => v.Value > 0);
-        int downs = votes.Count(v => v.Value < 0);
-        short? viewer = votes.FirstOrDefault(v => v.UserId == viewerId)?.Value;
+        int upvoteCount = votes.Count(v => v.Value > 0);
+        int downvoteCount = votes.Count(v => v.Value < 0);
+        short? viewerVoteValue = votes.FirstOrDefault(v => v.UserId == viewerId)?.Value;
+        string? viewerVote = viewerVoteValue switch
+        {
+            > 0 => "up",
+            < 0 => "down",
+            _ => null,
+        };
+
         return new MessageVoteDto(
             message.MessageId,
             message.RoomId,
-            ups - downs,
-            ups,
-            downs,
-            viewer is null ? null : viewer > 0 ? "up" : "down");
+            upvoteCount - downvoteCount,
+            upvoteCount,
+            downvoteCount,
+            viewerVote);
     }
 
     private static bool IsDuplicateVote(DbUpdateException ex) =>

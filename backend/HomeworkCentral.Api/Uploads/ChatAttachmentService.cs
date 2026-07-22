@@ -56,16 +56,16 @@ public sealed class ChatAttachmentService(
 {
     public async Task<ChatAttachmentDto> UploadAsync(Guid userId, IFormFile file, CancellationToken ct = default)
     {
-        UploadOptions opts = options.Value;
-        if (file.Length <= 0 || file.Length > opts.MaxBytes)
-            throw new InvalidOperationException($"File must be between 1 and {opts.MaxBytes} bytes.");
+        UploadOptions uploadOptions = options.Value;
+        if (file.Length <= 0 || file.Length > uploadOptions.MaxBytes)
+            throw new InvalidOperationException($"File must be between 1 and {uploadOptions.MaxBytes} bytes.");
 
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId, ct);
         System.Collections.BitArray featureMask = BitMask.FromBase64(masks.FeatureMask, 256);
 
         AccessScope? scope = accessScope.ResolveCurrent()
             ?? throw new InvalidOperationException("Access scope is required.");
-        bool developmentPersona = (scope.AccountClass is AccountClass.DeveloperAccount or AccountClass.DevAdmin)
+        bool isDevelopmentPersona = (scope.AccountClass is AccountClass.DeveloperAccount or AccountClass.DevAdmin)
             && DevBypass.IsEnabled(configuration, environment);
 
         AttachmentTypeInspectionResult inspection;
@@ -74,31 +74,15 @@ public sealed class ChatAttachmentService(
             inspection = typeInspector.Inspect(inspectStream, file.ContentType);
         }
 
-        bool isImage = inspection.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
-        if (!developmentPersona && isImage && !BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
-            && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
-        {
-            throw new InvalidOperationException("You do not have permission to upload images.");
-        }
-
-        if (!developmentPersona && !isImage && !BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
-            throw new InvalidOperationException("You do not have permission to upload files.");
+        AssertUploadFeatureAllowed(inspection, featureMask, isDevelopmentPersona);
 
         MalwareScanResult scanStatus;
         await using (Stream scanStream = file.OpenReadStream())
             scanStatus = await malwareScanner.ScanAsync(scanStream, ct);
 
-        Directory.CreateDirectory(opts.RootPath);
         Guid attachmentId = Guid.NewGuid();
         string safeName = Path.GetFileName(file.FileName);
-        string storageName = $"{attachmentId:N}_{safeName}";
-        string fullPath = Path.Combine(opts.RootPath, storageName);
-
-        await using (Stream saveStream = file.OpenReadStream())
-        await using (FileStream fs = File.Create(fullPath))
-        {
-            await saveStream.CopyToAsync(fs, ct);
-        }
+        string storageName = await StoreAttachmentFileAsync(uploadOptions, file, attachmentId, safeName, ct);
 
         ChatAttachment attachment = new()
         {
@@ -115,8 +99,7 @@ public sealed class ChatAttachmentService(
             InlinePreviewKind = inspection.InlinePreviewKind,
             ScanStatus = scanStatus,
         };
-        db.ChatAttachments.Add(attachment);
-        await db.SaveChangesAsync(ct);
+        await PersistAttachmentMetadataAsync(attachment, ct);
 
         return new ChatAttachmentDto(
             attachmentId,
@@ -146,9 +129,7 @@ public sealed class ChatAttachmentService(
         if (!accessTokenValidated && !await CanDownloadAsync(attachment, userId, ct))
             return null;
 
-        // Only confirmed malware prompts the caution gate. Scanner downtime / NotScanned
-        // must not block previews of ordinary PNG/txt/code uploads.
-        bool requiresCaution = attachment.ScanStatus is MalwareScanResult.Infected;
+        bool requiresCaution = RequiresCautionGate(attachment.ScanStatus);
         if (requiresCaution && !riskAcknowledged)
         {
             return new AttachmentReadResult(
@@ -159,8 +140,8 @@ public sealed class ChatAttachmentService(
                 RequiresCaution: true);
         }
 
-        UploadOptions opts = options.Value;
-        string fullPath = Path.Combine(opts.RootPath, attachment.StoragePath);
+        UploadOptions uploadOptions = options.Value;
+        string fullPath = Path.Combine(uploadOptions.RootPath, attachment.StoragePath);
         if (!File.Exists(fullPath))
             return null;
 
@@ -187,14 +168,74 @@ public sealed class ChatAttachmentService(
         if (attachment.MessageLinks.Count > 0)
             throw new InvalidOperationException("Cannot delete an attachment linked to a message.");
 
-        UploadOptions opts = options.Value;
-        string fullPath = Path.Combine(opts.RootPath, attachment.StoragePath);
+        UploadOptions uploadOptions = options.Value;
+        string fullPath = Path.Combine(uploadOptions.RootPath, attachment.StoragePath);
         if (File.Exists(fullPath))
             File.Delete(fullPath);
 
         db.ChatAttachments.Remove(attachment);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private static void AssertUploadFeatureAllowed(
+        AttachmentTypeInspectionResult inspection,
+        System.Collections.BitArray featureMask,
+        bool isDevelopmentPersona)
+    {
+        if (isDevelopmentPersona)
+            return;
+
+        switch (inspection.ContentType)
+        {
+            case { Length: > 0 } contentType
+                when contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase):
+                if (!CanUploadImage(featureMask))
+                    throw new InvalidOperationException("You do not have permission to upload images.");
+                break;
+
+            default:
+                if (!BitMask.HasBit(featureMask, PlatformFeatures.FileUploads))
+                    throw new InvalidOperationException("You do not have permission to upload files.");
+                break;
+        }
+    }
+
+    private static bool CanUploadImage(System.Collections.BitArray featureMask) =>
+        BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
+        || BitMask.HasBit(featureMask, PlatformFeatures.FileUploads);
+
+    private static async Task<string> StoreAttachmentFileAsync(
+        UploadOptions uploadOptions,
+        IFormFile file,
+        Guid attachmentId,
+        string safeName,
+        CancellationToken ct)
+    {
+        Directory.CreateDirectory(uploadOptions.RootPath);
+        string storageName = $"{attachmentId:N}_{safeName}";
+        string fullPath = Path.Combine(uploadOptions.RootPath, storageName);
+
+        await using (Stream saveStream = file.OpenReadStream())
+        await using (FileStream fileStream = File.Create(fullPath))
+        {
+            await saveStream.CopyToAsync(fileStream, ct);
+        }
+
+        return storageName;
+    }
+
+    private async Task PersistAttachmentMetadataAsync(ChatAttachment attachment, CancellationToken ct)
+    {
+        db.ChatAttachments.Add(attachment);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static bool RequiresCautionGate(MalwareScanResult scanStatus)
+    {
+        // Only confirmed malware prompts the caution gate. Scanner downtime and NotScanned
+        // fail open for ordinary downloads; see docs/uploads-and-scanning.md.
+        return scanStatus is MalwareScanResult.Infected;
     }
 
     private async Task<bool> CanDownloadAsync(ChatAttachment attachment, Guid userId, CancellationToken ct)

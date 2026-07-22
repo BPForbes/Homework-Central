@@ -139,60 +139,28 @@ public static class TicketIntakeValidator
     {
         switch (question.Type)
         {
-            case "shortText":
-            case "longText":
-            case "date":
-                if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
-                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
+            case "shortText" or "longText" or "date":
+                ValidateRequiredStringAnswer(question.Prompt, value);
                 break;
 
-            case "multipleChoice":
-            case "dropdown":
-                if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
-                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
-                if (question.Options is { Count: > 0 }
-                    && !question.Options.Contains(value.GetString()!, StringComparer.Ordinal))
-                {
-                    throw new InvalidOperationException($"Answer for '{question.Prompt}' is not an allowed option.");
-                }
-
+            case "multipleChoice" or "dropdown":
+                ValidateSingleOptionAnswer(question, value);
                 break;
 
             case "link":
-                if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
-                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
-                if (!Uri.TryCreate(value.GetString(), UriKind.Absolute, out Uri? linkUri)
-                    || linkUri.Scheme is not ("http" or "https"))
-                {
-                    throw new InvalidOperationException($"Answer for '{question.Prompt}' must be an http(s) URL.");
-                }
-
+                ValidateLinkAnswer(question.Prompt, value);
                 break;
 
-            case "trueFalse":
-            case "checkbox":
-                if (value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
-                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
+            case "trueFalse" or "checkbox":
+                ValidateBooleanAnswer(question.Prompt, value);
+                break;
+
+            case "fileUpload":
+                ValidateRequiredArrayAnswer(question.Prompt, value);
                 break;
 
             case "multiSelect":
-            case "fileUpload":
-                if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() == 0)
-                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
-
-                if (question.Type == "multiSelect" && question.Options is { Count: > 0 })
-                {
-                    foreach (JsonElement element in value.EnumerateArray())
-                    {
-                        if (element.ValueKind != JsonValueKind.String
-                            || !question.Options.Contains(element.GetString()!, StringComparer.Ordinal))
-                        {
-                            throw new InvalidOperationException(
-                                $"Answer for '{question.Prompt}' contains an invalid option.");
-                        }
-                    }
-                }
-
+                ValidateMultiSelectAnswer(question, value);
                 break;
 
             case "messageForward":
@@ -200,23 +168,7 @@ public static class TicketIntakeValidator
                 break;
 
             case "mixed":
-                if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() == 0)
-                    throw new InvalidOperationException($"Invalid answer for '{question.Prompt}'.");
-                HashSet<string> allowed = new(
-                    question.AllowedResponseKinds ?? [],
-                    StringComparer.Ordinal);
-                foreach (JsonElement part in value.EnumerateArray())
-                {
-                    if (part.ValueKind != JsonValueKind.Object
-                        || !part.TryGetProperty("kind", out JsonElement kindEl)
-                        || kindEl.ValueKind != JsonValueKind.String
-                        || !allowed.Contains(kindEl.GetString()!))
-                    {
-                        throw new InvalidOperationException(
-                            $"Answer for '{question.Prompt}' contains an invalid part.");
-                    }
-                }
-
+                ValidateMixedAnswer(question, value);
                 break;
         }
 
@@ -224,6 +176,91 @@ public static class TicketIntakeValidator
         {
             throw new InvalidOperationException(
                 $"Answer for '{question.Prompt}' must be a valid user id.");
+        }
+    }
+
+    private static string ValidateRequiredStringAnswer(string prompt, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.String)
+            throw new InvalidOperationException($"Invalid answer for '{prompt}'.");
+
+        string? answer = value.GetString();
+        if (string.IsNullOrWhiteSpace(answer))
+            throw new InvalidOperationException($"Invalid answer for '{prompt}'.");
+
+        return answer;
+    }
+
+    private static void ValidateSingleOptionAnswer(TicketIntakeQuestionDto question, JsonElement value)
+    {
+        string answer = ValidateRequiredStringAnswer(question.Prompt, value);
+        if (question.Options is { Count: > 0 }
+            && !question.Options.Contains(answer, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException($"Answer for '{question.Prompt}' is not an allowed option.");
+        }
+    }
+
+    private static void ValidateLinkAnswer(string prompt, JsonElement value)
+    {
+        string answer = ValidateRequiredStringAnswer(prompt, value);
+        // Ticket intake links are browser-opened evidence, so custom URL schemes are rejected.
+        if (!Uri.TryCreate(answer, UriKind.Absolute, out Uri? linkUri)
+            || linkUri.Scheme is not ("http" or "https"))
+        {
+            throw new InvalidOperationException($"Answer for '{prompt}' must be an http(s) URL.");
+        }
+    }
+
+    private static void ValidateBooleanAnswer(string prompt, JsonElement value)
+    {
+        if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new InvalidOperationException($"Invalid answer for '{prompt}'.");
+    }
+
+    private static void ValidateRequiredArrayAnswer(string prompt, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() == 0)
+            throw new InvalidOperationException($"Invalid answer for '{prompt}'.");
+    }
+
+    private static void ValidateMultiSelectAnswer(TicketIntakeQuestionDto question, JsonElement value)
+    {
+        ValidateRequiredArrayAnswer(question.Prompt, value);
+        if (question.Options is not { Count: > 0 })
+            return;
+
+        foreach (JsonElement element in value.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String
+                || !question.Options.Contains(element.GetString()!, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Answer for '{question.Prompt}' contains an invalid option.");
+            }
+        }
+    }
+
+    private static void ValidateMixedAnswer(TicketIntakeQuestionDto question, JsonElement value)
+    {
+        ValidateRequiredArrayAnswer(question.Prompt, value);
+        HashSet<string> allowedResponseKinds = new(
+            question.AllowedResponseKinds ?? [],
+            StringComparer.Ordinal);
+
+        // Mixed answers preserve each part kind for ticket AI evidence and moderator review.
+        foreach (JsonElement part in value.EnumerateArray())
+        {
+            if (part is { ValueKind: JsonValueKind.Object }
+                && part.TryGetProperty("kind", out JsonElement kindElement)
+                && kindElement is { ValueKind: JsonValueKind.String }
+                && allowedResponseKinds.Contains(kindElement.GetString()!))
+            {
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                $"Answer for '{question.Prompt}' contains an invalid part.");
         }
     }
 
