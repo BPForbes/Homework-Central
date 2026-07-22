@@ -5,6 +5,28 @@ export interface AttachmentClassification {
   inlineKind?: 'image' | 'pdf' | 'text' | 'video' | 'audio'
 }
 
+function resolveInlineKind(
+  contentType: string,
+  inlinePreviewKind?: string | null,
+): AttachmentClassification['inlineKind'] | undefined {
+  const serverInlineKind = inlinePreviewKind as AttachmentClassification['inlineKind'] | undefined
+  if (serverInlineKind)
+    return serverInlineKind
+
+  if (contentType.startsWith('image/'))
+    return 'image'
+  if (contentType === 'application/pdf')
+    return 'pdf'
+  if (contentType.startsWith('text/'))
+    return 'text'
+  if (contentType.startsWith('video/'))
+    return 'video'
+  if (contentType.startsWith('audio/'))
+    return 'audio'
+
+  return undefined
+}
+
 export function classifyAttachment(
   contentType: string,
   isHazard: boolean,
@@ -13,20 +35,9 @@ export function classifyAttachment(
   if (isHazard)
     return { mode: 'hazard' }
 
-  const kind = inlinePreviewKind as AttachmentClassification['inlineKind'] | undefined
-  if (kind)
-    return { mode: 'inline', inlineKind: kind }
-
-  if (contentType.startsWith('image/'))
-    return { mode: 'inline', inlineKind: 'image' }
-  if (contentType === 'application/pdf')
-    return { mode: 'inline', inlineKind: 'pdf' }
-  if (contentType.startsWith('text/'))
-    return { mode: 'inline', inlineKind: 'text' }
-  if (contentType.startsWith('video/'))
-    return { mode: 'inline', inlineKind: 'video' }
-  if (contentType.startsWith('audio/'))
-    return { mode: 'inline', inlineKind: 'audio' }
+  const inlineKind = resolveInlineKind(contentType, inlinePreviewKind)
+  if (inlineKind)
+    return { mode: 'inline', inlineKind }
 
   return { mode: 'link' }
 }

@@ -27,6 +27,8 @@ public class AuthService(
     private IDevPersonaProvisioner? PersonaProvisioner =>
         serviceProvider.GetService<IDevPersonaProvisioner>();
 
+    private sealed record DeveloperLoginAccount(DevAccountDefinition Definition);
+
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
         string normalizedEmail = req.Email.ToLowerInvariant();
@@ -100,80 +102,19 @@ public class AuthService(
     /// <inheritdoc />
     public async Task<DevLoginOptionsResponse> GetDevLoginOptionsAsync()
     {
-        HashSet<Guid> developerUserIds = await masterDb.UserRoles
-            .AsNoTracking()
-            .Where(userRole => userRole.Role.Name == "Developer")
-            .Select(userRole => userRole.UserId)
-            .ToHashSetAsync();
-
-        Dictionary<string, User> masterUsersByEmail = await masterDb.Users
-            .AsNoTracking()
-            .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
-
+        HashSet<Guid> developerUserIds = await LoadDeveloperUserIdsAsync();
+        Dictionary<string, User> masterUsersByEmail = await LoadMasterUsersByEmailAsync();
         List<DevDeveloperOption> developers = new();
 
         foreach (DevAccountDefinition account in DevAccountCatalog.All)
         {
-            if (!masterUsersByEmail.TryGetValue(account.DeveloperEmail, out User? developer))
-                continue;
+            DevDeveloperOption? developerOption = await BuildDeveloperOptionAsync(
+                account,
+                masterUsersByEmail,
+                developerUserIds);
 
-            if (!developerUserIds.Contains(developer.UserId))
-                continue;
-
-            List<DevUserOption> personas = new();
-            foreach (DevPersonaDefinition persona in account.Personas)
-            {
-                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
-                if (PersonaProvisioner?.TryGetPersonaIdentity(databaseName, out PersonaIdentity cachedIdentity) == true)
-                {
-                    personas.Add(new DevUserOption
-                    {
-                        UserId = cachedIdentity.UserId,
-                        Username = cachedIdentity.Username,
-                        TenantDatabaseName = databaseName,
-                    });
-                    continue;
-                }
-
-                if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
-                {
-                    personas.Add(new DevUserOption
-                    {
-                        UserId = Guid.Empty,
-                        Username = persona.Username,
-                        TenantDatabaseName = databaseName,
-                    });
-                    continue;
-                }
-
-                AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName);
-                await using (tenantDb)
-                {
-                    User? user = await tenantDb.Users
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(u => u.Email == persona.Email);
-
-                    if (user is null)
-                        continue;
-
-                    PersonaIdentity identity = new(user.UserId, user.Username);
-                    PersonaProvisioner?.RememberPersonaIdentity(databaseName, identity);
-
-                    personas.Add(new DevUserOption
-                    {
-                        UserId = identity.UserId,
-                        Username = identity.Username,
-                        TenantDatabaseName = databaseName,
-                    });
-                }
-            }
-
-            developers.Add(new DevDeveloperOption
-            {
-                UserId = developer.UserId,
-                Username = developer.Username,
-                Users = personas,
-            });
+            if (developerOption is not null)
+                developers.Add(developerOption);
         }
 
         return new DevLoginOptionsResponse
@@ -185,66 +126,227 @@ public class AuthService(
     /// <inheritdoc />
     public async Task<AuthResponse> DevLoginAsync(DevLoginRequest req)
     {
-        User? developer = await masterDb.Users
-            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.UserId == req.DeveloperUserId);
+        DeveloperLoginAccount developerAccount = await ResolveDeveloperLoginAccountAsync(req.DeveloperUserId);
 
-        if (developer is null)
-            throw new UnauthorizedAccessException("Selected developer account was not found.");
+        // Developer bypass chooses either DevAdmin or a seeded persona scope; the
+        // resulting account_class and tenant_db claims enforce the isolation model.
+        // See docs/identity.md.
+        if (IsDevAdminLogin(req))
+            return await BuildDevAdminAuthResponseAsync();
 
-        DevAccountDefinition? account = DevAccountCatalog.FindByDeveloperEmail(developer.Email);
-        if (account is null || !developer.UserRoles.Any(ur => ur.Role.Name == "Developer"))
-            throw new UnauthorizedAccessException("Selected account is not a developer.");
+        string tenantDatabaseName = RequirePersonaTenantDatabaseName(req);
+        (DevAccountDefinition Account, DevPersonaDefinition Persona) personaMatch =
+            ResolvePersonaForDeveloper(tenantDatabaseName, developerAccount.Definition);
 
-        bool impersonatingPersona = !string.IsNullOrWhiteSpace(req.TenantDatabaseName);
-        if (!impersonatingPersona && (req.TargetUserId is null || req.TargetUserId == Guid.Empty))
+        await EnsurePersonaProvisionedAsync(personaMatch.Account, personaMatch.Persona);
+
+        await using AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabaseName);
+        User loginPersona = await LoadPersonaLoginUserAsync(tenantDb, req.TargetUserId, personaMatch.Persona);
+        return await BuildAuthResponseAsync(loginPersona, tenantDb, tenantDatabaseName);
+    }
+
+    private async Task<HashSet<Guid>> LoadDeveloperUserIdsAsync() =>
+        await masterDb.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.Role.Name == "Developer")
+            .Select(userRole => userRole.UserId)
+            .ToHashSetAsync();
+
+    private async Task<Dictionary<string, User>> LoadMasterUsersByEmailAsync() =>
+        await masterDb.Users
+            .AsNoTracking()
+            .ToDictionaryAsync(user => user.Email, StringComparer.OrdinalIgnoreCase);
+
+    private async Task<DevDeveloperOption?> BuildDeveloperOptionAsync(
+        DevAccountDefinition account,
+        Dictionary<string, User> masterUsersByEmail,
+        HashSet<Guid> developerUserIds)
+    {
+        if (!TryGetCatalogDeveloper(account, masterUsersByEmail, developerUserIds, out User developer))
+            return null;
+
+        List<DevUserOption> personas = await BuildPersonaOptionsAsync(account);
+        return new DevDeveloperOption
         {
-            User loginUser = await masterDb.Users
-                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-                .Include(u => u.EffectiveMask!)
-                    .ThenInclude(m => m.SubjectExpertiseMasks)
-                .FirstOrDefaultAsync(u => u.Username == DevBypass.DevAdminUsername)
-                ?? throw new InvalidOperationException("DevAdmin account is not configured.");
+            UserId = developer.UserId,
+            Username = developer.Username,
+            Users = personas,
+        };
+    }
 
-            return await BuildAuthResponseAsync(loginUser, masterDb, tenantDatabaseName: null);
+    private static bool TryGetCatalogDeveloper(
+        DevAccountDefinition account,
+        Dictionary<string, User> masterUsersByEmail,
+        HashSet<Guid> developerUserIds,
+        out User developer)
+    {
+        if (!masterUsersByEmail.TryGetValue(account.DeveloperEmail, out User? matchedDeveloper)
+            || !developerUserIds.Contains(matchedDeveloper.UserId))
+        {
+            developer = null!;
+            return false;
         }
 
-        string tenantDatabaseName = req.TenantDatabaseName
-            ?? throw new InvalidOperationException("Tenant database name is required when impersonating a persona.");
+        developer = matchedDeveloper;
+        return true;
+    }
+
+    private async Task<List<DevUserOption>> BuildPersonaOptionsAsync(DevAccountDefinition account)
+    {
+        List<DevUserOption> personas = new();
+        foreach (DevPersonaDefinition persona in account.Personas)
+        {
+            DevUserOption? personaOption = await ResolvePersonaOptionAsync(account, persona);
+            if (personaOption is not null)
+                personas.Add(personaOption);
+        }
+
+        return personas;
+    }
+
+    private async Task<DevUserOption?> ResolvePersonaOptionAsync(
+        DevAccountDefinition account,
+        DevPersonaDefinition persona)
+    {
+        string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
+        DevUserOption? cachedOption = TryBuildCachedPersonaOption(databaseName);
+        if (cachedOption is not null)
+            return cachedOption;
+
+        if (PersonaProvisioner is not null && !PersonaProvisioner.IsProvisioned(databaseName))
+            return BuildUnprovisionedPersonaOption(persona, databaseName);
+
+        return await LoadPersonaOptionFromTenantAsync(persona, databaseName);
+    }
+
+    private DevUserOption? TryBuildCachedPersonaOption(string databaseName)
+    {
+        if (PersonaProvisioner?.TryGetPersonaIdentity(databaseName, out PersonaIdentity cachedIdentity) != true)
+            return null;
+
+        return new DevUserOption
+        {
+            UserId = cachedIdentity.UserId,
+            Username = cachedIdentity.Username,
+            TenantDatabaseName = databaseName,
+        };
+    }
+
+    private static DevUserOption BuildUnprovisionedPersonaOption(
+        DevPersonaDefinition persona,
+        string databaseName) =>
+        new DevUserOption
+        {
+            UserId = Guid.Empty,
+            Username = persona.Username,
+            TenantDatabaseName = databaseName,
+        };
+
+    private async Task<DevUserOption?> LoadPersonaOptionFromTenantAsync(
+        DevPersonaDefinition persona,
+        string databaseName)
+    {
+        await using AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName);
+        User? user = await tenantDb.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Email == persona.Email);
+
+        if (user is null)
+            return null;
+
+        PersonaIdentity identity = new(user.UserId, user.Username);
+        PersonaProvisioner?.RememberPersonaIdentity(databaseName, identity);
+
+        return new DevUserOption
+        {
+            UserId = identity.UserId,
+            Username = identity.Username,
+            TenantDatabaseName = databaseName,
+        };
+    }
+
+    private async Task<DeveloperLoginAccount> ResolveDeveloperLoginAccountAsync(Guid developerUserId)
+    {
+        User developer = await masterDb.Users
+            .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
+            .FirstOrDefaultAsync(user => user.UserId == developerUserId)
+            ?? throw new UnauthorizedAccessException("Selected developer account was not found.");
+
+        DevAccountDefinition? account = DevAccountCatalog.FindByDeveloperEmail(developer.Email);
+        if (account is null || !developer.UserRoles.Any(userRole => userRole.Role.Name == "Developer"))
+            throw new UnauthorizedAccessException("Selected account is not a developer.");
+
+        return new DeveloperLoginAccount(account);
+    }
+
+    private static bool IsDevAdminLogin(DevLoginRequest request) =>
+        string.IsNullOrWhiteSpace(request.TenantDatabaseName)
+        && (request.TargetUserId is null || request.TargetUserId == Guid.Empty);
+
+    private async Task<AuthResponse> BuildDevAdminAuthResponseAsync()
+    {
+        User loginUser = await masterDb.Users
+            .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
+            .Include(user => user.EffectiveMask!)
+                .ThenInclude(mask => mask.SubjectExpertiseMasks)
+            .FirstOrDefaultAsync(user => user.Username == DevBypass.DevAdminUsername)
+            ?? throw new InvalidOperationException("DevAdmin account is not configured.");
+
+        return await BuildAuthResponseAsync(loginUser, masterDb, tenantDatabaseName: null);
+    }
+
+    private static string RequirePersonaTenantDatabaseName(DevLoginRequest request) =>
+        request.TenantDatabaseName
+        ?? throw new InvalidOperationException("Tenant database name is required when impersonating a persona.");
+
+    private static (DevAccountDefinition Account, DevPersonaDefinition Persona) ResolvePersonaForDeveloper(
+        string tenantDatabaseName,
+        DevAccountDefinition developerAccount)
+    {
         (DevAccountDefinition Account, DevPersonaDefinition Persona)? personaMatch =
             DevAccountCatalog.FindByPersonaDatabaseName(tenantDatabaseName);
 
         if (personaMatch is null
-            || !string.Equals(personaMatch.Value.Account.DeveloperEmail, developer.Email, StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(
+                personaMatch.Value.Account.DeveloperEmail,
+                developerAccount.DeveloperEmail,
+                StringComparison.OrdinalIgnoreCase))
         {
             throw new UnauthorizedAccessException("Selected persona does not belong to this developer account.");
         }
 
-        if (PersonaProvisioner is not null)
-        {
-            await PersonaProvisioner.EnsureProvisionedAsync(
-                personaMatch.Value.Account,
-                personaMatch.Value.Persona);
-        }
+        return personaMatch.Value;
+    }
 
-        AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabaseName);
-        await using (tenantDb)
-        {
-            bool resolveByCatalogEmail = req.TargetUserId is null || req.TargetUserId == Guid.Empty;
-            User loginPersona = await tenantDb.Users
-                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-                .Include(u => u.EffectiveMask!)
-                    .ThenInclude(m => m.SubjectExpertiseMasks)
-                .FirstOrDefaultAsync(u => resolveByCatalogEmail
-                    ? u.Email == personaMatch.Value.Persona.Email
-                    : u.UserId == req.TargetUserId)
-                ?? throw new InvalidOperationException("Selected user was not found.");
+    private async Task EnsurePersonaProvisionedAsync(
+        DevAccountDefinition account,
+        DevPersonaDefinition persona)
+    {
+        if (PersonaProvisioner is null)
+            return;
 
-            if (!string.Equals(loginPersona.Email, personaMatch.Value.Persona.Email, StringComparison.OrdinalIgnoreCase))
-                throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
+        await PersonaProvisioner.EnsureProvisionedAsync(account, persona);
+    }
 
-            return await BuildAuthResponseAsync(loginPersona, tenantDb, tenantDatabaseName);
-        }
+    private static async Task<User> LoadPersonaLoginUserAsync(
+        AppDbContext tenantDb,
+        Guid? targetUserId,
+        DevPersonaDefinition persona)
+    {
+        bool resolveByCatalogEmail = targetUserId is null || targetUserId == Guid.Empty;
+        User loginPersona = await tenantDb.Users
+            .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
+            .Include(user => user.EffectiveMask!)
+                .ThenInclude(mask => mask.SubjectExpertiseMasks)
+            .FirstOrDefaultAsync(user => resolveByCatalogEmail
+                ? user.Email == persona.Email
+                : user.UserId == targetUserId)
+            ?? throw new InvalidOperationException("Selected user was not found.");
+
+        if (!string.Equals(loginPersona.Email, persona.Email, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Selected user does not belong to this developer account.");
+
+        return loginPersona;
     }
 
     public async Task<AuthResponse> RefreshAsync(string rawToken)
@@ -428,6 +530,8 @@ public class AuthService(
             return;
         }
 
+        // tenant_db selects the refresh-token store for developer personas; the
+        // signed access-token claims remain the authorization source. See docs/identity.md.
         response.Cookies.Append(TenancyConstants.TenantDbClaimName, tenantDatabaseName, cookieOptions);
     }
 
@@ -439,6 +543,9 @@ public class AuthService(
 
     private static AccountClass ResolveAccountClass(User user, string? tenantDatabaseName)
     {
+        // account_class follows the signed session source: DevAdmin is master-scoped,
+        // persona sessions carry tenant_db, and normal sessions stay real-account.
+        // See docs/identity.md.
         if (string.Equals(user.Username, DevBypass.DevAdminUsername, StringComparison.Ordinal)
             && string.IsNullOrEmpty(tenantDatabaseName))
         {

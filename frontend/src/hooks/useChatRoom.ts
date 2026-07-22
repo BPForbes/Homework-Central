@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { chatApi } from '../api/chatApi'
 import type { ChatMessage, ChatTypingUser, MessageVoteUpdate } from '../types/chat'
@@ -8,6 +9,220 @@ import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
 // Bound long-lived room tabs; older history can be fetched again through pagination.
 const MAX_RETAINED_MESSAGES = 250
+
+type MessageSetter = Dispatch<SetStateAction<ChatMessage[]>>
+type StringSetter = Dispatch<SetStateAction<string | null>>
+type BooleanSetter = Dispatch<SetStateAction<boolean>>
+type TypingUsersSetter = Dispatch<SetStateAction<ChatTypingUser[]>>
+
+interface SignalRHandlerOptions {
+  currentUserId: string | undefined
+  enableVotes: boolean
+  addMessage: (message: ChatMessage) => void
+  setMessages: MessageSetter
+  setTypingUsers: TypingUsersSetter
+}
+
+function sortAndRetainMessages(messages: ChatMessage[]): ChatMessage[] {
+  return [...messages]
+    .sort((a, b) => new Date(a.createdAtUtc).getTime() - new Date(b.createdAtUtc).getTime())
+    .slice(-MAX_RETAINED_MESSAGES)
+}
+
+function mergeServerHistoryMessages(
+  serverMessages: ChatMessage[],
+  locallyReceivedMessages: ChatMessage[],
+): ChatMessage[] {
+  const messagesById = new Map(serverMessages.map((message) => [message.messageId, message]))
+  for (const message of locallyReceivedMessages) {
+    if (!messagesById.has(message.messageId))
+      messagesById.set(message.messageId, message)
+  }
+
+  // Server timestamps remain authoritative when HTTP history and SignalR delivery
+  // race each other for the same room. See docs/chat.md.
+  return sortAndRetainMessages(Array.from(messagesById.values()))
+}
+
+function appendLiveMessage(previousMessages: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  if (previousMessages.some((existing) => existing.messageId === message.messageId))
+    return previousMessages
+
+  return [...previousMessages, message].slice(-MAX_RETAINED_MESSAGES)
+}
+
+function applyBroadcastVoteUpdate(message: ChatMessage, payload: MessageVoteUpdate): ChatMessage {
+  if (message.messageId !== payload.messageId)
+    return message
+
+  return {
+    ...message,
+    score: payload.score,
+    upvoteCount: payload.upvoteCount,
+    downvoteCount: payload.downvoteCount,
+  }
+}
+
+function applyViewerVoteUpdate(message: ChatMessage, payload: MessageVoteUpdate): ChatMessage {
+  if (message.messageId !== payload.messageId)
+    return message
+
+  return {
+    ...message,
+    score: payload.score,
+    upvoteCount: payload.upvoteCount,
+    downvoteCount: payload.downvoteCount,
+    viewerVote: payload.viewerVote === 'up' || payload.viewerVote === 'down'
+      ? payload.viewerVote
+      : null,
+  }
+}
+
+async function loadRoomHistory(
+  roomId: string,
+  isCancelled: () => boolean,
+  setMessages: MessageSetter,
+  setError: StringSetter,
+  setLoading: BooleanSetter,
+) {
+  try {
+    const { data } = await chatApi.getMessages(roomId)
+    if (isCancelled())
+      return
+
+    setMessages((previousMessages) => mergeServerHistoryMessages(data, previousMessages))
+  } catch {
+    if (!isCancelled())
+      setError('Could not load messages for this room.')
+  } finally {
+    if (!isCancelled())
+      setLoading(false)
+  }
+}
+
+function buildChatConnection(): signalR.HubConnection {
+  return new signalR.HubConnectionBuilder()
+    .withUrl('/hubs/chat', {
+      accessTokenFactory: () => getFreshAccessToken(),
+    })
+    .withAutomaticReconnect()
+    .build()
+}
+
+function registerSignalRHandlers(
+  connection: signalR.HubConnection,
+  options: SignalRHandlerOptions,
+) {
+  connection.on('ReceiveMessage', (message: ChatMessage) => {
+    options.addMessage(message)
+  })
+
+  if (options.enableVotes) {
+    connection.on('MessageVoteUpdated', (payload: MessageVoteUpdate) => {
+      options.setMessages((previousMessages) =>
+        previousMessages.map((message) => applyBroadcastVoteUpdate(message, payload)),
+      )
+    })
+  }
+
+  connection.on('UserTyping', (payload: ChatTypingUser) => {
+    if (payload.userId === options.currentUserId)
+      return
+
+    options.setTypingUsers((previousUsers) => {
+      if (previousUsers.some((user) => user.userId === payload.userId))
+        return previousUsers
+      return [...previousUsers, payload]
+    })
+  })
+
+  connection.on('UserStoppedTyping', (userId: string) => {
+    options.setTypingUsers((previousUsers) => previousUsers.filter((user) => user.userId !== userId))
+  })
+
+  // JoinRoom snapshots close the gap for users who started typing before the
+  // current connection entered the SignalR group.
+  connection.on('TypingUsersSnapshot', (users: ChatTypingUser[]) => {
+    options.setTypingUsers(users.filter((user) => user.userId !== options.currentUserId))
+  })
+}
+
+async function startRoomConnection(
+  connection: signalR.HubConnection,
+  roomId: string,
+  setConnected: BooleanSetter,
+) {
+  try {
+    await connection.start()
+    await connection.invoke('JoinRoom', roomId)
+    setConnected(true)
+  } catch {
+    setConnected(false)
+  }
+}
+
+async function rejoinRoomConnection(
+  connection: signalR.HubConnection,
+  roomId: string,
+  isTypingRef: MutableRefObject<boolean>,
+  setConnected: BooleanSetter,
+) {
+  const wasTyping = isTypingRef.current
+  if (wasTyping)
+    isTypingRef.current = false
+
+  try {
+    await connection.invoke('JoinRoom', roomId)
+    setConnected(true)
+    if (wasTyping) {
+      isTypingRef.current = true
+      void connection.invoke('NotifyTyping', roomId).catch(() => undefined)
+    }
+  } catch {
+    setConnected(false)
+  }
+}
+
+function registerReconnectHandlers(
+  connection: signalR.HubConnection,
+  roomId: string,
+  isTypingRef: MutableRefObject<boolean>,
+  setConnected: BooleanSetter,
+) {
+  connection.onreconnected(() => {
+    void rejoinRoomConnection(connection, roomId, isTypingRef, setConnected)
+  })
+
+  connection.onreconnecting(() => {
+    setConnected(false)
+    // Automatic reconnect opens a new connection id; clearing typing on the
+    // dying connection avoids a stale indicator if hub disconnect cleanup lags.
+    if (isTypingRef.current) {
+      isTypingRef.current = false
+      void connection.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
+    }
+  })
+}
+
+function cleanupRoomConnection(
+  connection: signalR.HubConnection,
+  roomId: string,
+  isTypingRef: MutableRefObject<boolean>,
+  setConnected: BooleanSetter,
+  setTypingUsers: TypingUsersSetter,
+) {
+  // The indicator has no server-side timeout, so unmounts and room switches must
+  // explicitly clear active typing state for other viewers.
+  if (isTypingRef.current) {
+    isTypingRef.current = false
+    void connection.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
+  }
+
+  void connection.invoke('LeaveRoom', roomId).catch(() => undefined)
+  void connection.stop()
+  setConnected(false)
+  setTypingUsers([])
+}
 
 export function useChatRoom(
   roomId: string,
@@ -27,11 +242,7 @@ export function useChatRoom(
   const isTypingRef = useRef(false)
 
   const addMessage = useCallback((message: ChatMessage) => {
-    setMessages((prev) => {
-      if (prev.some((existing) => existing.messageId === message.messageId))
-        return prev
-      return [...prev, message].slice(-MAX_RETAINED_MESSAGES)
-    })
+    setMessages((previousMessages) => appendLiveMessage(previousMessages, message))
   }, [])
 
   useEffect(() => {
@@ -46,35 +257,7 @@ export function useChatRoom(
       return
     }
 
-    const load = async () => {
-      try {
-        const { data } = await chatApi.getMessages(roomId)
-        if (cancelled)
-          return
-        // The SignalR connection effect below can start receiving 'ReceiveMessage' broadcasts
-        // (or a locally-sent message can resolve) before this history fetch completes, since
-        // both run concurrently. Merge instead of replacing so a message that arrived first
-        // isn't dropped by this (possibly slower) history load overwriting the whole array.
-        setMessages((prev) => {
-          const byId = new Map(data.map((message) => [message.messageId, message]))
-          for (const message of prev) {
-            if (!byId.has(message.messageId))
-              byId.set(message.messageId, message)
-          }
-          return Array.from(byId.values()).sort(
-            (a, b) => new Date(a.createdAtUtc).getTime() - new Date(b.createdAtUtc).getTime()
-          ).slice(-MAX_RETAINED_MESSAGES)
-        })
-      } catch {
-        if (!cancelled)
-          setError('Could not load messages for this room.')
-      } finally {
-        if (!cancelled)
-          setLoading(false)
-      }
-    }
-
-    void load()
+    void loadRoomHistory(roomId, () => cancelled, setMessages, setError, setLoading)
     return () => {
       cancelled = true
     }
@@ -84,112 +267,23 @@ export function useChatRoom(
     if (!roomId || !getAccessToken())
       return
 
-    const connection = new signalR.HubConnectionBuilder()
-      .withUrl('/hubs/chat', {
-        accessTokenFactory: () => getFreshAccessToken(),
-      })
-      .withAutomaticReconnect()
-      .build()
-
+    const connection = buildChatConnection()
     connectionRef.current = connection
 
-    connection.on('ReceiveMessage', (message: ChatMessage) => {
-      addMessage(message)
+    registerSignalRHandlers(connection, {
+      currentUserId,
+      enableVotes,
+      addMessage,
+      setMessages,
+      setTypingUsers,
     })
+    registerReconnectHandlers(connection, roomId, isTypingRef, setConnected)
 
-    if (enableVotes) {
-      connection.on('MessageVoteUpdated', (payload: MessageVoteUpdate) => {
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.messageId === payload.messageId
-              ? {
-                  ...message,
-                  score: payload.score,
-                  upvoteCount: payload.upvoteCount,
-                  downvoteCount: payload.downvoteCount,
-                }
-              : message,
-          ),
-        )
-      })
-    }
-
-    connection.on('UserTyping', (payload: ChatTypingUser) => {
-      if (payload.userId === currentUserId)
-        return
-      setTypingUsers((prev) => {
-        if (prev.some((user) => user.userId === payload.userId))
-          return prev
-        return [...prev, payload]
-      })
-    })
-
-    connection.on('UserStoppedTyping', (userId: string) => {
-      setTypingUsers((prev) => prev.filter((user) => user.userId !== userId))
-    })
-
-    // JoinRoom (and reconnect re-join) delivers the room's current typing state because live
-    // UserTyping events are only sent to others already in the group.
-    connection.on('TypingUsersSnapshot', (users: ChatTypingUser[]) => {
-      setTypingUsers(users.filter((user) => user.userId !== currentUserId))
-    })
-
-    const start = async () => {
-      try {
-        await connection.start()
-        await connection.invoke('JoinRoom', roomId)
-        setConnected(true)
-      } catch {
-        setConnected(false)
-      }
-    }
-
-    void start()
-
-    // withAutomaticReconnect() gives the client a new underlying connection after a network
-    // blip, but SignalR group membership (JoinRoom's Groups.AddToGroupAsync) is tied to the
-    // old connection and doesn't carry over — without rejoining here, ReceiveMessage/typing
-    // broadcasts would silently stop arriving until the user navigated away and back.
-    connection.onreconnected(() => {
-      const wasTyping = isTypingRef.current
-      if (wasTyping)
-        isTypingRef.current = false
-
-      void connection.invoke('JoinRoom', roomId).then(
-        () => {
-          setConnected(true)
-          if (wasTyping) {
-            isTypingRef.current = true
-            void connection.invoke('NotifyTyping', roomId).catch(() => undefined)
-          }
-        },
-        () => setConnected(false)
-      )
-    })
-
-    connection.onreconnecting(() => {
-      setConnected(false)
-      // Automatic reconnect opens a new underlying connection id; clear typing on the dying
-      // connection so a slow hub disconnect does not leave a stuck indicator for the room.
-      if (isTypingRef.current) {
-        isTypingRef.current = false
-        void connection.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
-      }
-    })
+    void startRoomConnection(connection, roomId, setConnected)
 
     return () => {
-      // The indicator has no server-side timeout, so an unmount/room-switch while still
-      // flagged as typing must explicitly notify — otherwise it would appear "stuck" for
-      // everyone else in the room (the hub also clears it on disconnect as a safety net).
-      if (isTypingRef.current) {
-        isTypingRef.current = false
-        void connection.invoke('NotifyStoppedTyping', roomId).catch(() => undefined)
-      }
-      void connection.invoke('LeaveRoom', roomId).catch(() => undefined)
-      void connection.stop()
+      cleanupRoomConnection(connection, roomId, isTypingRef, setConnected, setTypingUsers)
       connectionRef.current = null
-      setConnected(false)
-      setTypingUsers([])
     }
   }, [roomId, currentUserId, addMessage, enableVotes])
 
@@ -252,20 +346,8 @@ export function useChatRoom(
       return
     try {
       const { data } = await chatApi.castVote(message.messageId, value)
-      setMessages((prev) =>
-        prev.map((item) =>
-          item.messageId === data.messageId
-            ? {
-                ...item,
-                score: data.score,
-                upvoteCount: data.upvoteCount,
-                downvoteCount: data.downvoteCount,
-                viewerVote: data.viewerVote === 'up' || data.viewerVote === 'down'
-                  ? data.viewerVote
-                  : null,
-              }
-            : item,
-        ),
+      setMessages((previousMessages) =>
+        previousMessages.map((item) => applyViewerVoteUpdate(item, data)),
       )
     } catch {
       setError('Could not update vote.')
