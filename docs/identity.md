@@ -28,7 +28,7 @@ selection for normal login, or frontend visual styling.
 | Refresh token | Random 64-byte secret returned only as the `refresh_token` HttpOnly cookie and stored in the database as a SHA-256 hash. |
 | `account_class` | JWT claim named by `TenancyConstants.AccountClassClaimName`; one of `RealAccount`, `DeveloperAccount`, or `DevAdmin`. |
 | `tenant_db` | JWT claim and refresh-scope cookie named by `TenancyConstants.TenantDbClaimName`; present for developer persona sessions. |
-| Effective mask | The role, moderation, feature, subject, and status masks rebuilt from role assignments and embedded in auth responses and JWT claims. |
+| Effective mask | The rebuilt authorization masks for a user. JWT access tokens carry only moderation (`perm`), role (`role_mask`), and feature (`feature_mask`). General-subject, subject-expertise, and status masks are returned on `UserDto` / auth responses and are not JWT claims. |
 | Developer bypass | Development-only, loopback-only login surface guarded by `HC_DEV_BYPASS` and `ASPNETCORE_ENVIRONMENT=Development`. |
 | Scoped resource | Entity implementing `IScopedResource`; EF query filters and the `"ResourceVisibility"` policy enforce account-class and tenant matching. |
 
@@ -90,6 +90,11 @@ HMAC-SHA256 using `Jwt:Secret`. Tokens include:
 - `jti`: per-token identifier;
 - one `ClaimTypes.Role` claim per role name;
 - `tenant_db` when the session belongs to a developer persona.
+
+General-subject, subject-expertise, and status masks are **not** JWT claims.
+They are returned only on `UserDto` (login/register/refresh/`/me` responses) for
+client-side room and UI gating. Server authorization that needs those masks must
+reload them from the effective-mask store rather than reading the access token.
 
 `backend/HomeworkCentral.Api/Program.cs` configures JWT Bearer validation for
 issuer, audience, signing key, lifetime, and zero clock skew. SignalR hub calls
