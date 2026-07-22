@@ -180,79 +180,30 @@ reviews:
 knowledge_base:
   code_guidelines:
     enabled: true
+    # Schema requires each entry to be a string glob, or { files, applyTo } where both
+    # fields are comma-separated strings (not YAML arrays). See schema.v2.json.
     filePatterns:
       # Comment Documentation Guide — enforce on all source under review
       - files: "docs/COMMENT_DOCUMENTATION_GUIDE.md"
-        applyTo:
-          - "backend/**/*.{cs,csproj}"
-          - "frontend/**/*.{ts,tsx,css,html}"
-          - "scripts/**/*"
-          - "docs/**/*.md"
-          - "*.md"
-          - ".coderabbit.yaml"
-          - "AGENTS.md"
-          - "CLAUDE.md"
+        applyTo: "backend/**/*.{cs,csproj},frontend/**/*.{ts,tsx,css,html},scripts/**/*,docs/**/*.md,*.md,.coderabbit.yaml,AGENTS.md,CLAUDE.md"
       # System architecture docs — use when reviewing related code
       - files: "docs/README.md"
-        applyTo:
-          - "backend/**"
-          - "frontend/**"
-          - "docs/**"
-          - "scripts/**"
+        applyTo: "backend/**,frontend/**,docs/**,scripts/**"
       - files: "docs/identity.md"
-        applyTo:
-          - "backend/**/*Auth*"
-          - "backend/**/*Session*"
-          - "backend/**/*Tenant*"
-          - "backend/**/*Captcha*"
-          - "backend/**/*Permission*"
-          - "frontend/**/*Auth*"
-          - "frontend/**/*Login*"
-          - "frontend/**/*Session*"
+        applyTo: "backend/**/*Auth*,backend/**/*Session*,backend/**/*Tenant*,backend/**/*Captcha*,backend/**/*Permission*,frontend/**/*Auth*,frontend/**/*Login*,frontend/**/*Session*"
       - files: "docs/chat.md"
-        applyTo:
-          - "backend/**/*Chat*"
-          - "backend/**/*Message*"
-          - "backend/**/*Upload*"
-          - "backend/**/*Clam*"
-          - "frontend/**/*Chat*"
-          - "frontend/**/*Message*"
-          - "frontend/**/*Upload*"
+        applyTo: "backend/**/*Chat*,backend/**/*Message*,backend/**/*Upload*,backend/**/*Clam*,frontend/**/*Chat*,frontend/**/*Message*,frontend/**/*Upload*"
       - files: "docs/tickets.md"
-        applyTo:
-          - "backend/**/*Ticket*"
-          - "backend/**/*Assessment*"
-          - "backend/**/*Neural*"
-          - "backend/**/*Preface*"
-          - "frontend/**/*Ticket*"
-          - "frontend/**/*Assessment*"
-          - "frontend/**/*Neural*"
+        applyTo: "backend/**/*Ticket*,backend/**/*Assessment*,backend/**/*Neural*,backend/**/*Preface*,frontend/**/*Ticket*,frontend/**/*Assessment*,frontend/**/*Neural*"
       - files: "README.md"
-        applyTo:
-          - "scripts/**"
-          - "**/docker-compose*.yml"
-          - "**/Dockerfile*"
-          - "deploy/windows/**"
-          - "deploy/clamav/**"
+        applyTo: "scripts/**,**/docker-compose*.yml,**/Dockerfile*,deploy/windows/**,deploy/clamav/**"
       - files: "design.md"
-        applyTo:
-          - "frontend/**/*.{css,tsx,html}"
-          - "index.html"
+        applyTo: "frontend/**/*.{css,tsx,html},index.html"
       # Same agent context as AGENTS.md (auto-detected; explicit apply keeps scope clear)
       - files: "AGENTS.md"
-        applyTo:
-          - "backend/**"
-          - "frontend/**"
-          - "scripts/**"
-          - "docs/**"
-          - "*.md"
+        applyTo: "backend/**,frontend/**,scripts/**,docs/**,*.md"
       - files: "CLAUDE.md"
-        applyTo:
-          - "backend/**"
-          - "frontend/**"
-          - "scripts/**"
-          - "docs/**"
-          - "*.md"
+        applyTo: "backend/**,frontend/**,scripts/**,docs/**,*.md"
 
 chat:
   auto_reply: true
