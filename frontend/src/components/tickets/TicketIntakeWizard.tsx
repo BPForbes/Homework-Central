@@ -293,10 +293,18 @@ export function TicketIntakeWizard({
       return
     }
 
+    // Untouched optional checkboxes are absent from state; send explicit false so the API
+    // does not have to invent values for omitted optional answers.
+    const payload: TicketAnswers = { ...answers }
+    for (const question of questions) {
+      if (question.type === 'checkbox' && payload[question.id] === undefined)
+        payload[question.id] = false
+    }
+
     setSubmitting(true)
     setError('')
     try {
-      const { data } = await ticketsApi.open(portalRoomId, answers)
+      const { data } = await ticketsApi.open(portalRoomId, payload)
       onOpened(data)
     } catch (err: unknown) {
       const msg =

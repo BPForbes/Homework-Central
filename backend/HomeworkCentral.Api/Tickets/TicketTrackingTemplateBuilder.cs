@@ -10,6 +10,7 @@ public static class TicketTrackingTemplateBuilder
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
     public static string Build(
@@ -40,13 +41,24 @@ public static class TicketTrackingTemplateBuilder
         {
             FilterName = filterName,
             BuiltAtUtc = DateTime.UtcNow,
-            Intake = schema.Select(q => new TrackingTemplateIntakeItem
+            Intake = schema.Select(q =>
             {
-                Id = q.Id,
-                Prompt = q.Prompt,
-                Type = q.Type,
-                TracksUser = q.TracksUser,
-                Answer = answers.TryGetValue(q.Id, out JsonElement value) ? value : default,
+                JsonElement? answer = null;
+                if (answers.TryGetValue(q.Id, out JsonElement value)
+                    && value.ValueKind is not JsonValueKind.Undefined and not JsonValueKind.Null)
+                {
+                    // Clone so the template outlives request-bound JsonElements.
+                    answer = value.Clone();
+                }
+
+                return new TrackingTemplateIntakeItem
+                {
+                    Id = q.Id,
+                    Prompt = q.Prompt,
+                    Type = q.Type,
+                    TracksUser = q.TracksUser,
+                    Answer = answer,
+                };
             }).ToList(),
             PrefaceCategory = prefaceCategory,
             PrefaceSpecifics = prefaceSpecifics,
@@ -76,7 +88,6 @@ public static class TicketTrackingTemplateBuilder
         public string Prompt { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
         public bool TracksUser { get; set; }
-        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-        public JsonElement Answer { get; set; }
+        public JsonElement? Answer { get; set; }
     }
 }

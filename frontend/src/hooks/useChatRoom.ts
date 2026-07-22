@@ -36,10 +36,15 @@ export function useChatRoom(
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    setLoading(Boolean(roomId))
     setError(null)
     setMessages([])
     setReplyTarget(null)
+
+    if (!roomId) {
+      setLoading(false)
+      return
+    }
 
     const load = async () => {
       try {
