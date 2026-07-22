@@ -64,17 +64,16 @@ export function buildMentionCandidates(
 
 /** Colors for @mention highlighting inside rendered Markdown — shared by the message list and composer preview. */
 export function buildMentionStyleLookup(messages: ChatMessage[], mentionRoles: MentionRoleOption[]): MentionStyleLookup {
-  const userColors: Record<string, string> = {}
-  const roleColors: Record<string, string> = {}
-
-  for (const message of messages) {
+  const userColors = messages.reduce<Record<string, string>>((colors, message) => {
     const key = message.senderUsername.toLowerCase()
-    if (!userColors[key] && message.senderMessageColor)
-      userColors[key] = message.senderMessageColor
-  }
+    if (!colors[key] && message.senderMessageColor)
+      colors[key] = message.senderMessageColor
+    return colors
+  }, {})
 
-  for (const role of mentionRoles)
-    roleColors[role.name.toLowerCase()] = role.messageColor
+  const roleColors = Object.fromEntries(
+    mentionRoles.map((role) => [role.name.toLowerCase(), role.messageColor]),
+  )
 
   return { userColors, roleColors }
 }

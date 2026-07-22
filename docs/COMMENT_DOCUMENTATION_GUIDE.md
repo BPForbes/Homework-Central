@@ -1,4 +1,28 @@
-# Comment, documentation, readability, and naming standard
+# Comment Documentation Guide
+
+## Naming convention for this guide
+
+Use these names consistently in agent rules, CodeRabbit config, PR reviews,
+source cross-references, and Markdown links. Do not invent alternate titles.
+
+| Form | Required value |
+|---|---|
+| Canonical title | Comment Documentation Guide |
+| File name | `COMMENT_DOCUMENTATION_GUIDE.md` |
+| Short name | `COMMENT_DOCUMENTATION_GUIDE` |
+| Repository path | `docs/COMMENT_DOCUMENTATION_GUIDE.md` |
+| H1 heading | `# Comment Documentation Guide` |
+| Link from `docs/` | `[Comment Documentation Guide](./COMMENT_DOCUMENTATION_GUIDE.md)` |
+| Link from repository root | `[Comment Documentation Guide](./docs/COMMENT_DOCUMENTATION_GUIDE.md)` |
+
+Acceptable shorthand in tight contexts: "the Comment Documentation Guide" or
+`` `docs/COMMENT_DOCUMENTATION_GUIDE.md` ``. Avoid informal aliases such as
+"comment format file", "COMMENT_STANDARD", "docs style guide", "naming md", or
+"readability doc" when referring to this standard.
+
+The former file name `docs/COMMENT_STANDARD.md` and the former long title
+("Comment, documentation, readability, and naming standard") are obsolete. Use
+**Comment Documentation Guide** / `docs/COMMENT_DOCUMENTATION_GUIDE.md`.
 
 ## Purpose
 
@@ -38,6 +62,10 @@ constraint, or risk that is not obvious from the code alone.
 |---|---|
 | Explain the project | Document Homework Central behavior, decisions, and invariants; skip language tutorials. |
 | Prefer readable code | Rename, simplify, or decompose before adding comments. |
+| Prefer pattern matching | Prefer `switch` expressions and patterns over large `if` / `else if` chains for closed-set decisions. |
+| Prefer fail-first | Validate and return/throw early; keep the happy path least indented. |
+| Prefer speakable names | Names must be pronounceable words or clear domain terms; rename cryptic abbreviations. |
+| Prefer collection transforms | Prefer `map` / `filter` / `reduce` (TS) and C# LINQ `Select()` / `Where()` / `Aggregate()` (also `Sum()` / `ToDictionary()`) when clearer than a hand-rolled loop. |
 | Prefer naming over comments | A precise name is stronger than a sentence explaining an imprecise name. |
 | Document why and constraints | Comments should explain policy, risk, invariants, or non-obvious tradeoffs. |
 | Keep comments current | A stale comment is a defect. Update comments with the code they describe. |
@@ -52,17 +80,24 @@ Before approving or merging changes, reviewers must check:
 
 1. **Names first** — confusing names are fixed before comments are added.
 2. **Explicit C# locals** — C# local variables use explicit types; `var` is not allowed.
-3. **Comment value** — comments explain project intent, invariants, trust boundaries,
+3. **Pattern matching** — closed-set decisions use `switch` expressions/patterns
+   instead of large `if` / `else if` chains when branches are pure mappings.
+4. **Fail-first** — guards return or throw early; the success path is not buried in nesting.
+5. **Speakable names** — identifiers can be spoken aloud as words or clear domain terms.
+6. **Collection transforms** — member selection/projection/aggregation uses
+   `map` / `filter` / `reduce` in TypeScript and `Select()` / `Where()` /
+   `Aggregate()` (or `Sum()`) in C# LINQ when that is clearer than an imperative loop.
+7. **Comment value** — comments explain project intent, invariants, trust boundaries,
    or operational behavior.
-4. **No process language** — comments and docs do not reference AI, prompts, branch
+8. **No process language** — comments and docs do not reference AI, prompts, branch
    state, personal authorship, or implementation chronology.
-5. **Complexity thresholds** — functions exceeding warning bands are reviewed for
+9. **Complexity thresholds** — functions exceeding warning bands are reviewed for
    simplification; functions exceeding hard limits are refactored.
-6. **Canonical docs** — user-facing or operator-facing knowledge is added to the
+10. **Canonical docs** — user-facing or operator-facing knowledge is added to the
    most relevant existing Markdown file.
-7. **Cross-references** — source comments point to stable docs only when the code
+11. **Cross-references** — source comments point to stable docs only when the code
    cannot carry the full rationale safely.
-8. **Tests as documentation** — behavior encoded in comments or Markdown has
+12. **Tests as documentation** — behavior encoded in comments or Markdown has
    corresponding tests when it is executable behavior.
 
 ## Documentation decision guide
@@ -73,21 +108,21 @@ Use the smallest durable documentation surface that captures the information.
 |---|---|---|
 | Clarify a non-obvious line or block | Inline comment near the code | Tenant filter intentionally omits tenant ID for shared chat traffic. |
 | Explain public API contract | XML doc or exported TypeScript type doc | `IChatRoomAccessService.CanAccessRoom` authorization contract. |
-| Explain architecture or trust boundary | Existing Markdown in `docs/` | `docs/tenancy-isolation.md`, `docs/chat-room-access.md`. |
+| Explain architecture or trust boundary | Existing feature Markdown in `docs/` | `docs/identity.md`, `docs/chat.md`, `docs/tickets.md`. |
 | Record a decision and alternatives | ADR | Choice to keep built-in chat rooms catalog-driven. |
 | Describe operations or incident response | Runbook | Restoring Postgres, rotating captcha secrets, handling failed migrations. |
-| Explain local setup | `README.md`, `SETUP.md`, or script comments | Required tools, ports, reset commands. |
+| Explain local setup | `README.md`, `SETUP.md`, or script comments | App ports/reset commands; optional contributor tool installs in `SETUP.md`. |
 | Explain UI design tokens | `design.md` and `frontend/src/index.css` tokens | Theme, spacing, animation, and component visual rules. |
 | Preserve security expectations | Security-focused doc plus tests | XSS baseline, SQL injection baseline, upload validation. |
 
 When several files could own the information, choose the document closest to the
 runtime boundary:
 
-- account class and tenant rules -> `docs/tenancy-isolation.md`;
-- chat room visibility -> `docs/chat-room-access.md`;
-- ticket assessment and AI scoring -> `docs/tickets-assessment.md` or
-  `docs/ticket-ai-scoring.md`;
-- environment setup -> `README.md`, `SETUP.md`, or `docs/windows-docker-resources.md`;
+- account class, auth, and tenant rules -> `docs/identity.md`;
+- chat room visibility, messages, and uploads -> `docs/chat.md`;
+- ticket portals, assessment, and AI scoring -> `docs/tickets.md`;
+- local Docker profiles, WSL caps, and ClamAV resource notes -> `README.md`;
+- environment setup -> `README.md` or `SETUP.md`;
 - design tokens and visual language -> `design.md`.
 
 ## Naming before commenting
@@ -117,10 +152,12 @@ Variable names must identify role, domain, and unit when relevant.
 | Include source when comparing | `jwtAccountClass`, `resourceAccountClass` | `left`, `right` |
 | Include lifecycle state | `pendingUploadScan` | `scan` |
 | Avoid abbreviations except common project terms | `moderationConceptSlug` | `mcs` |
+| Prefer speakable names | `eligibleUsers`, `roomId` | `eus`, `rid`, `tmpUsr` |
 
-Single-letter variables are allowed only for conventional math in a small local
-scope, such as neural network formulas in tests or training helpers. Prefer
-domain names even there when the value crosses more than a few lines.
+Names must be speakable aloud as words or clear domain phrases. Cryptic
+consonant clusters and unexplained initialisms fail review unless they are
+established Homework Central or industry terms (`JWT`, `DTO`, `EF`). Conventional
+short forms such as `ct` for `CancellationToken` remain acceptable.
 
 ## Loop counters and indexes
 
@@ -177,6 +214,25 @@ Boolean names must read naturally in conditionals and reveal polarity.
 Avoid negative booleans when possible. `isBlocked` is clearer than
 `isNotAllowed` when the domain state is a block. Do not combine negative names
 with negated conditions.
+
+## Collection transforms
+
+Prefer declarative collection operations over hand-rolled loops when the body is a
+member transform, filter, or aggregation. Informal review language often says
+**map** / **filter** / **reduce**; use the language-native names in code:
+
+| Concept | JavaScript / TypeScript / Python / Scala | C# (LINQ) |
+|---|---|---|
+| Transforming elements | `map()` | `Select()` |
+| Filtering elements | `filter()` | `Where()` |
+| Aggregating elements | `reduce()` | `Aggregate()` / `Sum()` |
+
+Related C# helpers that fit the same preference: `ToDictionary()`, `ToHashSet()`,
+`ToList()`, `Any()`, `All()`, `FirstOrDefault()` when they are clearer than a
+manual accumulation loop.
+
+Use an explicit `for` / `foreach` when the body has multi-step side effects, early
+exits that do not map cleanly, or a performance-critical inner kernel.
 
 ## Collection naming
 
@@ -304,19 +360,108 @@ Numeric types must match domain meaning:
 Do not hide numeric unit conversions in comments. Encode the unit in the type or
 name.
 
+## Prefer pattern matching over large if blocks
+
+Prefer C# pattern matching (`switch` expressions, `switch` statements, property
+patterns, relational patterns, and list patterns) when control flow is driven by
+a discriminated value, type shape, or small set of mutually exclusive cases.
+
+Prefer:
+
+```csharp
+string previewKind = contentType switch
+{
+    { Length: > 0 } when contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+        => "image",
+    "application/pdf" => "pdf",
+    "text/plain" or "text/markdown" => "text",
+    _ => "download",
+};
+```
+
+```csharp
+MalwareScanResult scanStatus = clamResult.Result switch
+{
+    ClamScanResults.VirusDetected => MalwareScanResult.Infected,
+    ClamScanResults.Clean => MalwareScanResult.Clean,
+    ClamScanResults.Error => MalwareScanResult.NotScanned,
+    _ => MalwareScanResult.NotScanned,
+};
+```
+
+Avoid expanding the same decision into nested or chained `if` / `else if` blocks
+when each branch is a pure mapping or a short validation:
+
+```csharp
+string previewKind;
+if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+{
+    previewKind = "image";
+}
+else if (contentType == "application/pdf")
+{
+    previewKind = "pdf";
+}
+else if (contentType == "text/plain" || contentType == "text/markdown")
+{
+    previewKind = "text";
+}
+else
+{
+    previewKind = "download";
+}
+```
+
+Keep ordinary `if` statements when:
+
+- There is a single guard or early return.
+- Branches perform materially different side effects that read better sequentially.
+- Pattern matching would force awkward temporary variables or obscure ordering.
+- The condition is a complex authorization or transaction invariant that needs an
+  intent comment next to the predicate.
+
+Exhaustive `switch` expressions are preferred for intake question types, scan
+statuses, account classes, tracking modes, and similar closed sets. Add a
+default arm only when the domain set is intentionally open, and document why.
+
+TypeScript/React code should follow the same preference: use discriminated
+unions and `switch` on `kind` / `type` fields instead of long `if`/`else if`
+chains when rendering or validating variant payloads.
+
 ## Function readability and complexity
 
 Readable functions have one clear purpose, a small number of inputs, shallow
 control flow, and explicit side effects. Review functions as units of behavior,
 not as line-count contests.
 
-Reviewers should evaluate:
+### Complexity review scope
+
+Hard complexity gates apply to:
+
+- C# under `backend/` (`*.cs`);
+- non-UI TypeScript modules (`*.ts`) such as API clients, hooks that own
+  protocol/state machines, and pure utilities.
+
+Hard complexity gates do **not** apply to:
+
+- React component files (`*.tsx`), including page and panel components whose
+  complexity is mostly JSX branching and local UI state;
+- generated code, EF migrations' fluent `OnModelCreating` / `Up` / `Down`
+  builders when they are linear schema declarations;
+- primary-constructor type declarations mistaken for methods by crude scanners.
+
+TSX may still be refactored for clarity, but a high score from JSX composition
+alone is not a merge blocker. Prefer extracting hooks and helpers into `*.ts`
+when protocol, authorization, or retry logic grows inside a component.
+
+Reviewers should evaluate in-scope functions for:
 
 - Can the function purpose be stated in one sentence?
 - Are all parameters necessary and cohesive?
 - Are authorization, validation, persistence, network calls, and response mapping
   mixed together?
 - Are there multiple levels of nested branching?
+- Would pattern matching replace a large `if` / `else if` chain?
 - Are boolean expressions readable without a truth table?
 - Do names make comments unnecessary?
 - Does the function expose or hide side effects?
@@ -402,8 +547,11 @@ approved readability exception is documented near the function and in review.
 | Side-effect categories | `3` | `>3` |
 | Structural readability score | `60-74` | `<60` |
 
-Hard limits apply to production code, test helpers, migrations, scripts, and
-frontend code. Generated code is exempt when it is not edited by hand.
+Hard limits apply to in-scope production and test C# (`*.cs`) and non-UI
+TypeScript modules (`*.ts`). React component files (`*.tsx`) are exempt from
+hard complexity gates; see [Complexity review scope](#complexity-review-scope).
+Generated code is exempt when it is not edited by hand. Document module-level
+exceptions in the owning feature Markdown file, not in a new per-item doc.
 
 ## Function decomposition
 
@@ -537,12 +685,13 @@ Style rules:
 - Avoid authoring-process language.
 - Keep comments close to the code they constrain.
 - Delete comments made obsolete by clearer names or simpler structure.
+- Do not document asymptotic time/space complexity (Big-O) in comments or docs.
 
-Example:
+Example (intent):
 
 ```csharp
 // Shared chat traffic is isolated by account class only; per-tenant matching
-// would split the community room model. See docs/chat-room-access.md.
+// would split the community room model. See docs/chat.md.
 query = query.Where(message => message.OwnerAccountClass == scope.AccountClass);
 ```
 
@@ -598,7 +747,61 @@ bool CanQuery(ResourceVisibilityScope scope, IScopedResource resource);
 Markdown files are the durable home for architecture, operations, setup, and
 cross-cutting standards.
 
-Markdown standards:
+### Feature-level documents
+
+Prefer **one Markdown file per feature or subsystem**, not one file per
+endpoint, class, helper, or small topic.
+
+| Prefer | Avoid |
+|---|---|
+| `docs/tickets.md` for portals, intake, votes, AI scoring, and promotion | Separate docs per validator, preface check, neural class, or UI panel |
+| `docs/chat.md` for rooms, messages, attachments, and scanning | Separate room-access, upload, and composer docs |
+| `docs/identity.md` for auth, sessions, and tenancy isolation | Separate auth and tenancy docs that must be read together |
+| `README.md` for Docker Compose profiles, WSL caps, and ClamAV resource notes | A separate runtime/efficiency Markdown file |
+| A short section inside the module doc for complexity exceptions | `docs/ChatComposer-complexity.md`-style one-off files |
+
+Create a new Markdown file only when the subject is a distinct feature,
+subsystem, standard, ADR, or runbook. Do not create a file merely because one
+class, enum, endpoint, config key, TSX panel, or complexity finding changed.
+
+When a feature grows, add headings and sections inside the existing feature
+document. Split only when the resulting file covers unrelated trust boundaries
+or unrelated operators cannot share one narrative.
+
+Canonical feature docs today:
+
+| Feature / module | Canonical file |
+|---|---|
+| Comment Documentation Guide (comments, naming, readability) | `docs/COMMENT_DOCUMENTATION_GUIDE.md` |
+| Identity, sessions, tenancy | `docs/identity.md` |
+| Chat rooms, messages, uploads | `docs/chat.md` |
+| Tickets and assessment (incl. neural) | `docs/tickets.md` |
+| Local Docker profiles / WSL / ClamAV resource notes | `README.md` |
+| UI design tokens | `design.md` |
+
+Complexity review findings for a module belong as a short section in that
+module's feature doc (or in PR review notes), not as additional Markdown files.
+
+### Required content for feature docs
+
+Each feature Markdown file should include, when applicable:
+
+1. **Purpose and scope** — what the feature owns and intentionally excludes.
+2. **Architecture** — at least one Mermaid diagram (flowchart, sequence, or
+   state) that matches the current implementation.
+3. **Current behavior** — durable control flow and ownership rules.
+4. **Code behavior** — short, accurate snippets from current source that show
+   important behavior changes or invariants. Use explicit C# types; do not use
+   `var`. Cite the source path near the snippet.
+5. **Implementation files** — the primary backend, frontend, deploy, and script
+   paths that implement the feature.
+6. **Trust boundaries, failure handling, and configuration** — without secrets.
+7. **Related documentation** — links to other feature docs, not duplicate copies.
+
+Snippets must reflect current code. When behavior changes, update the snippet
+and the implementation-file list in the same change as the code.
+
+### Markdown standards
 
 - Start with a clear H1.
 - Explain project-specific context before implementation detail.
@@ -608,10 +811,12 @@ Markdown standards:
 - Include command examples that can be copied safely.
 - Mark destructive commands clearly.
 - Keep headings stable so source comments can link to them.
-- Update existing docs when the topic already has an owner.
+- Update existing feature docs when the topic already has an owner.
 
 Avoid creating:
 
+- one Markdown file per class, endpoint, DTO, config key, TSX panel, or function;
+- one Markdown file per complexity finding;
 - duplicate setup guides;
 - one-off branch notes;
 - temporary comparison documents;
@@ -686,7 +891,7 @@ Use repository-relative paths:
 
 ```csharp
 // Real and developer traffic must stay separated at query time.
-// See docs/tenancy-isolation.md.
+// See docs/identity.md.
 ```
 
 Do not link to branch comparisons, AI transcripts, ephemeral issue comments, or
@@ -902,6 +1107,8 @@ Required behavior:
 - Update the canonical Markdown file instead of creating duplicate docs.
 - Preserve user changes and unrelated working-tree changes.
 - Use explicit C# local types; do not introduce `var`.
+- Prefer pattern matching over large `if` / `else if` chains for closed-set
+  decisions (intake types, scan statuses, account classes, and similar).
 - Avoid comments or docs that mention AI, prompts, generated status, branch
   comparisons, or personal authorship.
 - Prefer project terms over generic placeholders.
@@ -911,6 +1118,31 @@ Required behavior:
 
 AI agents must not leave "generated by", "AI note", "prompt asked", or similar
 text in source, tests, or Markdown.
+
+### Narrow exception: contributor entry files and tool setup
+
+The bans on AI-assistance, prompt, and authoring-process language apply to
+**source comments**, **XML docs**, **feature Markdown under `docs/`**, and other
+durable product/architecture documentation.
+
+A narrow exception applies only to these tracked operational files:
+
+| File | Allowed content |
+|---|---|
+| `AGENTS.md`, `CLAUDE.md`, and equivalent agent entry files | Repository operating rules for automated contributors (project layout, hard rules, pointers to canonical docs). |
+| `SETUP.md` | Install and usage steps for **operationally supported** optional local contributor tools (for example CodeGraph, Graphify, Claude-Mem), including product names and commands. |
+
+This exception does **not** allow:
+
+- "generated by", prompt transcripts, branch-diff notes, or authorship chronology
+  in source, tests, or feature docs;
+- embedding agent authoring process inside `docs/identity.md`, `docs/chat.md`,
+  `docs/tickets.md`, or similar feature documents;
+- treating `SETUP.md` as a second Comment Documentation Guide or security policy
+  (those remain in `docs/COMMENT_DOCUMENTATION_GUIDE.md` and the owning module docs).
+
+Keep `SETUP.md` install-focused. Keep agent workflow rules in `AGENTS.md` /
+`CLAUDE.md`, not in feature architecture docs.
 
 ## Examples
 
@@ -1049,9 +1281,14 @@ Maintenance rules:
 Use this checklist before submitting or approving a change:
 
 - [ ] Names describe Homework Central domain behavior accurately.
+- [ ] Names are speakable; cryptic abbreviations were renamed.
 - [ ] C# locals use explicit types; no `var` appears in hand-authored code.
+- [ ] Closed-set decisions use pattern matching instead of large `if` chains.
+- [ ] Fail-first guards keep the happy path unindented.
+- [ ] Collection member transforms prefer map/filter/reduce (TS) or Select/Where/Aggregate (C#) when clearer than a for-loop.
 - [ ] Functions stay below hard complexity limits or have an approved exception.
 - [ ] Warning-band complexity has been considered for decomposition.
+- [ ] Comments and docs do not include asymptotic time/space (Big-O) analysis.
 - [ ] Comments explain project-specific why, constraints, or risks.
 - [ ] Comments avoid self-reference and authoring-process language.
 - [ ] XML docs exist for public contracts and security-sensitive abstractions.
@@ -1063,4 +1300,6 @@ Use this checklist before submitting or approving a change:
 - [ ] TODO/FIXME/HACK/NOTE markers include a clear condition or issue reference.
 - [ ] React, CSS, database, and deployment comments follow their local rules.
 - [ ] Tests cover changed executable behavior and use descriptive domain names.
-- [ ] AI-assisted content contains no AI, prompt, branch-diff, or authorship notes.
+- [ ] AI-assisted content contains no AI, prompt, branch-diff, or authorship notes
+      outside the narrow exception for `AGENTS.md` / `CLAUDE.md` / install-only
+      `SETUP.md` (see [AI contributor requirements](#ai-contributor-requirements)).

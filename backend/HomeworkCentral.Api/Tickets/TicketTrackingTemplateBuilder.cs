@@ -19,58 +19,97 @@ public static class TicketTrackingTemplateBuilder
         IReadOnlyDictionary<string, JsonElement> answers,
         IReadOnlyDictionary<string, TicketPrefaceResult>? prefaceResults = null)
     {
-        string? prefaceCategory = null;
-        List<string> prefaceSpecifics = [];
-        if (prefaceResults is not null)
-        {
-            foreach (TicketPrefaceResult result in prefaceResults
-                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                .Select(kv => kv.Value))
-            {
-                if (string.IsNullOrWhiteSpace(prefaceCategory) && !string.IsNullOrWhiteSpace(result.PrimaryCategory))
-                    prefaceCategory = result.PrimaryCategory;
-                foreach (string label in result.SpecificLabels)
-                {
-                    if (!prefaceSpecifics.Contains(label, StringComparer.OrdinalIgnoreCase))
-                        prefaceSpecifics.Add(label);
-                }
-            }
-        }
-
+        PrefaceTemplateSummary prefaceSummary = BuildPrefaceSummary(prefaceResults);
         TrackingTemplatePayload payload = new()
         {
             FilterName = filterName,
             BuiltAtUtc = DateTime.UtcNow,
-            Intake = schema.Select(q =>
-            {
-                JsonElement? answer = null;
-                if (answers.TryGetValue(q.Id, out JsonElement value)
-                    && value.ValueKind is not JsonValueKind.Undefined and not JsonValueKind.Null)
-                {
-                    // Clone so the template outlives request-bound JsonElements.
-                    answer = value.Clone();
-                }
-
-                return new TrackingTemplateIntakeItem
-                {
-                    Id = q.Id,
-                    Prompt = q.Prompt,
-                    Type = q.Type,
-                    TracksUser = q.TracksUser,
-                    Answer = answer,
-                };
-            }).ToList(),
-            PrefaceCategory = prefaceCategory,
-            PrefaceSpecifics = prefaceSpecifics,
-            Instructions = string.Equals(filterName, DefaultTicketPortalPresets.TutorFilterName, StringComparison.OrdinalIgnoreCase)
-                ? "Tutor trial: monitor applied subjects strictly, related subjects mildly, unrelated reward-only."
-                : string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
-                    ? "Mod report: score when reported users' messages match the reported reason or similar."
-                    : "Generic ticket tracking from intake answers and chat evidence.",
+            Intake = BuildIntakeItems(schema, answers),
+            PrefaceCategory = prefaceSummary.PrimaryCategory,
+            PrefaceSpecifics = prefaceSummary.Specifics,
+            Instructions = ResolveInstructions(filterName),
         };
 
         return JsonSerializer.Serialize(payload, JsonOptions);
     }
+
+    private static PrefaceTemplateSummary BuildPrefaceSummary(
+        IReadOnlyDictionary<string, TicketPrefaceResult>? prefaceResults)
+    {
+        string? prefaceCategory = null;
+        List<string> prefaceSpecifics = [];
+        if (prefaceResults is null)
+            return new PrefaceTemplateSummary(prefaceCategory, prefaceSpecifics);
+
+        foreach (TicketPrefaceResult result in prefaceResults
+            .OrderBy(prefaceResult => prefaceResult.Key, StringComparer.Ordinal)
+            .Select(prefaceResult => prefaceResult.Value))
+        {
+            if (string.IsNullOrWhiteSpace(prefaceCategory) && !string.IsNullOrWhiteSpace(result.PrimaryCategory))
+                prefaceCategory = result.PrimaryCategory;
+
+            AddSpecificLabels(result, prefaceSpecifics);
+        }
+
+        return new PrefaceTemplateSummary(prefaceCategory, prefaceSpecifics);
+    }
+
+    private static void AddSpecificLabels(TicketPrefaceResult result, List<string> prefaceSpecifics)
+    {
+        foreach (string label in result.SpecificLabels)
+        {
+            if (!prefaceSpecifics.Contains(label, StringComparer.OrdinalIgnoreCase))
+                prefaceSpecifics.Add(label);
+        }
+    }
+
+    private static List<TrackingTemplateIntakeItem> BuildIntakeItems(
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, JsonElement> answers) =>
+        schema.Select(question => BuildIntakeItem(question, answers)).ToList();
+
+    private static TrackingTemplateIntakeItem BuildIntakeItem(
+        TicketIntakeQuestionDto question,
+        IReadOnlyDictionary<string, JsonElement> answers) =>
+        new()
+        {
+            Id = question.Id,
+            Prompt = question.Prompt,
+            Type = question.Type,
+            TracksUser = question.TracksUser,
+            Answer = CloneTemplateAnswer(question, answers),
+        };
+
+    private static JsonElement? CloneTemplateAnswer(
+        TicketIntakeQuestionDto question,
+        IReadOnlyDictionary<string, JsonElement> answers)
+    {
+        if (!answers.TryGetValue(question.Id, out JsonElement value)
+            || value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        // Tracking templates outlive request-bound JsonElements stored by model binding.
+        return value.Clone();
+    }
+
+    private static string ResolveInstructions(string filterName) => filterName switch
+    {
+        string tutorFilter when string.Equals(
+            tutorFilter,
+            DefaultTicketPortalPresets.TutorFilterName,
+            StringComparison.OrdinalIgnoreCase)
+            => "Tutor trial: monitor applied subjects strictly, related subjects mildly, unrelated reward-only.",
+        string modFilter when string.Equals(
+            modFilter,
+            DefaultTicketPortalPresets.ModFilterName,
+            StringComparison.OrdinalIgnoreCase)
+            => "Mod report: score when reported users' messages match the reported reason or similar.",
+        _ => "Generic ticket tracking from intake answers and chat evidence.",
+    };
+
+    private sealed record PrefaceTemplateSummary(string? PrimaryCategory, List<string> Specifics);
 
     private sealed class TrackingTemplatePayload
     {

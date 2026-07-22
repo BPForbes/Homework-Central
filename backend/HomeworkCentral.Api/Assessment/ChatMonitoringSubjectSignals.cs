@@ -109,52 +109,99 @@ public static class ChatMonitoringSubjectSignals
         float fallbackChannelRelevance = .5f,
         IReadOnlyList<string>? appliedExpertise = null)
     {
-        List<string> applied = appliedGenerals
-            .Where(s => GeneralIndex(s) >= 0)
+        List<string> applied = NormalizeAppliedGenerals(appliedGenerals);
+        List<string> expertise = NormalizeAppliedExpertise(appliedExpertise);
+        float countNorm = Math.Clamp(applied.Count / 6f, 0f, 1f);
+        if (string.IsNullOrWhiteSpace(channelGeneral) || GeneralIndex(channelGeneral) < 0)
+            return BuildNoChannelSnapshot(applied, expertise, countNorm, fallbackChannelRelevance);
+
+        string channel = CanonicalMask(channelGeneral);
+        SubjectChannelMatch channelMatch = CalculateChannelMatch(applied, channel);
+        return new SubjectSignalSnapshot(
+            applied,
+            expertise,
+            channel,
+            channelMatch.ExactMatch,
+            channelMatch.RelatedMatch,
+            channelMatch.CrossSubjectSupport,
+            countNorm,
+            channelMatch.EffectiveChannelRelevance,
+            channelMatch.RewardScale);
+    }
+
+    private static List<string> NormalizeAppliedGenerals(IReadOnlyList<string> appliedGenerals) =>
+        appliedGenerals
+            .Where(subject => GeneralIndex(subject) >= 0)
             .Select(CanonicalMask)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        List<string> expertise = (appliedExpertise ?? [])
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Select(s => s.Trim())
+
+    private static List<string> NormalizeAppliedExpertise(IReadOnlyList<string>? appliedExpertise) =>
+        (appliedExpertise ?? [])
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Select(label => label.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        float countNorm = Math.Clamp(applied.Count / 6f, 0f, 1f);
-        if (string.IsNullOrWhiteSpace(channelGeneral) || GeneralIndex(channelGeneral) < 0)
-        {
-            return new SubjectSignalSnapshot(applied, expertise, null, 0f, 0f, 0f, countNorm,
-                Math.Clamp(fallbackChannelRelevance, 0f, 1f), 1f);
-        }
 
-        string channel = CanonicalMask(channelGeneral);
-        bool exact = applied.Any(s => string.Equals(s, channel, StringComparison.OrdinalIgnoreCase));
+    private static SubjectSignalSnapshot BuildNoChannelSnapshot(
+        IReadOnlyList<string> applied,
+        IReadOnlyList<string> expertise,
+        float countNorm,
+        float fallbackChannelRelevance) =>
+        new(
+            applied,
+            expertise,
+            null,
+            0f,
+            0f,
+            0f,
+            countNorm,
+            Math.Clamp(fallbackChannelRelevance, 0f, 1f),
+            1f);
+
+    private static SubjectChannelMatch CalculateChannelMatch(IReadOnlyList<string> applied, string channel)
+    {
+        bool exact = applied.Any(subject => string.Equals(subject, channel, StringComparison.OrdinalIgnoreCase));
         float maxRelated = 0f;
         float crossSupport = 0f;
         foreach (string subject in applied)
         {
-            float rel = PairRelatedness(subject, channel);
+            float relatedness = PairRelatedness(subject, channel);
             if (string.Equals(subject, channel, StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (rel > crossSupport) crossSupport = rel;
-            if (rel > maxRelated) maxRelated = rel;
+
+            if (relatedness > crossSupport)
+                crossSupport = relatedness;
+            if (relatedness > maxRelated)
+                maxRelated = relatedness;
         }
 
-        float exactMatch = exact ? 1f : 0f;
         float relatedMatch = exact ? crossSupport : maxRelated;
-        // Exact channel match gets a cross-subject boost (Math+Science applicant in Physics/Science).
-        float effective = exact
-            ? Math.Clamp(.85f + .15f * crossSupport, 0f, 1f)
-            : relatedMatch >= .7f ? .55f + .3f * relatedMatch
-            : relatedMatch >= .35f ? .3f + .25f * relatedMatch
-            : .1f;
-        float rewardScale = exact
-            ? Math.Clamp(.9f + .2f * crossSupport, 0f, 1.15f)
-            : relatedMatch >= .7f ? .65f
-            : relatedMatch >= .35f ? .4f
-            : .15f;
-
-        return new SubjectSignalSnapshot(applied, expertise, channel, exactMatch, relatedMatch, crossSupport, countNorm, effective, rewardScale);
+        return new SubjectChannelMatch(
+            exact ? 1f : 0f,
+            relatedMatch,
+            crossSupport,
+            CalculateEffectiveChannelRelevance(exact, relatedMatch, crossSupport),
+            CalculateRewardScale(exact, relatedMatch, crossSupport));
     }
+
+    private static float CalculateEffectiveChannelRelevance(bool exact, float relatedMatch, float crossSupport) =>
+        exact switch
+        {
+            true => Math.Clamp(.85f + .15f * crossSupport, 0f, 1f),
+            false when relatedMatch >= .7f => .55f + .3f * relatedMatch,
+            false when relatedMatch >= .35f => .3f + .25f * relatedMatch,
+            _ => .1f,
+        };
+
+    private static float CalculateRewardScale(bool exact, float relatedMatch, float crossSupport) =>
+        exact switch
+        {
+            true => Math.Clamp(.9f + .2f * crossSupport, 0f, 1.15f),
+            false when relatedMatch >= .7f => .65f,
+            false when relatedMatch >= .35f => .4f,
+            _ => .15f,
+        };
 
     public static SubjectSignalSnapshot ResolveFromTicket(TicketUserWatch watch, string? roomId, float fallbackChannelRelevance = .5f)
     {
@@ -193,58 +240,40 @@ public static class ChatMonitoringSubjectSignals
 
     public static TutorSubjectTextProcessor.SubjectExtraction ParseAppliedExtraction(params string?[] texts)
     {
-        List<string> generals = [];
-        List<string> expertise = [];
-        List<TutorSubjectTextProcessor.SubjectHit> hits = [];
-
-        void Merge(TutorSubjectTextProcessor.SubjectExtraction extraction)
-        {
-            foreach (string general in extraction.GeneralMasks)
-            {
-                if (!generals.Contains(general, StringComparer.OrdinalIgnoreCase))
-                    generals.Add(general);
-            }
-
-            foreach (string label in extraction.ExpertiseLabels)
-            {
-                if (!expertise.Contains(label, StringComparer.OrdinalIgnoreCase))
-                    expertise.Add(label);
-            }
-
-            foreach (TutorSubjectTextProcessor.SubjectHit hit in extraction.Hits)
-            {
-                if (!hits.Any(h =>
-                        string.Equals(h.GeneralMask, hit.GeneralMask, StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(h.Label, hit.Label, StringComparison.OrdinalIgnoreCase)))
-                {
-                    hits.Add(hit);
-                }
-            }
-        }
+        SubjectExtractionBuilder builder = new();
 
         foreach (string? text in texts)
         {
-            if (string.IsNullOrWhiteSpace(text)) continue;
-            Merge(TutorSubjectTextProcessor.ExtractSubjects(text));
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
 
-            if (text.Contains("tutor-subjects", StringComparison.OrdinalIgnoreCase)
-                || text.Contains("\"intake\"", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    using JsonDocument document = JsonDocument.Parse(text);
-                    foreach (string subjectText in ExtractTutorSubjectTextsFromTemplate(document.RootElement))
-                        Merge(TutorSubjectTextProcessor.ExtractSubjects(subjectText));
-                }
-                catch (JsonException)
-                {
-                    // free-text parse already ran
-                }
-            }
+            builder.Merge(TutorSubjectTextProcessor.ExtractSubjects(text));
+            MergeTemplateSubjectTexts(text, builder);
         }
 
-        return new TutorSubjectTextProcessor.SubjectExtraction(generals, expertise, hits);
+        return builder.Build();
     }
+
+    private static void MergeTemplateSubjectTexts(string text, SubjectExtractionBuilder builder)
+    {
+        if (!LooksLikeTrackingTemplate(text))
+            return;
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(text);
+            foreach (string subjectText in ExtractTutorSubjectTextsFromTemplate(document.RootElement))
+                builder.Merge(TutorSubjectTextProcessor.ExtractSubjects(subjectText));
+        }
+        catch (JsonException)
+        {
+            // Free-text parsing already captured any readable subject hints.
+        }
+    }
+
+    private static bool LooksLikeTrackingTemplate(string text) =>
+        text.Contains("tutor-subjects", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("\"intake\"", StringComparison.OrdinalIgnoreCase);
 
     public static string? ResolveChannelSubject(string? roomOrChannel)
     {
@@ -326,6 +355,49 @@ public static class ChatMonitoringSubjectSignals
         string a = left.ToLowerInvariant();
         string b = right.ToLowerInvariant();
         return string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
+    }
+
+    private sealed record SubjectChannelMatch(
+        float ExactMatch,
+        float RelatedMatch,
+        float CrossSubjectSupport,
+        float EffectiveChannelRelevance,
+        float RewardScale);
+
+    private sealed class SubjectExtractionBuilder
+    {
+        private readonly List<string> _generals = [];
+        private readonly List<string> _expertise = [];
+        private readonly List<TutorSubjectTextProcessor.SubjectHit> _hits = [];
+
+        public void Merge(TutorSubjectTextProcessor.SubjectExtraction extraction)
+        {
+            foreach (string general in extraction.GeneralMasks)
+            {
+                if (!_generals.Contains(general, StringComparer.OrdinalIgnoreCase))
+                    _generals.Add(general);
+            }
+
+            foreach (string label in extraction.ExpertiseLabels)
+            {
+                if (!_expertise.Contains(label, StringComparer.OrdinalIgnoreCase))
+                    _expertise.Add(label);
+            }
+
+            foreach (TutorSubjectTextProcessor.SubjectHit hit in extraction.Hits)
+            {
+                if (!ContainsHit(hit))
+                    _hits.Add(hit);
+            }
+        }
+
+        public TutorSubjectTextProcessor.SubjectExtraction Build() =>
+            new(_generals, _expertise, _hits);
+
+        private bool ContainsHit(TutorSubjectTextProcessor.SubjectHit hit) =>
+            _hits.Any(existing =>
+                string.Equals(existing.GeneralMask, hit.GeneralMask, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(existing.Label, hit.Label, StringComparison.OrdinalIgnoreCase));
     }
 }
 

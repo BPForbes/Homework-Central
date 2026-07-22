@@ -9,8 +9,16 @@ using Microsoft.Extensions.Options;
 
 namespace HomeworkCentral.Api.Assessment;
 
+/// <summary>
+/// Runs queued ticket-assessment jobs against watched chat traffic. Implementations
+/// may persist score events and vector evidence; callers must treat jobs as at-least-once.
+/// </summary>
 public interface IAssessmentPipelineService
 {
+    /// <summary>
+    /// Processes queued ticket-assessment work. New-message jobs may read chat
+    /// context, write score events, and upsert vector evidence for active watches.
+    /// </summary>
     Task ProcessMessageAsync(AssessmentMessageJob job, CancellationToken ct = default);
 }
 
@@ -39,13 +47,36 @@ public sealed class AssessmentPipelineService(
         + "All numbers must be 0..1. Keep explanation and guidance under 300 characters.";
 
     public Task ProcessMessageAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
-        job.Kind == AssessmentJobKind.CommunityRecalc
-            ? Task.CompletedTask
-            : ProcessNewMessageAsync(job, ct);
+        job.Kind switch
+        {
+            AssessmentJobKind.CommunityRecalc => Task.CompletedTask,
+            _ => ProcessNewMessageAsync(job, ct),
+        };
 
     private async Task ProcessNewMessageAsync(AssessmentMessageJob job, CancellationToken ct)
     {
-        List<TicketUserWatch> watches = await db.TicketUserWatches
+        List<TicketUserWatch> activeWatches = await LoadActiveWatchesForMessageAsync(job, ct);
+
+        if (activeWatches.Count == 0)
+            return;
+
+        TicketOptions ticketOptions = options.Value;
+        IReadOnlyList<float> messageEmbedding = ChatMonitoringFeatureEncoder.EmbedText(job.Content);
+        List<ChatMessage> recentMessages = await LoadRecentRoomMessagesAsync(job, ct);
+        string contextSnapshot = BuildContextSnapshot(recentMessages);
+        MessageScoringContext scoringContext = new(
+            job,
+            ticketOptions,
+            messageEmbedding,
+            recentMessages,
+            contextSnapshot);
+
+        foreach (TicketUserWatch watch in activeWatches)
+            await ScoreActiveWatchAsync(watch, scoringContext, ct);
+    }
+
+    private Task<List<TicketUserWatch>> LoadActiveWatchesForMessageAsync(AssessmentMessageJob job, CancellationToken ct) =>
+        db.TicketUserWatches
             .Include(w => w.Ticket)
             .ThenInclude(t => t.Portal)
             .Where(w => w.IsActive
@@ -55,157 +86,386 @@ public sealed class AssessmentPipelineService(
                         && w.Ticket.DecisionApprovedAtUtc == null)
             .ToListAsync(ct);
 
-        if (watches.Count == 0)
-            return;
-
-        TicketOptions ticketOptions = options.Value;
-        IReadOnlyList<float> embedding = ChatMonitoringFeatureEncoder.EmbedText(job.Content);
-        List<ChatMessage> recentMessages = await db.ChatMessages.AsNoTracking()
+    private Task<List<ChatMessage>> LoadRecentRoomMessagesAsync(AssessmentMessageJob job, CancellationToken ct) =>
+        db.ChatMessages.AsNoTracking()
             .Where(message => message.RoomId == job.RoomId && message.MessageId != job.MessageId)
             .OrderByDescending(message => message.CreatedAtUtc)
             .Take(5)
             .OrderBy(message => message.CreatedAtUtc)
             .ToListAsync(ct);
-        string contextSnapshot = BuildContextSnapshot(recentMessages);
 
-        foreach (TicketUserWatch watch in watches)
-        {
-            bool alreadyScored = await db.TicketMessageScores.AsNoTracking()
-                .AnyAsync(s => s.TicketId == watch.TicketId && s.MessageId == job.MessageId, ct);
-            if (alreadyScored)
-                continue;
+    private async Task ScoreActiveWatchAsync(
+        TicketUserWatch watch,
+        MessageScoringContext scoringContext,
+        CancellationToken ct)
+    {
+        bool alreadyScored = await HasMessageAlreadyBeenScoredAsync(watch, scoringContext.Job.MessageId, ct);
+        if (alreadyScored)
+            return;
 
-            double previousScore = await db.TicketMessageScores.AsNoTracking()
-                .Where(s => s.TicketId == watch.TicketId && s.TrackedUserId == watch.TrackedUserId)
-                .OrderByDescending(s => s.CreatedAtUtc)
-                .Select(s => (double?)s.CurrentScore)
-                .FirstOrDefaultAsync(ct)
-                ?? Math.Clamp(ticketOptions.InitialConfidenceScore, 0, 1);
+        double previousScore = await LoadPreviousTicketScoreAsync(watch, scoringContext.TicketOptions, ct);
+        WatchNeuralEvaluation neuralEvaluation = ScoreWatchWithNeuralModel(watch, scoringContext, previousScore);
+        ReviewerEvaluationAttempt reviewerEvaluationAttempt =
+            await InvokeOptionalReviewerAsync(watch, scoringContext, neuralEvaluation, ct);
+        BlendedScoreInputs blendedScoreInputs = BlendReviewerSignals(
+            neuralEvaluation,
+            reviewerEvaluationAttempt,
+            scoringContext.TicketOptions);
+        TicketConfidenceUpdate confidenceUpdate = TicketConfidenceScoring.Update(
+            previousScore,
+            blendedScoreInputs.Evidence,
+            blendedScoreInputs.Relevance,
+            scoringContext.TicketOptions.MaxScoreDeltaPerMessage);
+        TicketMessageScore scoreEvent = CreateScoreEvent(
+            watch,
+            scoringContext,
+            neuralEvaluation,
+            reviewerEvaluationAttempt,
+            blendedScoreInputs,
+            confidenceUpdate);
+        WatchScoringResult scoringResult = new(
+            confidenceUpdate,
+            scoreEvent,
+            neuralEvaluation,
+            reviewerEvaluationAttempt,
+            blendedScoreInputs);
 
-            string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
-            string modelRequirement = $"{requirement}\nRunning ticket confidence before this message: {previousScore:F3}.";
-            string modelMessage = string.IsNullOrEmpty(contextSnapshot)
-                ? job.Content
-                : $"{contextSnapshot}\n<current_message>\n{job.Content}\n</current_message>";
-            NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
-            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
-            SubjectSignalSnapshot subjectSignals = chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
-                ? ChatMonitoringSubjectSignals.ResolveFromTicket(watch, job.RoomId)
-                : ChatMonitoringSubjectSignals.Resolve([], ChatMonitoringSubjectSignals.ResolveChannelSubject(job.RoomId), 1f);
-            ChatMonitoringNeuralModelInput modelInput = ChatMonitoringNeuralModelInput.Create(
-                modelRequirement,
-                contextSnapshot,
-                job.Content,
-                communityVote: 0,
-                threadContinuity: Math.Clamp(recentMessages.Count / 5f, 0, 1),
-                priorScore: (float)previousScore,
-                subjectSignals);
-            ChatMonitoringNeuralModelPrediction prediction = model.Predict(modelInput);
-            string retrievalPositionId = ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind);
-            bool reviewerInvoked = !ticketOptions.NeuralOnlyScoring
-                && ticketOptions.OllamaEnabled
-                && TicketReviewPolicy.ShouldReview(
-                    prediction.Confidence, job.MessageId, ticketOptions.StudentConfidenceThreshold, ticketOptions.ReviewerAuditRate);
-            IReadOnlyList<VectorDocument> similar = reviewerInvoked
-                ? await vectors.RetrieveSimilarAsync(VectorNamespaces.TicketTrainingExample, embedding, 3, retrievalPositionId, ct)
-                : [];
-            string? rawReview = reviewerInvoked
-                ? await llm.ChatJsonAsync(SystemPrompt, BuildReviewerPrompt(watch, job, prediction, modelRequirement, contextSnapshot, similar, ticketOptions.MaxMessageCharacters), ct)
-                : null;
-            TicketReviewerEvaluation? review = !string.IsNullOrWhiteSpace(rawReview)
-                                                   && TicketReviewerEvaluation.TryParse(rawReview, out TicketReviewerEvaluation parsed)
-                ? parsed : null;
-            double evidence = review is TicketReviewerEvaluation reviewer
-                ? TicketReviewPolicy.Blend(prediction.Evidence, reviewer.ReviewerScore, ticketOptions.ReviewerBlendWeight)
-                : prediction.Evidence;
-            double relevance = review is TicketReviewerEvaluation reviewerRelevance
-                ? TicketReviewPolicy.Blend(prediction.Relevance, reviewerRelevance.Relevance, ticketOptions.ReviewerBlendWeight)
-                : prediction.Relevance;
-            // Multi-subject policy: exact channel match (with cross-subject support) rewards more;
-            // related subjects mildly; unrelated channels barely move the ticket.
-            if (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring)
-                relevance = Math.Clamp(relevance * subjectSignals.RewardScale, 0, 1);
-            string reason = review?.Explanation
-                ?? (chatMonitoringKind == NeuralModelKindChatMonitoring.Tutoring
-                    ? AppendSubjectReason(prediction.Reasoning, subjectSignals)
-                    : prediction.Reasoning);
-
-            TicketConfidenceUpdate update = TicketConfidenceScoring.Update(
-                previousScore,
-                evidence,
-                relevance,
-                ticketOptions.MaxScoreDeltaPerMessage);
-
-            TicketMessageScore scoreEvent = new()
-            {
-                ScoreEventId = Guid.NewGuid(),
-                TicketId = watch.TicketId,
-                MessageId = job.MessageId,
-                TrackedUserId = watch.TrackedUserId,
-                PreviousScore = update.PreviousScore,
-                ScoreDelta = update.ScoreDelta,
-                CurrentScore = update.CurrentScore,
-                EvidenceConfidence = evidence,
-                Relevance = relevance,
-                Reason = reason,
-                EvaluatorModelVersion = review is null ? prediction.ModelVersion : $"{prediction.ModelVersion}+{ticketOptions.ModelName}",
-                RawEvaluationJson = JsonSerializer.Serialize(new { student = prediction, reviewer = rawReview }),
-                StudentScore = prediction.Evidence,
-                StudentConfidence = prediction.Confidence,
-                StudentRelevance = prediction.Relevance,
-                StudentCategory = prediction.Category,
-                StudentReasoning = prediction.Reasoning,
-                ContextSnapshot = contextSnapshot,
-                ReviewerInvoked = reviewerInvoked,
-                ReviewerScore = review?.ReviewerScore,
-                ReviewerConfidence = review?.ReviewerConfidence,
-                ReviewerRelevance = review?.Relevance,
-                CorrectionNeeded = review?.CorrectionNeeded == true || (review is TicketReviewerEvaluation r && Math.Abs(r.ReviewerScore - prediction.Evidence) >= 0.2),
-                ReviewerExplanation = review?.Explanation,
-                ReviewerGuidance = review?.Guidance,
-                CreatedAtUtc = DateTime.UtcNow,
-            };
-            db.TicketMessageScores.Add(scoreEvent);
-            await db.SaveChangesAsync(ct);
-
-            await vectors.UpsertAsync(
-                VectorNamespaces.TicketMessageEvidence,
-                job.Content,
-                embedding,
-                positionId: watch.TicketId.ToString("N"),
-                canonicalRecordId: scoreEvent.ScoreEventId,
-                metadata: new
-                {
-                    scoreEventId = scoreEvent.ScoreEventId,
-                    ticketId = watch.TicketId,
-                    messageId = job.MessageId,
-                    trackedUserId = watch.TrackedUserId,
-                    previousScore = update.PreviousScore,
-                    scoreDelta = update.ScoreDelta,
-                    currentScore = update.CurrentScore,
-                    evidenceConfidence = evidence,
-                    relevance,
-                    reason,
-                    studentScore = prediction.Evidence,
-                    studentConfidence = prediction.Confidence,
-                    studentCategory = prediction.Category,
-                    chatMonitoringKind,
-                    reviewerInvoked,
-                    reviewerScore = review?.ReviewerScore,
-                    contextMessageCount = recentMessages.Count,
-                    evaluatedAtUtc = scoreEvent.CreatedAtUtc,
-                },
-                ct);
-
-            logger.LogInformation(
-                "Ticket {TicketId} message {MessageId} confidence {Previous:F3} {Delta:+0.000;-0.000;0.000} = {Current:F3}",
-                watch.TicketId,
-                job.MessageId,
-                update.PreviousScore,
-                update.ScoreDelta,
-                update.CurrentScore);
-        }
+        await PersistScoreAndVectorAsync(watch, scoringContext, scoringResult, ct);
+        LogTicketConfidenceUpdate(watch, scoringContext.Job, confidenceUpdate);
     }
+
+    private Task<bool> HasMessageAlreadyBeenScoredAsync(
+        TicketUserWatch watch,
+        Guid messageId,
+        CancellationToken ct) =>
+        db.TicketMessageScores.AsNoTracking()
+            .AnyAsync(s => s.TicketId == watch.TicketId && s.MessageId == messageId, ct);
+
+    private async Task<double> LoadPreviousTicketScoreAsync(
+        TicketUserWatch watch,
+        TicketOptions ticketOptions,
+        CancellationToken ct) =>
+        await db.TicketMessageScores.AsNoTracking()
+            .Where(s => s.TicketId == watch.TicketId && s.TrackedUserId == watch.TrackedUserId)
+            .OrderByDescending(s => s.CreatedAtUtc)
+            .Select(s => (double?)s.CurrentScore)
+            .FirstOrDefaultAsync(ct)
+        ?? Math.Clamp(ticketOptions.InitialConfidenceScore, 0, 1);
+
+    private WatchNeuralEvaluation ScoreWatchWithNeuralModel(
+        TicketUserWatch watch,
+        MessageScoringContext scoringContext,
+        double previousScore)
+    {
+        string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
+        string modelRequirement = $"{requirement}\nRunning ticket confidence before this message: {previousScore:F3}.";
+        NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
+        IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
+        SubjectSignalSnapshot subjectSignals = ResolveSubjectSignals(
+            chatMonitoringKind,
+            watch,
+            scoringContext.Job.RoomId);
+        ChatMonitoringNeuralModelInput modelInput = CreateChatMonitoringModelInput(
+            modelRequirement,
+            scoringContext,
+            previousScore,
+            subjectSignals);
+        ChatMonitoringNeuralModelPrediction prediction = model.Predict(modelInput);
+
+        return new WatchNeuralEvaluation(
+            chatMonitoringKind,
+            subjectSignals,
+            prediction,
+            modelRequirement);
+    }
+
+    private static SubjectSignalSnapshot ResolveSubjectSignals(
+        NeuralModelKindChatMonitoring chatMonitoringKind,
+        TicketUserWatch watch,
+        string? roomId) =>
+        chatMonitoringKind switch
+        {
+            NeuralModelKindChatMonitoring.Tutoring => ChatMonitoringSubjectSignals.ResolveFromTicket(watch, roomId),
+            _ => ChatMonitoringSubjectSignals.Resolve(
+                Array.Empty<string>(),
+                ChatMonitoringSubjectSignals.ResolveChannelSubject(roomId),
+                1f),
+        };
+
+    private static ChatMonitoringNeuralModelInput CreateChatMonitoringModelInput(
+        string modelRequirement,
+        MessageScoringContext scoringContext,
+        double previousScore,
+        SubjectSignalSnapshot subjectSignals) =>
+        ChatMonitoringNeuralModelInput.Create(
+            modelRequirement,
+            scoringContext.ContextSnapshot,
+            scoringContext.Job.Content,
+            communityVote: 0,
+            threadContinuity: Math.Clamp(scoringContext.RecentMessages.Count / 5f, 0, 1),
+            priorScore: (float)previousScore,
+            subjectSignals);
+
+    private async Task<ReviewerEvaluationAttempt> InvokeOptionalReviewerAsync(
+        TicketUserWatch watch,
+        MessageScoringContext scoringContext,
+        WatchNeuralEvaluation neuralEvaluation,
+        CancellationToken ct)
+    {
+        bool reviewerInvoked = ShouldInvokeOptionalReviewer(
+            scoringContext.TicketOptions,
+            neuralEvaluation.Prediction.Confidence,
+            scoringContext.Job.MessageId);
+        string retrievalPositionId = ChatMonitoringVectorKeys.LineagePositionId(neuralEvaluation.ChatMonitoringKind);
+        IReadOnlyList<VectorDocument> similar = reviewerInvoked
+            ? await vectors.RetrieveSimilarAsync(
+                VectorNamespaces.TicketTrainingExample,
+                scoringContext.MessageEmbedding,
+                3,
+                retrievalPositionId,
+                ct)
+            : [];
+        string? rawReview = reviewerInvoked
+            ? await llm.ChatJsonAsync(
+                SystemPrompt,
+                BuildReviewerPrompt(
+                    watch,
+                    scoringContext.Job,
+                    neuralEvaluation.Prediction,
+                    neuralEvaluation.ModelRequirement,
+                    scoringContext.ContextSnapshot,
+                    similar,
+                    scoringContext.TicketOptions.MaxMessageCharacters),
+                ct)
+            : null;
+        TicketReviewerEvaluation? review = ParseReviewerEvaluation(rawReview);
+
+        return new ReviewerEvaluationAttempt(reviewerInvoked, rawReview, review);
+    }
+
+    private static bool ShouldInvokeOptionalReviewer(
+        TicketOptions ticketOptions,
+        double studentConfidence,
+        Guid messageId)
+    {
+        // Neural-only mode prevents Ollama reviewer calls; disabled Ollama keeps
+        // scoring on the local neural model. See
+        // docs/tickets.md#neural-monitors-and-ollama-blend.
+        return !ticketOptions.NeuralOnlyScoring
+               && ticketOptions.OllamaEnabled
+               && TicketReviewPolicy.ShouldReview(
+                   studentConfidence,
+                   messageId,
+                   ticketOptions.StudentConfidenceThreshold,
+                   ticketOptions.ReviewerAuditRate);
+    }
+
+    private static TicketReviewerEvaluation? ParseReviewerEvaluation(string? rawReview)
+    {
+        if (!string.IsNullOrWhiteSpace(rawReview)
+            && TicketReviewerEvaluation.TryParse(rawReview, out TicketReviewerEvaluation parsedReview))
+        {
+            return parsedReview;
+        }
+
+        return null;
+    }
+
+    private static BlendedScoreInputs BlendReviewerSignals(
+        WatchNeuralEvaluation neuralEvaluation,
+        ReviewerEvaluationAttempt reviewerEvaluationAttempt,
+        TicketOptions ticketOptions)
+    {
+        ChatMonitoringNeuralModelPrediction prediction = neuralEvaluation.Prediction;
+        TicketReviewerEvaluation? review = reviewerEvaluationAttempt.Review;
+
+        // Reviewer output is advisory; deterministic blend weight bounds how far
+        // Ollama can move neural evidence. See
+        // docs/tickets.md#neural-monitors-and-ollama-blend.
+        double evidence = review switch
+        {
+            TicketReviewerEvaluation reviewerEvaluation => TicketReviewPolicy.Blend(
+                prediction.Evidence,
+                reviewerEvaluation.ReviewerScore,
+                ticketOptions.ReviewerBlendWeight),
+            _ => prediction.Evidence,
+        };
+        double relevance = review switch
+        {
+            TicketReviewerEvaluation reviewerEvaluation => TicketReviewPolicy.Blend(
+                prediction.Relevance,
+                reviewerEvaluation.Relevance,
+                ticketOptions.ReviewerBlendWeight),
+            _ => prediction.Relevance,
+        };
+        double rewardScaledRelevance = ApplySubjectRewardScale(
+            relevance,
+            neuralEvaluation.ChatMonitoringKind,
+            neuralEvaluation.SubjectSignals);
+        string reason = review?.Explanation
+            ?? BuildNeuralReason(neuralEvaluation.ChatMonitoringKind, prediction, neuralEvaluation.SubjectSignals);
+        bool correctionNeeded = IsReviewerCorrectionNeeded(review, prediction);
+
+        return new BlendedScoreInputs(evidence, rewardScaledRelevance, reason, correctionNeeded);
+    }
+
+    private static double ApplySubjectRewardScale(
+        double relevance,
+        NeuralModelKindChatMonitoring chatMonitoringKind,
+        SubjectSignalSnapshot subjectSignals)
+    {
+        // Multi-subject tutoring tickets reward exact or related subject channels;
+        // unrelated channels barely move confidence. See
+        // docs/tickets.md#neural-monitors-and-ollama-blend.
+        return chatMonitoringKind switch
+        {
+            NeuralModelKindChatMonitoring.Tutoring => Math.Clamp(relevance * subjectSignals.RewardScale, 0, 1),
+            _ => relevance,
+        };
+    }
+
+    private static string BuildNeuralReason(
+        NeuralModelKindChatMonitoring chatMonitoringKind,
+        ChatMonitoringNeuralModelPrediction prediction,
+        SubjectSignalSnapshot subjectSignals) =>
+        chatMonitoringKind switch
+        {
+            NeuralModelKindChatMonitoring.Tutoring => AppendSubjectReason(prediction.Reasoning, subjectSignals),
+            _ => prediction.Reasoning,
+        };
+
+    private static bool IsReviewerCorrectionNeeded(
+        TicketReviewerEvaluation? review,
+        ChatMonitoringNeuralModelPrediction prediction) =>
+        review is { CorrectionNeeded: true }
+        || (review is TicketReviewerEvaluation reviewerEvaluation
+            && Math.Abs(reviewerEvaluation.ReviewerScore - prediction.Evidence) >= 0.2);
+
+    private static TicketMessageScore CreateScoreEvent(
+        TicketUserWatch watch,
+        MessageScoringContext scoringContext,
+        WatchNeuralEvaluation neuralEvaluation,
+        ReviewerEvaluationAttempt reviewerEvaluationAttempt,
+        BlendedScoreInputs blendedScoreInputs,
+        TicketConfidenceUpdate confidenceUpdate)
+    {
+        ChatMonitoringNeuralModelPrediction prediction = neuralEvaluation.Prediction;
+        TicketReviewerEvaluation? review = reviewerEvaluationAttempt.Review;
+
+        return new TicketMessageScore
+        {
+            ScoreEventId = Guid.NewGuid(),
+            TicketId = watch.TicketId,
+            MessageId = scoringContext.Job.MessageId,
+            TrackedUserId = watch.TrackedUserId,
+            PreviousScore = confidenceUpdate.PreviousScore,
+            ScoreDelta = confidenceUpdate.ScoreDelta,
+            CurrentScore = confidenceUpdate.CurrentScore,
+            EvidenceConfidence = blendedScoreInputs.Evidence,
+            Relevance = blendedScoreInputs.Relevance,
+            Reason = blendedScoreInputs.Reason,
+            EvaluatorModelVersion = review is null
+                ? prediction.ModelVersion
+                : $"{prediction.ModelVersion}+{scoringContext.TicketOptions.ModelName}",
+            RawEvaluationJson = JsonSerializer.Serialize(new { student = prediction, reviewer = reviewerEvaluationAttempt.RawReview }),
+            StudentScore = prediction.Evidence,
+            StudentConfidence = prediction.Confidence,
+            StudentRelevance = prediction.Relevance,
+            StudentCategory = prediction.Category,
+            StudentReasoning = prediction.Reasoning,
+            ContextSnapshot = scoringContext.ContextSnapshot,
+            ReviewerInvoked = reviewerEvaluationAttempt.ReviewerInvoked,
+            ReviewerScore = review?.ReviewerScore,
+            ReviewerConfidence = review?.ReviewerConfidence,
+            ReviewerRelevance = review?.Relevance,
+            CorrectionNeeded = blendedScoreInputs.CorrectionNeeded,
+            ReviewerExplanation = review?.Explanation,
+            ReviewerGuidance = review?.Guidance,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+    }
+
+    private async Task PersistScoreAndVectorAsync(
+        TicketUserWatch watch,
+        MessageScoringContext scoringContext,
+        WatchScoringResult scoringResult,
+        CancellationToken ct)
+    {
+        db.TicketMessageScores.Add(scoringResult.ScoreEvent);
+        await db.SaveChangesAsync(ct);
+
+        await vectors.UpsertAsync(
+            VectorNamespaces.TicketMessageEvidence,
+            scoringContext.Job.Content,
+            scoringContext.MessageEmbedding,
+            positionId: watch.TicketId.ToString("N"),
+            canonicalRecordId: scoringResult.ScoreEvent.ScoreEventId,
+            metadata: new
+            {
+                scoreEventId = scoringResult.ScoreEvent.ScoreEventId,
+                ticketId = watch.TicketId,
+                messageId = scoringContext.Job.MessageId,
+                trackedUserId = watch.TrackedUserId,
+                previousScore = scoringResult.ConfidenceUpdate.PreviousScore,
+                scoreDelta = scoringResult.ConfidenceUpdate.ScoreDelta,
+                currentScore = scoringResult.ConfidenceUpdate.CurrentScore,
+                evidenceConfidence = scoringResult.BlendedScoreInputs.Evidence,
+                relevance = scoringResult.BlendedScoreInputs.Relevance,
+                reason = scoringResult.BlendedScoreInputs.Reason,
+                studentScore = scoringResult.NeuralEvaluation.Prediction.Evidence,
+                studentConfidence = scoringResult.NeuralEvaluation.Prediction.Confidence,
+                studentCategory = scoringResult.NeuralEvaluation.Prediction.Category,
+                chatMonitoringKind = scoringResult.NeuralEvaluation.ChatMonitoringKind,
+                reviewerInvoked = scoringResult.ReviewerEvaluationAttempt.ReviewerInvoked,
+                reviewerScore = scoringResult.ReviewerEvaluationAttempt.Review?.ReviewerScore,
+                contextMessageCount = scoringContext.RecentMessages.Count,
+                evaluatedAtUtc = scoringResult.ScoreEvent.CreatedAtUtc,
+            },
+            ct);
+    }
+
+    private void LogTicketConfidenceUpdate(
+        TicketUserWatch watch,
+        AssessmentMessageJob job,
+        TicketConfidenceUpdate confidenceUpdate) =>
+        logger.LogInformation(
+            "Ticket {TicketId} message {MessageId} confidence {Previous:F3} {Delta:+0.000;-0.000;0.000} = {Current:F3}",
+            watch.TicketId,
+            job.MessageId,
+            confidenceUpdate.PreviousScore,
+            confidenceUpdate.ScoreDelta,
+            confidenceUpdate.CurrentScore);
+
+    private sealed record MessageScoringContext(
+        AssessmentMessageJob Job,
+        TicketOptions TicketOptions,
+        IReadOnlyList<float> MessageEmbedding,
+        IReadOnlyList<ChatMessage> RecentMessages,
+        string ContextSnapshot);
+
+    private sealed record WatchNeuralEvaluation(
+        NeuralModelKindChatMonitoring ChatMonitoringKind,
+        SubjectSignalSnapshot SubjectSignals,
+        ChatMonitoringNeuralModelPrediction Prediction,
+        string ModelRequirement);
+
+    private sealed record ReviewerEvaluationAttempt(
+        bool ReviewerInvoked,
+        string? RawReview,
+        TicketReviewerEvaluation? Review);
+
+    private sealed record BlendedScoreInputs(
+        double Evidence,
+        double Relevance,
+        string Reason,
+        bool CorrectionNeeded);
+
+    private sealed record WatchScoringResult(
+        TicketConfidenceUpdate ConfidenceUpdate,
+        TicketMessageScore ScoreEvent,
+        WatchNeuralEvaluation NeuralEvaluation,
+        ReviewerEvaluationAttempt ReviewerEvaluationAttempt,
+        BlendedScoreInputs BlendedScoreInputs);
 
     private static string BuildReviewerPrompt(
         TicketUserWatch watch,

@@ -4,8 +4,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Assessment;
 
+/// <summary>
+/// Builds a reliability-weighted community vote score for a chat message.
+/// Ticket-room votes are excluded so assessment cannot be gamed inside ticket channels.
+/// </summary>
 public interface ICommunityScoreAggregator
 {
+    /// <summary>
+    /// Aggregates non-ticket-room votes for <paramref name="messageId"/>.
+    /// Returns a null score when no usable votes exist.
+    /// </summary>
     Task<(double? Score, double ReliableWeight)> AggregateAsync(Guid messageId, CancellationToken ct = default);
 }
 

@@ -16,17 +16,21 @@ function needsOptions(type: TicketIntakeQuestion['type']): boolean {
 }
 
 function validateAnswers(questions: TicketIntakeQuestion[], answers: TicketAnswers): string | null {
-  for (const question of questions) {
-    if (!question.required) continue
+  const missingQuestion = questions.find((question) => {
+    if (!question.required)
+      return false
     const value = answers[question.id]
-    if (value === null || value === undefined || value === '') {
-      return `“${question.prompt}” is required.`
-    }
-    if (Array.isArray(value) && value.length === 0) {
-      return `“${question.prompt}” needs at least one selection.`
-    }
-  }
-  return null
+    if (value === null || value === undefined || value === '')
+      return true
+    return Array.isArray(value) && value.length === 0
+  })
+  if (!missingQuestion)
+    return null
+
+  const value = answers[missingQuestion.id]
+  if (Array.isArray(value) && value.length === 0)
+    return `“${missingQuestion.prompt}” needs at least one selection.`
+  return `“${missingQuestion.prompt}” is required.`
 }
 
 function QuestionField({

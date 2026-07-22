@@ -53,7 +53,7 @@ public class EffectiveMaskService(
         UserEffectiveMask mask = await GetUserEffectiveMaskAsync(userId, ct)
             ?? await RebuildUserEffectiveMaskAsync(userId, ct);
 
-        List<Guid> customRoleIds = await db.UserRoles
+        HashSet<Guid> customRoleIds = (await db.UserRoles
             .AsNoTracking()
             .Where(ur => ur.UserId == userId)
             .Join(
@@ -61,7 +61,7 @@ public class EffectiveMaskService(
                 ur => ur.RoleId,
                 role => role.RoleId,
                 (ur, role) => role.RoleId)
-            .ToListAsync(ct);
+            .ToListAsync(ct)).ToHashSet();
 
         EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
         dto.CustomRoleIds = customRoleIds;

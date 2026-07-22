@@ -32,7 +32,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly float[][] weightVelocity;
     private readonly float[][] biasVelocity;
     private readonly NeuralNetTopologySnapshot topology;
-    private readonly List<SupportExample> support = [];
+    // FIFO support set: train enqueues examples and drops the oldest past 512
+    // with Queue.Dequeue instead of List.RemoveAt(0).
+    private readonly Queue<SupportExample> support = new();
     private readonly object gate = new();
 
     protected ChatMonitoringNeuralModelHashedMlp(
@@ -126,6 +128,10 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     /// it is invoked at the start of each epoch (so f(x) can be refreshed). When
     /// <paramref name="onSampleInputGradients"/> is set, it receives ∂C_x/∂x per sample after
     /// backprop and before the stage-2 weight update — used to chain-rule into f.
+    /// Readability exception: physical length and nesting remain above normal
+    /// limits because separating the forward pass, ∂C/∂x cascade hook, and
+    /// momentum update would obscure the chain-rule training path. Replay
+    /// validation and hashed-MLP tests are the guardrails; see docs/tickets.md.
     /// </summary>
     internal TrainingPassTrace TrainMiniBatchWithTrace(
         IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> examples,
@@ -284,9 +290,10 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 for (int i = 0; i < n; i++)
                 {
                     string category = categoryLabels[lastCategoryIndices[i]];
-                    support.Add(new SupportExample(lastEncoded[i], category));
+                    // Cap at 512 by dequeuing the oldest example after each enqueue.
+                    support.Enqueue(new SupportExample(lastEncoded[i], category));
                     if (support.Count > 512)
-                        support.RemoveAt(0);
+                        support.Dequeue();
                 }
             }
 

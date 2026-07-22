@@ -86,6 +86,28 @@ public sealed class ChatMessageService(
     private const int MaxMessageLength = 4000;
     private const int DefaultPageSize = 50;
     private static readonly TimeSpan MentionCooldown = TimeSpan.FromSeconds(3);
+    private static readonly JsonSerializerOptions ForwardSnapshotJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    private sealed record MessageScope(AccountClass AccountClass, string? TenantDatabaseName);
+
+    private sealed record MentionContext(
+        BitArray RoleMask,
+        MentionParseResult ParsedMessage,
+        IReadOnlyList<ParsedMention> ActiveMentions);
+
+    private sealed record RoomNotificationContext(
+        string RoomDisplayName,
+        string CategoryKey,
+        string CategoryDisplayName);
+
+    private sealed record VoteSummary(
+        int Score,
+        int UpvoteCount,
+        int DownvoteCount,
+        string? ViewerVote);
 
     public async Task<bool> CanAccessRoomAsync(string roomId, Guid userId, CancellationToken ct = default)
     {
@@ -160,205 +182,62 @@ public sealed class ChatMessageService(
         if (!await CanAccessRoomAsync(roomId, userId, ct))
             return null;
 
-        string trimmed = (content ?? string.Empty).Trim();
         bool hasAttachments = attachmentIds is { Count: > 0 };
         bool hasForward = forwardedFrom is not null;
-        if ((string.IsNullOrEmpty(trimmed) && !hasAttachments && !hasForward) || trimmed.Length > MaxMessageLength)
+        if (!TryNormalizeSendContent(content, hasAttachments, hasForward, out string trimmed))
             return null;
-        if (string.IsNullOrEmpty(trimmed))
-            trimmed = hasForward ? "(forwarded message)" : "(attachment)";
 
-        EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
-        BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
-        bool canUseBroadcastMentions = MentionPermissions.CanUseBroadcastMentions(roleMask);
-        MentionParseResult parsed = MentionParser.Parse(trimmed, canUseBroadcastMentions);
-
-        if (parsed.ActiveMentions.Any(mention => mention.IsActive))
-        {
-            if (MentionPermissions.IsGuest(roleMask))
-                throw new SendMessageMentionException(SendMessageMentionError.GuestCannotMention);
-
-            if (!MentionPermissions.IsSeniorStaff(roleMask)
-                && !mentionCooldownTracker.TryRecordMention(userId, MentionCooldown, out TimeSpan retryAfter))
-            {
-                throw new SendMessageMentionException(SendMessageMentionError.MentionCooldown, retryAfter);
-            }
-        }
+        MentionContext mentionContext = await ParseAndAuthorizeMentionsAsync(userId, trimmed, ct);
 
         // The sender's User row may only exist in their own tenant database (dev personas are
         // fully isolated per tenant), so the username is read from the JWT claim already
         // present on every authenticated request rather than looked up in a tenant-scoped
         // Users table — keeping this service entirely master-db-only.
         string senderUsername = ResolveUsername(userId);
-        (AccountClass accountClass, string? tenantDatabaseName) = ResolveScope();
-
-        // The IShareableScopedResource query filter already confines this lookup to messages the
-        // sender's account class may see, so a reply target in a different room, a different
-        // real-vs-developer scope, or one that simply doesn't exist all resolve to null here —
-        // the message is then sent as a normal (non-reply) message rather than failing the send.
-        ChatMessage? replyTarget = replyToMessageId is Guid targetId
-            ? await masterDb.ChatMessages
-                .AsNoTracking()
-                .FirstOrDefaultAsync(m => m.MessageId == targetId && m.RoomId == roomId, ct)
-            : null;
-
-        ChatMessage message = new()
-        {
-            MessageId = Guid.NewGuid(),
-            RoomId = roomId,
-            SenderId = userId,
-            SenderUsername = senderUsername,
-            SenderMessageColor = await roleAppearanceService.ResolveSenderColorAsync(roleMask, ct),
-            RawContent = parsed.DisplayContent,
-            CreatedAtUtc = DateTime.UtcNow,
-            OwnerAccountClass = accountClass,
-            TenantDatabaseName = tenantDatabaseName,
-            ReplyToMessageId = replyTarget?.MessageId,
-            ReplyToSenderId = replyTarget?.SenderId,
-            ReplyToSenderUsername = replyTarget?.SenderUsername,
-            ReplyToContentSnippet = replyTarget is null ? null : ChatReplySnippet.Build(replyTarget.RawContent),
-            ForwardedFromJson = forwardedFrom is null
-                ? null
-                : JsonSerializer.Serialize(forwardedFrom, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                }),
-        };
+        MessageScope messageScope = ResolveScope();
+        ChatMessage? replyTarget = await FindReplyTargetAsync(roomId, replyToMessageId, ct);
+        string senderColor = await roleAppearanceService.ResolveSenderColorAsync(mentionContext.RoleMask, ct);
+        ChatMessage message = CreateChatMessage(
+            roomId,
+            userId,
+            senderUsername,
+            senderColor,
+            mentionContext.ParsedMessage.DisplayContent,
+            messageScope,
+            replyTarget,
+            forwardedFrom);
 
         masterDb.ChatMessages.Add(message);
+        await AttachFilesAsync(message, attachmentIds, userId, messageScope, ct);
 
-        if (attachmentIds is { Count: > 0 })
-        {
-            Guid[] distinctAttachmentIds = attachmentIds.Distinct().ToArray();
-            Dictionary<Guid, ChatAttachment> attachmentsById = await masterDb.ChatAttachments
-                .Where(a => distinctAttachmentIds.Contains(a.AttachmentId))
-                .ToDictionaryAsync(a => a.AttachmentId, ct);
-
-            int order = 0;
-            foreach (Guid attachmentId in distinctAttachmentIds)
-            {
-                attachmentsById.TryGetValue(attachmentId, out ChatAttachment? attachment);
-
-                switch (attachment)
-                {
-                    case null:
-                        continue;
-                    case { UploadedByUserId: Guid ownerId } when ownerId != userId:
-                        throw new InvalidOperationException("You can only attach files you uploaded.");
-                    case ChatAttachment scoped
-                        when scoped.OwnerAccountClass != accountClass
-                            || scoped.TenantDatabaseName != tenantDatabaseName:
-                        throw new InvalidOperationException("Attachment belongs to a different account scope.");
-                    case ChatAttachment owned:
-                        masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
-                        {
-                            MessageId = message.MessageId,
-                            AttachmentId = attachmentId,
-                            SortOrder = order++,
-                        });
-                        break;
-                }
-            }
-        }
-
-        ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
-        string roomDisplayName = room?.RoomDisplayName ?? roomId;
-        string categoryKey = room?.CategoryKey ?? ChatRoomBlueprint.GeneralCategoryKey;
-        string categoryDisplayName = room?.CategoryDisplayName ?? ChatRoomBlueprint.GeneralCategoryDisplayName;
-
-        // Tracks who has already been queued a notification for this message so a user who is
-        // both @mentioned and the original sender being replied to only gets a single row.
+        RoomNotificationContext roomNotificationContext = BuildRoomNotificationContext(roomId);
         HashSet<Guid> notifiedRecipients = [];
-
-        IReadOnlyList<ParsedMention> activeMentions = parsed.ActiveMentions.Where(mention => mention.IsActive).ToArray();
-        if (activeMentions.Count > 0)
-        {
-            string groupKey = ChatRoomGroupKey.Build(roomId, accountClass);
-            HashSet<Guid> recipients = await mentionRecipientResolver.ResolveRecipientsAsync(
-                roomId,
-                groupKey,
-                activeMentions,
-                userId,
-                accountClass,
-                tenantDatabaseName,
-                ct);
-
-            string mentionKind = activeMentions.Count == 1
-                ? activeMentions[0].Kind.ToString()
-                : "Multiple";
-
-            foreach (Guid recipientId in recipients)
-            {
-                if (!notifiedRecipients.Add(recipientId))
-                    continue;
-
-                masterDb.ChatMentionNotifications.Add(new ChatMentionNotification
-                {
-                    NotificationId = Guid.NewGuid(),
-                    MessageId = message.MessageId,
-                    RecipientUserId = recipientId,
-                    SenderId = userId,
-                    SenderUsername = senderUsername,
-                    RoomId = roomId,
-                    RoomDisplayName = roomDisplayName,
-                    CategoryKey = categoryKey,
-                    CategoryDisplayName = categoryDisplayName,
-                    MessageContent = message.RawContent,
-                    MentionKind = mentionKind,
-                    CreatedAtUtc = message.CreatedAtUtc,
-                    OwnerAccountClass = accountClass,
-                    TenantDatabaseName = tenantDatabaseName,
-                });
-            }
-        }
-
-        // A reply notifies the original sender the same way a mention does (surfaced in their
-        // Inbox), as long as they aren't replying to themselves and cross-scope notify rules
-        // (real accounts never notify developer accounts and vice versa) allow it.
-        if (replyTarget is not null
-            && replyTarget.SenderId != userId
-            && MentionNotifyScope.CanNotify(accountClass, tenantDatabaseName, replyTarget.OwnerAccountClass, replyTarget.TenantDatabaseName)
-            && notifiedRecipients.Add(replyTarget.SenderId))
-        {
-            masterDb.ChatMentionNotifications.Add(new ChatMentionNotification
-            {
-                NotificationId = Guid.NewGuid(),
-                MessageId = message.MessageId,
-                RecipientUserId = replyTarget.SenderId,
-                SenderId = userId,
-                SenderUsername = senderUsername,
-                RoomId = roomId,
-                RoomDisplayName = roomDisplayName,
-                CategoryKey = categoryKey,
-                CategoryDisplayName = categoryDisplayName,
-                MessageContent = message.RawContent,
-                MentionKind = "Reply",
-                CreatedAtUtc = message.CreatedAtUtc,
-                OwnerAccountClass = accountClass,
-                TenantDatabaseName = tenantDatabaseName,
-            });
-        }
+        await AddMentionNotificationsAsync(
+            message,
+            mentionContext,
+            messageScope,
+            roomNotificationContext,
+            userId,
+            senderUsername,
+            notifiedRecipients,
+            ct);
+        AddReplyNotificationIfAllowed(
+            message,
+            replyTarget,
+            messageScope,
+            roomNotificationContext,
+            userId,
+            senderUsername,
+            notifiedRecipients);
 
         await masterDb.SaveChangesAsync(ct);
 
-        if (hasAttachments)
-        {
-            await masterDb.Entry(message)
-                .Collection(m => m.Attachments)
-                .Query()
-                .Include(a => a.Attachment)
-                .LoadAsync(ct);
-        }
+        await LoadLinkedAttachmentsAsync(message, hasAttachments, ct);
 
         assessmentQueue.TryEnqueue(
             new AssessmentMessageJob(message.MessageId, roomId, userId, message.RawContent));
 
-        bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
-        ChatMessageDto dto = ToDto(message, userId, includeVotes: !isTicketRoom, mintAccessTokens: true);
-        ChatMessageDto broadcastDto = ToDto(message, viewerId: null, includeVotes: !isTicketRoom, mintAccessTokens: false);
-        string broadcastGroupKey = ChatRoomGroupKey.Build(roomId, accountClass);
-        await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", broadcastDto, ct);
-        return dto;
+        return await BroadcastSavedMessageAsync(message, roomId, messageScope, userId, ct);
     }
 
     public async Task<IReadOnlyList<ChatInboxItemDto>> GetInboxAsync(
@@ -526,11 +405,11 @@ public sealed class ChatMessageService(
         return string.IsNullOrWhiteSpace(claimed) ? userId.ToString() : claimed;
     }
 
-    private (AccountClass AccountClass, string? TenantDatabaseName) ResolveScope()
+    private MessageScope ResolveScope()
     {
         HttpContext? httpContext = httpContextAccessor.HttpContext;
         if (httpContext is null)
-            return (AccountClass.RealAccount, null);
+            return new MessageScope(AccountClass.RealAccount, null);
 
         ClaimsPrincipal user = httpContext.User;
         AccountClass accountClass = AccountClass.RealAccount;
@@ -542,7 +421,13 @@ public sealed class ChatMessageService(
         }
 
         string? tenantDatabaseName = user.FindFirst(TenancyConstants.TenantDbClaimName)?.Value;
-        return (accountClass, string.IsNullOrWhiteSpace(tenantDatabaseName) ? null : tenantDatabaseName);
+        string? normalizedTenantDatabaseName = string.IsNullOrWhiteSpace(tenantDatabaseName)
+            ? null
+            : tenantDatabaseName;
+
+        // Shared chat stays in the master database while the row scope records the
+        // account-class bucket that separates real and developer traffic. See docs/chat.md.
+        return new MessageScope(accountClass, normalizedTenantDatabaseName);
     }
 
     private static bool HasGroupMessagesFeature(EffectiveMaskDto masks)
@@ -551,32 +436,322 @@ public sealed class ChatMessageService(
         return BitMask.HasBit(featureMask, PlatformFeatures.GroupMessages);
     }
 
+    private static bool TryNormalizeSendContent(
+        string content,
+        bool hasAttachments,
+        bool hasForward,
+        out string normalizedContent)
+    {
+        normalizedContent = (content ?? string.Empty).Trim();
+        if ((string.IsNullOrEmpty(normalizedContent) && !hasAttachments && !hasForward)
+            || normalizedContent.Length > MaxMessageLength)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(normalizedContent))
+            normalizedContent = hasForward ? "(forwarded message)" : "(attachment)";
+
+        return true;
+    }
+
+    private async Task<MentionContext> ParseAndAuthorizeMentionsAsync(
+        Guid userId,
+        string content,
+        CancellationToken ct)
+    {
+        EffectiveMaskDto masks = await GetMasksAsync(userId, ct);
+        BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
+        bool canUseBroadcastMentions = MentionPermissions.CanUseBroadcastMentions(roleMask);
+        MentionParseResult parsedMessage = MentionParser.Parse(content, canUseBroadcastMentions);
+        IReadOnlyList<ParsedMention> activeMentions = parsedMessage.ActiveMentions
+            .Where(mention => mention.IsActive)
+            .ToArray();
+
+        AssertMentionSendAllowed(userId, roleMask, activeMentions);
+        return new MentionContext(roleMask, parsedMessage, activeMentions);
+    }
+
+    private void AssertMentionSendAllowed(
+        Guid userId,
+        BitArray roleMask,
+        IReadOnlyList<ParsedMention> activeMentions)
+    {
+        if (activeMentions.Count == 0)
+            return;
+
+        // Guest / senior-staff / cooldown-limited is a closed authorization set.
+        // See docs/chat.md for mention policy.
+        switch (ClassifyMentionAuthority(roleMask))
+        {
+            case MentionAuthority.Guest:
+                throw new SendMessageMentionException(SendMessageMentionError.GuestCannotMention);
+            case MentionAuthority.SeniorStaff:
+                return;
+            case MentionAuthority.CooldownLimited:
+                if (!mentionCooldownTracker.TryRecordMention(userId, MentionCooldown, out TimeSpan retryAfter))
+                    throw new SendMessageMentionException(SendMessageMentionError.MentionCooldown, retryAfter);
+                return;
+        }
+    }
+
+    private static MentionAuthority ClassifyMentionAuthority(BitArray roleMask) => roleMask switch
+    {
+        _ when MentionPermissions.IsGuest(roleMask) => MentionAuthority.Guest,
+        _ when MentionPermissions.IsSeniorStaff(roleMask) => MentionAuthority.SeniorStaff,
+        _ => MentionAuthority.CooldownLimited,
+    };
+
+    private enum MentionAuthority
+    {
+        Guest,
+        SeniorStaff,
+        CooldownLimited,
+    }
+
+    private async Task<ChatMessage?> FindReplyTargetAsync(
+        string roomId,
+        Guid? replyToMessageId,
+        CancellationToken ct)
+    {
+        if (replyToMessageId is not Guid targetMessageId)
+            return null;
+
+        // The shared-resource EF filter confines reply lookup to messages visible
+        // within the sender's account-class bucket. See docs/chat.md.
+        return await masterDb.ChatMessages
+            .AsNoTracking()
+            .FirstOrDefaultAsync(message => message.MessageId == targetMessageId && message.RoomId == roomId, ct);
+    }
+
+    private static ChatMessage CreateChatMessage(
+        string roomId,
+        Guid senderId,
+        string senderUsername,
+        string senderColor,
+        string displayContent,
+        MessageScope messageScope,
+        ChatMessage? replyTarget,
+        ChatForwardSnapshotDto? forwardedFrom)
+    {
+        return new ChatMessage
+        {
+            MessageId = Guid.NewGuid(),
+            RoomId = roomId,
+            SenderId = senderId,
+            SenderUsername = senderUsername,
+            SenderMessageColor = senderColor,
+            RawContent = displayContent,
+            CreatedAtUtc = DateTime.UtcNow,
+            OwnerAccountClass = messageScope.AccountClass,
+            TenantDatabaseName = messageScope.TenantDatabaseName,
+            ReplyToMessageId = replyTarget?.MessageId,
+            ReplyToSenderId = replyTarget?.SenderId,
+            ReplyToSenderUsername = replyTarget?.SenderUsername,
+            ReplyToContentSnippet = replyTarget is null ? null : ChatReplySnippet.Build(replyTarget.RawContent),
+            ForwardedFromJson = forwardedFrom is null
+                ? null
+                : JsonSerializer.Serialize(forwardedFrom, ForwardSnapshotJsonOptions),
+        };
+    }
+
+    private async Task AttachFilesAsync(
+        ChatMessage message,
+        IReadOnlyList<Guid>? attachmentIds,
+        Guid userId,
+        MessageScope messageScope,
+        CancellationToken ct)
+    {
+        if (attachmentIds is not { Count: > 0 })
+            return;
+
+        Guid[] distinctAttachmentIds = attachmentIds.Distinct().ToArray();
+        Dictionary<Guid, ChatAttachment> attachmentsById = await masterDb.ChatAttachments
+            .Where(attachment => distinctAttachmentIds.Contains(attachment.AttachmentId))
+            .ToDictionaryAsync(attachment => attachment.AttachmentId, ct);
+
+        int attachmentOrder = 0;
+        foreach (Guid attachmentId in distinctAttachmentIds)
+        {
+            attachmentsById.TryGetValue(attachmentId, out ChatAttachment? attachment);
+
+            switch (attachment)
+            {
+                case null:
+                    continue;
+                case { UploadedByUserId: Guid ownerId } when ownerId != userId:
+                    throw new InvalidOperationException("You can only attach files you uploaded.");
+                case ChatAttachment scopedAttachment
+                    when scopedAttachment.OwnerAccountClass != messageScope.AccountClass
+                        || scopedAttachment.TenantDatabaseName != messageScope.TenantDatabaseName:
+                    throw new InvalidOperationException("Attachment belongs to a different account scope.");
+                case { }:
+                    masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
+                    {
+                        MessageId = message.MessageId,
+                        AttachmentId = attachmentId,
+                        SortOrder = attachmentOrder++,
+                    });
+                    break;
+            }
+        }
+    }
+
+    private static RoomNotificationContext BuildRoomNotificationContext(string roomId)
+    {
+        ChatRoomDefinition? room = ChatRoomCatalog.FindById(roomId);
+        return new RoomNotificationContext(
+            room?.RoomDisplayName ?? roomId,
+            room?.CategoryKey ?? ChatRoomBlueprint.GeneralCategoryKey,
+            room?.CategoryDisplayName ?? ChatRoomBlueprint.GeneralCategoryDisplayName);
+    }
+
+    private async Task AddMentionNotificationsAsync(
+        ChatMessage message,
+        MentionContext mentionContext,
+        MessageScope messageScope,
+        RoomNotificationContext roomContext,
+        Guid senderId,
+        string senderUsername,
+        HashSet<Guid> notifiedRecipients,
+        CancellationToken ct)
+    {
+        if (mentionContext.ActiveMentions.Count == 0)
+            return;
+
+        string groupKey = ChatRoomGroupKey.Build(message.RoomId, messageScope.AccountClass);
+        HashSet<Guid> recipients = await mentionRecipientResolver.ResolveRecipientsAsync(
+            message.RoomId,
+            groupKey,
+            mentionContext.ActiveMentions,
+            senderId,
+            messageScope.AccountClass,
+            messageScope.TenantDatabaseName,
+            ct);
+
+        string mentionKind = mentionContext.ActiveMentions.Count == 1
+            ? mentionContext.ActiveMentions[0].Kind.ToString()
+            : "Multiple";
+
+        foreach (Guid recipientId in recipients)
+        {
+            AddNotificationIfNew(
+                message,
+                recipientId,
+                senderId,
+                senderUsername,
+                mentionKind,
+                messageScope,
+                roomContext,
+                notifiedRecipients);
+        }
+    }
+
+    private void AddReplyNotificationIfAllowed(
+        ChatMessage message,
+        ChatMessage? replyTarget,
+        MessageScope messageScope,
+        RoomNotificationContext roomContext,
+        Guid senderId,
+        string senderUsername,
+        HashSet<Guid> notifiedRecipients)
+    {
+        if (replyTarget is null || replyTarget.SenderId == senderId)
+            return;
+
+        bool canNotifyReplySender = MentionNotifyScope.CanNotify(
+            messageScope.AccountClass,
+            messageScope.TenantDatabaseName,
+            replyTarget.OwnerAccountClass,
+            replyTarget.TenantDatabaseName);
+
+        if (!canNotifyReplySender)
+            return;
+
+        AddNotificationIfNew(
+            message,
+            replyTarget.SenderId,
+            senderId,
+            senderUsername,
+            "Reply",
+            messageScope,
+            roomContext,
+            notifiedRecipients);
+    }
+
+    private void AddNotificationIfNew(
+        ChatMessage message,
+        Guid recipientId,
+        Guid senderId,
+        string senderUsername,
+        string mentionKind,
+        MessageScope messageScope,
+        RoomNotificationContext roomContext,
+        HashSet<Guid> notifiedRecipients)
+    {
+        // One notification row represents one sent message per recipient, even
+        // when mention and reply rules both match. See docs/chat.md.
+        if (!notifiedRecipients.Add(recipientId))
+            return;
+
+        masterDb.ChatMentionNotifications.Add(new ChatMentionNotification
+        {
+            NotificationId = Guid.NewGuid(),
+            MessageId = message.MessageId,
+            RecipientUserId = recipientId,
+            SenderId = senderId,
+            SenderUsername = senderUsername,
+            RoomId = message.RoomId,
+            RoomDisplayName = roomContext.RoomDisplayName,
+            CategoryKey = roomContext.CategoryKey,
+            CategoryDisplayName = roomContext.CategoryDisplayName,
+            MessageContent = message.RawContent,
+            MentionKind = mentionKind,
+            CreatedAtUtc = message.CreatedAtUtc,
+            OwnerAccountClass = messageScope.AccountClass,
+            TenantDatabaseName = messageScope.TenantDatabaseName,
+        });
+    }
+
+    private async Task LoadLinkedAttachmentsAsync(
+        ChatMessage message,
+        bool hasAttachments,
+        CancellationToken ct)
+    {
+        if (!hasAttachments)
+            return;
+
+        await masterDb.Entry(message)
+            .Collection(chatMessage => chatMessage.Attachments)
+            .Query()
+            .Include(messageAttachment => messageAttachment.Attachment)
+            .LoadAsync(ct);
+    }
+
+    private async Task<ChatMessageDto> BroadcastSavedMessageAsync(
+        ChatMessage message,
+        string roomId,
+        MessageScope messageScope,
+        Guid viewerId,
+        CancellationToken ct)
+    {
+        bool isTicketRoom = await TicketRoomLookup.IsTicketChatRoomAsync(masterDb, roomId, ct);
+        bool includeVotes = !isTicketRoom;
+        ChatMessageDto viewerDto = ToDto(message, viewerId, includeVotes, mintAccessTokens: true);
+        ChatMessageDto broadcastDto = ToDto(message, viewerId: null, includeVotes, mintAccessTokens: false);
+        string broadcastGroupKey = ChatRoomGroupKey.Build(roomId, messageScope.AccountClass);
+        await hubContext.Clients.Group(broadcastGroupKey).SendAsync("ReceiveMessage", broadcastDto, ct);
+        return viewerDto;
+    }
+
     private ChatMessageDto ToDto(
         ChatMessage message,
         Guid? viewerId = null,
         bool includeVotes = true,
         bool mintAccessTokens = true)
     {
-        int ups = includeVotes ? message.Votes?.Count(v => v.Value > 0) ?? 0 : 0;
-        int downs = includeVotes ? message.Votes?.Count(v => v.Value < 0) ?? 0 : 0;
-        short? viewerVote = includeVotes && viewerId is Guid vid
-            ? message.Votes?.FirstOrDefault(v => v.UserId == vid)?.Value
-            : null;
-
-        ChatForwardSnapshotDto? forward = null;
-        if (!string.IsNullOrWhiteSpace(message.ForwardedFromJson))
-        {
-            try
-            {
-                forward = JsonSerializer.Deserialize<ChatForwardSnapshotDto>(
-                    message.ForwardedFromJson,
-                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-            }
-            catch (JsonException)
-            {
-                forward = null;
-            }
-        }
+        VoteSummary voteSummary = BuildVoteSummary(message, viewerId, includeVotes);
+        ChatForwardSnapshotDto? forwardedFrom = DeserializeForwardSnapshot(message.ForwardedFromJson);
 
         return new ChatMessageDto
         {
@@ -591,37 +766,99 @@ public sealed class ChatMessageService(
             ReplyToSenderId = message.ReplyToSenderId,
             ReplyToSenderUsername = message.ReplyToSenderUsername,
             ReplyToContentSnippet = message.ReplyToContentSnippet,
-            Score = ups - downs,
-            UpvoteCount = ups,
-            DownvoteCount = downs,
-            ViewerVote = viewerVote is null ? null : viewerVote > 0 ? "up" : "down",
-            ForwardedFrom = forward,
-            Attachments = message.Attachments?
-                .OrderBy(a => a.SortOrder)
-                .Select(a => new ChatAttachmentInfoDto
-                {
-                    AttachmentId = a.AttachmentId,
-                    FileName = a.Attachment.OriginalFileName,
-                    ContentType = a.Attachment.ContentType,
-                    SizeBytes = a.Attachment.SizeBytes,
-                    DownloadUrl = mintAccessTokens && viewerId is Guid vid
-                        ? accessTokenService.MintDownloadUrl(a.AttachmentId, vid)
-                        : $"/api/chat/attachments/{a.AttachmentId}",
-                    IsHazard = a.Attachment.IsHazard,
-                    InlinePreviewKind = a.Attachment.InlinePreviewKind,
-                    ScanStatus = a.Attachment.ScanStatus.ToString(),
-                })
-                .ToList() ?? [],
-            LinkPreviews = message.LinkPreviews?
-                .Select(p => new LinkPreviewDto
-                {
-                    Url = p.Url,
-                    Title = p.Title,
-                    Description = p.Description,
-                    ImageUrl = p.ImageUrl,
-                })
-                .ToList() ?? [],
+            Score = voteSummary.Score,
+            UpvoteCount = voteSummary.UpvoteCount,
+            DownvoteCount = voteSummary.DownvoteCount,
+            ViewerVote = voteSummary.ViewerVote,
+            ForwardedFrom = forwardedFrom,
+            Attachments = MapAttachments(message, viewerId, mintAccessTokens),
+            LinkPreviews = MapLinkPreviews(message),
         };
+    }
+
+    private static VoteSummary BuildVoteSummary(ChatMessage message, Guid? viewerId, bool includeVotes)
+    {
+        if (!includeVotes)
+            return new VoteSummary(0, 0, 0, null);
+
+        int upvoteCount = message.Votes?.Count(vote => vote.Value > 0) ?? 0;
+        int downvoteCount = message.Votes?.Count(vote => vote.Value < 0) ?? 0;
+        short? viewerVoteValue = viewerId is Guid viewerGuid
+            ? message.Votes?.FirstOrDefault(vote => vote.UserId == viewerGuid)?.Value
+            : null;
+        string? viewerVote = viewerVoteValue switch
+        {
+            null => null,
+            > 0 => "up",
+            _ => "down",
+        };
+
+        return new VoteSummary(upvoteCount - downvoteCount, upvoteCount, downvoteCount, viewerVote);
+    }
+
+    private static ChatForwardSnapshotDto? DeserializeForwardSnapshot(string? forwardedFromJson)
+    {
+        if (string.IsNullOrWhiteSpace(forwardedFromJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<ChatForwardSnapshotDto>(
+                forwardedFromJson,
+                ForwardSnapshotJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private List<ChatAttachmentInfoDto> MapAttachments(
+        ChatMessage message,
+        Guid? viewerId,
+        bool mintAccessTokens)
+    {
+        if (message.Attachments is null)
+            return [];
+
+        return message.Attachments
+            .OrderBy(messageAttachment => messageAttachment.SortOrder)
+            .Select(messageAttachment => new ChatAttachmentInfoDto
+            {
+                AttachmentId = messageAttachment.AttachmentId,
+                FileName = messageAttachment.Attachment.OriginalFileName,
+                ContentType = messageAttachment.Attachment.ContentType,
+                SizeBytes = messageAttachment.Attachment.SizeBytes,
+                DownloadUrl = BuildAttachmentDownloadUrl(
+                    messageAttachment.AttachmentId,
+                    viewerId,
+                    mintAccessTokens),
+                IsHazard = messageAttachment.Attachment.IsHazard,
+                InlinePreviewKind = messageAttachment.Attachment.InlinePreviewKind,
+                ScanStatus = messageAttachment.Attachment.ScanStatus.ToString(),
+            })
+            .ToList();
+    }
+
+    private string BuildAttachmentDownloadUrl(Guid attachmentId, Guid? viewerId, bool mintAccessTokens) =>
+        mintAccessTokens && viewerId is Guid viewerGuid
+            ? accessTokenService.MintDownloadUrl(attachmentId, viewerGuid)
+            : $"/api/chat/attachments/{attachmentId}";
+
+    private static List<LinkPreviewDto> MapLinkPreviews(ChatMessage message)
+    {
+        if (message.LinkPreviews is null)
+            return [];
+
+        return message.LinkPreviews
+            .Select(linkPreview => new LinkPreviewDto
+            {
+                Url = linkPreview.Url,
+                Title = linkPreview.Title,
+                Description = linkPreview.Description,
+                ImageUrl = linkPreview.ImageUrl,
+            })
+            .ToList();
     }
 
     private static ChatInboxItemDto ToInboxDto(ChatMentionNotification notification)

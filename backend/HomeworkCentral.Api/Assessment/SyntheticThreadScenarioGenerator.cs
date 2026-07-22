@@ -2,53 +2,126 @@ using System.Text.Json;
 
 namespace HomeworkCentral.Api.Assessment;
 
+/// <summary>
+/// Builds fictional ticket threads for neural training without using real student data.
+/// </summary>
 public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
 {
+    private const string ScenarioSystemPrompt =
+        "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, and messages. "
+        + "Each message needs authorId, authorRole, channel, content, isDistractor, channelRelevance (0..1), expectedScore (0..1 evidence teacher label), expectedRelevance (0..1), proposedApproval (0..1), proposedVoterCount (1..200), controversy (0..1), reasons array. "
+        + "For moderation scenarios, set category to one precise kebab-case concept slug such as payment-solicitation, tip-pressure, staff-impersonation, doxxing, violent-intent, credential-theft, coordinated-brigading, or fabricated-source — not broad labels like spam or harassment. "
+        + "Include relevant messages, hard-negative near-misses when useful, unrelated casual distractors, multiple users/roles/channels, and a short thread. Never use real people or data.";
+
     public async Task<SyntheticThreadScenario?> GenerateAsync(NeuralTrainingMode mode, CancellationToken ct)
     {
-        string selected = mode == NeuralTrainingMode.Both ? "moderation or tutoring" : mode.ToString().ToLowerInvariant();
-        const string system = "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, and messages. Each message needs authorId, authorRole, channel, content, isDistractor, channelRelevance (0..1), expectedScore (0..1 evidence teacher label), expectedRelevance (0..1), proposedApproval (0..1), proposedVoterCount (1..200), controversy (0..1), reasons array. For moderation scenarios, set category to one precise kebab-case concept slug such as payment-solicitation, tip-pressure, staff-impersonation, doxxing, violent-intent, credential-theft, coordinated-brigading, or fabricated-source — not broad labels like spam or harassment. Include relevant messages, hard-negative near-misses when useful, unrelated casual distractors, multiple users/roles/channels, and a short thread. Never use real people or data.";
-        string? json = await llm.ChatJsonAsync(system, $"Create one {selected} training scenario with 4 to 8 messages.", ct);
-        if (string.IsNullOrWhiteSpace(json)) return CreateFallback(mode);
+        string? json = await llm.ChatJsonAsync(ScenarioSystemPrompt, BuildUserPrompt(mode), ct);
+        if (string.IsNullOrWhiteSpace(json))
+            return CreateFallback(mode);
+
         try
         {
-            using JsonDocument document = JsonDocument.Parse(json);
-            JsonElement root = document.RootElement;
-            string category = String(root, "category"), requirement = String(root, "requirement"), context = String(root, "initialContext");
-            if (string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(requirement) || !root.TryGetProperty("messages", out JsonElement source) || source.ValueKind != JsonValueKind.Array) return null;
-            List<SyntheticThreadMessage> messages = [];
-            int index = 0;
-            foreach (JsonElement item in source.EnumerateArray().Take(8))
-            {
-                string content = String(item, "content"); if (string.IsNullOrWhiteSpace(content)) continue;
-                JsonElement reasons = item.TryGetProperty("reasons", out JsonElement rawReasons) ? rawReasons : default;
-                float channelRelevance = Unit(item, "channelRelevance", .5f);
-                float? teacherEvidence = OptionalUnit(item, "expectedScore");
-                float? teacherRelevance = OptionalUnit(item, "expectedRelevance") ?? (item.TryGetProperty("expectedRelevance", out _) ? null : channelRelevance);
-                messages.Add(new SyntheticThreadMessage(
-                    index++,
-                    String(item, "authorId", "user-" + index),
-                    String(item, "authorRole", "student"),
-                    String(item, "channel", "general"),
-                    content[..Math.Min(content.Length, 2000)],
-                    Bool(item, "isDistractor"),
-                    channelRelevance,
-                    new SyntheticCommunityIntent(
-                        Unit(item, "proposedApproval", .5f),
-                        Math.Clamp(Int(item, "proposedVoterCount", 10), 1, 200),
-                        Unit(item, "controversy", .5f),
-                        reasons.ValueKind == JsonValueKind.Array
-                            ? reasons.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString() ?? string.Empty).ToList()
-                            : []),
-                    teacherEvidence,
-                    teacherRelevance,
-                    OptionalUnit(item, "proposedApproval"),
-                    OptionalUnit(item, "evaluatorConfidence")));
-            }
-            return messages.Count == 0 ? CreateFallback(mode) : new SyntheticThreadScenario(category[..Math.Min(category.Length, 64)], requirement[..Math.Min(requirement.Length, 4000)], context[..Math.Min(context.Length, 2500)], messages);
+            SyntheticThreadScenario? scenario = ParseScenario(json);
+            return scenario is { Messages.Count: 0 } ? CreateFallback(mode) : scenario;
         }
-        catch (JsonException) { return CreateFallback(mode); }
+        catch (JsonException)
+        {
+            return CreateFallback(mode);
+        }
     }
+
+    private static string BuildUserPrompt(NeuralTrainingMode mode)
+    {
+        string selected = mode == NeuralTrainingMode.Both
+            ? "moderation or tutoring"
+            : mode.ToString().ToLowerInvariant();
+        return $"Create one {selected} training scenario with 4 to 8 messages.";
+    }
+
+    private static SyntheticThreadScenario? ParseScenario(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        string category = String(root, "category");
+        string requirement = String(root, "requirement");
+        string context = String(root, "initialContext");
+
+        if (string.IsNullOrWhiteSpace(category)
+            || string.IsNullOrWhiteSpace(requirement)
+            || !root.TryGetProperty("messages", out JsonElement source)
+            || source.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        List<SyntheticThreadMessage> messages = ReadMessages(source);
+        return new SyntheticThreadScenario(
+            Truncate(category, 64),
+            Truncate(requirement, 4000),
+            Truncate(context, 2500),
+            messages);
+    }
+
+    private static List<SyntheticThreadMessage> ReadMessages(JsonElement source)
+    {
+        List<SyntheticThreadMessage> messages = [];
+        int index = 0;
+        foreach (JsonElement item in source.EnumerateArray().Take(8))
+        {
+            string content = String(item, "content");
+            if (string.IsNullOrWhiteSpace(content))
+                continue;
+
+            messages.Add(ReadMessage(item, content, ref index));
+        }
+
+        return messages;
+    }
+
+    private static SyntheticThreadMessage ReadMessage(JsonElement item, string content, ref int index)
+    {
+        int messageIndex = index;
+        index++;
+        float channelRelevance = Unit(item, "channelRelevance", .5f);
+        return new SyntheticThreadMessage(
+            messageIndex,
+            String(item, "authorId", "user-" + index),
+            String(item, "authorRole", "student"),
+            String(item, "channel", "general"),
+            Truncate(content, 2000),
+            Bool(item, "isDistractor"),
+            channelRelevance,
+            ReadCommunityIntent(item),
+            OptionalUnit(item, "expectedScore"),
+            ReadTeacherRelevance(item, channelRelevance),
+            OptionalUnit(item, "proposedApproval"),
+            OptionalUnit(item, "evaluatorConfidence"));
+    }
+
+    private static SyntheticCommunityIntent ReadCommunityIntent(JsonElement item)
+    {
+        JsonElement reasons = item.TryGetProperty("reasons", out JsonElement rawReasons)
+            ? rawReasons
+            : default;
+
+        return new SyntheticCommunityIntent(
+            Unit(item, "proposedApproval", .5f),
+            Math.Clamp(Int(item, "proposedVoterCount", 10), 1, 200),
+            Unit(item, "controversy", .5f),
+            ReadReasons(reasons));
+    }
+
+    private static List<string> ReadReasons(JsonElement reasons) =>
+        reasons.ValueKind == JsonValueKind.Array
+            ? reasons.EnumerateArray()
+                .Where(static reason => reason.ValueKind == JsonValueKind.String)
+                .Select(static reason => reason.GetString() ?? string.Empty)
+                .ToList()
+            : [];
+
+    private static float? ReadTeacherRelevance(JsonElement item, float channelRelevance) =>
+        OptionalUnit(item, "expectedRelevance")
+        ?? (item.TryGetProperty("expectedRelevance", out _) ? null : channelRelevance);
 
     private static SyntheticThreadScenario CreateFallback(NeuralTrainingMode mode)
     {
@@ -73,10 +146,27 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
                 new(3, "synthetic-reported", "student", "math-help", "Tips are expected if you want the last step.", false, 1f, new(.08f, 28, .1f, ["tip pressure"]), .92f, 1f, .08f, .88f)];
         return new SyntheticThreadScenario(category, requirement, context, messages);
     }
-    private static string String(JsonElement root, string property, string fallback = "") => root.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : fallback;
-    private static int Int(JsonElement root, string property, int fallback) => root.TryGetProperty(property, out JsonElement value) && value.TryGetInt32(out int result) ? result : fallback;
-    private static float Unit(JsonElement root, string property, float fallback) => root.TryGetProperty(property, out JsonElement value) && value.TryGetSingle(out float result) ? Math.Clamp(result, 0, 1) : fallback;
+    private static string Truncate(string value, int maxCharacters) =>
+        value[..Math.Min(value.Length, maxCharacters)];
+
+    private static string String(JsonElement root, string property, string fallback = "") =>
+        root.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? fallback
+            : fallback;
+
+    private static int Int(JsonElement root, string property, int fallback) =>
+        root.TryGetProperty(property, out JsonElement value) && value.TryGetInt32(out int result)
+            ? result
+            : fallback;
+
+    private static float Unit(JsonElement root, string property, float fallback) =>
+        root.TryGetProperty(property, out JsonElement value) && value.TryGetSingle(out float result)
+            ? Math.Clamp(result, 0, 1)
+            : fallback;
+
     private static float? OptionalUnit(JsonElement root, string property) =>
         root.TryGetProperty(property, out JsonElement value) && value.TryGetSingle(out float result) ? Math.Clamp(result, 0, 1) : null;
-    private static bool Bool(JsonElement root, string property) => root.TryGetProperty(property, out JsonElement value) && value.ValueKind is JsonValueKind.True;
+
+    private static bool Bool(JsonElement root, string property) =>
+        root.TryGetProperty(property, out JsonElement value) && value.ValueKind is JsonValueKind.True;
 }
