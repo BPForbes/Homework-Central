@@ -477,7 +477,7 @@ captcha challenge, role verification, and FCaptcha assessment endpoints.
   attachments, and attachment download tokens.
 - [Tickets and assessment](tickets.md) — ticket portal rooms, user watches,
   assessment flows, ticket chat, and neural scoring boundaries.
-- [Runtime and operations](runtime.md) — service topology choices, local Docker
-  resource guidance, and ClamAV/Ollama profile costs.
+- [README.md](../README.md) — Docker Compose profiles, WSL caps, and ClamAV
+  resource notes for local development.
 - [Comment Documentation Guide](COMMENT_DOCUMENTATION_GUIDE.md)
   — durable documentation and source-comment standards.

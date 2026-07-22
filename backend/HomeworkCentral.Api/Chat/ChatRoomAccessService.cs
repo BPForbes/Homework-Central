@@ -47,7 +47,6 @@ public sealed class ChatRoomAccessService(
 
         // Catalog rooms are already in hand; filter with the definition overload so
         // nav does not re-resolve each room through FindById.
-        // Time: O(R + C·Rule). Space: O(R + C). See docs/runtime.md.
         List<ChatRoomDefinition> accessibleGeneralRooms = ChatRoomCatalog.GeneralRooms
             .Where(room => CanAccessRoom(masks, room))
             .ToList();
@@ -78,8 +77,8 @@ public sealed class ChatRoomAccessService(
             .Where(channel => CanAccessCustomChannel(masks, userId, channel))
             .ToList();
 
-        // Merge custom channels into existing sidebar categories without another
-        // linear scan of the category list per channel (O(1) category key lookup).
+        // Merge custom channels into existing sidebar categories by category key
+        // instead of scanning the category list per channel.
         Dictionary<string, ChatNavCategoryDto> categoriesByKey = categories
             .ToDictionary(category => category.Key, StringComparer.Ordinal);
 

@@ -52,25 +52,7 @@ reviews:
         - Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
           structural readability score below the accepted threshold must be split into cohesive,
           precisely named subfunctions unless an approved exception applies.
-        - Hot-path optimization seams must note brief **time** and **space** Big-O next to
-          the data-structure or algorithm choice; keep the full table in `docs/runtime.md`.
-
-        ## Asymptotic analysis (required for algorithm / hot-path changes)
-
-        When reviewing new or changed algorithms, loops over collections, lookups, or
-        data-structure choices, evaluate:
-
-        1. What are the **time** and **space** complexities (Big-O) in meaningful variables
-           (messages, users, mentions, rooms, vocabulary size, batch size, feature width, etc.)?
-        2. Is a brief Time/Space note present on the hot-path seam in source?
-        3. Can the cost be **improved** without breaking correctness, trust boundaries, or APIs?
-        4. Flag nested scans that yield `O(n²)` where a dictionary, set, or automaton would be
-           linear expected cost.
-        5. If a documented hot path changes, require an update to
-           `docs/runtime.md` § Asymptotic analysis.
-
-        Asymptotic cost is separate from cognitive/cyclomatic readability limits; evaluate both.
-        Baseline hot-path table: `docs/runtime.md`.
+        - Do not require or add asymptotic time/space (Big-O) notes in comments or docs.
 
         ## System documentation (docs/*)
 
@@ -80,7 +62,7 @@ reviews:
         - `docs/identity.md` — auth, sessions, captcha, account classes, tenancy
         - `docs/chat.md` — rooms, messages, SignalR, uploads, ClamAV, downloads
         - `docs/tickets.md` — portals, preface checks, votes, neural scoring
-        - docs/runtime.md — hot paths, asymptotic cost, queues, Docker profiles, Windows resources
+        - `README.md` — Docker Compose profiles, WSL caps, ClamAV resource notes
         - `docs/COMMENT_DOCUMENTATION_GUIDE.md` — Comment Documentation Guide (comments, naming, readability)
         - `design.md` — UI design tokens and motion (frontend styling)
 
@@ -119,7 +101,8 @@ reviews:
         standards. Check that feature docs stay module-level (one file per module),
         link to the Comment Documentation Guide when stating comment/naming rules,
         and do not invent parallel standards. Prefer updating the owning module doc
-        (`identity.md`, `chat.md`, `tickets.md`, `runtime.md`) over adding one-off files.
+        (`identity.md`, `chat.md`, `tickets.md`) over adding one-off files. Local
+        Docker/WSL/ClamAV resource notes belong in `README.md`.
 
     - path: "backend/**/*.cs"
       instructions: |
@@ -127,11 +110,7 @@ reviews:
         new and changed C# code: no `var`, prefer pattern matching for closed sets,
         project-intent comments only, and canonical doc updates under `docs/`.
 
-        ## Complexity analysis (required)
-
-        Evaluate **two** kinds of complexity for every new or changed in-scope function:
-
-        ### A) Cognitive / structural readability (Comment Documentation Guide)
+        ## Cognitive / structural readability (required)
 
         Report findings when thresholds are approached or exceeded:
 
@@ -157,21 +136,11 @@ reviews:
         module doc under `docs/`. Prefer decomposition around authorization,
         validation, persistence, DTO mapping, and similar seams.
 
-        ### B) Asymptotic time and space (required for algorithms / hot paths)
-
-        For loops, lookups, scans, sorting, graph/text matching, neural paths, and
-        collection fan-out, answer in the review:
-
-        - What is the **time** complexity?
-        - What is the **space** complexity?
-        - Can this be improved (dictionary/set/automaton/index/cache) without harming
-          correctness or trust boundaries?
-
-        Require a brief Time/Space Big-O note on the hot-path seam and an update to
-        `docs/runtime.md` § Asymptotic analysis when the path changes.
+        Do not require asymptotic time/space (Big-O) analysis in comments or docs.
 
         For system questions (tenancy, chat access, tickets, uploads), consult
-        `docs/identity.md`, `docs/chat.md`, `docs/tickets.md`, or `docs/runtime.md`.
+        `docs/identity.md`, `docs/chat.md`, or `docs/tickets.md`. Docker/WSL/ClamAV
+        resource notes are in `README.md`.
 
     - path: "frontend/**/*.{ts,tsx}"
       instructions: |
@@ -179,11 +148,7 @@ reviews:
         and changed TypeScript. Prefer precise names and project-intent comments.
         Keep styling token-driven per `design.md` / `frontend/src/index.css`.
 
-        ## Complexity analysis (required)
-
-        Evaluate **two** kinds of complexity for every new or changed in-scope function:
-
-        ### A) Cognitive / structural readability
+        ## Cognitive / structural readability (required)
 
         Hard complexity gates apply to non-UI TypeScript modules (`*.ts`) such as
         API clients, protocol/state-machine hooks, and pure utilities — same metric
@@ -193,19 +158,10 @@ reviews:
         still note clearly excessive nesting or mixed protocol logic that should
         move into `*.ts` helpers/hooks.
 
-        ### B) Asymptotic time and space
+        Do not require asymptotic time/space (Big-O) analysis in comments or docs.
 
-        For collection scans, merges, dedupe, and protocol hot paths, answer:
-
-        - What is the time complexity?
-        - What is the space complexity?
-        - Can this be improved?
-
-        Require a brief Time/Space Big-O note on the client hot-path seam and update
-        `docs/runtime.md` when client hot paths change (for example chat message
-        retention / live dedupe).
-
-        For system questions, consult the matching file under `docs/*`.
+        For system questions, consult the matching file under `docs/*`. Docker/WSL/ClamAV
+        resource notes are in `README.md`.
 
     - path: "frontend/**/*.{css,scss}"
       instructions: |
@@ -270,13 +226,13 @@ knowledge_base:
           - "frontend/**/*Ticket*"
           - "frontend/**/*Assessment*"
           - "frontend/**/*Neural*"
-      - files: "docs/runtime.md"
+      - files: "README.md"
         applyTo:
           - "scripts/**"
           - "**/docker-compose*.yml"
           - "**/Dockerfile*"
-          - "backend/**/*Queue*"
-          - "backend/**/*Hosted*"
+          - "deploy/windows/**"
+          - "deploy/clamav/**"
       - files: "design.md"
         applyTo:
           - "frontend/**/*.{css,tsx,html}"

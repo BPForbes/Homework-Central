@@ -84,7 +84,6 @@ public static class ChatRoomCatalog
 
     // Access and nav resolve rooms by id on every request; the static map keeps
     // catalog lookup off the linear AllRooms scan.
-    // Time: O(1) FindById. Space: O(R) static dictionary. See docs/runtime.md.
     private static readonly IReadOnlyDictionary<string, ChatRoomDefinition> RoomsById =
         AllRooms.ToDictionary(room => room.Id, StringComparer.Ordinal);
 

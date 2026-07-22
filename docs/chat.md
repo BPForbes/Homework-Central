@@ -877,8 +877,7 @@ limit is the effective default application limit.
   scoped-resource rules, refresh rotation, captcha, and developer login.
 - [Tickets and assessment](tickets.md) — ticket portals, ticket chat channels,
   watches, votes, neural scoring, and reviewer fallback.
-- [Runtime and operations](runtime.md) — ClamAV service choice, local service
-  topology, Docker resource guidance, and asymptotic hot-path costs (mentions,
-  nav, client message retention).
+- [README.md](../README.md) — Docker Compose profiles, WSL caps, and ClamAV
+  resource notes for local development.
 - [Comment Documentation Guide](COMMENT_DOCUMENTATION_GUIDE.md)
   — durable documentation and source-comment standards.

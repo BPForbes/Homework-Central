@@ -75,8 +75,7 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
     /// <summary>
     /// Scores multi-word vocabulary hits via Exact dictionary windows over tokens,
     /// longest windows first. Prefer Exact before fuzzy token resolve.
-    /// Time ≈ O(Tok²) windows into Exact (not O(V·L) over all keys). Space: O(V) vocab.
-    /// See docs/tickets.md and docs/runtime.md.
+    /// See docs/tickets.md.
     /// </summary>
     private void AddPhraseHits(string freeText, PrefaceExtractionBuilder builder)
     {

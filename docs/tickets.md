@@ -355,6 +355,11 @@ Live scoring is message-driven and follows the [Assessment pipeline](#assessment
 4. Deterministic code blends student/reviewer signals, clamps score movement, writes
    one `TicketMessageScores` audit row, and mirrors the score event to vector search.
 
+The live assessment channel is in-process, capacity **256** jobs, single reader.
+When full, `TryEnqueue` returns false and the message stays unscored (logged).
+Queued jobs are lost on backend restart; multi-worker durability would need a
+transactional outbox plus an external broker.
+
 Training is example-driven:
 
 - staff-approved reviewer feedback creates `TicketModelTrainingExamples` with source
@@ -1278,7 +1283,7 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 
 ### Related docs
 
-- [docs/runtime.md](runtime.md) — assessment queue, local resource limits, Ollama concurrency, service tradeoffs, and asymptotic costs for preface/neural/recipient paths
 - [docs/chat.md](chat.md) — room categories, access bits, portal visibility, ticket attachments, scanning, and download safety
 - [docs/identity.md](identity.md) — JWT, account class, developer login, and account-class visibility
+- [README.md](../README.md) — Docker Compose profiles, WSL caps, and ClamAV resource notes
 - [docs/README.md](README.md) — documentation index

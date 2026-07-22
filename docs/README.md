@@ -20,7 +20,10 @@ per class, endpoint, TSX panel, or complexity finding. See
 | Identity | [identity.md](./identity.md) | Auth, sessions, captcha, account classes, tenancy |
 | Chat | [chat.md](./chat.md) | Rooms, messages, SignalR, uploads, ClamAV, downloads |
 | Tickets | [tickets.md](./tickets.md) | Portals, preface checks, votes, neural scoring, NeuralNet admin |
-| Runtime | [runtime.md](./runtime.md) | Hot paths, asymptotic cost, queues, Docker profiles, Windows resources |
+
+Local Docker Compose profiles, WSL caps, and ClamAV resource notes live in
+[`README.md`](../README.md). Assessment queue capacity is noted in
+[`tickets.md`](./tickets.md).
 
 ## Design and deployment
 
@@ -35,7 +38,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 | Authentication, sessions, account classes, tenant visibility | [`identity.md`](./identity.md) |
 | Chat rooms, messages, uploads, scanning, downloads | [`chat.md`](./chat.md) |
 | Ticket portals, Trial Tutor, votes, AI scoring | [`tickets.md`](./tickets.md) |
-| Runtime efficiency, asymptotic hot-path cost, service tradeoffs, Windows Docker resources | [`runtime.md`](./runtime.md) |
+| Docker Compose profiles, WSL caps, ClamAV resource notes | [`README.md`](../README.md) |
 | Design tokens and motion | [`design.md`](../design.md) |
 | Kubernetes deployment | [`deploy/kubernetes/README.md`](../deploy/kubernetes/README.md) |
 

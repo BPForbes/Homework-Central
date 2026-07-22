@@ -129,18 +129,52 @@ and run `wsl --shutdown`, then start Docker Desktop again. To reclaim unused bui
 images without deleting the database volume, run `docker system prune -af`. Do not add
 `--volumes` unless you intentionally want to delete local Postgres data.
 
-`docker-compose.yml` keeps the lightweight core below a 1.25 GiB container ceiling. ClamAV and
-Ollama are separate `antivirus` and `ai` profiles because an 8 GiB Windows machine cannot safely
-run both together. CPU values are ceilings rather than reservations. The default development
-scripts run the API and frontend directly on the host, so Docker limits do not cap those two host
-processes. Windows users should also cap Docker Desktop's WSL 2 utility VM; see
-[`docs/runtime.md`](docs/runtime.md#windows-8-gib-docker-profiles).
+### Docker Compose profiles (8 GiB workstation)
+
+`docker-compose.yml` keeps the lightweight core below a 1.25 GiB container ceiling.
+Heavy services are opt-in profiles:
+
+| Service | Profile | CPU ceiling | RAM ceiling |
+|---|---|---:|---:|
+| PostgreSQL, FCaptcha, Redis, API, nginx | default | ~1.75 total | ~1.25 GiB total |
+| ClamAV | `antivirus` | 0.75 | 2,560 MiB |
+| Ollama | `ai` | 1.50 | 1,536 MiB |
+
+```powershell
+docker compose up -d                          # core only
+docker compose --profile antivirus up -d      # + attachment malware scanning
+docker compose --profile ai up -d             # + local AI reviewer
+```
+
+Do not enable `antivirus` and `ai` together on an 8 GiB machine. CPU values are
+ceilings rather than reservations. The default development scripts run the API and
+frontend on the host, so Docker limits do not cap those two host processes.
+Override individual ceilings with `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`,
+`LLM_MEMORY_LIMIT`, and related keys in `.env` when `docker stats` shows a need.
+
+### WSL caps (Windows Docker Desktop)
+
+Compose limits do not include the Linux kernel, Docker daemon, or filesystem cache.
+Copy [`deploy/windows/.wslconfig.example`](deploy/windows/.wslconfig.example) to
+`%USERPROFILE%\.wslconfig` (4 GiB memory, 4 processors, 2 GiB swap), run
+`wsl --shutdown`, and restart Docker Desktop. Sustained swapping means the active
+profile is too large; avoid running other WSL distributions alongside a heavy profile.
+
+### ClamAV notes
+
+ClamAV is profile-gated because the signature engine dominates RAM. The local image
+disables concurrent database reloads so scans pause briefly during signature update
+instead of holding two engines. Enable it in the script path with
+`HC_ENABLE_CLAMAV=1` before `scripts/run-dev.sh`, or use
+`docker compose --profile antivirus up -d`. An npm ClamAV package is only a client
+wrapper; the backend already streams to `clamd` via `nClam`. A native Windows
+`clamd` on port `3310` moves signature RAM outside the WSL cap but does not shrink
+it — the Docker antivirus profile remains the safer default on the documented
+workstation. Upload scan statuses and fail-open behavior are in
+[`docs/chat.md`](docs/chat.md).
 
 Ticket AI uses bounded per-message confidence changes with an auditable vector
 archive; see [`docs/tickets.md`](docs/tickets.md#neural-monitors-and-ollama-blend).
-
-Backend query, shared-memory, service-alternative, and RabbitMQ tradeoffs are
-documented in [`docs/runtime.md`](docs/runtime.md).
 
 ### Documentation
 
@@ -153,7 +187,6 @@ Architecture, trust boundaries, and engineering standards live under
 | [`docs/identity.md`](docs/identity.md) | Authentication, sessions, account classes, tenant visibility |
 | [`docs/chat.md`](docs/chat.md) | Chat categories, rooms, messages, attachments |
 | [`docs/tickets.md`](docs/tickets.md) | Ticket portals, Trial Tutor, votes, AI scoring |
-| [`docs/runtime.md`](docs/runtime.md) | Runtime efficiency, asymptotic hot-path cost, Docker resources |
 | [`design.md`](design.md) | UI design tokens and motion |
 | [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md) | Kubernetes deployment |
 
