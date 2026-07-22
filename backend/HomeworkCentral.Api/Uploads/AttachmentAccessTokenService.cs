@@ -29,36 +29,67 @@ public sealed class AttachmentAccessTokenService(
 
     public async Task<bool> TryValidateAsync(Guid attachmentId, string accessToken, CancellationToken ct = default)
     {
-        string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(accessToken));
-        string[] parts = decoded.Split('|');
-
-        if (parts.Length != 4)
+        // Anonymous download URLs accept arbitrary query input; malformed Base64/GUID/expiry
+        // must return false (401) rather than throw FormatException (500).
+        if (!TryParseToken(accessToken, out string attachmentIdText, out string userIdText, out string expiresText, out string signature))
             return false;
 
-        Guid tokenAttachmentId = Guid.Parse(parts[0]);
-        long expiresUnix = long.Parse(parts[2]);
-        string payload = $"{parts[0]}|{parts[1]}|{parts[2]}";
-        string signature = parts[3];
-
-        bool tokenShapeValid = (tokenAttachmentId, expiresUnix, signature) switch
+        if (!Guid.TryParse(attachmentIdText, out Guid tokenAttachmentId)
+            || tokenAttachmentId != attachmentId
+            || !long.TryParse(expiresText, out long expiresUnix)
+            || DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expiresUnix)
         {
-            (Guid id, _, _) when id != attachmentId => false,
-            (_, long exp, _) when DateTimeOffset.UtcNow.ToUnixTimeSeconds() > exp => false,
-            (_, _, string sig) when !SignatureValid(payload, sig) => false,
-            _ => true,
-        };
-        if (!tokenShapeValid)
+            return false;
+        }
+
+        string payload = $"{attachmentIdText}|{userIdText}|{expiresText}";
+        if (!SignatureValid(payload, signature))
             return false;
 
         string? cached = await cache.GetStringAsync($"att:tok:{attachmentId:N}:{signature}", ct);
         return cached is not null;
     }
 
+    private static bool TryParseToken(
+        string accessToken,
+        out string attachmentIdText,
+        out string userIdText,
+        out string expiresText,
+        out string signature)
+    {
+        attachmentIdText = string.Empty;
+        userIdText = string.Empty;
+        expiresText = string.Empty;
+        signature = string.Empty;
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(accessToken);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        string[] parts = Encoding.UTF8.GetString(bytes).Split('|');
+        if (parts.Length != 4)
+            return false;
+
+        attachmentIdText = parts[0];
+        userIdText = parts[1];
+        expiresText = parts[2];
+        signature = parts[3];
+        return true;
+    }
+
     private bool SignatureValid(string payload, string signature)
     {
         byte[] expected = Encoding.UTF8.GetBytes(Sign(payload));
         byte[] actual = Encoding.UTF8.GetBytes(signature);
-        return CryptographicOperations.FixedTimeEquals(expected, actual);
+        // FixedTimeEquals throws when lengths differ; treat that as an invalid token.
+        return expected.Length == actual.Length
+            && CryptographicOperations.FixedTimeEquals(expected, actual);
     }
 
     private string Sign(string payload)

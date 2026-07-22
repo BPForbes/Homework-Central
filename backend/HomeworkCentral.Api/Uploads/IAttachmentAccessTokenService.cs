@@ -11,6 +11,7 @@ public interface IAttachmentAccessTokenService
 
     /// <summary>
     /// Returns true when the token is valid for <paramref name="attachmentId"/> and has not expired.
+    /// Malformed tokens return false (never throw) so anonymous download URLs stay 401.
     /// </summary>
     Task<bool> TryValidateAsync(Guid attachmentId, string accessToken, CancellationToken ct = default);
 }
