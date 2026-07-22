@@ -12,6 +12,8 @@ per class, endpoint, TSX panel, or complexity finding. See
 ## Engineering standards
 
 - [Comment Documentation Guide](./COMMENT_DOCUMENTATION_GUIDE.md) (`docs/COMMENT_DOCUMENTATION_GUIDE.md`)
+  — includes [Analyzer and CI expectations](./COMMENT_DOCUMENTATION_GUIDE.md#analyzer-and-ci-expectations)
+  (SonarQube for C# + TypeScript, ESLint, raw SQL gate).
 
 ## Feature-level architecture
 

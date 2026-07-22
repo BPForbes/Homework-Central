@@ -1077,19 +1077,68 @@ constants, not every assertion.
 
 ## Analyzer and CI expectations
 
-Current CI enforces backend build/test, raw SQL rejection in backend application
-code, frontend lint, and frontend build. Other review items are expectations
-unless matching analyzers or checks are added.
+Current CI enforces:
+
+- Backend build and tests.
+- Rejection of unparameterized raw SQL in backend application code.
+- Frontend ESLint and frontend build.
+- **SonarQube** analysis of C# and TypeScript when repository Variables +
+  `SONAR_TOKEN` are configured (job name `SonarQube`). The scanner waits on the
+  quality gate (`sonar.qualitygate.wait=true`), so a failing gate fails the
+  workflow.
+
+SonarQube is the shared function-level lint system for in-scope `*.cs` and
+`*.ts`. Prefer its quality profile for cognitive complexity and related Clean
+Code rules over inventing parallel ESLint/Roslyn complexity configs. The default
+Sonar cognitive-complexity threshold (`15`) matches this guide's hard limit.
+React `*.tsx` files may still appear in the Sonar UI; reviewers keep the softer
+TSX gate from [Complexity review scope](#complexity-review-scope).
+
+### Enabling SonarQube (C# + TypeScript)
+
+Use **one** SonarQube Cloud (or Server) project for the whole repository. Do
+**not** add a root `sonar-project.properties` file — SonarScanner for .NET
+rejects it. Pass analysis settings on the scanner command line (see
+`.github/workflows/ci.yml` and `scripts/run-sonar.sh`).
+
+1. Create or import the GitHub repo in SonarQube Cloud (EU or US) or bind a
+   self-hosted SonarQube Server project.
+2. Generate a user or project analysis token.
+3. In the GitHub repository **Settings → Secrets and variables → Actions**:
+   - Secret `SONAR_TOKEN` — analysis token.
+   - Variable `SONAR_PROJECT_KEY` — e.g. `BPForbes_Homework-Central`.
+   - Variable `SONAR_ORGANIZATION` — SonarQube Cloud organization key
+     (required for Cloud; omit for most self-hosted Server setups).
+   - Optional variable `SONAR_HOST_URL` — defaults to `https://sonarcloud.io`;
+     use `https://sonarqube.us` for US Cloud, or your Server URL.
+4. Copy `.sonarlint/connectedMode.example.json` to
+   `.sonarlint/connectedMode.json` and fill in the organization + project key
+   (no tokens in that file). This keeps IDE / CLI tools on the same project.
+5. Mark the `SonarQube` check required in branch protection once the first
+   analysis has run successfully.
+6. Prefer a **new-code** quality gate so legacy findings do not block every PR
+   while still enforcing this guide on changed functions.
+
+Local parity with CI:
+
+```bash
+export SONAR_TOKEN=...
+export SONAR_PROJECT_KEY=BPForbes_Homework-Central
+export SONAR_ORGANIZATION=your-org-key
+scripts/run-sonar.sh
+```
 
 Review and automation expectations:
 
-- Hand-authored C# local variables avoid `var`; reviewers reject violations
-  until an analyzer exists.
-- Formatting and lint checks run where configured.
+- Hand-authored C# local variables avoid `var`; `.editorconfig` marks the
+  style as error, and reviewers reject violations when style enforcement is not
+  yet active in the build.
+- Frontend ESLint remains a fast local/CI gate; SonarQube owns cross-language
+  complexity and Clean Code rules once enabled.
 - Tests cover changed executable behavior.
 - Existing CI rejects unsafe raw SQL in backend application code.
 - Markdown links stay valid when files move.
-- Complexity warnings are reviewed before merge.
+- Complexity warnings from SonarQube / CodeRabbit are reviewed before merge.
 - Hard complexity limit failures should block merge unless an approved exception
   is documented.
 
