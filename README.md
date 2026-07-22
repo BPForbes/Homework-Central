@@ -142,6 +142,23 @@ archive; see [`docs/ticket-ai-scoring.md`](docs/ticket-ai-scoring.md).
 Backend query, shared-memory, service-alternative, and RabbitMQ tradeoffs are
 documented in [`docs/system-efficiency.md`](docs/system-efficiency.md).
 
+### Documentation
+
+Architecture, trust boundaries, and engineering standards live under
+[`docs/`](docs/README.md):
+
+| Document | Topic |
+|----------|-------|
+| [`docs/COMMENT_STANDARD.md`](docs/COMMENT_STANDARD.md) | Comments, naming, readability, XML/Markdown rules |
+| [`docs/auth-and-sessions.md`](docs/auth-and-sessions.md) | JWT, captcha, refresh cookies, developer login |
+| [`docs/tenancy-isolation.md`](docs/tenancy-isolation.md) | Account classes and resource visibility |
+| [`docs/chat-room-access.md`](docs/chat-room-access.md) | Chat categories, rooms, and access bits |
+| [`docs/tickets-assessment.md`](docs/tickets-assessment.md) | Ticket portals, Trial Tutor, votes |
+| [`docs/ticket-ai-scoring.md`](docs/ticket-ai-scoring.md) | Neural monitors and confidence scoring |
+| [`docs/uploads-and-scanning.md`](docs/uploads-and-scanning.md) | Attachments, ClamAV, download tokens |
+| [`docs/windows-docker-resources.md`](docs/windows-docker-resources.md) | 8 GiB Windows Docker profiles |
+| [`design.md`](design.md) | UI design tokens and motion |
+
 ### Fast repeat starts
 
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
@@ -181,6 +198,8 @@ after resetting the local database. Never use it for a fresh database.
 Homework-Central/
 ├── backend/HomeworkCentral.Api/   # ASP.NET Core API
 ├── frontend/                      # React + Vite SPA
+├── docs/                          # Architecture and engineering standards
+├── deploy/                        # Kubernetes and Windows Docker helpers
 ├── scripts/                       # Dev orchestration (.ps1 / .sh)
 ├── docker-compose.yml             # Postgres, FCaptcha, and production-style services
 ├── HomeworkCentral.sln            # .NET solution
