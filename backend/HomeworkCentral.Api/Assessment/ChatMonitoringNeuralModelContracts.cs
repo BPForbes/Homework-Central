@@ -95,6 +95,10 @@ public sealed record ChatMonitoringNeuralModelStateSnapshot(
     float ParameterL2Norm,
     int SupportExamples);
 
+/// <summary>
+/// In-process chat-monitoring student model. Predictions and training mutate process-local
+/// weights only; canonical promotion remains outside this contract.
+/// </summary>
 public interface IChatMonitoringNeuralModel
 {
     NeuralModelKindChatMonitoring Kind { get; }
@@ -102,6 +106,10 @@ public interface IChatMonitoringNeuralModel
     void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12);
 }
 
+/// <summary>
+/// Telemetry-capable student model used for replay capture and admin training sessions.
+/// Callers own disposal; parameter snapshots are process-local until promotion persists them.
+/// </summary>
 public interface IChatMonitoringNeuralModelTelemetry : IChatMonitoringNeuralModel, IDisposable
 {
     ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input);
@@ -128,6 +136,9 @@ public interface IChatMonitoringNeuralModelTelemetry : IChatMonitoringNeuralMode
     void LoadParameterSnapshot(NeuralNetParameterSnapshot snapshot);
 }
 
+/// <summary>
+/// Resolves the active moderation/tutoring student models for live scoring and training modes.
+/// </summary>
 public interface IChatMonitoringNeuralModelFactory
 {
     IChatMonitoringNeuralModel Get(NeuralModelKindChatMonitoring kind);

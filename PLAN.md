@@ -29,4 +29,3 @@ Tests verify float32 delta reconstruction, parameter ordering, LLM 2 single eval
 - [x] Add canonical promotion/checkpoint reload service.
 - [x] Replace visualizer with V2 frame controls, clustered/full graph, and inspector.
 - [x] Add replay/promotion tests and run isolated API/frontend builds.
-- [x] Commit and push the completed implementation to `cursor/chat-votes-files-tickets-3ebf`.

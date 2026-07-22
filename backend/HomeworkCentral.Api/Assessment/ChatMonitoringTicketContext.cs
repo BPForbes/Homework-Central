@@ -151,4 +151,3 @@ public static class ChatMonitoringTicketContext
     public static int CategoryIndex(string? category, NeuralModelKindChatMonitoring kind) =>
         ChatMonitoringCategoryTaxonomy.IndexOf(kind, category);
 }
-

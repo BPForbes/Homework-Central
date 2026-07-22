@@ -9,6 +9,10 @@ using Microsoft.Extensions.Options;
 
 namespace HomeworkCentral.Api.Assessment;
 
+/// <summary>
+/// Runs queued ticket-assessment jobs against watched chat traffic. Implementations
+/// may persist score events and vector evidence; callers must treat jobs as at-least-once.
+/// </summary>
 public interface IAssessmentPipelineService
 {
     /// <summary>
