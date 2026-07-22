@@ -61,6 +61,88 @@ sequenceDiagram
     Broker-->>Worker: future: durable queue delivery
 ```
 
+## How to use
+
+### Start, verify, and stop local development
+
+1. Start the standard local stack with `scripts/run-dev.sh`. It prepares `.env`,
+   starts the local Docker dependencies, runs backend warmup unless skipped, and
+   launches the API on `http://localhost:5000` plus Vite on
+   `http://localhost:5173`.
+2. Use `scripts/run-dev.sh --build-only` when only compile and frontend
+   dependency checks are needed.
+3. Check the API with `GET http://localhost:5000/healthz` after startup.
+4. Stop the managed local stack with `scripts/stop-dev.sh`; the PostgreSQL volume
+   is preserved.
+5. Reset the local database only when a clean dev data set is required:
+   `scripts/reset-dev-db.sh --yes`.
+
+The architecture diagram above shows the local service boundaries. The sequence
+diagram shows why the in-process assessment queue is acceptable for the single
+backend process and where a future RabbitMQ deployment needs an outbox.
+
+### Choose a runtime profile
+
+- Use the default core profile for normal development: `docker compose up -d` or
+  `scripts/run-dev.sh`.
+- Enable attachment malware scanning in the script path by setting
+  `HC_ENABLE_CLAMAV=1` before running `scripts/run-dev.sh`; use the Compose
+  antivirus profile with `docker compose --profile antivirus up -d`.
+- Enable local reviewer and synthetic scenario model service with
+  `docker compose --profile ai up -d`.
+- Do not run the antivirus and AI profiles together on the documented 8 GiB
+  workstation. The profile totals and resource ceilings are listed in
+  [Windows 8 GiB Docker profiles](#windows-8-gib-docker-profiles).
+
+### Operate under memory limits
+
+- Copy `deploy/windows/.wslconfig.example` to `%USERPROFILE%\.wslconfig`, run
+  `wsl --shutdown`, and restart Docker Desktop to apply the documented WSL cap.
+- Measure warmed-up containers with `docker stats --no-stream` before raising
+  memory limits.
+- Release containers while preserving volumes with `docker compose down`.
+- If Windows still reports a large WSL process after containers stop, use
+  `wsl --shutdown`.
+- Override only the specific ceiling shown by logs or metrics. Common keys are
+  `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`, `LLM_MEMORY_LIMIT`,
+  `NODE_OPTIONS`, and `DOTNET_GCHeapHardLimit`.
+
+### Troubleshoot runtime symptoms
+
+- API or frontend startup issues: use `scripts/run-dev.sh --build-only` first,
+  then start normally and check `http://localhost:5000/healthz`.
+- PostgreSQL startup or memory pressure: inspect `docker compose logs postgres`
+  and `docker stats --no-stream`; see [Shared memory](#shared-memory) and
+  [Npgsql pool bounds](#npgsql-pool-bounds).
+- Uploads marked `NotScanned`: confirm whether ClamAV was intentionally disabled
+  or unavailable; the chat upload behavior is documented in [Chat](chat.md).
+- Missing live ticket review output: confirm the AI profile and the ticket
+  settings listed in [Tickets and assessment](tickets.md); neural-only or
+  unavailable-reviewer paths continue with local neural evidence.
+- Unscored assessment messages after restart: the queue is in-process. Durable
+  recovery requires the outbox design described in [RabbitMQ decision](#rabbitmq-decision).
+
+### Key scripts and commands
+
+| Task | Command or endpoint |
+|---|---|
+| Start full local development | `scripts/run-dev.sh` |
+| Compile without running servers | `scripts/run-dev.sh --build-only` |
+| Start API only against local dev dependencies | `scripts/start-api-dev.sh` |
+| Stop managed local stack | `scripts/stop-dev.sh` |
+| Reset local PostgreSQL data | `scripts/reset-dev-db.sh --yes` |
+| Check backend readiness | `GET http://localhost:5000/healthz` |
+| Run core Compose services | `docker compose up -d` |
+| Run ClamAV profile | `docker compose --profile antivirus up -d` |
+| Run local AI profile | `docker compose --profile ai up -d` |
+| Inspect container usage | `docker stats --no-stream` |
+| Stop Compose containers, preserve volumes | `docker compose down` |
+
+For implementation changes, start with [Code behavior](#code-behavior). It
+contains the bounded assessment queue, custom channel snapshot lookup, split
+chat history queries, Npgsql pool bounds, frontend message retention, Compose
+resource limits, and launcher heap behavior.
+
 ## Current behavior
 
 ### Application hot paths

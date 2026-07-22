@@ -59,6 +59,89 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
+## How to use
+
+### Open and work a ticket
+
+1. Sign in as a non-guest user and open a visible ticket portal room from
+   `/chat/:roomId`. Seeded portals are "Apply for Tutor Positions" and
+   "Notify Mods"; additional portals are custom rooms of type `Ticket`.
+2. The portal panel loads room and portal metadata, then submits intake answers
+   with `POST /api/channels/by-room/{portalRoomId}/tickets`.
+3. The server validates answers, runs configured preface checks, creates a
+   private ticket chat room, copies staff access rules, grants the opener direct
+   access, creates inbox notifications, and returns the ticket DTO.
+4. Staff and the opener continue the case in the private chat room. Ticket chat
+   uses the chat message APIs and SignalR behavior described in
+   [Chat](chat.md), while the ticket lifecycle uses the endpoints below.
+
+The flowchart above shows portal intake, private room creation, notifications,
+watch creation, and assessment queueing. The state diagram shows the open,
+closed, reopened, approved-decision, and deleted lifecycle states.
+
+### Administer portals and ticket lifecycle
+
+- Configure ticket portals in Server Maintenance with `/server` and
+  `/server/channels/{channelId}`. Portal config is read with
+  `GET /api/infrastructure/channels/{channelId}/ticket-config` and saved with
+  `PUT /api/infrastructure/channels/{channelId}/ticket-config`.
+- Read a ticket by ID with `GET /api/tickets/{ticketId}` or from its private room
+  with `GET /api/tickets/by-room/{roomId}`.
+- Close, reopen, or delete with `POST /api/tickets/{ticketId}/close`,
+  `POST /api/tickets/{ticketId}/reopen`, and `DELETE /api/tickets/{ticketId}`.
+  Deletion is only allowed after close.
+- Add or update watched users with `POST /api/tickets/{ticketId}/watches`.
+- Run a manual analysis pass with `POST /api/tickets/{ticketId}/analyze`.
+- Apply a human ticket decision with
+  `POST /api/tickets/{ticketId}/approve-decision`. Tutor approval or trial
+  decisions grant the `TrialTutor` role to the opener and remove `Tutor` when it
+  is present.
+
+### Review scoring and train neural monitors
+
+- Ticket messages enqueue live assessment work when active watches exist and the
+  intake did not opt out of tracking.
+- Pending reviewer-completed score events are listed in Server Maintenance under
+  `/server/NeuralNet/TrainingFeedback` and through
+  `GET /api/neural-net/training-feedback`.
+- Approve or reject feedback with
+  `POST /api/neural-net/training-feedback/{scoreEventId}/approve` or
+  `POST /api/neural-net/training-feedback/{scoreEventId}/reject`.
+- Queue synthetic training from `/server/NeuralNet/Training` with
+  `POST /api/neural-net/training`; list, remove, and download session reports
+  with `GET /api/neural-net/training`,
+  `DELETE /api/neural-net/training/{sessionId}`, and
+  `GET /api/neural-net/training/{sessionId}/report?chatMonitoringKind=`.
+- Inspect counts and topology with `/server/NeuralNet/DataManagement`,
+  `/server/NeuralNet/Visualizer`, `GET /api/neural-net/data-management`, and
+  `GET /api/neural-net/visualizer`.
+
+### Find the implementation detail to change
+
+- Use [Ticket portals](#ticket-portals), [Open lifecycle](#open-lifecycle), and
+  [Intake validation and preface checks](#intake-validation-and-preface-checks)
+  for portal and answer behavior.
+- Use [Assessment ownership](#assessment-ownership) and
+  [Neural monitors and Ollama blend](#neural-monitors-and-ollama-blend) before
+  changing live scoring, reviewer fallback, or confidence movement.
+- The [Code behavior](#code-behavior) snippets show the transaction used to open
+  a ticket, private room access-rule creation, intake answer dispatch, preface
+  resolution, score persistence, monitor selection, training session enqueue,
+  canonical promotion, and vote rejection in ticket rooms.
+
+### Key endpoints
+
+| Task | API or UI |
+|---|---|
+| Open a portal and submit intake | `/chat/:portalRoomId`, `POST /api/channels/by-room/{portalRoomId}/tickets` |
+| Configure a ticket portal | `/server/channels/{channelId}`, `GET/PUT /api/infrastructure/channels/{channelId}/ticket-config` |
+| Read ticket state | `GET /api/tickets/{ticketId}`, `GET /api/tickets/by-room/{roomId}` |
+| Close, reopen, or delete | `POST /api/tickets/{ticketId}/close`, `POST /api/tickets/{ticketId}/reopen`, `DELETE /api/tickets/{ticketId}` |
+| Manage watches and analysis | `POST /api/tickets/{ticketId}/watches`, `POST /api/tickets/{ticketId}/analyze` |
+| Approve ticket decision | `POST /api/tickets/{ticketId}/approve-decision` |
+| Approve score as training data | `POST /api/tickets/{ticketId}/scores/{scoreEventId}/approve-training` |
+| Review and manage neural data | `/server/NeuralNet/*`, `/api/neural-net/*` |
+
 ## Current behavior
 
 ### Ticket portals

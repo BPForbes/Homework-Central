@@ -171,6 +171,77 @@ subject expertise index classes and staff rooms from platform role bits.
 `ChatNavRoomDto` exposes `IsPrivate`, `CategoryKey`, `CategoryKind`,
 `RoomType`, and optional `IconName` for the frontend icon layer.
 
+## How to use
+
+### Navigate rooms and join live chat
+
+1. Sign in so the frontend has a Bearer access token and refresh cookies.
+2. Open `/chat`. The sidebar loads `GET /api/chat/nav`, which returns only the
+   categories and rooms allowed by the effective role, feature, subject, and
+   custom-role masks.
+3. Choose a room. Chat rooms route to `/chat/:roomId`, load
+   `GET /api/chat/rooms/{roomId}`, then page messages with
+   `GET /api/chat/rooms/{roomId}/messages?beforeUtc=&limit=`.
+4. The room hook connects to `/hubs/chat`, calls the hub `JoinRoom` method, and
+   sends typing events over SignalR. The architecture diagram above shows the
+   matching HTTP and hub paths.
+5. Get Roles rooms are navigation entries, not message-history rooms. They route
+   to the subject-claim panel backed by `GET /api/subjects/general`,
+   `POST /api/subjects/claim`, and `POST /api/subjects/unclaim`.
+
+### Send messages, mentions, votes, and inbox actions
+
+- Send content, replies, forwards, and already-uploaded attachment IDs with
+  `POST /api/chat/rooms/{roomId}/messages`.
+- Load mention autocomplete data from `GET /api/chat/mention-roles` and
+  `GET /api/chat/users/search?q=`.
+- Vote on ordinary chat messages with `POST /api/chat/messages/{messageId}/vote`.
+  Ticket rooms reject votes; see [Tickets and assessment](tickets.md) for ticket
+  chat behavior.
+- Use `GET /api/chat/inbox`, `GET /api/chat/inbox/summary`,
+  `POST /api/chat/inbox/{notificationId}/read`, `POST /api/chat/inbox/read-all`,
+  `POST /api/chat/inbox/delete`, and `DELETE /api/chat/inbox` for mention and
+  reply notification maintenance.
+
+### Upload and download attachments
+
+1. Upload one file with `POST /api/chat/attachments` as `multipart/form-data`
+   field `file`.
+2. Add the returned attachment ID to `SendChatMessageRequest.AttachmentIds` when
+   sending the chat message. The send path rejects attachments owned by another
+   user or account scope.
+3. Download with `GET /api/chat/attachments/{attachmentId}` using Bearer auth, or
+   use the signed `downloadUrl` returned in attachment DTOs while its access
+   token is valid.
+4. If the server returns `409` for an infected attachment, repeat the download
+   with `riskAcknowledged=true` after explicit user acknowledgement.
+5. Delete an unattached upload with `DELETE /api/chat/attachments/{attachmentId}`;
+   deletion fails after the attachment is linked to a message.
+
+### Configure custom rooms
+
+- Use Server Maintenance `/server` to create, update, or archive custom chat,
+  info, role-claim, and ticket portal rooms.
+- The matching API surface is `GET/POST/PUT/DELETE /api/infrastructure/channels`
+  plus public room helpers under `/api/infrastructure/channels/by-room/{roomId}`.
+- Review [Access rules](#access-rules) before changing catalog or custom-room
+  gates. The [Code behavior](#code-behavior) snippets show catalog access,
+  private custom-channel access, shared traffic filters, attachment linking,
+  scanning, and signed download-token validation.
+
+### Key endpoints and scripts
+
+| Task | API, UI, or script |
+|---|---|
+| Load visible chat navigation | `/chat`, `GET /api/chat/nav` |
+| Enter a room and page history | `/chat/:roomId`, `GET /api/chat/rooms/{roomId}`, `GET /api/chat/rooms/{roomId}/messages` |
+| Join live updates and typing | SignalR `/hubs/chat` |
+| Send a message, reply, or forward | `POST /api/chat/rooms/{roomId}/messages` |
+| Upload, download, or delete files | `POST /api/chat/attachments`, `GET/DELETE /api/chat/attachments/{attachmentId}` |
+| Maintain inbox notifications | `/inbox`, `GET/POST/DELETE /api/chat/inbox*` |
+| Manage custom rooms | `/server`, `/api/infrastructure/channels*` |
+| Run local chat dependencies | `scripts/run-dev.sh`; set `HC_ENABLE_CLAMAV=1` before launch to opt into ClamAV scanning |
+
 ## Behavior / control flow
 
 ### Navigation and room entry

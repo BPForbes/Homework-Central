@@ -170,6 +170,59 @@ Shared community resources, such as chat messages, use
 would split a community space. The chat-specific behavior is documented in
 [Chat](chat.md).
 
+## How to use
+
+### Run and sign in during development
+
+1. Start the local stack with `scripts/run-dev.sh`. The launcher starts the API
+   on `http://localhost:5000`, the frontend on `http://localhost:5173`, and sets
+   `HC_DEV_BYPASS=1` plus `VITE_HC_DEV_BYPASS=true` for the child processes.
+2. Use `/register` to create a normal account. Registration calls
+   `POST /api/auth/register`; duplicate email or username checks run before
+   captcha validation, and a failed captcha leaves the account as `Guest`.
+3. Use `/login` for normal sign-in. The frontend calls `POST /api/auth/login`,
+   stores the returned access token client-side, and relies on the
+   `refresh_token` HttpOnly cookie for session continuity.
+4. Use `/devlogin` only on localhost development runs. The page probes
+   `GET /api/auth/dev/status`, loads `GET /api/auth/dev/options`, and signs in
+   with `POST /api/auth/dev/login`. Leaving the persona selection blank signs in
+   as `DevAdmin`; selecting a persona signs in as a developer-tenant account.
+
+### Maintain browser sessions
+
+- Authenticated API calls use `Authorization: Bearer <access token>`.
+- When a request receives `401`, the frontend refresh path calls
+  `POST /api/auth/refresh` with credentials so the server can rotate the
+  refresh-token cookie and return a replacement access token.
+- Use `GET /api/auth/me` to rehydrate the current user and effective masks after
+  page load.
+- Use `POST /api/auth/logout` to revoke the active refresh-token row when one is
+  present and delete the refresh-scope cookies.
+
+### Check authorization scope
+
+- Treat `account_class` and optional `tenant_db` in the JWT as the authorization
+  inputs for tenant-private resources. The sequence diagram above shows where
+  those claims are added during login and refresh.
+- Review [Visibility rules](#visibility-rules) before adding a tenant-private
+  entity. Use `IScopedResource` for tenant-private data and
+  `IShareableScopedResource` only for shared community traffic such as chat.
+- The source excerpts in [Code behavior](#code-behavior) show the refresh-token
+  write, JWT claim construction, account-class mapping, and EF query-filter
+  translation that enforce those boundaries.
+
+### Key endpoints and scripts
+
+| Task | API, UI, or script |
+|---|---|
+| Register a real account | `/register` -> `POST /api/auth/register` |
+| Sign in with email/password | `/login` -> `POST /api/auth/login` |
+| Refresh a browser session | `POST /api/auth/refresh` with refresh cookies |
+| Resolve current user and masks | `GET /api/auth/me` |
+| End the browser session | `POST /api/auth/logout` |
+| Local developer sign-in | `/devlogin`, `GET /api/auth/dev/status`, `GET /api/auth/dev/options`, `POST /api/auth/dev/login` |
+| Start or stop local identity dependencies | `scripts/run-dev.sh`, `scripts/stop-dev.sh`, `scripts/reset-dev-db.sh --yes` |
+
 ## Behavior / control flow
 
 ### Register
