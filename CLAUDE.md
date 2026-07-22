@@ -11,7 +11,7 @@ gate for account verification, and an admin "Server Maintenance" panel.
 - `backend/` — .NET API (`HomeworkCentral.Api`), EF Core migrations, SignalR chat hubs.
 - `frontend/` — React + TypeScript + Vite SPA, plain CSS (no Tailwind/component library).
 - `scripts/` — local dev stack helpers (`run-dev.sh` / `run-dev.ps1`, etc.); see [`README.md`](./README.md)
-  for application setup and [`SETUP.md`](./SETUP.md) for optional AI tooling.
+  for application setup and [`SETUP.md`](./SETUP.md) for optional local contributor tooling.
 - `docs/` — architecture and engineering standards; start at [`docs/README.md`](./docs/README.md).
 
 ## Comments, documentation, naming, and readability
@@ -36,6 +36,15 @@ Hard rules:
 - Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
   structural readability score below the accepted threshold must be split into cohesive,
   precisely named subfunctions unless an approved exception applies.
+
+## Optional local tooling
+
+When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
+
+- Prefer `codegraph search <term>` over broad directory reads.
+- Do not stage generated local directories (`.codegraph/`, `.code-review-graph/`,
+  `claude-mem/`, `node_modules/`).
+- Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
 ## UI and styling work
 

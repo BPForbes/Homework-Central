@@ -25,7 +25,7 @@ reviews:
         - `backend/` — .NET API (`HomeworkCentral.Api`), EF Core migrations, SignalR chat hubs.
         - `frontend/` — React + TypeScript + Vite SPA, plain CSS (no Tailwind/component library).
         - `scripts/` — local dev stack helpers (`run-dev.sh` / `run-dev.ps1`, etc.); see `README.md`
-          for application setup and `SETUP.md` for optional AI tooling.
+          for application setup and `SETUP.md` for optional local contributor tooling.
         - `docs/` — architecture and engineering standards; start at `docs/README.md`.
 
         ## Comments, documentation, naming, and readability

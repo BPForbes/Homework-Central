@@ -2,8 +2,8 @@
 
 Homework Central documentation explains project-specific architecture, trust
 boundaries, operations, deployment, design, and engineering standards.
-Application setup remains in [`README.md`](../README.md). AI agent tooling setup
-remains in [`SETUP.md`](../SETUP.md).
+Application setup remains in [`README.md`](../README.md). Optional local
+contributor tooling install steps remain in [`SETUP.md`](../SETUP.md).
 
 Documentation is **feature-level**: one Markdown file per module, not one file
 per class, endpoint, TSX panel, or complexity finding. See
