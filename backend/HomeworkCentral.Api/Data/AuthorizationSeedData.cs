@@ -75,21 +75,12 @@ public static class AuthorizationSeedData
     /// Returns true when built-in roles, permissions, ties, masks, and subject
     /// hierarchy match <see cref="AuthorizationCatalog"/>. See docs/identity.md.
     /// </summary>
-    internal static async Task<bool> IsCatalogCurrentAsync(AppDbContext db, CancellationToken ct)
-    {
-        if (!await CatalogCountsMatchAsync(db, ct))
-            return false;
-        if (!await PermissionsMatchCatalogAsync(db, ct))
-            return false;
-        if (!await RolePermissionTiesMatchCatalogAsync(db, ct))
-            return false;
-        if (!await RolesAndMasksMatchCatalogAsync(db, ct))
-            return false;
-        if (!await SubjectsMatchCatalogAsync(db, ct))
-            return false;
-
-        return true;
-    }
+    internal static async Task<bool> IsCatalogCurrentAsync(AppDbContext db, CancellationToken ct) =>
+        await CatalogCountsMatchAsync(db, ct)
+        && await PermissionsMatchCatalogAsync(db, ct)
+        && await RolePermissionTiesMatchCatalogAsync(db, ct)
+        && await RolesAndMasksMatchCatalogAsync(db, ct)
+        && await SubjectsMatchCatalogAsync(db, ct);
 
     private static async Task<bool> CatalogCountsMatchAsync(AppDbContext db, CancellationToken ct)
     {

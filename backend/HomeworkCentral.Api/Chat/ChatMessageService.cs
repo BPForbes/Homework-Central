@@ -480,14 +480,33 @@ public sealed class ChatMessageService(
         if (activeMentions.Count == 0)
             return;
 
-        if (MentionPermissions.IsGuest(roleMask))
-            throw new SendMessageMentionException(SendMessageMentionError.GuestCannotMention);
-
-        if (!MentionPermissions.IsSeniorStaff(roleMask)
-            && !mentionCooldownTracker.TryRecordMention(userId, MentionCooldown, out TimeSpan retryAfter))
+        // Guest / senior-staff / cooldown-limited is a closed authorization set.
+        // See docs/chat.md for mention policy.
+        switch (ClassifyMentionAuthority(roleMask))
         {
-            throw new SendMessageMentionException(SendMessageMentionError.MentionCooldown, retryAfter);
+            case MentionAuthority.Guest:
+                throw new SendMessageMentionException(SendMessageMentionError.GuestCannotMention);
+            case MentionAuthority.SeniorStaff:
+                return;
+            case MentionAuthority.CooldownLimited:
+                if (!mentionCooldownTracker.TryRecordMention(userId, MentionCooldown, out TimeSpan retryAfter))
+                    throw new SendMessageMentionException(SendMessageMentionError.MentionCooldown, retryAfter);
+                return;
         }
+    }
+
+    private static MentionAuthority ClassifyMentionAuthority(BitArray roleMask) => roleMask switch
+    {
+        _ when MentionPermissions.IsGuest(roleMask) => MentionAuthority.Guest,
+        _ when MentionPermissions.IsSeniorStaff(roleMask) => MentionAuthority.SeniorStaff,
+        _ => MentionAuthority.CooldownLimited,
+    };
+
+    private enum MentionAuthority
+    {
+        Guest,
+        SeniorStaff,
+        CooldownLimited,
     }
 
     private async Task<ChatMessage?> FindReplyTargetAsync(

@@ -78,27 +78,21 @@ public static class ChatMonitoringCategoryTaxonomy
         };
     }
 
-    private static string NormalizeTutoringCategory(string raw, string value)
-    {
-        string? exactSubjectSlug = TryNormalizeExactSubject(raw);
-        if (exactSubjectSlug is not null)
-            return exactSubjectSlug;
-
-        string? aliasSlug = TryNormalizeTutoringAlias(value);
-        if (aliasSlug is not null)
-            return aliasSlug;
-
-        if (Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)))
-            return value;
-
-        string? textSlug = TryFindSubjectSlugInText(value);
-        if (textSlug is not null)
-            return textSlug;
-
-        return value.StartsWith("tutoring-", StringComparison.Ordinal)
-            ? value
-            : "tutoring-competency";
-    }
+    private static string NormalizeTutoringCategory(string raw, string value) =>
+        (
+            TryNormalizeExactSubject(raw),
+            TryNormalizeTutoringAlias(value),
+            Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)) ? value : null,
+            TryFindSubjectSlugInText(value)
+        ) switch
+        {
+            (string exactSubjectSlug, _, _, _) => exactSubjectSlug,
+            (null, string aliasSlug, _, _) => aliasSlug,
+            (null, null, string tutoringLabel, _) => tutoringLabel,
+            (null, null, null, string textSlug) => textSlug,
+            _ when value.StartsWith("tutoring-", StringComparison.Ordinal) => value,
+            _ => "tutoring-competency",
+        };
 
     private static string? TryNormalizeExactSubject(string raw)
     {
