@@ -405,6 +405,16 @@ Training sessions:
 - persist examples and vector mirrors in batches;
 - sample full traces while compacting routine replay frames.
 
+### Readability exception: hashed-MLP mini-batch training
+
+`ChatMonitoringNeuralModelHashedMlp.TrainMiniBatchWithTrace` intentionally keeps
+the stage-2 forward pass, the cascade `dC/dx` hook, and the momentum update in one
+training routine. Splitting those steps across helpers would make replay trace
+validation harder to audit because the chain-rule handoff between the scorer and
+the stage-1 routers would no longer be visible in one control-flow path. The
+guardrails are the XML documentation on the method, replay JSON validation, and
+`ChatMonitoringNeuralModelHashedMlpTests`.
+
 ### Replay traces, checkpoints, and canonical promotion
 
 Worker model weights are diagnostic candidates. Canonical promotion always

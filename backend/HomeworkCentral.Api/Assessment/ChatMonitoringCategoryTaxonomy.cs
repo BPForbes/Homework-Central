@@ -71,27 +71,61 @@ public static class ChatMonitoringCategoryTaxonomy
     {
         string raw = category.Trim();
         string value = raw.ToLowerInvariant();
-        if (kind == NeuralModelKindChatMonitoring.Moderation)
-            return NormalizeModerationCategory(value);
+        return kind switch
+        {
+            NeuralModelKindChatMonitoring.Moderation => NormalizeModerationCategory(value),
+            _ => NormalizeTutoringCategory(raw, value),
+        };
+    }
 
+    private static string NormalizeTutoringCategory(string raw, string value)
+    {
+        string? exactSubjectSlug = TryNormalizeExactSubject(raw);
+        if (exactSubjectSlug is not null)
+            return exactSubjectSlug;
+
+        string? aliasSlug = TryNormalizeTutoringAlias(value);
+        if (aliasSlug is not null)
+            return aliasSlug;
+
+        if (Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)))
+            return value;
+
+        string? textSlug = TryFindSubjectSlugInText(value);
+        if (textSlug is not null)
+            return textSlug;
+
+        return value.StartsWith("tutoring-", StringComparison.Ordinal)
+            ? value
+            : "tutoring-competency";
+    }
+
+    private static string? TryNormalizeExactSubject(string raw)
+    {
         foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories
-            .OrderByDescending(s => s.ExpertiseMaskName.Length))
+            .OrderByDescending(subject => subject.ExpertiseMaskName.Length))
         {
             if (string.Equals(subject.ExpertiseMaskName, raw, StringComparison.OrdinalIgnoreCase))
                 return SubjectToTutoringSlug(subject.ExpertiseMaskName);
         }
 
-        if (value is "tutoring-math" or "math" or "mathematics" or "algebra" or "calculus" or "quadratic")
-            return "tutoring-mathematics";
-        if (value is "tutoring-english" or "english" or "writing" or "essay" or "language" or "languages")
-            return "tutoring-languages";
-        if (value is "cs" or "compsci" or "computer science" or "computer-science" or "computerscience"
-            or "programming" or "coding")
-            return "tutoring-computer-science";
+        return null;
+    }
 
-        if (Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)))
-            return value;
+    private static string? TryNormalizeTutoringAlias(string value) => value switch
+    {
+        "tutoring-math" or "math" or "mathematics" or "algebra" or "calculus" or "quadratic"
+            => "tutoring-mathematics",
+        "tutoring-english" or "english" or "writing" or "essay" or "language" or "languages"
+            => "tutoring-languages",
+        "cs" or "compsci" or "computer science" or "computer-science" or "computerscience"
+            or "programming" or "coding"
+            => "tutoring-computer-science",
+        _ => null,
+    };
 
+    private static string? TryFindSubjectSlugInText(string value)
+    {
         string? bestSlug = null;
         int bestLength = -1;
         foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories)
@@ -110,12 +144,7 @@ public static class ChatMonitoringCategoryTaxonomy
             }
         }
 
-        if (bestSlug is not null)
-            return bestSlug;
-
-        return value.StartsWith("tutoring-", StringComparison.Ordinal)
-            ? value
-            : "tutoring-competency";
+        return bestSlug;
     }
 
     private static string NormalizeModerationCategory(string value)

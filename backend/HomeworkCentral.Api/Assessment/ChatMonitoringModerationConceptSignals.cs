@@ -76,85 +76,17 @@ public static class ChatMonitoringModerationConceptSignals
 
     public static ModerationConceptSnapshot Resolve(string? reportedConcept, params string?[] texts)
     {
-        string? concept = null;
-        if (!string.IsNullOrWhiteSpace(reportedConcept))
-        {
-            string normalized = ChatMonitoringCategoryTaxonomy.NormalizeCategory(
-                NeuralModelKindChatMonitoring.Moderation, reportedConcept);
-            if (ChatMonitoringModerationConcepts.TryGet(normalized, out _)
-                || string.Equals(normalized, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
-                concept = normalized;
-        }
-
-        // Shared preface extractor (same engine as tutor subjects) before slug substring fallback.
-        if (concept is null)
-        {
-            foreach (string? text in texts)
-            {
-                if (string.IsNullOrWhiteSpace(text)) continue;
-                TicketPrefaceExtraction extraction = ModerationConceptPrefaceCheck.Instance.Extract(text);
-                if (!string.IsNullOrWhiteSpace(extraction.PrimaryCategory))
-                {
-                    concept = extraction.PrimaryCategory;
-                    break;
-                }
-
-                // Tracking templates may carry prefaceCategory from intake.
-                if (text.Contains("prefaceCategory", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        using JsonDocument document = JsonDocument.Parse(text);
-                        if (document.RootElement.TryGetProperty("prefaceCategory", out JsonElement cat)
-                            && cat.ValueKind == JsonValueKind.String
-                            && !string.IsNullOrWhiteSpace(cat.GetString()))
-                        {
-                            string fromTemplate = ChatMonitoringCategoryTaxonomy.NormalizeCategory(
-                                NeuralModelKindChatMonitoring.Moderation, cat.GetString()!);
-                            if (ChatMonitoringModerationConcepts.TryGet(fromTemplate, out _)
-                                || string.Equals(fromTemplate, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
-                            {
-                                concept = fromTemplate;
-                                break;
-                            }
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // fall through to slug parse
-                    }
-                }
-            }
-        }
-
-        concept ??= ParseConceptFromTexts(texts);
+        string? concept = ResolveReportedConcept(reportedConcept)
+                          ?? ResolveConceptFromTexts(texts)
+                          ?? ParseConceptFromTexts(texts);
         IReadOnlyList<string> related = concept is null || string.Equals(concept, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal)
             ? []
             : ChatMonitoringModerationConcepts.RelatedConcepts(concept);
         string? family = concept is null ? null : ChatMonitoringModerationConcepts.FamilyOf(concept);
-        float[] familyHot = new float[FamilyCount];
-        if (family is not null)
-        {
-            int index = FamilyIndex(family);
-            if (index >= 0) familyHot[index] = 1f;
-        }
-
+        float[] familyHot = BuildFamilyMultiHot(family);
         float[] textFamily = ScoreFamiliesFromText(string.Join(' ', texts.Where(t => !string.IsNullOrWhiteSpace(t))));
-        float exact = 0f;
-        float overlap = 0f;
-        if (family is not null)
-        {
-            int familyIdx = FamilyIndex(family);
-            if (familyIdx >= 0 && textFamily[familyIdx] >= .5f)
-                exact = 1f;
-        }
-
-        if (related.Count > 0)
-        {
-            string haystack = string.Join(' ', texts).ToLowerInvariant();
-            int hits = related.Count(slug => haystack.Contains(slug, StringComparison.Ordinal));
-            overlap = Math.Clamp(hits / (float)related.Count, 0f, 1f);
-        }
+        float exact = CalculateExactFamilyMatch(family, textFamily);
+        float overlap = CalculateRelatedOverlap(related, texts);
 
         return new ModerationConceptSnapshot(
             concept,
@@ -174,6 +106,76 @@ public static class ChatMonitoringModerationConceptSignals
     public static ModerationConceptSnapshot ResolveFromTicketTexts(params string?[] texts) =>
         Resolve(null, texts);
 
+    private static string? ResolveReportedConcept(string? reportedConcept)
+    {
+        if (string.IsNullOrWhiteSpace(reportedConcept))
+            return null;
+
+        string normalized = ChatMonitoringCategoryTaxonomy.NormalizeCategory(
+            NeuralModelKindChatMonitoring.Moderation,
+            reportedConcept);
+
+        return IsKnownConcept(normalized) ? normalized : null;
+    }
+
+    private static string? ResolveConceptFromTexts(IReadOnlyList<string?> texts)
+    {
+        // Preface checks encode verified intake concepts before broad slug fallback.
+        foreach (string? text in texts)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
+
+            string? extractedConcept = ExtractPrefacePrimaryCategory(text);
+            if (extractedConcept is not null)
+                return extractedConcept;
+
+            string? templateConcept = TryParseTemplatePrefaceCategory(text);
+            if (templateConcept is not null)
+                return templateConcept;
+        }
+
+        return null;
+    }
+
+    private static string? ExtractPrefacePrimaryCategory(string text)
+    {
+        TicketPrefaceExtraction extraction = ModerationConceptPrefaceCheck.Instance.Extract(text);
+        return string.IsNullOrWhiteSpace(extraction.PrimaryCategory)
+            ? null
+            : extraction.PrimaryCategory;
+    }
+
+    private static string? TryParseTemplatePrefaceCategory(string text)
+    {
+        if (!text.Contains("prefaceCategory", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(text);
+            if (!document.RootElement.TryGetProperty("prefaceCategory", out JsonElement categoryElement)
+                || categoryElement.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(categoryElement.GetString()))
+            {
+                return null;
+            }
+
+            string fromTemplate = ChatMonitoringCategoryTaxonomy.NormalizeCategory(
+                NeuralModelKindChatMonitoring.Moderation,
+                categoryElement.GetString()!);
+            return IsKnownConcept(fromTemplate) ? fromTemplate : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsKnownConcept(string concept) =>
+        ChatMonitoringModerationConcepts.TryGet(concept, out _)
+        || string.Equals(concept, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal);
+
     private static string? ParseConceptFromTexts(IReadOnlyList<string?> texts)
     {
         string haystack = string.Join(' ', texts.Where(t => !string.IsNullOrWhiteSpace(t))).ToLowerInvariant();
@@ -189,6 +191,38 @@ public static class ChatMonitoringModerationConceptSignals
         }
 
         return best;
+    }
+
+    private static float[] BuildFamilyMultiHot(string? family)
+    {
+        float[] familyHot = new float[FamilyCount];
+        if (family is null)
+            return familyHot;
+
+        int index = FamilyIndex(family);
+        if (index >= 0)
+            familyHot[index] = 1f;
+
+        return familyHot;
+    }
+
+    private static float CalculateExactFamilyMatch(string? family, IReadOnlyList<float> textFamily)
+    {
+        if (family is null)
+            return 0f;
+
+        int familyIndex = FamilyIndex(family);
+        return familyIndex >= 0 && textFamily[familyIndex] >= .5f ? 1f : 0f;
+    }
+
+    private static float CalculateRelatedOverlap(IReadOnlyList<string> related, IReadOnlyList<string?> texts)
+    {
+        if (related.Count == 0)
+            return 0f;
+
+        string haystack = string.Join(' ', texts).ToLowerInvariant();
+        int hits = related.Count(slug => haystack.Contains(slug, StringComparison.Ordinal));
+        return Math.Clamp(hits / (float)related.Count, 0f, 1f);
     }
 
     private static float[] ScoreFamiliesFromText(string text)

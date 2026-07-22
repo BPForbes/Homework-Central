@@ -5,6 +5,42 @@ namespace HomeworkCentral.Api.Assessment;
 /// <summary>Builds bounded ticket context and resolves which chat-monitor lineage to run.</summary>
 public static class ChatMonitoringTicketContext
 {
+    private static readonly (string Category, string[] Needles)[] TutoringCategoryNeedles =
+    [
+        ("tutoring-computer-science", ["computer science", "computerscience", "programming", "coding", "python", "java", "software"]),
+        ("tutoring-mathematics", ["math", "algebra", "calculus", "geometry", "trigonometry", "statistics"]),
+        ("tutoring-science", ["biology", "chemistry", "physics", "science", "psychology", "philosophy"]),
+        ("tutoring-languages", ["english", "spanish", "french", "german", "language", "writing", "essay", "asl"]),
+        ("tutoring-history", ["history", "civics", "geography"]),
+        ("tutoring-business", ["business", "marketing", "management", "entrepreneur"]),
+        ("tutoring-art", ["art", "drawing", "painting", "design"]),
+        ("tutoring-music", ["music", "band", "choir", "orchestra"]),
+        ("tutoring-engineering", ["engineering", "mechanical", "electrical", "civil"]),
+        ("tutoring-medicine", ["medicine", "anatomy", "medical", "nursing", "health"]),
+        ("tutoring-finance", ["finance", "investing", "accounting", "banking"]),
+        ("tutoring-economics", ["economics", "microeconomics", "macroeconomics"]),
+        ("tutoring-education", ["education", "curriculum", "pedagogy", "teaching"]),
+    ];
+
+    private static readonly (string Category, string[] Needles)[] ModerationCategoryNeedles =
+    [
+        ("tip-pressure", ["tip pressure", "tip-pressure", "guilt tip"]),
+        ("tip-solicitation", ["tip solicit", "tip-solicit", "tips expected", "send tip"]),
+        ("payment-solicitation", ["pay me", "payment solicit", "pay for help", "paywalled"]),
+        ("off-platform-payment", ["cash app", "paypal", "venmo", "crypto", "gift card"]),
+        ("staff-impersonation", ["impersonat", "pretend to be staff", "fake mod"]),
+        ("doxxing", ["doxx", "doxing", "home address", "phone number leak"]),
+        ("grooming-escalation", ["groom", "minor", "underage"]),
+        ("violent-intent", ["threat", "kill you", "hurt you", "violent"]),
+        ("credential-theft", ["malware", "password", "account takeover", "phishing"]),
+        ("coordinated-brigading", ["brigad", "mass report", "sockpuppet", "vote manip"]),
+        ("persistent-unwanted-contact", ["harass", "insult", "dogpil", "unwanted contact"]),
+        ("fabricated-source", ["misinfo", "fake news", "fabricated source"]),
+        ("fake-engagement", ["spam", "flood"]),
+        (ChatMonitoringModerationConcepts.CatchAll, ["profan", "cuss"]),
+        ("security-control-bypass", ["evad", "filter bypass"]),
+    ];
+
     public static string BuildRequirement(TicketUserWatch watch, int maxCharacters)
     {
         string value = $"Filter: {watch.Ticket.FilterName}. Watch context: {watch.ContextLabel}. "
@@ -50,38 +86,42 @@ public static class ChatMonitoringTicketContext
     public static string DetectCategory(string requirement, NeuralModelKindChatMonitoring kind)
     {
         string value = requirement.ToLowerInvariant();
-        if (kind == NeuralModelKindChatMonitoring.Tutoring)
+        return kind switch
         {
-            if (ContainsAny(value, "computer science", "computerscience", "programming", "coding", "python", "java", "software"))
-                return "tutoring-computer-science";
-            if (ContainsAny(value, "math", "algebra", "calculus", "geometry", "trigonometry", "statistics"))
-                return "tutoring-mathematics";
-            if (ContainsAny(value, "biology", "chemistry", "physics", "science", "psychology", "philosophy"))
-                return "tutoring-science";
-            if (ContainsAny(value, "english", "spanish", "french", "german", "language", "writing", "essay", "asl"))
-                return "tutoring-languages";
-            if (ContainsAny(value, "history", "civics", "geography"))
-                return "tutoring-history";
-            if (ContainsAny(value, "business", "marketing", "management", "entrepreneur"))
-                return "tutoring-business";
-            if (ContainsAny(value, "art", "drawing", "painting", "design"))
-                return "tutoring-art";
-            if (ContainsAny(value, "music", "band", "choir", "orchestra"))
-                return "tutoring-music";
-            if (ContainsAny(value, "engineering", "mechanical", "electrical", "civil"))
-                return "tutoring-engineering";
-            if (ContainsAny(value, "medicine", "anatomy", "medical", "nursing", "health"))
-                return "tutoring-medicine";
-            if (ContainsAny(value, "finance", "investing", "accounting", "banking"))
-                return "tutoring-finance";
-            if (ContainsAny(value, "economics", "microeconomics", "macroeconomics"))
-                return "tutoring-economics";
-            if (ContainsAny(value, "education", "curriculum", "pedagogy", "teaching"))
-                return "tutoring-education";
-            return "tutoring-competency";
+            NeuralModelKindChatMonitoring.Tutoring => DetectTutoringCategory(value),
+            _ => DetectModerationCategory(value),
+        };
+    }
+
+    private static string DetectTutoringCategory(string value)
+    {
+        foreach ((string category, string[] needles) in TutoringCategoryNeedles)
+        {
+            if (ContainsAny(value, needles))
+                return category;
         }
 
+        return "tutoring-competency";
+    }
+
+    private static string DetectModerationCategory(string value)
+    {
         // Prefer an explicit fine-grained slug mentioned in the ticket text.
+        string? explicitSlug = FindLongestModerationSlug(value);
+        if (explicitSlug is not null)
+            return explicitSlug;
+
+        foreach ((string category, string[] needles) in ModerationCategoryNeedles)
+        {
+            if (ContainsAny(value, needles))
+                return category;
+        }
+
+        return ChatMonitoringModerationConcepts.CatchAll;
+    }
+
+    private static string? FindLongestModerationSlug(string value)
+    {
         string? bestSlug = null;
         int bestLength = -1;
         foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
@@ -93,25 +133,7 @@ public static class ChatMonitoringTicketContext
             }
         }
 
-        if (bestSlug is not null)
-            return bestSlug;
-
-        if (ContainsAny(value, "tip pressure", "tip-pressure", "guilt tip")) return "tip-pressure";
-        if (ContainsAny(value, "tip solicit", "tip-solicit", "tips expected", "send tip")) return "tip-solicitation";
-        if (ContainsAny(value, "pay me", "payment solicit", "pay for help", "paywalled")) return "payment-solicitation";
-        if (ContainsAny(value, "cash app", "paypal", "venmo", "crypto", "gift card")) return "off-platform-payment";
-        if (ContainsAny(value, "impersonat", "pretend to be staff", "fake mod")) return "staff-impersonation";
-        if (ContainsAny(value, "doxx", "doxing", "home address", "phone number leak")) return "doxxing";
-        if (ContainsAny(value, "groom", "minor", "underage")) return "grooming-escalation";
-        if (ContainsAny(value, "threat", "kill you", "hurt you", "violent")) return "violent-intent";
-        if (ContainsAny(value, "malware", "password", "account takeover", "phishing")) return "credential-theft";
-        if (ContainsAny(value, "brigad", "mass report", "sockpuppet", "vote manip")) return "coordinated-brigading";
-        if (ContainsAny(value, "harass", "insult", "dogpil", "unwanted contact")) return "persistent-unwanted-contact";
-        if (ContainsAny(value, "misinfo", "fake news", "fabricated source")) return "fabricated-source";
-        if (ContainsAny(value, "spam", "flood")) return "fake-engagement";
-        if (ContainsAny(value, "profan", "cuss")) return ChatMonitoringModerationConcepts.CatchAll;
-        if (ContainsAny(value, "evad", "filter bypass")) return "security-control-bypass";
-        return ChatMonitoringModerationConcepts.CatchAll;
+        return bestSlug;
     }
 
     private static bool ContainsAny(string haystack, params string[] needles)

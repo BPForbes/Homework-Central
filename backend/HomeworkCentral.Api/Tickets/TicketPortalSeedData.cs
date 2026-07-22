@@ -32,123 +32,161 @@ public static class TicketPortalSeedData
         ILogger? logger = null,
         CancellationToken ct = default)
     {
-        await EnsurePortalAsync(
-            db,
-            ownerAccountClass,
-            displayName: DefaultTicketPortalPresets.TutorDisplayName,
-            filterName: DefaultTicketPortalPresets.TutorFilterName,
-            trackingMode: TicketTrackingModes.Opener,
-            decisionLabels: DefaultTicketPortalPresets.TutorDecisionLabels,
-            mentionRules: DefaultTicketPortalPresets.TutorMentionRules(),
-            staffRules: DefaultTicketPortalPresets.TutorStaffRules(),
-            intake: DefaultTicketPortalPresets.TutorIntakeQuestions(),
-            ctaLabel: "Apply",
-            description: TutorPortalDescription,
-            trackingInstructions:
-                "Monitor subject-channel responses related to applied subjects. Score direct subjects strictly, "
-                + "related subjects mildly, unrelated subjects reward-only.",
-            logger,
-            ct);
-
-        await EnsurePortalAsync(
-            db,
-            ownerAccountClass,
-            displayName: DefaultTicketPortalPresets.ModDisplayName,
-            filterName: DefaultTicketPortalPresets.ModFilterName,
-            trackingMode: TicketTrackingModes.FromIntakeField,
-            decisionLabels: DefaultTicketPortalPresets.ModDecisionLabels,
-            mentionRules: DefaultTicketPortalPresets.ModMentionRules(),
-            staffRules: DefaultTicketPortalPresets.ModStaffRules(),
-            intake: DefaultTicketPortalPresets.ModIntakeQuestions(),
-            ctaLabel: "Notify Mods",
-            description: ModPortalDescription,
-            trackingInstructions:
-                "Cross-examine reported reason against proof and subsequent messages from the reported user(s).",
-            logger,
-            ct);
+        await EnsurePortalAsync(db, ownerAccountClass, CreateTutorPortalDefinition(), logger, ct);
+        await EnsurePortalAsync(db, ownerAccountClass, CreateModPortalDefinition(), logger, ct);
 
         await db.SaveChangesAsync(ct);
     }
 
+    private static TicketPortalSeedDefinition CreateTutorPortalDefinition() =>
+        new()
+        {
+            DisplayName = DefaultTicketPortalPresets.TutorDisplayName,
+            FilterName = DefaultTicketPortalPresets.TutorFilterName,
+            TrackingMode = TicketTrackingModes.Opener,
+            DecisionLabels = DefaultTicketPortalPresets.TutorDecisionLabels,
+            MentionRules = DefaultTicketPortalPresets.TutorMentionRules(),
+            StaffRules = DefaultTicketPortalPresets.TutorStaffRules(),
+            Intake = DefaultTicketPortalPresets.TutorIntakeQuestions(),
+            CtaLabel = "Apply",
+            Description = TutorPortalDescription,
+            TrackingInstructions =
+                "Monitor subject-channel responses related to applied subjects. Score direct subjects strictly, "
+                + "related subjects mildly, unrelated subjects reward-only.",
+        };
+
+    private static TicketPortalSeedDefinition CreateModPortalDefinition() =>
+        new()
+        {
+            DisplayName = DefaultTicketPortalPresets.ModDisplayName,
+            FilterName = DefaultTicketPortalPresets.ModFilterName,
+            TrackingMode = TicketTrackingModes.FromIntakeField,
+            DecisionLabels = DefaultTicketPortalPresets.ModDecisionLabels,
+            MentionRules = DefaultTicketPortalPresets.ModMentionRules(),
+            StaffRules = DefaultTicketPortalPresets.ModStaffRules(),
+            Intake = DefaultTicketPortalPresets.ModIntakeQuestions(),
+            CtaLabel = "Notify Mods",
+            Description = ModPortalDescription,
+            TrackingInstructions =
+                "Cross-examine reported reason against proof and subsequent messages from the reported user(s).",
+        };
+
     private static async Task EnsurePortalAsync(
         AppDbContext db,
         AccountClass ownerAccountClass,
-        string displayName,
-        string filterName,
-        string trackingMode,
-        IReadOnlyList<string> decisionLabels,
-        IReadOnlyList<CustomChannelAccessRuleInput> mentionRules,
-        IReadOnlyList<CustomChannelAccessRuleInput> staffRules,
-        IReadOnlyList<TicketIntakeQuestionDto> intake,
-        string ctaLabel,
-        string description,
-        string trackingInstructions,
+        TicketPortalSeedDefinition definition,
         ILogger? logger,
         CancellationToken ct)
     {
-        TicketPortalConfig? existing = await db.TicketPortalConfigs
-            .IgnoreQueryFilters()
-            .Include(p => p.Channel)
-            .FirstOrDefaultAsync(
-                p => !p.Channel.IsArchived
-                     && p.Channel.OwnerAccountClass == ownerAccountClass
-                     && (p.FilterName == filterName
-                         || p.Purpose == filterName
-                         || p.Channel.DisplayName == displayName),
-                ct);
-
         DateTime now = DateTime.UtcNow;
+        TicketPortalConfig? existing = await FindExistingPortalAsync(db, ownerAccountClass, definition, ct);
 
         if (existing is not null)
         {
-            bool changed = false;
-            if (!string.Equals(existing.Channel.CategoryKey, ChatRoomBlueprint.GeneralCategoryKey, StringComparison.Ordinal))
-            {
-                existing.Channel.CategoryKey = ChatRoomBlueprint.GeneralCategoryKey;
-                changed = true;
-            }
-
-            if (!string.Equals(
-                    existing.Channel.CategoryDisplayName,
-                    ChatRoomBlueprint.GeneralCategoryDisplayName,
-                    StringComparison.Ordinal))
-            {
-                existing.Channel.CategoryDisplayName = ChatRoomBlueprint.GeneralCategoryDisplayName;
-                changed = true;
-            }
-
-            if (existing.Channel.IsPrivate)
-            {
-                existing.Channel.IsPrivate = false;
-                changed = true;
-            }
-
-            if (!string.Equals(existing.Description, description, StringComparison.Ordinal))
-            {
-                existing.Description = description;
-                changed = true;
-            }
-
-            if (!string.Equals(existing.CtaLabel, ctaLabel, StringComparison.Ordinal))
-            {
-                existing.CtaLabel = ctaLabel;
-                changed = true;
-            }
-
-            if (changed)
-            {
-                existing.Channel.UpdatedAtUtc = now;
-                existing.UpdatedAtUtc = now;
+            if (ReconcileExistingPortal(existing, definition, now))
                 logger?.LogInformation(
                     "Updated default ticket portal '{DisplayName}' (filter {FilterName}) for {AccountClass}.",
-                    displayName,
-                    filterName,
+                    definition.DisplayName,
+                    definition.FilterName,
                     ownerAccountClass);
-            }
 
             return;
         }
 
+        CreatePortal(db, ownerAccountClass, definition, now);
+        logger?.LogInformation(
+            "Seeded default ticket portal '{DisplayName}' (filter {FilterName}) for {AccountClass}.",
+            definition.DisplayName,
+            definition.FilterName,
+            ownerAccountClass);
+    }
+
+    private static Task<TicketPortalConfig?> FindExistingPortalAsync(
+        AppDbContext db,
+        AccountClass ownerAccountClass,
+        TicketPortalSeedDefinition definition,
+        CancellationToken ct) =>
+        db.TicketPortalConfigs
+            .IgnoreQueryFilters()
+            .Include(portal => portal.Channel)
+            .FirstOrDefaultAsync(
+                portal => !portal.Channel.IsArchived
+                          && portal.Channel.OwnerAccountClass == ownerAccountClass
+                          && (portal.FilterName == definition.FilterName
+                              || portal.Purpose == definition.FilterName
+                              || portal.Channel.DisplayName == definition.DisplayName),
+                ct);
+
+    private static bool ReconcileExistingPortal(
+        TicketPortalConfig existing,
+        TicketPortalSeedDefinition definition,
+        DateTime now)
+    {
+        bool changed = ReconcileChannel(existing.Channel)
+                       | ReconcilePortalText(existing, definition);
+
+        if (changed)
+        {
+            existing.Channel.UpdatedAtUtc = now;
+            existing.UpdatedAtUtc = now;
+        }
+
+        return changed;
+    }
+
+    private static bool ReconcileChannel(CustomChannel channel)
+    {
+        bool changed = false;
+        if (!string.Equals(channel.CategoryKey, ChatRoomBlueprint.GeneralCategoryKey, StringComparison.Ordinal))
+        {
+            channel.CategoryKey = ChatRoomBlueprint.GeneralCategoryKey;
+            changed = true;
+        }
+
+        if (!string.Equals(
+                channel.CategoryDisplayName,
+                ChatRoomBlueprint.GeneralCategoryDisplayName,
+                StringComparison.Ordinal))
+        {
+            channel.CategoryDisplayName = ChatRoomBlueprint.GeneralCategoryDisplayName;
+            changed = true;
+        }
+
+        if (channel.IsPrivate)
+        {
+            channel.IsPrivate = false;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool ReconcilePortalText(
+        TicketPortalConfig existing,
+        TicketPortalSeedDefinition definition)
+    {
+        bool changed = false;
+        if (!string.Equals(existing.Description, definition.Description, StringComparison.Ordinal))
+        {
+            existing.Description = definition.Description;
+            changed = true;
+        }
+
+        if (!string.Equals(existing.CtaLabel, definition.CtaLabel, StringComparison.Ordinal))
+        {
+            existing.CtaLabel = definition.CtaLabel;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static void CreatePortal(
+        AppDbContext db,
+        AccountClass ownerAccountClass,
+        TicketPortalSeedDefinition definition,
+        DateTime now)
+    {
         Guid channelId = Guid.NewGuid();
         string roomId = CustomChannelIds.BuildRoomId(channelId);
 
@@ -156,7 +194,7 @@ public static class TicketPortalSeedData
         {
             ChannelId = channelId,
             RoomId = roomId,
-            DisplayName = displayName,
+            DisplayName = definition.DisplayName,
             IconName = "ticket",
             CategoryKey = ChatRoomBlueprint.GeneralCategoryKey,
             CategoryDisplayName = ChatRoomBlueprint.GeneralCategoryDisplayName,
@@ -172,24 +210,32 @@ public static class TicketPortalSeedData
         db.TicketPortalConfigs.Add(new TicketPortalConfig
         {
             ChannelId = channelId,
-            CtaLabel = ctaLabel,
-            Description = description,
-            Purpose = displayName,
-            FilterName = filterName,
+            CtaLabel = definition.CtaLabel,
+            Description = definition.Description,
+            Purpose = definition.DisplayName,
+            FilterName = definition.FilterName,
             NextDisplayNumber = 1,
-            TrackingMode = trackingMode,
-            TrackingInstructions = trackingInstructions,
-            DecisionLabelsJson = TicketJson.SerializeStringList(decisionLabels),
-            MentionRoleRulesJson = TicketJson.SerializeAccessRules(mentionRules),
-            StaffAccessRulesJson = TicketJson.SerializeAccessRules(staffRules),
-            IntakeSchemaJson = TicketJson.SerializeIntakeSchema(intake),
+            TrackingMode = definition.TrackingMode,
+            TrackingInstructions = definition.TrackingInstructions,
+            DecisionLabelsJson = TicketJson.SerializeStringList(definition.DecisionLabels),
+            MentionRoleRulesJson = TicketJson.SerializeAccessRules(definition.MentionRules),
+            StaffAccessRulesJson = TicketJson.SerializeAccessRules(definition.StaffRules),
+            IntakeSchemaJson = TicketJson.SerializeIntakeSchema(definition.Intake),
             UpdatedAtUtc = now,
         });
+    }
 
-        logger?.LogInformation(
-            "Seeded default ticket portal '{DisplayName}' (filter {FilterName}) for {AccountClass}.",
-            displayName,
-            filterName,
-            ownerAccountClass);
+    private sealed class TicketPortalSeedDefinition
+    {
+        public string DisplayName { get; init; } = string.Empty;
+        public string FilterName { get; init; } = string.Empty;
+        public string TrackingMode { get; init; } = string.Empty;
+        public IReadOnlyList<string> DecisionLabels { get; init; } = [];
+        public IReadOnlyList<CustomChannelAccessRuleInput> MentionRules { get; init; } = [];
+        public IReadOnlyList<CustomChannelAccessRuleInput> StaffRules { get; init; } = [];
+        public IReadOnlyList<TicketIntakeQuestionDto> Intake { get; init; } = [];
+        public string CtaLabel { get; init; } = string.Empty;
+        public string Description { get; init; } = string.Empty;
+        public string TrackingInstructions { get; init; } = string.Empty;
     }
 }

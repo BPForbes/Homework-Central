@@ -47,28 +47,14 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
         if (string.IsNullOrWhiteSpace(freeText))
             return TicketPrefaceExtraction.Empty;
 
-        List<string> categories = [];
-        List<string> specifics = [];
-        List<TicketPrefaceHit> hits = [];
+        PrefaceExtractionBuilder builder = new();
+        AddVerifiedTokenHits(freeText, builder);
+        AddPhraseHits(freeText, builder);
+        return builder.Build();
+    }
 
-        void AddEntry(VocabEntry entry, string matchedKey, string? rawToken = null)
-        {
-            if (!categories.Contains(entry.Category, StringComparer.OrdinalIgnoreCase))
-                categories.Add(entry.Category);
-            if (entry.IsSpecific
-                && !specifics.Contains(entry.Label, StringComparer.OrdinalIgnoreCase))
-            {
-                specifics.Add(entry.Label);
-            }
-
-            if (!hits.Any(h =>
-                    string.Equals(h.Category, entry.Category, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(h.Label, entry.Label, StringComparison.OrdinalIgnoreCase)))
-            {
-                hits.Add(new TicketPrefaceHit(entry.Category, entry.Label, entry.IsSpecific, matchedKey, rawToken));
-            }
-        }
-
+    private void AddVerifiedTokenHits(string freeText, PrefaceExtractionBuilder builder)
+    {
         foreach (string raw in SplitTokens(freeText))
         {
             TicketPrefaceTokenResult token = ResolveToken(raw);
@@ -79,12 +65,15 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
                 continue;
             }
 
-            AddEntry(
+            builder.Add(
                 new VocabEntry(token.Category, token.Label, token.IsSpecific),
                 token.NormalizedToken,
                 token.RawToken);
         }
+    }
 
+    private void AddPhraseHits(string freeText, PrefaceExtractionBuilder builder)
+    {
         string padded = $" {NormalizeKey(freeText)} ";
         string paddedCompact = $" {Compact(NormalizeKey(freeText))} ";
         foreach (string key in _vocab.Value.KeysLongestFirst)
@@ -95,11 +84,8 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
                 continue;
             if (!ContainsToken(padded, key) && !ContainsToken(paddedCompact, key))
                 continue;
-            AddEntry(entry, key);
+            builder.Add(entry, key);
         }
-
-        string? primary = categories.Count > 0 ? categories[0] : null;
-        return new TicketPrefaceExtraction(categories, specifics, hits, primary);
     }
 
     protected abstract void RegisterVocabulary(VocabularyBuilder builder);
@@ -498,6 +484,41 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
         List<string> Failures);
 
     protected sealed record VocabEntry(string Category, string Label, bool IsSpecific);
+
+    private sealed class PrefaceExtractionBuilder
+    {
+        private readonly List<string> _categories = [];
+        private readonly List<string> _specifics = [];
+        private readonly List<TicketPrefaceHit> _hits = [];
+
+        public void Add(VocabEntry entry, string matchedKey, string? rawToken = null)
+        {
+            if (!_categories.Contains(entry.Category, StringComparer.OrdinalIgnoreCase))
+                _categories.Add(entry.Category);
+
+            if (entry.IsSpecific
+                && !_specifics.Contains(entry.Label, StringComparer.OrdinalIgnoreCase))
+            {
+                _specifics.Add(entry.Label);
+            }
+
+            if (ContainsHit(entry))
+                return;
+
+            _hits.Add(new TicketPrefaceHit(entry.Category, entry.Label, entry.IsSpecific, matchedKey, rawToken));
+        }
+
+        public TicketPrefaceExtraction Build()
+        {
+            string? primary = _categories.Count > 0 ? _categories[0] : null;
+            return new TicketPrefaceExtraction(_categories, _specifics, _hits, primary);
+        }
+
+        private bool ContainsHit(VocabEntry entry) =>
+            _hits.Any(hit =>
+                string.Equals(hit.Category, entry.Category, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(hit.Label, entry.Label, StringComparison.OrdinalIgnoreCase));
+    }
 
     protected sealed class VocabularyBuilder
     {

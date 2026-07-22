@@ -36,46 +36,66 @@ public static class TicketIntakeValidator
         int aiOptOutCount = 0;
         foreach (TicketIntakeQuestionDto question in questions)
         {
-            if (string.IsNullOrWhiteSpace(question.Id))
-                throw new InvalidOperationException("Each intake question must have an id.");
-
-            if (!ids.Add(question.Id.Trim()))
-                throw new InvalidOperationException("Intake question ids must be unique.");
-
-            if (string.IsNullOrWhiteSpace(question.Prompt))
-                throw new InvalidOperationException("Each intake question must have a prompt.");
-
-            if (!AllowedQuestionTypes.Contains(question.Type))
-                throw new InvalidOperationException($"Unsupported intake question type '{question.Type}'.");
-
-            bool needsOptions = question.Type is "multipleChoice" or "multiSelect" or "dropdown";
-            if (needsOptions && (question.Options is null || question.Options.Count == 0))
-            {
-                throw new InvalidOperationException(
-                    $"Question '{question.Id}' requires at least one option.");
-            }
-
-            if (question.AiOptOut)
-            {
-                if (question.Type is not ("checkbox" or "trueFalse"))
-                    throw new InvalidOperationException("AI opt-out questions must be checkbox or true/false.");
+            ValidateQuestionIdentity(question, ids);
+            ValidateQuestionTypeAndOptions(question);
+            ValidateMixedQuestion(question);
+            if (ValidateAiOptOutQuestion(question))
                 aiOptOutCount++;
-            }
-
-            if (question.Type == "mixed")
-            {
-                if (question.AllowedResponseKinds is null || question.AllowedResponseKinds.Count == 0)
-                    throw new InvalidOperationException($"Mixed question '{question.Id}' needs allowedResponseKinds.");
-                foreach (string kind in question.AllowedResponseKinds)
-                {
-                    if (!AllowedResponseKinds.Contains(kind))
-                        throw new InvalidOperationException($"Unsupported response kind '{kind}'.");
-                }
-            }
         }
 
         if (aiOptOutCount > 1)
             throw new InvalidOperationException("At most one AI opt-out question is allowed per portal.");
+    }
+
+    private static void ValidateQuestionIdentity(TicketIntakeQuestionDto question, HashSet<string> ids)
+    {
+        if (string.IsNullOrWhiteSpace(question.Id))
+            throw new InvalidOperationException("Each intake question must have an id.");
+
+        if (!ids.Add(question.Id.Trim()))
+            throw new InvalidOperationException("Intake question ids must be unique.");
+
+        if (string.IsNullOrWhiteSpace(question.Prompt))
+            throw new InvalidOperationException("Each intake question must have a prompt.");
+    }
+
+    private static void ValidateQuestionTypeAndOptions(TicketIntakeQuestionDto question)
+    {
+        if (!AllowedQuestionTypes.Contains(question.Type))
+            throw new InvalidOperationException($"Unsupported intake question type '{question.Type}'.");
+
+        bool needsOptions = question.Type is "multipleChoice" or "multiSelect" or "dropdown";
+        if (needsOptions && (question.Options is null || question.Options.Count == 0))
+        {
+            throw new InvalidOperationException(
+                $"Question '{question.Id}' requires at least one option.");
+        }
+    }
+
+    private static bool ValidateAiOptOutQuestion(TicketIntakeQuestionDto question)
+    {
+        if (!question.AiOptOut)
+            return false;
+
+        if (question.Type is not ("checkbox" or "trueFalse"))
+            throw new InvalidOperationException("AI opt-out questions must be checkbox or true/false.");
+
+        return true;
+    }
+
+    private static void ValidateMixedQuestion(TicketIntakeQuestionDto question)
+    {
+        if (question.Type != "mixed")
+            return;
+
+        if (question.AllowedResponseKinds is null || question.AllowedResponseKinds.Count == 0)
+            throw new InvalidOperationException($"Mixed question '{question.Id}' needs allowedResponseKinds.");
+
+        foreach (string kind in question.AllowedResponseKinds)
+        {
+            if (!AllowedResponseKinds.Contains(kind))
+                throw new InvalidOperationException($"Unsupported response kind '{kind}'.");
+        }
     }
 
     /// <summary>
@@ -93,35 +113,51 @@ public static class TicketIntakeValidator
 
         foreach (TicketIntakeQuestionDto question in schema)
         {
-            bool hasAnswer = answers.TryGetValue(question.Id, out JsonElement value);
-            if (question.Required && (!hasAnswer || IsEmptyValue(value)))
-            {
-                throw new InvalidOperationException($"Answer required for '{question.Prompt}'.");
-            }
-
-            if (!hasAnswer || IsEmptyValue(value))
+            if (!TryGetSubmittedAnswer(question, answers, out JsonElement value))
                 continue;
 
             ValidateAnswerValue(question, value);
-
-            ITicketPrefaceCheck? check = prefaceChecks?.Resolve(question.Id, filterName);
-            if (check is null || value.ValueKind != JsonValueKind.String)
-                continue;
-
-            TicketPrefaceResult processed = check.Process(value.GetString());
-            prefaceByQuestion[question.Id] = processed;
-            if (!processed.Ok)
-            {
-                throw new InvalidOperationException(
-                    processed.ErrorMessage
-                    ?? $"Could not verify the answer for '{question.Prompt}'. Please re-enter it.");
-            }
-
-            if (check.RewriteAnswerOnSuccess && !string.IsNullOrWhiteSpace(processed.CanonicalDisplay))
-                answers[question.Id] = JsonSerializer.SerializeToElement(processed.CanonicalDisplay);
+            ProcessPrefaceCheck(question, value, answers, prefaceByQuestion, prefaceChecks, filterName);
         }
 
         return prefaceByQuestion;
+    }
+
+    private static bool TryGetSubmittedAnswer(
+        TicketIntakeQuestionDto question,
+        IReadOnlyDictionary<string, JsonElement> answers,
+        out JsonElement value)
+    {
+        bool hasAnswer = answers.TryGetValue(question.Id, out value);
+        if (question.Required && (!hasAnswer || IsEmptyValue(value)))
+            throw new InvalidOperationException($"Answer required for '{question.Prompt}'.");
+
+        return hasAnswer && !IsEmptyValue(value);
+    }
+
+    private static void ProcessPrefaceCheck(
+        TicketIntakeQuestionDto question,
+        JsonElement value,
+        Dictionary<string, JsonElement> answers,
+        Dictionary<string, TicketPrefaceResult> prefaceByQuestion,
+        ITicketPrefaceCheckResolver? prefaceChecks,
+        string? filterName)
+    {
+        ITicketPrefaceCheck? check = prefaceChecks?.Resolve(question.Id, filterName);
+        if (check is null || value.ValueKind != JsonValueKind.String)
+            return;
+
+        TicketPrefaceResult processed = check.Process(value.GetString());
+        prefaceByQuestion[question.Id] = processed;
+        if (!processed.Ok)
+        {
+            throw new InvalidOperationException(
+                processed.ErrorMessage
+                ?? $"Could not verify the answer for '{question.Prompt}'. Please re-enter it.");
+        }
+
+        if (check.RewriteAnswerOnSuccess && !string.IsNullOrWhiteSpace(processed.CanonicalDisplay))
+            answers[question.Id] = JsonSerializer.SerializeToElement(processed.CanonicalDisplay);
     }
 
     public static bool IsAiOptOut(
@@ -251,18 +287,19 @@ public static class TicketIntakeValidator
         // Mixed answers preserve each part kind for ticket AI evidence and moderator review.
         foreach (JsonElement part in value.EnumerateArray())
         {
-            if (part is { ValueKind: JsonValueKind.Object }
-                && part.TryGetProperty("kind", out JsonElement kindElement)
-                && kindElement is { ValueKind: JsonValueKind.String }
-                && allowedResponseKinds.Contains(kindElement.GetString()!))
-            {
+            if (IsAllowedMixedPart(part, allowedResponseKinds))
                 continue;
-            }
 
             throw new InvalidOperationException(
                 $"Answer for '{question.Prompt}' contains an invalid part.");
         }
     }
+
+    private static bool IsAllowedMixedPart(JsonElement part, IReadOnlySet<string> allowedResponseKinds) =>
+        part is { ValueKind: JsonValueKind.Object }
+        && part.TryGetProperty("kind", out JsonElement kindElement)
+        && kindElement is { ValueKind: JsonValueKind.String }
+        && allowedResponseKinds.Contains(kindElement.GetString()!);
 
     private static void ValidateForwardSnapshot(string prompt, JsonElement value)
     {
