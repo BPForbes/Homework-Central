@@ -494,8 +494,11 @@ approved readability exception is documented near the function and in review.
 | Side-effect categories | `3` | `>3` |
 | Structural readability score | `60-74` | `<60` |
 
-Hard limits apply to production code, test helpers, migrations, scripts, and
-frontend code. Generated code is exempt when it is not edited by hand.
+Hard limits apply to in-scope production and test C# (`*.cs`) and non-UI
+TypeScript modules (`*.ts`). React component files (`*.tsx`) are exempt from
+hard complexity gates; see [Complexity review scope](#complexity-review-scope).
+Generated code is exempt when it is not edited by hand. Document module-level
+exceptions in the owning feature Markdown file, not in a new per-item doc.
 
 ## Function decomposition
 
