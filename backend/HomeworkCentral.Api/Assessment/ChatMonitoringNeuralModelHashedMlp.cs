@@ -216,7 +216,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 float[]? parameterAfter = captureFull ? ReadParameters() : null;
                 float avgGradScale = 1f / n;
                 float gradientL2 = NeuralNetFinite.OrZero(MathF.Sqrt((float)(gradSqSum * avgGradScale * avgGradScale)));
-                if (minNonZeroAbsGradient == float.MaxValue) minNonZeroAbsGradient = 0;
+                // Sentinel was float.MaxValue when no non-zero gradient was tracked.
+                if (!(minNonZeroAbsGradient < float.MaxValue))
+                    minNonZeroAbsGradient = 0;
                 maxAbsGradient = NeuralNetFinite.OrZero(maxAbsGradient * avgGradScale);
                 minNonZeroAbsGradient = NeuralNetFinite.OrZero(minNonZeroAbsGradient * avgGradScale);
 
@@ -235,7 +237,11 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                         ? (gradients.Count == 0 ? 0 : gradients.Max(gradient => MathF.Abs(gradient.Value)))
                         : maxAbsGradient,
                     captureFull
-                        ? gradients.Where(gradient => gradient.Value != 0).Select(gradient => MathF.Abs(gradient.Value)).DefaultIfEmpty(0).Min()
+                        ? gradients
+                            .Where(gradient => MathF.Abs(gradient.Value) > 0f)
+                            .Select(gradient => MathF.Abs(gradient.Value))
+                            .DefaultIfEmpty(0)
+                            .Min()
                         : minNonZeroAbsGradient);
                 BackpropagationTrace backward = new([], [],
                     gradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Weight).ToList(),

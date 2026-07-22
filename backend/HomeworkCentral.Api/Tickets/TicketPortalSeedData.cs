@@ -122,8 +122,11 @@ public static class TicketPortalSeedData
         TicketPortalSeedDefinition definition,
         DateTime now)
     {
-        bool changed = ReconcileChannel(existing.Channel)
-                       | ReconcilePortalText(existing, definition);
+        // Both reconcilers mutate; evaluate each before combining so a channel
+        // text update cannot skip portal field reconciliation (or the reverse).
+        bool channelChanged = ReconcileChannel(existing.Channel);
+        bool portalChanged = ReconcilePortalText(existing, definition);
+        bool changed = channelChanged || portalChanged;
 
         if (changed)
         {

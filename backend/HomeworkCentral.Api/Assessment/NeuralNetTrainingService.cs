@@ -77,7 +77,6 @@ public sealed class NeuralNetTrainingService(
         TicketUserWatch watch = score.Ticket.Watches.FirstOrDefault(x => x.TrackedUserId == score.TrackedUserId)
             ?? throw new InvalidOperationException("The score's tracking context is unavailable.");
         string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
-        string modelMessage = ComposeModelMessage(score.ContextSnapshot, message);
         NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
         TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
             .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
@@ -942,8 +941,6 @@ public sealed class NeuralNetTrainingService(
     };
 
     private static string Truncate(string value, int limit) => value.Length <= limit ? value : value[..limit] + "…";
-    private static string ComposeModelMessage(string? contextSnapshot, string message) =>
-        string.IsNullOrWhiteSpace(contextSnapshot) ? message : $"{contextSnapshot}\n<current_message>\n{message}\n</current_message>";
 
     private async Task<SyntheticTicket?> GenerateSyntheticTicketAsync(NeuralTrainingMode mode, TrainingSessionTimings timings, CancellationToken ct)
     {
