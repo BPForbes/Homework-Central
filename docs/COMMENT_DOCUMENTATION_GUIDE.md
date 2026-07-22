@@ -65,7 +65,7 @@ constraint, or risk that is not obvious from the code alone.
 | Prefer pattern matching | Prefer `switch` expressions and patterns over large `if` / `else if` chains for closed-set decisions. |
 | Prefer fail-first | Validate and return/throw early; keep the happy path least indented. |
 | Prefer speakable names | Names must be pronounceable words or clear domain terms; rename cryptic abbreviations. |
-| Prefer collection transforms | Prefer `Where` / `Select` / `ToDictionary` / `map` / `filter` for member transforms when clearer than a hand-rolled loop. |
+| Prefer collection transforms | Prefer `map` / `filter` / `reduce` (TS) and C# LINQ `Select()` / `Where()` / `Aggregate()` (also `Sum()` / `ToDictionary()`) when clearer than a hand-rolled loop. |
 | Prefer naming over comments | A precise name is stronger than a sentence explaining an imprecise name. |
 | Document why and constraints | Comments should explain policy, risk, invariants, or non-obvious tradeoffs. |
 | Keep comments current | A stale comment is a defect. Update comments with the code they describe. |
@@ -84,8 +84,9 @@ Before approving or merging changes, reviewers must check:
    instead of large `if` / `else if` chains when branches are pure mappings.
 4. **Fail-first** — guards return or throw early; the success path is not buried in nesting.
 5. **Speakable names** — identifiers can be spoken aloud as words or clear domain terms.
-6. **Collection transforms** — member selection/projection uses `Where` / `Select` /
-   `map` / `filter` (and similar) when that is clearer than an imperative loop.
+6. **Collection transforms** — member selection/projection/aggregation uses
+   `map` / `filter` / `reduce` in TypeScript and `Select()` / `Where()` /
+   `Aggregate()` (or `Sum()`) in C# LINQ when that is clearer than an imperative loop.
 7. **Comment value** — comments explain project intent, invariants, trust boundaries,
    or operational behavior.
 8. **No process language** — comments and docs do not reference AI, prompts, branch
@@ -213,6 +214,25 @@ Boolean names must read naturally in conditionals and reveal polarity.
 Avoid negative booleans when possible. `isBlocked` is clearer than
 `isNotAllowed` when the domain state is a block. Do not combine negative names
 with negated conditions.
+
+## Collection transforms
+
+Prefer declarative collection operations over hand-rolled loops when the body is a
+member transform, filter, or aggregation. Informal review language often says
+**map** / **filter** / **reduce**; use the language-native names in code:
+
+| Concept | JavaScript / TypeScript / Python / Scala | C# (LINQ) |
+|---|---|---|
+| Transforming elements | `map()` | `Select()` |
+| Filtering elements | `filter()` | `Where()` |
+| Aggregating elements | `reduce()` | `Aggregate()` / `Sum()` |
+
+Related C# helpers that fit the same preference: `ToDictionary()`, `ToHashSet()`,
+`ToList()`, `Any()`, `All()`, `FirstOrDefault()` when they replace clearer than a
+manual accumulation loop.
+
+Use an explicit `for` / `foreach` when the body has multi-step side effects, early
+exits that do not map cleanly, or a performance-critical inner kernel.
 
 ## Collection naming
 
@@ -1265,7 +1285,7 @@ Use this checklist before submitting or approving a change:
 - [ ] C# locals use explicit types; no `var` appears in hand-authored code.
 - [ ] Closed-set decisions use pattern matching instead of large `if` chains.
 - [ ] Fail-first guards keep the happy path unindented.
-- [ ] Collection member transforms prefer Where/Select/map/filter when clearer than a for-loop.
+- [ ] Collection member transforms prefer map/filter/reduce (TS) or Select/Where/Aggregate (C#) when clearer than a for-loop.
 - [ ] Functions stay below hard complexity limits or have an approved exception.
 - [ ] Warning-band complexity has been considered for decomposition.
 - [ ] Comments and docs do not include asymptotic time/space (Big-O) analysis.

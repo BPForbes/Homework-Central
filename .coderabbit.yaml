@@ -41,9 +41,10 @@ reviews:
         - Prefer fail-first control flow (early return/throw; happy path last).
         - Prefer speakable names; rename abbreviations that cannot be spoken clearly
           (conventional `ct` / small loop indices are fine).
-        - Prefer Where/Select/ToDictionary/map/filter for collection member transforms when
-          clearer than a hand-written for-loop; use explicit loops for multi-step side effects
-          or tight kernels.
+        - Prefer collection transforms when clearer than a hand-written for-loop:
+          TypeScript `map`/`filter`/`reduce`; C# LINQ `Select()`/`Where()`/`Aggregate()`
+          (also `Sum()`/`ToDictionary()`/`ToHashSet()`). Use explicit loops for multi-step
+          side effects or tight kernels.
         - Comments must explain project-specific intent, constraints, trust boundaries, state
           ownership, lifecycle behavior, or non-obvious implementation decisions.
         - Comments must not be self-referential and must not mention an AI agent, prompt,

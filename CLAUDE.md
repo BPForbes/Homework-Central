@@ -34,10 +34,11 @@ Hard rules:
   domain terms must be renamed (for example prefer `roomId` over `rid`, `eligibleUsers`
   over `eus`). Conventional short forms such as `ct` for `CancellationToken` and small
   loop indices remain acceptable.
-- Prefer `Where` / `Select` / `ToDictionary` / `ToHashSet` / `map` / `filter` (and similar)
-  for transforming or selecting members of collections when that is clearer than a
-  hand-written `for` loop. Use an explicit loop when the body has multi-step side effects,
-  early exits that do not map cleanly, or performance-critical inner kernels.
+- Prefer collection transforms over hand-written loops when clearer: TypeScript/Python-style
+  `map` / `filter` / `reduce`, and the C# LINQ equivalents `Select()` / `Where()` /
+  `Aggregate()` (also `Sum()` / `ToDictionary()` / `ToHashSet()` where they fit). Use an
+  explicit loop for multi-step side effects, early exits that do not map cleanly, or
+  performance-critical inner kernels.
 - Comments must explain project-specific intent, constraints, trust boundaries, state
   ownership, lifecycle behavior, or non-obvious implementation decisions.
 - Comments must not be self-referential and must not mention an AI agent, prompt,
