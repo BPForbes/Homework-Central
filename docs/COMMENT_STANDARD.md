@@ -1,4 +1,27 @@
-# Comment, documentation, readability, and naming standard
+# Comment Documentation Guide
+
+## Naming convention for this guide
+
+Use these names consistently in agent rules, CodeRabbit config, PR reviews,
+source cross-references, and Markdown links. Do not invent alternate titles.
+
+| Form | Required value |
+|---|---|
+| Canonical title | Comment Documentation Guide |
+| Short name | `COMMENT_STANDARD` |
+| Repository path | `docs/COMMENT_STANDARD.md` |
+| H1 heading | `# Comment Documentation Guide` |
+| Link from `docs/` | `[Comment Documentation Guide](./COMMENT_STANDARD.md)` |
+| Link from repository root | `[Comment Documentation Guide](./docs/COMMENT_STANDARD.md)` |
+
+Acceptable shorthand in tight contexts: "the Comment Documentation Guide" or
+`` `docs/COMMENT_STANDARD.md` ``. Avoid informal aliases such as "comment format
+file", "docs style guide", "naming md", or "readability doc" when referring to
+this standard.
+
+The former long title ("Comment, documentation, readability, and naming
+standard") describes the guide's scope; the **canonical title** for references
+is **Comment Documentation Guide**.
 
 ## Purpose
 
@@ -718,7 +741,7 @@ Canonical feature docs today:
 
 | Feature / module | Canonical file |
 |---|---|
-| Comments, naming, readability | `docs/COMMENT_STANDARD.md` |
+| Comment Documentation Guide (comments, naming, readability) | `docs/COMMENT_STANDARD.md` |
 | Identity, sessions, tenancy | `docs/identity.md` |
 | Chat rooms, messages, uploads | `docs/chat.md` |
 | Tickets and assessment (incl. neural) | `docs/tickets.md` |

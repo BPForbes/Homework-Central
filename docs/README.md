@@ -11,7 +11,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 
 ## Engineering standards
 
-- [Comment, documentation, readability, and naming standard](./COMMENT_STANDARD.md)
+- [Comment Documentation Guide](./COMMENT_STANDARD.md) (`docs/COMMENT_STANDARD.md`)
 
 ## Feature-level architecture
 
@@ -31,7 +31,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 
 | Topic | Canonical document |
 |---|---|
-| Comments, naming, readability, XML/Markdown rules | [`COMMENT_STANDARD.md`](./COMMENT_STANDARD.md) |
+| Comment Documentation Guide (comments, naming, readability, XML/Markdown rules) | [`COMMENT_STANDARD.md`](./COMMENT_STANDARD.md) |
 | Authentication, sessions, account classes, tenant visibility | [`identity.md`](./identity.md) |
 | Chat rooms, messages, uploads, scanning, downloads | [`chat.md`](./chat.md) |
 | Ticket portals, Trial Tutor, votes, AI scoring | [`tickets.md`](./tickets.md) |
