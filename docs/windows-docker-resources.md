@@ -106,3 +106,10 @@ docker compose down
 
 If Windows still reports a large WSL process afterward, quit Docker Desktop and
 run `wsl --shutdown`.
+
+## Related documentation
+
+- [system-efficiency.md](system-efficiency.md) — hot-path query patterns, shared memory, RabbitMQ/outbox tradeoffs
+- [uploads-and-scanning.md](uploads-and-scanning.md) — ClamAV scan pipeline and fail behavior (authoritative)
+- [deploy/kubernetes/README.md](../deploy/kubernetes/README.md) — cluster workloads and overlays beyond this workstation
+- [docs/README.md](README.md) — documentation index

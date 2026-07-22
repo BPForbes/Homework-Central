@@ -1,5 +1,9 @@
 # Homework Central — Local AI Agent Tools Setup
 
+This file documents **AI agent tooling** (CodeGraph, Graphify, Claude-Mem) for
+Cursor, Claude Code, and Codex. **Application local setup** — Docker, dev
+scripts, ports, and troubleshooting — is in [`README.md`](README.md).
+
 This project uses local token optimization tools to reduce AI token usage and improve context efficiency.
 
 ---
@@ -61,6 +65,12 @@ When working as an AI agent (Claude Code, Cursor, Codex) in this repository:
 ## Web Security Notes
 
 All web-facing code in this project must follow these security requirements. Agents must flag any violation before merging.
+
+Homework Central–specific XSS and SQL baselines (sanitizer usage, EF Core
+rules, CSP middleware) are maintained in
+[`docs/tenancy-isolation.md`](docs/tenancy-isolation.md). Treat that document
+as authoritative for this repository; the checklist below is a general agent
+reference.
 
 ### Injection Attacks
 

@@ -215,3 +215,10 @@ Tune `StudentConfidenceThreshold`, `ReviewerAuditRate`, and
 `ReviewerBlendWeight` under `Tickets`; matching Docker variables are documented
 in `.env.example`. Synthetic training knobs live under `NeuralNetTraining` in
 `appsettings.json`.
+
+## Related documentation
+
+- [tickets-assessment.md](tickets-assessment.md) — portals, ticket open lifecycle, watches, inbox, votes
+- [system-efficiency.md](system-efficiency.md) — assessment work channel, RabbitMQ/outbox tradeoffs, resource profiles
+- [PLAN.md](../PLAN.md) — Neural Replay V2 training telemetry, promotion, and replay UI (historical implementation plan)
+- [docs/README.md](README.md) — documentation index

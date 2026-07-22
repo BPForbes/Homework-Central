@@ -259,4 +259,5 @@ that sets signed claims.
 
 - [docs/tenancy-isolation.md](tenancy-isolation.md)
 - [docs/chat-room-access.md](chat-room-access.md)
+- [docs/tickets-assessment.md](tickets-assessment.md)
 - [docs/COMMENT_STANDARD.md](COMMENT_STANDARD.md)

@@ -39,7 +39,7 @@ Chat
 | Category visibility | Dropdown shown only when ≥1 child room is accessible. |
 | Category kind | `General`, `Subject`, or `Staff` — drives nav grouping and `IsPrivateCategory`. |
 | Feature gate | `PlatformFeatures.GroupMessages` is required for **staff** rooms; subject-expertise rooms only require the room-access rule above. General is always open. |
-| Traffic isolation | Messages implement `IShareableScopedResource`; EF global query filters split **real production** chat from **developer/test** traffic by `OwnerAccountClass` only (no per-tenant match). See `ChatMessage.cs` for rationale — chat is a shared community space, not tenant-private data. |
+| Traffic isolation | Messages implement `IShareableScopedResource`; EF global query filters split **real production** chat from **developer/test** traffic by `OwnerAccountClass` only (no per-tenant match). See [tenancy-isolation.md](tenancy-isolation.md) and `ChatMessage.cs` — chat is a shared community space, not tenant-private data. |
 
 ## Room blueprint
 
@@ -73,7 +73,16 @@ For rich-text message rendering (future), sanitize with DOMPurify before any `da
 
 ## Typing presence
 
-`IChatTypingTracker` (default: in-process `ChatTypingTracker`) tracks who is typing per SignalR group. State is **in-memory only** and is lost on server restart — acceptable for single-server dev today. Horizontal scaling would require a distributed backing store (e.g. Redis) and a SignalR backplane; the tracker is already behind an interface to allow that swap.
+`IChatTypingTracker` (default: in-process `ChatTypingTracker`) tracks who is
+typing per SignalR group. State lives **only in the current API process** — it
+is not shared across instances and is lost on restart. That is acceptable for
+single-server development today.
+
+**Current:** one backend process; typing is process-local.
+
+**Planned for multi-instance:** a SignalR backplane plus a distributed backing
+store (for example Redis) behind the same interface so every node sees the same
+typing sets.
 
 ## Future `ChatChannel` entity
 
@@ -92,3 +101,10 @@ Channels are shared community spaces like messages, so they would **not** use `I
 | `ChatMessage` scoping | Resolved via `IShareableScopedResource` + EF global query filter (replaces manual filter) |
 | Stale `IScopedResource` docs | Corrected in this file and `tenancy-isolation.md` |
 | Typing persistence | Documented; `IChatTypingTracker` extracted for future distributed implementation |
+
+## Related documentation
+
+- [tenancy-isolation.md](tenancy-isolation.md) — account-class isolation, XSS/SQL baselines, `IShareableScopedResource`
+- [auth-and-sessions.md](auth-and-sessions.md) — effective masks and JWT claims used for room gating
+- [tickets-assessment.md](tickets-assessment.md) — ticket portal rooms and private ticket chat channels
+- [docs/README.md](README.md) — documentation index

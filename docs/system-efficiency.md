@@ -52,6 +52,11 @@ a database/broker dual-write failure window.
 
 ## ClamAV and non-Docker alternatives
 
+The authoritative description of the upload inspect → scan → store → download
+pipeline, scan statuses, infected-file caution gate, and fail behavior when
+ClamAV is unavailable is [uploads-and-scanning.md](uploads-and-scanning.md).
+This section covers deployment alternatives and memory tradeoffs only.
+
 An npm ClamAV package is a client wrapper. It still needs `clamd`, `clamdscan`, or
 `clamscan` plus the signature database; it does not replace the memory-heavy scan
 engine. The current C# `nClam` client already streams directly to `clamd` without a
@@ -64,4 +69,12 @@ the WSL safety cap. The antivirus Docker profile is therefore the safer default.
 
 PostgreSQL, Redis, and the frontend web server can also be installed natively, but
 doing so mostly moves their memory rather than eliminating it. Docker provides the
-hard resource ceilings that protect the host.
+hard resource ceilings that protect the host. Profile ceilings and WSL caps for
+this workstation are in [windows-docker-resources.md](windows-docker-resources.md).
+
+## Related documentation
+
+- [uploads-and-scanning.md](uploads-and-scanning.md) — attachment pipeline, scan results, download authorization
+- [windows-docker-resources.md](windows-docker-resources.md) — Docker profiles, WSL 2 cap, ClamAV/Ollama ceilings
+- [ticket-ai-scoring.md](ticket-ai-scoring.md) — assessment queue consumers and Ollama concurrency
+- [docs/README.md](README.md) — documentation index

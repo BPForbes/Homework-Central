@@ -2,13 +2,17 @@
 
 Homework Central separates **real (production) accounts** from **developer personas** and **DevAdmin** at the JWT and authorization layers. Shared features (chat, channels, notifications) must enforce these boundaries defensively, not only by deployment layout.
 
+JWT claim names, refresh cookies, and how `account_class` / `tenant_db` are
+set at login are documented in [auth-and-sessions.md](auth-and-sessions.md).
+This file covers visibility rules and where they apply.
+
 ## Account classes
 
-| Class | Typical source | `tenant_db` claim |
-|-------|----------------|-------------------|
-| `RealAccount` | Register / login on master | Usually absent (production tenants may add this later) |
+| Class | Typical source | Tenant scope (see auth doc for claim details) |
+|-------|----------------|-----------------------------------------------|
+| `RealAccount` | Register / login on master | Usually no `tenant_db` (production tenants may add this later) |
 | `DeveloperAccount` | Dev login impersonating a persona | Persona database name (e.g. `tenant_math`) |
-| `DevAdmin` | Dev login without persona | Absent (master database) |
+| `DevAdmin` | Dev login without persona | Master database only (no persona `tenant_db`) |
 
 ## Visibility rules
 
@@ -48,6 +52,12 @@ Future tenant-private resources **must** use `IScopedResource` + the `"ResourceV
 - Use EF Core LINQ for reads/writes (parameterized automatically).
 - If raw SQL is unavoidable, use `FromSqlInterpolated` / `ExecuteSqlInterpolated` only.
 - CI fails the build if `FromSqlRaw` / `ExecuteSqlRaw` appear in `backend/HomeworkCentral.Api`.
+
+## Related documentation
+
+- [auth-and-sessions.md](auth-and-sessions.md) — JWT claims, refresh rotation, developer bypass login
+- [chat-room-access.md](chat-room-access.md) — room access bits, traffic isolation for chat messages
+- [docs/README.md](README.md) — documentation index
 
 ## References
 
