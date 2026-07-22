@@ -381,7 +381,27 @@ Readable functions have one clear purpose, a small number of inputs, shallow
 control flow, and explicit side effects. Review functions as units of behavior,
 not as line-count contests.
 
-Reviewers should evaluate:
+### Complexity review scope
+
+Hard complexity gates apply to:
+
+- C# under `backend/` (`*.cs`);
+- non-UI TypeScript modules (`*.ts`) such as API clients, hooks that own
+  protocol/state machines, and pure utilities.
+
+Hard complexity gates do **not** apply to:
+
+- React component files (`*.tsx`), including page and panel components whose
+  complexity is mostly JSX branching and local UI state;
+- generated code, EF migrations' fluent `OnModelCreating` / `Up` / `Down`
+  builders when they are linear schema declarations;
+- primary-constructor type declarations mistaken for methods by crude scanners.
+
+TSX may still be refactored for clarity, but a high score from JSX composition
+alone is not a merge blocker. Prefer extracting hooks and helpers into `*.ts`
+when protocol, authorization, or retry logic grows inside a component.
+
+Reviewers should evaluate in-scope functions for:
 
 - Can the function purpose be stated in one sentence?
 - Are all parameters necessary and cohesive?
@@ -677,14 +697,15 @@ endpoint, class, helper, or small topic.
 
 | Prefer | Avoid |
 |---|---|
-| `docs/tickets.md` for portals, intake, votes, AI scoring, and promotion | Multiple Markdown files for the same ticket feature |
-| `docs/chat.md` for rooms, messages, attachments, and scanning | Separate room-access and uploads docs when both are chat behavior |
+| `docs/tickets.md` for portals, intake, votes, AI scoring, and promotion | Separate docs per validator, preface check, neural class, or UI panel |
+| `docs/chat.md` for rooms, messages, attachments, and scanning | Separate room-access, upload, and composer docs |
 | `docs/identity.md` for auth, sessions, and tenancy isolation | Separate auth and tenancy docs that must be read together |
 | `docs/runtime.md` for efficiency, Docker profiles, and resource ceilings | Separate efficiency and Windows-resource notes for the same runtime story |
+| A short section inside the module doc for complexity exceptions | `docs/ChatComposer-complexity.md`-style one-off files |
 
 Create a new Markdown file only when the subject is a distinct feature,
 subsystem, standard, ADR, or runbook. Do not create a file merely because one
-class, enum, endpoint, or config key changed.
+class, enum, endpoint, config key, TSX panel, or complexity finding changed.
 
 When a feature grows, add headings and sections inside the existing feature
 document. Split only when the resulting file covers unrelated trust boundaries
@@ -692,14 +713,17 @@ or unrelated operators cannot share one narrative.
 
 Canonical feature docs today:
 
-| Feature | Canonical file |
+| Feature / module | Canonical file |
 |---|---|
 | Comments, naming, readability | `docs/COMMENT_STANDARD.md` |
 | Identity, sessions, tenancy | `docs/identity.md` |
 | Chat rooms, messages, uploads | `docs/chat.md` |
-| Tickets and assessment | `docs/tickets.md` |
+| Tickets and assessment (incl. neural) | `docs/tickets.md` |
 | Runtime efficiency and local resources | `docs/runtime.md` |
 | UI design tokens | `design.md` |
+
+Complexity review findings for a module belong as a short section in that
+module's feature doc (or in PR review notes), not as additional Markdown files.
 
 ### Required content for feature docs
 
@@ -734,7 +758,8 @@ and the implementation-file list in the same change as the code.
 
 Avoid creating:
 
-- one Markdown file per class, endpoint, DTO, or config key;
+- one Markdown file per class, endpoint, DTO, config key, TSX panel, or function;
+- one Markdown file per complexity finding;
 - duplicate setup guides;
 - one-off branch notes;
 - temporary comparison documents;

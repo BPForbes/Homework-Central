@@ -5,20 +5,22 @@ boundaries, operations, deployment, design, and engineering standards.
 Application setup remains in [`README.md`](../README.md). AI agent tooling setup
 remains in [`SETUP.md`](../SETUP.md).
 
+Documentation is **feature-level**: one Markdown file per module, not one file
+per class, endpoint, TSX panel, or complexity finding. See
+[`COMMENT_STANDARD.md`](./COMMENT_STANDARD.md#feature-level-documents).
+
 ## Engineering standards
 
 - [Comment, documentation, readability, and naming standard](./COMMENT_STANDARD.md)
 
 ## Feature-level architecture
 
-- [Identity](./identity.md) — authentication, sessions, account classes, and
-  tenant visibility.
-- [Chat](./chat.md) — rooms, messages, SignalR behavior, uploads, scanning, and
-  attachment downloads.
-- [Tickets and assessment](./tickets.md) — ticket portals, ticket chat, votes,
-  neural scoring, reviewer blend, and training archives.
-- [Runtime and operations](./runtime.md) — hot paths, service choices, local
-  Docker profiles, Windows resource caps, and operational commands.
+| Module | Document | Owns |
+|---|---|---|
+| Identity | [identity.md](./identity.md) | Auth, sessions, captcha, account classes, tenancy |
+| Chat | [chat.md](./chat.md) | Rooms, messages, SignalR, uploads, ClamAV, downloads |
+| Tickets | [tickets.md](./tickets.md) | Portals, preface checks, votes, neural scoring, NeuralNet admin |
+| Runtime | [runtime.md](./runtime.md) | Hot paths, queues, Docker profiles, Windows resources |
 
 ## Design and deployment
 
@@ -37,5 +39,5 @@ remains in [`SETUP.md`](../SETUP.md).
 | Design tokens and motion | [`design.md`](../design.md) |
 | Kubernetes deployment | [`deploy/kubernetes/README.md`](../deploy/kubernetes/README.md) |
 
-When documents overlap, update the canonical file and link from secondary notes.
-Do not invent parallel standards.
+When documents overlap, update the canonical module file and link from secondary
+notes. Do not invent parallel standards or per-item Markdown files.
