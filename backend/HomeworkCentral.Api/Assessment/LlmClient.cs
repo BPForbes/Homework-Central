@@ -16,9 +16,16 @@ public class LlmOptions
     public int MaxConcurrentRequests { get; set; } = 2;
 }
 
+/// <summary>
+/// Optional local LLM boundary (Ollama). Returns null / empty when disabled, offline, or timed out
+/// so assessment can fall back to deterministic scoring without failing the request pipeline.
+/// </summary>
 public interface ILlmClient
 {
+    /// <summary>Requests JSON chat completion; null means unavailable or non-JSON response.</summary>
     Task<string?> ChatJsonAsync(string systemPrompt, string userPrompt, CancellationToken ct = default);
+
+    /// <summary>Embeds text for vector evidence; empty when unavailable.</summary>
     Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default);
 }
 
