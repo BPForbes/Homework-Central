@@ -171,6 +171,62 @@ subject expertise index classes and staff rooms from platform role bits.
 `ChatNavRoomDto` exposes `IsPrivate`, `CategoryKey`, `CategoryKind`,
 `RoomType`, and optional `IconName` for the frontend icon layer.
 
+## Custom channels and access rules
+
+Custom channels are infrastructure-defined rooms (chat, info, role-claim, or
+ticket portal) that appear in chat navigation alongside catalog rooms. They are
+owned by an account class and filtered through
+`InfrastructureAccountScope.CanViewInfrastructure`, so viewers only see channels
+in the traffic bucket their scope permits.
+
+### Privacy invariant
+
+- Public custom channels are open to authenticated viewers in the same
+  infrastructure traffic bucket.
+- Private custom channels require **at least one** access rule (allowed user ID,
+  platform role bit, or custom role ID).
+- Converting a public channel to private without supplying access rules is
+  rejected. Privacy flips and access-rule mutation commit in one database
+  transaction so a private channel is never persisted without its required rule
+  set.
+
+### Role-claim safety
+
+Role-claim rooms reject self-referential access-role graphs: a required access
+role must be obtainable outside the room it protects. Otherwise no user can
+bootstrap access. `RoleClaimCycleValidator` enforces that invariant on create
+and update.
+
+### Ticket coupling
+
+Creating a custom channel with room type `Ticket` also creates the initial
+`TicketPortalConfig` row (CTA defaults, empty intake/staff JSON, display-number
+sequence). Ticket open/close lifecycle remains documented in
+[`docs/tickets.md`](./tickets.md#open-lifecycle); this module only owns the
+channel and portal seed.
+
+### Post-commit consistency
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant API as InfrastructureService
+    participant DB
+    participant Cache as CustomChannelStore
+    participant Clients as Chat navigation clients
+
+    Admin->>API: Create or update custom channel
+    API->>API: Validate scope, privacy rules, and role-claim graph
+    API->>DB: Persist channel and access rules
+    DB-->>API: Commit succeeds
+    API->>Cache: Refresh channel snapshot
+    API->>Clients: Notify navigation changed
+```
+
+`CustomChannelStore` refresh and SignalR navigation notification run **only
+after** persistence succeeds, so clients cannot receive a room that failed to
+commit.
+
 ## How to use
 
 ### Navigate rooms and join live chat
@@ -693,6 +749,9 @@ return cached is not null;
 | [backend/HomeworkCentral.Api/Controllers/ChatController.cs](../backend/HomeworkCentral.Api/Controllers/ChatController.cs) | HTTP endpoints for navigation, room metadata, messages, inbox, votes, user search, upload, download, and delete. |
 | [backend/HomeworkCentral.Api/Hubs/ChatHub.cs](../backend/HomeworkCentral.Api/Hubs/ChatHub.cs) | SignalR room joins, typing notifications, online state, and nav-group membership. |
 | [backend/HomeworkCentral.Api/Chat/ChatRoomAccessService.cs](../backend/HomeworkCentral.Api/Chat/ChatRoomAccessService.cs) | Catalog and custom room access rules. |
+| [backend/HomeworkCentral.Api/Infrastructure/InfrastructureService.cs](../backend/HomeworkCentral.Api/Infrastructure/InfrastructureService.cs) | Custom channel create/update, privacy/access-rule transactions, role-claim safety, and ticket-portal seed. |
+| [backend/HomeworkCentral.Api/Infrastructure/CustomChannelStore.cs](../backend/HomeworkCentral.Api/Infrastructure/CustomChannelStore.cs) | In-memory/custom-channel snapshot refreshed after successful persistence. |
+| [backend/HomeworkCentral.Api/Infrastructure/RoleClaimCycleValidator.cs](../backend/HomeworkCentral.Api/Infrastructure/RoleClaimCycleValidator.cs) | Rejects self-referential role-claim access graphs. |
 | [backend/HomeworkCentral.Api/Chat/ChatRoomCatalog.cs](../backend/HomeworkCentral.Api/Chat/ChatRoomCatalog.cs) | Catalog room list derived from expertise and role indices. |
 | [backend/HomeworkCentral.Api/Chat/ChatRoomBlueprint.cs](../backend/HomeworkCentral.Api/Chat/ChatRoomBlueprint.cs) | Public/private room construction. |
 | [backend/HomeworkCentral.Api/Chat/ChatMessageService.cs](../backend/HomeworkCentral.Api/Chat/ChatMessageService.cs) | Message read/send, attachment linking, mentions, replies, inbox notifications, SignalR broadcast, and assessment queueing. |

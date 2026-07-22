@@ -373,6 +373,7 @@ public sealed class InfrastructureService(
 
         CustomChannel channel = BuildCustomChannelEntity(actorUserId, request, scope, roomType, tieType, now);
         await ApplyAccessRulesAsync(channel, request.AccessRules, request.IsPrivate, request.Password, actorUserId, ct);
+        // Required roles must be claimable outside the protected room; otherwise no user can establish room access.
         await EnsureRoleClaimAccessIsNotSelfReferentialAsync(channel, ct);
 
         db.CustomChannels.Add(channel);
@@ -398,11 +399,14 @@ public sealed class InfrastructureService(
         bool wasPrivate = channel.IsPrivate;
         ApplyChannelFieldUpdates(channel, request);
 
+        // Privacy and access-rule changes commit together so a private channel is never
+        // persisted without the required access rule set.
         await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(ct);
         try
         {
             await SyncAccessRulesForPrivacyChangeAsync(channel, wasPrivate, request, actorUserId, ct);
+            // Required roles must be claimable outside the protected room; otherwise no user can establish room access.
             await EnsureRoleClaimAccessIsNotSelfReferentialAsync(channel, ct);
 
             channel.UpdatedAtUtc = DateTime.UtcNow;
@@ -415,6 +419,8 @@ public sealed class InfrastructureService(
             throw;
         }
 
+        // Cache refresh and SignalR nav notification run only after commit so clients
+        // never receive a room that failed to persist.
         await channelStore.RefreshAsync(ct);
         await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
 
@@ -1291,6 +1297,8 @@ public sealed class InfrastructureService(
         Guid actorUserId,
         CancellationToken ct)
     {
+        // Private rooms require at least one access rule; public rooms clear rules.
+        // Callers must run this inside the same DB transaction as the privacy flip.
         if (!channel.IsPrivate)
         {
             await ClearChannelAccessRulesAsync(channel, ct);
@@ -1324,6 +1332,7 @@ public sealed class InfrastructureService(
         if (channel.RoomType != CustomRoomType.RoleClaim || !channel.IsPrivate)
             return;
 
+        // Required roles must be claimable outside the protected room; otherwise no user can establish room access.
         if (await RoleClaimCycleValidator.WouldBeSelfReferentialAsync(
                 db,
                 channel.RoomId,
@@ -1341,6 +1350,8 @@ public sealed class InfrastructureService(
         CancellationToken ct)
     {
         await db.SaveChangesAsync(ct);
+        // Cache refresh and SignalR nav notification run only after persistence so clients
+        // never receive a room that failed to persist.
         await channelStore.RefreshAsync(ct);
         await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
 

@@ -7,6 +7,9 @@ on:
   pull_request:
 
 concurrency:
+  # Newer pushes to the same PR/branch cancel in-flight CI for that ref so only
+  # the latest commit is evaluated. Cancelled jobs can appear briefly with no
+  # useful steps in the UI; check the newest successful run for Frontend/Backend.
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 

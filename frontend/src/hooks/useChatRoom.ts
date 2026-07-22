@@ -294,9 +294,8 @@ export function useChatRoom(
     }
   }, [roomId])
 
-  // The indicator is meant to persist for as long as the composer has text in it, so this
-  // only needs to notify once per typing burst (no idle timeout) — stopTyping is called
-  // explicitly whenever the composer is cleared, blurred with no text, or the message is sent.
+  // Typing persists while the composer contains text. A typing burst sends one
+  // notification; clearing, blurring an empty composer, and sending stop it explicitly.
   const notifyTyping = useCallback(() => {
     if (!isTypingRef.current) {
       isTypingRef.current = true
