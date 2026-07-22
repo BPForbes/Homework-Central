@@ -873,8 +873,8 @@ constants, not every assertion.
 ## Analyzer and CI expectations
 
 Current CI enforces backend build/test, raw SQL rejection in backend application
-code, frontend lint, and frontend build. Other items in this section are review
-expectations unless matching analyzers or checks are added.
+code, frontend lint, and frontend build. Other review items are expectations
+unless matching analyzers or checks are added.
 
 Review and automation expectations:
 
