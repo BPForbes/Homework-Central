@@ -122,6 +122,13 @@ public sealed class TicketService(
         return await MapPortalConfigAsync(config, ct);
     }
 
+    /// <summary>
+    /// Opens a ticket by validating the portal intake, creating the private chat
+    /// channel, applying staff and opener access, creating optional watches,
+    /// sending inbox notifications, and refreshing chat navigation. See
+    /// docs/tickets-assessment.md for the portal-to-channel-to-watches-to-inbox
+    /// lifecycle.
+    /// </summary>
     public async Task<TicketDto> OpenTicketAsync(
         string portalRoomId,
         Guid openerUserId,
@@ -153,6 +160,8 @@ public sealed class TicketService(
         Dictionary<string, TicketPrefaceResult> prefaceResults =
             TicketIntakeValidator.ValidateAnswers(schema, request.Answers, prefaceChecks, filterName: portal.FilterName);
 
+        // Display numbers advance inside the transaction so each portal owns one
+        // channel-title sequence.
         int displayNumber = portal.NextDisplayNumber;
         portal.NextDisplayNumber = checked(displayNumber + 1);
         portal.UpdatedAtUtc = DateTime.UtcNow;
@@ -161,45 +170,21 @@ public sealed class TicketService(
         string filterName = string.IsNullOrWhiteSpace(portal.FilterName) ? purpose : portal.FilterName;
         string displayName = TicketDisplayNames.Open(filterName, displayNumber);
         DateTime now = DateTime.UtcNow;
-        Guid chatChannelId = Guid.NewGuid();
-        string roomId = CustomChannelIds.BuildRoomId(chatChannelId);
-        CustomChannel portalChannel = portal.Channel;
         bool aiOptOut = TicketIntakeValidator.IsAiOptOut(schema, request.Answers);
 
-        CustomChannel chatChannel = new()
-        {
-            ChannelId = chatChannelId,
-            RoomId = roomId,
-            DisplayName = displayName,
-            CategoryKey = portalChannel.CategoryKey,
-            CategoryDisplayName = portalChannel.CategoryDisplayName,
-            RoomType = CustomRoomType.Chat,
-            IsPrivate = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now,
-            CreatedByUserId = openerUserId,
-            OwnerAccountClass = portalChannel.OwnerAccountClass,
-            TieType = ChannelTieType.None,
-        };
-
-        List<CustomChannelAccessRuleInput> staffRules =
-            TicketJson.DeserializeAccessRules(portal.StaffAccessRulesJson);
-        await ApplyTicketAccessRulesAsync(chatChannel, staffRules, ct);
-        CustomChannelAccessRule openerRule = new()
-        {
-            AccessRuleId = Guid.NewGuid(),
-            ChannelId = chatChannelId,
-            AllowedUserId = openerUserId,
-        };
-        db.CustomChannelAccessRules.Add(openerRule);
-        chatChannel.AccessRules.Add(openerRule);
+        CustomChannel chatChannel = await CreateTicketChatChannelAsync(
+            portal,
+            openerUserId,
+            displayName,
+            now,
+            ct);
 
         Ticket ticket = new()
         {
             TicketId = Guid.NewGuid(),
             PortalChannelId = portal.ChannelId,
-            ChatChannelId = chatChannelId,
-            RoomId = roomId,
+            ChatChannelId = chatChannel.ChannelId,
+            RoomId = chatChannel.RoomId,
             DisplayNumber = displayNumber,
             Purpose = purpose,
             FilterName = filterName,
@@ -214,30 +199,12 @@ public sealed class TicketService(
 
         db.CustomChannels.Add(chatChannel);
         db.Tickets.Add(ticket);
+        // AI opt-out skips initial watches because watches feed automated
+        // assessment work; staff inbox notification still records the ticket.
         if (!aiOptOut)
             await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, now, ct);
 
-        if (string.Equals(filterName, DefaultTicketPortalPresets.TutorFilterName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase))
-        {
-            db.CandidateApplications.Add(new CandidateApplication
-            {
-                CandidateApplicationId = Guid.NewGuid(),
-                UserId = string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
-                    && schema.FirstOrDefault(q => q.TracksUser) is { } tracks
-                    && request.Answers.TryGetValue(tracks.Id, out JsonElement tracked)
-                    && TicketIntakeValidator.TryParseUserId(tracked, out Guid reportedUserId)
-                    ? reportedUserId
-                    : openerUserId,
-                PositionId = string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
-                    ? "mod_report"
-                    : "tutor",
-                Status = CandidateApplicationStatuses.InsufficientEvidence,
-                TicketId = ticket.TicketId,
-                AiOptOut = aiOptOut,
-                CreatedAtUtc = now,
-            });
-        }
+        CreateCandidateApplicationIfNeeded(ticket, schema, request.Answers, now);
 
         await db.SaveChangesAsync(ct);
 
@@ -706,6 +673,117 @@ public sealed class TicketService(
         return ticket;
     }
 
+    private async Task<CustomChannel> CreateTicketChatChannelAsync(
+        TicketPortalConfig portal,
+        Guid openerUserId,
+        string displayName,
+        DateTime now,
+        CancellationToken ct)
+    {
+        Guid chatChannelId = Guid.NewGuid();
+        CustomChannel portalChannel = portal.Channel;
+        CustomChannel chatChannel = new()
+        {
+            ChannelId = chatChannelId,
+            RoomId = CustomChannelIds.BuildRoomId(chatChannelId),
+            DisplayName = displayName,
+            CategoryKey = portalChannel.CategoryKey,
+            CategoryDisplayName = portalChannel.CategoryDisplayName,
+            RoomType = CustomRoomType.Chat,
+            IsPrivate = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedByUserId = openerUserId,
+            OwnerAccountClass = portalChannel.OwnerAccountClass,
+            TieType = ChannelTieType.None,
+        };
+
+        List<CustomChannelAccessRuleInput> staffRules =
+            TicketJson.DeserializeAccessRules(portal.StaffAccessRulesJson);
+        await ApplyTicketStaffAccessRulesAsync(chatChannel, staffRules, ct);
+        ApplyTicketOpenerAccess(chatChannel, openerUserId);
+
+        return chatChannel;
+    }
+
+    private void ApplyTicketOpenerAccess(CustomChannel chatChannel, Guid openerUserId)
+    {
+        // Private ticket channels need a direct opener rule; portal eligibility
+        // does not grant membership in the newly allocated chat room.
+        CustomChannelAccessRule openerRule = new()
+        {
+            AccessRuleId = Guid.NewGuid(),
+            ChannelId = chatChannel.ChannelId,
+            AllowedUserId = openerUserId,
+        };
+        db.CustomChannelAccessRules.Add(openerRule);
+        chatChannel.AccessRules.Add(openerRule);
+    }
+
+    private void CreateCandidateApplicationIfNeeded(
+        Ticket ticket,
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, JsonElement> answers,
+        DateTime now)
+    {
+        CandidateApplication? candidateApplication = ticket.FilterName switch
+        {
+            string filterName when string.Equals(
+                filterName,
+                DefaultTicketPortalPresets.ModFilterName,
+                StringComparison.OrdinalIgnoreCase)
+                => CreateCandidateApplication(
+                    ticket,
+                    ResolveModReportCandidateUserId(schema, answers, ticket.OpenedByUserId),
+                    "mod_report",
+                    now),
+            string filterName when string.Equals(
+                filterName,
+                DefaultTicketPortalPresets.TutorFilterName,
+                StringComparison.OrdinalIgnoreCase)
+                => CreateCandidateApplication(ticket, ticket.OpenedByUserId, "tutor", now),
+            _ => null,
+        };
+
+        if (candidateApplication is not null)
+            db.CandidateApplications.Add(candidateApplication);
+    }
+
+    private static CandidateApplication CreateCandidateApplication(
+        Ticket ticket,
+        Guid candidateUserId,
+        string positionId,
+        DateTime now) =>
+        new CandidateApplication
+        {
+            CandidateApplicationId = Guid.NewGuid(),
+            UserId = candidateUserId,
+            PositionId = positionId,
+            Status = CandidateApplicationStatuses.InsufficientEvidence,
+            TicketId = ticket.TicketId,
+            AiOptOut = ticket.AiTrackingOptOut,
+            CreatedAtUtc = now,
+        };
+
+    private static Guid ResolveModReportCandidateUserId(
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, JsonElement> answers,
+        Guid openerUserId)
+    {
+        // Mod-report assessment follows the reported account; malformed or
+        // missing tracked-user answers fall back to the opener.
+        TicketIntakeQuestionDto? trackedUserQuestion = schema.FirstOrDefault(question => question.TracksUser);
+        if (trackedUserQuestion is null)
+            return openerUserId;
+
+        if (!answers.TryGetValue(trackedUserQuestion.Id, out JsonElement trackedUserAnswer))
+            return openerUserId;
+
+        return TicketIntakeValidator.TryParseUserId(trackedUserAnswer, out Guid reportedUserId)
+            ? reportedUserId
+            : openerUserId;
+    }
+
     private async Task CreateInitialWatchesAsync(
         Ticket ticket,
         TicketPortalConfig portal,
@@ -920,7 +998,7 @@ public sealed class TicketService(
         return recipients.Count;
     }
 
-    private async Task ApplyTicketAccessRulesAsync(
+    private async Task ApplyTicketStaffAccessRulesAsync(
         CustomChannel channel,
         IReadOnlyList<CustomChannelAccessRuleInput> rules,
         CancellationToken ct)
