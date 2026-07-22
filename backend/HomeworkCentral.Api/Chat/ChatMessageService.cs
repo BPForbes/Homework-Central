@@ -573,27 +573,26 @@ public sealed class ChatMessageService(
         int attachmentOrder = 0;
         foreach (Guid attachmentId in distinctAttachmentIds)
         {
-            attachmentsById.TryGetValue(attachmentId, out ChatAttachment? attachment);
+            // Missing IDs must fail the send: otherwise attachment-only messages persist as
+            // "(attachment)" with no ChatMessageAttachment rows. See docs/chat.md.
+            if (!attachmentsById.TryGetValue(attachmentId, out ChatAttachment? attachment))
+                throw new InvalidOperationException("One or more attachments could not be found.");
 
-            switch (attachment)
+            if (attachment.UploadedByUserId != userId)
+                throw new InvalidOperationException("You can only attach files you uploaded.");
+
+            if (attachment.OwnerAccountClass != messageScope.AccountClass
+                || attachment.TenantDatabaseName != messageScope.TenantDatabaseName)
             {
-                case null:
-                    continue;
-                case { UploadedByUserId: Guid ownerId } when ownerId != userId:
-                    throw new InvalidOperationException("You can only attach files you uploaded.");
-                case ChatAttachment scopedAttachment
-                    when scopedAttachment.OwnerAccountClass != messageScope.AccountClass
-                        || scopedAttachment.TenantDatabaseName != messageScope.TenantDatabaseName:
-                    throw new InvalidOperationException("Attachment belongs to a different account scope.");
-                case { }:
-                    masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
-                    {
-                        MessageId = message.MessageId,
-                        AttachmentId = attachmentId,
-                        SortOrder = attachmentOrder++,
-                    });
-                    break;
+                throw new InvalidOperationException("Attachment belongs to a different account scope.");
             }
+
+            masterDb.ChatMessageAttachments.Add(new ChatMessageAttachment
+            {
+                MessageId = message.MessageId,
+                AttachmentId = attachmentId,
+                SortOrder = attachmentOrder++,
+            });
         }
     }
 

@@ -321,8 +321,10 @@ commit.
    `IShareableScopedResource` global query filter.
 4. Sends trim content, parse mentions, enforce guest/cooldown mention rules,
    resolve the sender username from claims, and create a `ChatMessage`.
-5. Attachment IDs are de-duplicated and linked only when the attachment belongs
-   to the sender and the same account scope.
+5. Attachment IDs are de-duplicated. Every requested ID must resolve to an
+   attachment owned by the sender in the same account scope; otherwise the send
+   fails with `400` and nothing is persisted (including attachment-only
+   `(attachment)` placeholder messages).
 6. Reply and mention notifications are inserted for allowed recipients.
 7. The message is saved, queued for assessment, and broadcast to the SignalR
    group key for the room and account-class bucket.
@@ -339,7 +341,8 @@ The current deployment model is a single backend process for development.
 2. The server stores file metadata and returns an attachment ID.
 3. The client includes that attachment ID in `SendChatMessageRequest.AttachmentIds`.
 4. `ChatMessageService` links each distinct attachment ID to the new message
-   only when ownership and account scope match.
+   when ownership and account scope match. Stale, deleted, or fabricated IDs
+   reject the entire send.
 5. Message DTOs include attachment metadata, scan status, hazard status, inline
    preview kind, and a download URL.
 
@@ -421,7 +424,9 @@ Access-token URLs are bearer secrets. The token payload contains attachment ID,
 minting user ID, and expiry. The HMAC signature uses `Jwt:Secret`, and token
 presence is cached under `att:tok:{attachmentId}:{signature}` in the configured
 distributed cache. A valid access-token URL bypasses the room-access check until
-the token expires or the cache entry disappears.
+the token expires or the cache entry disappears. Malformed Base64, GUID, or
+expiry values in `accessToken` are treated as unauthorized (`false` from
+`TryValidateAsync` → `401`), not as server errors.
 
 `ChatMessageService` mints viewer-specific download URLs when returning message
 DTOs that include attachments. Upload responses also include a signed download

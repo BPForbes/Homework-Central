@@ -171,6 +171,11 @@ public class ChatController(
                 _ => BadRequest(new { message = "Message content is invalid." }),
             };
         }
+        catch (InvalidOperationException ex)
+        {
+            // Missing, foreign-owned, or cross-scope attachment IDs fail the send before save.
+            return BadRequest(new { message = ex.Message });
+        }
 
         // Access was already confirmed above, so a null result here can only mean the
         // (non-whitespace) content was rejected for another reason, e.g. exceeding the max
