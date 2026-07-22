@@ -104,12 +104,16 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         DateTime leaseExpiresAtUtc = now.Add(PromotionLeaseDuration);
         // Pending -> Promoting is an atomic lease claim; concurrent workers lose
         // by observing zero updated rows rather than sharing a canonical write.
+        // Pending is always claimable. RetryPending allows a null/expired lease.
+        // Promoting is reclaimable only after the lease timestamp is past (null stays locked).
         int claimed = await db.NeuralNetTrainingPromotions
             .Where(x => x.PromotionId == candidate.PromotionId
                         && (x.Status == StatusPending
                             || (x.Status == StatusRetryPending
                                 && (x.LeaseExpiresAtUtc == null || x.LeaseExpiresAtUtc < now))
-                            || (x.Status == StatusPromoting && x.LeaseExpiresAtUtc < now)))
+                            || (x.Status == StatusPromoting
+                                && x.LeaseExpiresAtUtc != null
+                                && x.LeaseExpiresAtUtc < now)))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(x => x.Status, StatusPromoting)
                 .SetProperty(x => x.LeaseId, leaseId)

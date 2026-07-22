@@ -76,11 +76,10 @@ public sealed class TutorSubjectPrefaceCheck : VocabularyTicketPrefaceCheck
 
         foreach ((string generalMask, Type expertiseType) in ExpertiseTypes())
         {
-            foreach (FieldInfo field in expertiseType.GetFields(BindingFlags.Public | BindingFlags.Static))
+            foreach (FieldInfo field in expertiseType
+                .GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Where(field => field.FieldType == typeof(short)))
             {
-                if (field.FieldType != typeof(short))
-                    continue;
-
                 string display = ExpertiseDisplayName(field.Name);
                 builder.Add(field.Name, generalMask, display, isSpecific: true);
                 builder.Add(display, generalMask, display, isSpecific: true);

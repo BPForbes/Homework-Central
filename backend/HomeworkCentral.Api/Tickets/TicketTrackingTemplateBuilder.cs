@@ -54,14 +54,9 @@ public static class TicketTrackingTemplateBuilder
         return new PrefaceTemplateSummary(prefaceCategory, prefaceSpecifics);
     }
 
-    private static void AddSpecificLabels(TicketPrefaceResult result, List<string> prefaceSpecifics)
-    {
-        foreach (string label in result.SpecificLabels)
-        {
-            if (!prefaceSpecifics.Contains(label, StringComparer.OrdinalIgnoreCase))
-                prefaceSpecifics.Add(label);
-        }
-    }
+    private static void AddSpecificLabels(TicketPrefaceResult result, List<string> prefaceSpecifics) =>
+        prefaceSpecifics.AddRange(result.SpecificLabels
+            .Where(label => !prefaceSpecifics.Contains(label, StringComparer.OrdinalIgnoreCase)));
 
     private static List<TrackingTemplateIntakeItem> BuildIntakeItems(
         IReadOnlyList<TicketIntakeQuestionDto> schema,

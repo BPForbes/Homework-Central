@@ -866,28 +866,41 @@ public sealed class TicketService(
         DateTime now,
         CancellationToken ct)
     {
-        if (string.Equals(portal.TrackingMode, TicketTrackingModes.Opener, StringComparison.Ordinal))
+        switch (portal.TrackingMode)
         {
-            AddWatchEntity(ticket, openerUserId, "Ticket opener", TicketWatchSources.Intake, openerUserId, now);
-        }
+            case TicketTrackingModes.Opener:
+                AddWatchEntity(ticket, openerUserId, "Ticket opener", TicketWatchSources.Intake, openerUserId, now);
+                break;
 
-        if (string.Equals(portal.TrackingMode, TicketTrackingModes.FromIntakeField, StringComparison.Ordinal))
-        {
-            foreach (TicketIntakeQuestionDto question in schema.Where(q => q.TracksUser))
+            case TicketTrackingModes.FromIntakeField:
             {
-                if (!answers.TryGetValue(question.Id, out JsonElement value))
-                    continue;
+                IEnumerable<(TicketIntakeQuestionDto Question, Guid TrackedUserId)> intakeWatches = schema
+                    .Where(question => question.TracksUser)
+                    .Select(question =>
+                    {
+                        if (!answers.TryGetValue(question.Id, out JsonElement value)
+                            || !TicketIntakeValidator.TryParseUserId(value, out Guid trackedUserId))
+                        {
+                            return (Question: question, TrackedUserId: Guid.Empty, Resolved: false);
+                        }
 
-                if (!TicketIntakeValidator.TryParseUserId(value, out Guid trackedUserId))
-                    continue;
+                        return (Question: question, TrackedUserId: trackedUserId, Resolved: true);
+                    })
+                    .Where(item => item.Resolved)
+                    .Select(item => (item.Question, item.TrackedUserId));
 
-                AddWatchEntity(
-                    ticket,
-                    trackedUserId,
-                    question.Prompt,
-                    TicketWatchSources.Intake,
-                    openerUserId,
-                    now);
+                foreach ((TicketIntakeQuestionDto question, Guid trackedUserId) in intakeWatches)
+                {
+                    AddWatchEntity(
+                        ticket,
+                        trackedUserId,
+                        question.Prompt,
+                        TicketWatchSources.Intake,
+                        openerUserId,
+                        now);
+                }
+
+                break;
             }
         }
     }

@@ -121,11 +121,10 @@ public static class ChatMonitoringModerationConceptSignals
     private static string? ResolveConceptFromTexts(IReadOnlyList<string?> texts)
     {
         // Preface checks encode verified intake concepts before broad slug fallback.
-        foreach (string? text in texts)
+        foreach (string text in texts
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Select(candidate => candidate!))
         {
-            if (string.IsNullOrWhiteSpace(text))
-                continue;
-
             string? extractedConcept = ExtractPrefacePrimaryCategory(text);
             if (extractedConcept is not null)
                 return extractedConcept;

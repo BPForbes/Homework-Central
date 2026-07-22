@@ -863,7 +863,7 @@ cleanup from `Uploads:RootPath`.
 
 | Key | Purpose | Current default or behavior |
 |---|---|---|
-| `Uploads:RootPath` | Filesystem directory for attachment bytes. | `App_Data/uploads`; Docker sets `/app/App_Data/uploads`. |
+| `Uploads:RootPath` | Filesystem directory for attachment bytes. Attachment `StoragePath` values must stay relative under this root; rooted or `..` segments are rejected before open/delete. | `App_Data/uploads`; Docker sets `/app/App_Data/uploads`. |
 | `Uploads:MaxBytes` | Service-level maximum upload size. | `10 * 1024 * 1024`. |
 | `Uploads:OrphanTtlHours` | Age before unattached metadata rows and files are eligible for cleanup. | `24`. |
 | `Uploads:CleanupIntervalMinutes` | Background cleanup interval. | `60`. |

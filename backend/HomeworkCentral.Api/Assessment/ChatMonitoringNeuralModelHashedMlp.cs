@@ -217,7 +217,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 float avgGradScale = 1f / n;
                 float gradientL2 = NeuralNetFinite.OrZero(MathF.Sqrt((float)(gradSqSum * avgGradScale * avgGradScale)));
                 // Sentinel was float.MaxValue when no non-zero gradient was tracked.
-                if (!(minNonZeroAbsGradient < float.MaxValue))
+                if (minNonZeroAbsGradient >= float.MaxValue)
                     minNonZeroAbsGradient = 0;
                 maxAbsGradient = NeuralNetFinite.OrZero(maxAbsGradient * avgGradScale);
                 minNonZeroAbsGradient = NeuralNetFinite.OrZero(minNonZeroAbsGradient * avgGradScale);
@@ -663,7 +663,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         return -(target * MathF.Log(bounded) + (1 - target) * MathF.Log(1 - bounded));
     }
 
-    private NeuralNetTopologySnapshot BuildTopology(IReadOnlyList<string> layerLabels)
+    private NeuralNetTopologySnapshot BuildTopology(IReadOnlyList<string> topologyLayerLabels)
     {
         List<ReplayNode> nodes = [];
         for (int input = 0; input < layerWidths[0]; input++)
@@ -684,29 +684,29 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 >= 78 and < 86 => $"cascade-context-{input - 78}",
                 _ => $"feature-{input}",
             };
-            nodes.Add(new ReplayNode(nodes.Count, $"input-{input}", layerLabels[0], label, input, false));
+            nodes.Add(new ReplayNode(nodes.Count, $"input-{input}", topologyLayerLabels[0], label, input, false));
         }
 
         for (int layer = 1; layer < layerWidths.Length; layer++)
         {
             for (int node = 0; node < layerWidths[layer]; node++)
             {
-                string label;
-                if (layer == layerWidths.Length - 1)
-                {
-                    label = node switch
+                string label = layer == layerWidths.Length - 1
+                    ? node switch
                     {
                         0 => "Evidence",
                         1 => "Relevance",
                         _ => categoryLabels[node - 2],
-                    };
-                }
-                else
-                {
-                    label = $"{layerLabels[layer]}-{node + 1}";
-                }
+                    }
+                    : $"{topologyLayerLabels[layer]}-{node + 1}";
 
-                nodes.Add(new ReplayNode(nodes.Count, $"{layerLabels[layer]}-{node}", layerLabels[layer], label, null, true));
+                nodes.Add(new ReplayNode(
+                    nodes.Count,
+                    $"{topologyLayerLabels[layer]}-{node}",
+                    topologyLayerLabels[layer],
+                    label,
+                    null,
+                    true));
             }
         }
 

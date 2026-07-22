@@ -120,32 +120,14 @@ public static class ChatMonitoringTicketContext
         return ChatMonitoringModerationConcepts.CatchAll;
     }
 
-    private static string? FindLongestModerationSlug(string value)
-    {
-        string? bestSlug = null;
-        int bestLength = -1;
-        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
-        {
-            if (value.Contains(slug, StringComparison.Ordinal) && slug.Length > bestLength)
-            {
-                bestSlug = slug;
-                bestLength = slug.Length;
-            }
-        }
+    private static string? FindLongestModerationSlug(string value) =>
+        ChatMonitoringModerationConcepts.Slugs
+            .Where(slug => value.Contains(slug, StringComparison.Ordinal))
+            .OrderByDescending(slug => slug.Length)
+            .FirstOrDefault();
 
-        return bestSlug;
-    }
-
-    private static bool ContainsAny(string haystack, params string[] needles)
-    {
-        foreach (string needle in needles)
-        {
-            if (haystack.Contains(needle, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
-    }
+    private static bool ContainsAny(string haystack, params string[] needles) =>
+        needles.Any(needle => haystack.Contains(needle, StringComparison.Ordinal));
 
     /// <summary>Maps a free-text / heuristic category onto the softmax vocabulary index.</summary>
     public static int CategoryIndex(string? category, NeuralModelKindChatMonitoring kind) =>

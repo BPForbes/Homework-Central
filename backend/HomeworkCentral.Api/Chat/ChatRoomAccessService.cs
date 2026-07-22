@@ -79,15 +79,11 @@ public sealed class ChatRoomAccessService(
         Dictionary<string, ChatNavCategoryDto> categoriesByKey = categories
             .ToDictionary(category => category.Key, StringComparer.Ordinal);
 
-        // Merge has side effects on categories; keep an explicit loop for that seam.
-        List<CustomChannelSnapshot> unmatchedCustomChannels = new();
-        foreach (CustomChannelSnapshot channel in accessibleCustomChannels)
-        {
-            if (TryMergeCustomChannel(categories, categoriesByKey, channel))
-                continue;
-
-            unmatchedCustomChannels.Add(channel);
-        }
+        // TryMergeCustomChannel mutates categories/categoriesByKey; evaluate merge first,
+        // then keep only channels that still need a synthetic category.
+        List<CustomChannelSnapshot> unmatchedCustomChannels = accessibleCustomChannels
+            .Where(channel => !TryMergeCustomChannel(categories, categoriesByKey, channel))
+            .ToList();
 
         categories.AddRange(unmatchedCustomChannels
             .GroupBy(channel => channel.CategoryKey, StringComparer.Ordinal)
@@ -192,13 +188,27 @@ public sealed class ChatRoomAccessService(
         if (!channel.IsPrivate)
             return true;
 
-        return channel.AccessRules.Any(rule =>
-            (userId != Guid.Empty
-                && rule.AllowedUserId is Guid allowedUserId
-                && allowedUserId == userId)
-            || (rule.PlatformRoleBit is short platformBit && HasRole(masks.RoleMask, platformBit))
-            || (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId)));
+        return channel.AccessRules.Any(rule => MatchesPrivateAccessRule(rule, masks, userId));
     }
+
+    /// <summary>
+    /// Private custom channels admit the allow-listed user, a matching platform role bit,
+    /// or a matching custom role id. See docs/chat.md.
+    /// </summary>
+    private static bool MatchesPrivateAccessRule(
+        CustomChannelAccessSnapshot rule,
+        EffectiveMaskDto masks,
+        Guid userId) =>
+        rule switch
+        {
+            { AllowedUserId: Guid allowedUserId }
+                when userId != Guid.Empty && allowedUserId == userId => true,
+            { PlatformRoleBit: short platformBit }
+                when HasRole(masks.RoleMask, platformBit) => true,
+            { CustomRoleId: Guid customRoleId }
+                when masks.CustomRoleIds.Contains(customRoleId) => true,
+            _ => false,
+        };
 
     private static ChatNavCategoryDto BuildCategoryDto(
         ChatRoomDefinition categorySample,
