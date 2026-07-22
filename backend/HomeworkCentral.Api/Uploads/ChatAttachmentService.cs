@@ -251,9 +251,21 @@ public sealed class ChatAttachmentService(
         if (string.IsNullOrWhiteSpace(relativeStoragePath) || Path.IsPathRooted(relativeStoragePath))
             return false;
 
-        string combined = Path.Combine(rootPath, relativeStoragePath);
+        // Avoid Path.Combine: a rooted second argument would silently drop RootPath.
+        string normalizedRelative = relativeStoragePath
+            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+            .TrimStart(Path.DirectorySeparatorChar);
+        if (normalizedRelative.Contains(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || normalizedRelative.EndsWith("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         string rootFull = Path.GetFullPath(rootPath);
-        string candidateFull = Path.GetFullPath(combined);
+        string candidateFull = Path.GetFullPath(
+            rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar
+            + normalizedRelative);
         string rootPrefix = rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
         if (!candidateFull.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)

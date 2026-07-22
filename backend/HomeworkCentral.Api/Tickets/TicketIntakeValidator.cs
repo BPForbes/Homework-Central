@@ -91,11 +91,10 @@ public static class TicketIntakeValidator
         if (question.AllowedResponseKinds is null || question.AllowedResponseKinds.Count == 0)
             throw new InvalidOperationException($"Mixed question '{question.Id}' needs allowedResponseKinds.");
 
-        foreach (string kind in question.AllowedResponseKinds)
-        {
-            if (!AllowedResponseKinds.Contains(kind))
-                throw new InvalidOperationException($"Unsupported response kind '{kind}'.");
-        }
+        string? unsupportedKind = question.AllowedResponseKinds
+            .FirstOrDefault(kind => !AllowedResponseKinds.Contains(kind));
+        if (unsupportedKind is not null)
+            throw new InvalidOperationException($"Unsupported response kind '{unsupportedKind}'.");
     }
 
     /// <summary>
@@ -111,11 +110,17 @@ public static class TicketIntakeValidator
         ValidateSchema(schema);
         Dictionary<string, TicketPrefaceResult> prefaceByQuestion = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (TicketIntakeQuestionDto question in schema)
-        {
-            if (!TryGetSubmittedAnswer(question, answers, out JsonElement value))
-                continue;
+        IEnumerable<(TicketIntakeQuestionDto Question, JsonElement Value)> submittedAnswers = schema
+            .Select(question =>
+            {
+                bool present = TryGetSubmittedAnswer(question, answers, out JsonElement value);
+                return (Question: question, Value: value, Present: present);
+            })
+            .Where(item => item.Present)
+            .Select(item => (item.Question, item.Value));
 
+        foreach ((TicketIntakeQuestionDto question, JsonElement value) in submittedAnswers)
+        {
             ValidateAnswerValue(question, value);
             ProcessPrefaceCheck(question, value, answers, prefaceByQuestion, prefaceChecks, filterName);
         }

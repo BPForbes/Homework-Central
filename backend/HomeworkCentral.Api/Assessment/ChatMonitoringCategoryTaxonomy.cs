@@ -94,17 +94,12 @@ public static class ChatMonitoringCategoryTaxonomy
             _ => "tutoring-competency",
         };
 
-    private static string? TryNormalizeExactSubject(string raw)
-    {
-        foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories
-            .OrderByDescending(subject => subject.ExpertiseMaskName.Length))
-        {
-            if (string.Equals(subject.ExpertiseMaskName, raw, StringComparison.OrdinalIgnoreCase))
-                return SubjectToTutoringSlug(subject.ExpertiseMaskName);
-        }
-
-        return null;
-    }
+    private static string? TryNormalizeExactSubject(string raw) =>
+        SubjectExpertiseCatalog.Categories
+            .OrderByDescending(subject => subject.ExpertiseMaskName.Length)
+            .Where(subject => string.Equals(subject.ExpertiseMaskName, raw, StringComparison.OrdinalIgnoreCase))
+            .Select(subject => SubjectToTutoringSlug(subject.ExpertiseMaskName))
+            .FirstOrDefault();
 
     private static string? TryNormalizeTutoringAlias(string value) => value switch
     {
@@ -118,28 +113,23 @@ public static class ChatMonitoringCategoryTaxonomy
         _ => null,
     };
 
-    private static string? TryFindSubjectSlugInText(string value)
-    {
-        string? bestSlug = null;
-        int bestLength = -1;
-        foreach (SubjectExpertiseCategory subject in SubjectExpertiseCatalog.Categories)
-        {
-            string slug = SubjectToTutoringSlug(subject.ExpertiseMaskName);
-            string stem = slug["tutoring-".Length..];
-            string spaced = stem.Replace('-', ' ');
-            string compact = stem.Replace("-", "", StringComparison.Ordinal);
-            if ((value.Contains(spaced, StringComparison.Ordinal)
-                    || value.Contains(stem, StringComparison.Ordinal)
-                    || value.Contains(compact, StringComparison.Ordinal))
-                && stem.Length > bestLength)
+    private static string? TryFindSubjectSlugInText(string value) =>
+        SubjectExpertiseCatalog.Categories
+            .Select(subject =>
             {
-                bestLength = stem.Length;
-                bestSlug = slug;
-            }
-        }
-
-        return bestSlug;
-    }
+                string slug = SubjectToTutoringSlug(subject.ExpertiseMaskName);
+                string stem = slug["tutoring-".Length..];
+                string spaced = stem.Replace('-', ' ');
+                string compact = stem.Replace("-", "", StringComparison.Ordinal);
+                bool matched = value.Contains(spaced, StringComparison.Ordinal)
+                    || value.Contains(stem, StringComparison.Ordinal)
+                    || value.Contains(compact, StringComparison.Ordinal);
+                return (Slug: slug, StemLength: stem.Length, Matched: matched);
+            })
+            .Where(candidate => candidate.Matched)
+            .OrderByDescending(candidate => candidate.StemLength)
+            .Select(candidate => candidate.Slug)
+            .FirstOrDefault();
 
     private static string NormalizeModerationCategory(string value)
     {
@@ -149,24 +139,17 @@ public static class ChatMonitoringCategoryTaxonomy
         if (ChatMonitoringModerationConcepts.TryGet(mapped, out _))
             return mapped;
 
-        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
-        {
-            if (string.Equals(slug, value, StringComparison.OrdinalIgnoreCase))
-                return slug;
-        }
+        string? exactSlug = ChatMonitoringModerationConcepts.Slugs
+            .FirstOrDefault(slug => string.Equals(slug, value, StringComparison.OrdinalIgnoreCase));
+        if (exactSlug is not null)
+            return exactSlug;
 
-        string? best = null;
-        int bestLength = -1;
-        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
-        {
-            if (value.Contains(slug, StringComparison.OrdinalIgnoreCase) && slug.Length > bestLength)
-            {
-                best = slug;
-                bestLength = slug.Length;
-            }
-        }
-
-        return best ?? ChatMonitoringModerationConcepts.CatchAll;
+        // Prefer the longest embedded slug so "hate-speech-harassment" wins over "hate".
+        return ChatMonitoringModerationConcepts.Slugs
+            .Where(slug => value.Contains(slug, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(slug => slug.Length)
+            .FirstOrDefault()
+            ?? ChatMonitoringModerationConcepts.CatchAll;
     }
 
     public static string SubjectToTutoringSlug(string subjectMaskName) => subjectMaskName switch

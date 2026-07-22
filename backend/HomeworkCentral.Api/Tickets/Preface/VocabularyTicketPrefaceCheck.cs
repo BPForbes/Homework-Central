@@ -55,21 +55,18 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
 
     private void AddVerifiedTokenHits(string freeText, PrefaceExtractionBuilder builder)
     {
-        foreach (string raw in SplitTokens(freeText))
-        {
-            TicketPrefaceTokenResult token = ResolveToken(raw);
-            if (!token.Verified
-                || string.IsNullOrWhiteSpace(token.Category)
-                || string.IsNullOrWhiteSpace(token.Label))
-            {
-                continue;
-            }
-
-            builder.Add(
-                new VocabEntry(token.Category, token.Label, token.IsSpecific),
+        IEnumerable<(VocabEntry Entry, string Normalized, string Raw)> verifiedHits = SplitTokens(freeText)
+            .Select(ResolveToken)
+            .Where(token => token.Verified
+                && !string.IsNullOrWhiteSpace(token.Category)
+                && !string.IsNullOrWhiteSpace(token.Label))
+            .Select(token => (
+                new VocabEntry(token.Category!, token.Label!, token.IsSpecific),
                 token.NormalizedToken,
-                token.RawToken);
-        }
+                token.RawToken));
+
+        foreach ((VocabEntry entry, string normalized, string raw) in verifiedHits)
+            builder.Add(entry, normalized, raw);
     }
 
     /// <summary>
@@ -261,17 +258,10 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
     private void MergeNarrativeHits(string freeText, List<string> categories, List<string> specifics)
     {
         TicketPrefaceExtraction extraction = Extract(freeText);
-        foreach (string category in extraction.Categories)
-        {
-            if (!categories.Contains(category, StringComparer.OrdinalIgnoreCase))
-                categories.Add(category);
-        }
-
-        foreach (string label in extraction.SpecificLabels)
-        {
-            if (!specifics.Contains(label, StringComparer.OrdinalIgnoreCase))
-                specifics.Add(label);
-        }
+        categories.AddRange(extraction.Categories
+            .Where(category => !categories.Contains(category, StringComparer.OrdinalIgnoreCase)));
+        specifics.AddRange(extraction.SpecificLabels
+            .Where(label => !specifics.Contains(label, StringComparer.OrdinalIgnoreCase)));
     }
 
     private static TicketPrefaceResult BuildSuccessfulResult(TokenResolutionSummary summary, string display)
@@ -426,13 +416,12 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
                 builder.Append(ch);
                 prev = ch;
             }
-            else if (ch is ' ' or '-' or '_' or '/' or '\\' or '&' or '+')
+            else if ((ch is ' ' or '-' or '_' or '/' or '\\' or '&' or '+')
+                     && prev != ' '
+                     && builder.Length > 0)
             {
-                if (prev != ' ' && builder.Length > 0)
-                {
-                    builder.Append(' ');
-                    prev = ' ';
-                }
+                builder.Append(' ');
+                prev = ' ';
             }
         }
 

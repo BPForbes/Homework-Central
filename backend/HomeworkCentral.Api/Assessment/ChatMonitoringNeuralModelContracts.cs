@@ -55,10 +55,11 @@ public sealed record ChatMonitoringNeuralModelInput(
     private static float[] ToMultiHot(IReadOnlyList<string> generals)
     {
         float[] hot = new float[ChatMonitoringSubjectSignals.GeneralSubjectCount];
-        foreach (string general in generals)
+        foreach (int index in generals
+            .Select(ChatMonitoringSubjectSignals.GeneralIndex)
+            .Where(index => index >= 0))
         {
-            int index = ChatMonitoringSubjectSignals.GeneralIndex(general);
-            if (index >= 0) hot[index] = 1f;
+            hot[index] = 1f;
         }
 
         return hot;

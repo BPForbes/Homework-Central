@@ -137,17 +137,16 @@ public static class ChatMonitoringModerationConcepts
 
     public static bool TryGet(string slug, out ModerationConceptDefinition concept)
     {
-        foreach (ModerationConceptDefinition item in All)
+        ModerationConceptDefinition? match = All
+            .FirstOrDefault(item => string.Equals(item.Slug, slug, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
         {
-            if (string.Equals(item.Slug, slug, StringComparison.OrdinalIgnoreCase))
-            {
-                concept = item;
-                return true;
-            }
+            concept = default!;
+            return false;
         }
 
-        concept = default!;
-        return false;
+        concept = match;
+        return true;
     }
 
     public static string FamilyOf(string slug) =>

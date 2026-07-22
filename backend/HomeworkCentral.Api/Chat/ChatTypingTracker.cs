@@ -59,16 +59,15 @@ public sealed class ChatTypingTracker : IChatTypingTracker
         // Sweep every room: a connection can leak into a room if SetTyping moved rooms without
         // clearing the old entry (fixed above, but this also cleans up state left by older builds).
         (string GroupKey, Guid UserId)? notify = null;
-        foreach (KeyValuePair<string, ConcurrentDictionary<Guid, TypingEntry>> roomPair in _rooms.ToArray())
-        {
-            foreach (KeyValuePair<Guid, TypingEntry> userPair in roomPair.Value.ToArray())
-            {
-                if (!userPair.Value.ConnectionIds.ContainsKey(connectionId))
-                    continue;
+        IEnumerable<(string GroupKey, Guid UserId)> connectionRooms = _rooms.ToArray()
+            .SelectMany(roomPair => roomPair.Value.ToArray()
+                .Where(userPair => userPair.Value.ConnectionIds.ContainsKey(connectionId))
+                .Select(userPair => (GroupKey: roomPair.Key, UserId: userPair.Key)));
 
-                if (RemoveConnectionFromRoom(roomPair.Key, userPair.Key, connectionId))
-                    notify = (roomPair.Key, userPair.Key);
-            }
+        foreach ((string groupKey, Guid userId) in connectionRooms)
+        {
+            if (RemoveConnectionFromRoom(groupKey, userId, connectionId))
+                notify = (groupKey, userId);
         }
 
         return notify;

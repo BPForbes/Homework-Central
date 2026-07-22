@@ -246,11 +246,10 @@ public static class ChatMonitoringSubjectSignals
     {
         SubjectExtractionBuilder builder = new();
 
-        foreach (string? text in texts)
+        foreach (string text in texts
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Select(candidate => candidate!))
         {
-            if (string.IsNullOrWhiteSpace(text))
-                continue;
-
             builder.Merge(TutorSubjectTextProcessor.ExtractSubjects(text));
             MergeTemplateSubjectTexts(text, builder);
         }
@@ -343,16 +342,9 @@ public static class ChatMonitoringSubjectSignals
         _ => null,
     };
 
-    private static string CanonicalMask(string value)
-    {
-        foreach (string name in GeneralOrder)
-        {
-            if (string.Equals(name, value, StringComparison.OrdinalIgnoreCase))
-                return name;
-        }
-
-        return value;
-    }
+    private static string CanonicalMask(string value) =>
+        GeneralOrder.FirstOrDefault(name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase))
+        ?? value;
 
     private static (string, string) Key(string left, string right)
     {
@@ -376,23 +368,11 @@ public static class ChatMonitoringSubjectSignals
 
         public void Merge(TutorSubjectTextProcessor.SubjectExtraction extraction)
         {
-            foreach (string general in extraction.GeneralMasks)
-            {
-                if (!_generals.Contains(general, StringComparer.OrdinalIgnoreCase))
-                    _generals.Add(general);
-            }
-
-            foreach (string label in extraction.ExpertiseLabels)
-            {
-                if (!_expertise.Contains(label, StringComparer.OrdinalIgnoreCase))
-                    _expertise.Add(label);
-            }
-
-            foreach (TutorSubjectTextProcessor.SubjectHit hit in extraction.Hits)
-            {
-                if (!ContainsHit(hit))
-                    _hits.Add(hit);
-            }
+            _generals.AddRange(extraction.GeneralMasks
+                .Where(general => !_generals.Contains(general, StringComparer.OrdinalIgnoreCase)));
+            _expertise.AddRange(extraction.ExpertiseLabels
+                .Where(label => !_expertise.Contains(label, StringComparer.OrdinalIgnoreCase)));
+            _hits.AddRange(extraction.Hits.Where(hit => !ContainsHit(hit)));
         }
 
         public TutorSubjectTextProcessor.SubjectExtraction Build() =>

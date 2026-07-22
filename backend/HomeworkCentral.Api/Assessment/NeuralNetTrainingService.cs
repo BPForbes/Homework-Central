@@ -412,7 +412,12 @@ public sealed class NeuralNetTrainingService(
         {
             return JsonSerializer.Serialize(timings.ToReport(), JsonOptions);
         }
-        catch (Exception ex)
+        catch (NotSupportedException ex)
+        {
+            logger.LogWarning(ex, "Failed to serialize neural-net training report.");
+            return """{"error":"report-serialization-failed"}""";
+        }
+        catch (JsonException ex)
         {
             logger.LogWarning(ex, "Failed to serialize neural-net training report.");
             return """{"error":"report-serialization-failed"}""";
@@ -709,12 +714,25 @@ public sealed class NeuralNetTrainingService(
     {
         if (runContext.PendingTrain.Count > 0)
         {
-            try { await FlushPendingTrainingAsync(runContext, CancellationToken.None); }
-            catch { /* Failed drains cannot hide the original training failure. */ }
+            try
+            {
+                await FlushPendingTrainingAsync(runContext, CancellationToken.None);
+            }
+            catch (Exception drainEx)
+            {
+                // Best-effort drain only; preserve the original training FailureReason.
+                logger.LogWarning(drainEx, "Failed to flush pending chat-monitor training after run failure.");
+            }
         }
 
-        try { await runContext.Batch.FlushAsync(CancellationToken.None); }
-        catch { /* Failed drains cannot hide the original training failure. */ }
+        try
+        {
+            await runContext.Batch.FlushAsync(CancellationToken.None);
+        }
+        catch (Exception drainEx)
+        {
+            logger.LogWarning(drainEx, "Failed to flush chat-monitor persistence batch after run failure.");
+        }
 
         runContext.Run.Status = "Failed";
         runContext.Run.CompletedAtUtc = DateTime.UtcNow;
