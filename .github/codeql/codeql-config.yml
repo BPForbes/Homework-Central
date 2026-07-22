@@ -1,0 +1,16 @@
+# Shared CodeQL configuration for C# and JavaScript/TypeScript analysis.
+# See docs/COMMENT_DOCUMENTATION_GUIDE.md#analyzer-and-ci-expectations
+name: Homework Central
+
+queries:
+  # Security plus maintainability/quality queries (broader than default security-only).
+  - uses: security-and-quality
+
+paths-ignore:
+  - '**/Migrations/**'
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/.vite/**'
+  - '**/bin/**'
+  - '**/obj/**'
+  - 'llm-service/**'
