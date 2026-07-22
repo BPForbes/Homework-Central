@@ -1,11 +1,10 @@
 namespace HomeworkCentral.Api.Uploads;
 
 /// <summary>
-/// Purges unattached uploads older than <see cref="UploadOptions.OrphanTtlHours"/> so failed
-/// multi-file composer uploads do not accumulate forever on disk/DB.
+/// Purges unattached uploads past <see cref="UploadOptions.OrphanTtlHours"/> so abandoned
+/// composer uploads (e.g. partial multi-file failures) do not accumulate on disk/DB.
 /// </summary>
 public interface IOrphanAttachmentCleanupService
 {
-    /// <summary>Deletes eligible orphan rows and files. Returns the number of attachments purged.</summary>
     Task<int> PurgeOrphansAsync(CancellationToken ct = default);
 }

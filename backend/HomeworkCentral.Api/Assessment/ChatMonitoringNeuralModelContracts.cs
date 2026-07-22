@@ -1,6 +1,5 @@
 namespace HomeworkCentral.Api.Assessment;
 
-/// <summary>Which dual CPU hashed-MLP chat monitor is addressed (moderation vs tutoring cascade).</summary>
 public enum NeuralModelKindChatMonitoring
 {
     Moderation,
@@ -8,22 +7,17 @@ public enum NeuralModelKindChatMonitoring
 }
 
 /// <summary>
-/// Student-model features for one scored message. Scalar signals are expected in approximately
-/// <c>[0, 1]</c> unless noted; multi-hot vectors use general-subject indices from
-/// <see cref="ChatMonitoringSubjectSignals"/>. <see cref="CascadeContext"/> carries stage-1
-/// concept/subject router outputs into stage-2 when present.
+/// Student features for one scored message. Scalars are roughly <c>[0, 1]</c>; multi-hots use
+/// <see cref="ChatMonitoringSubjectSignals"/> indices. <see cref="CascadeContext"/> is stage-1
+/// router output into stage-2 when present.
 /// </summary>
 public sealed record ChatMonitoringNeuralModelInput(
     string Requirement,
     string ThreadContext,
     string Message,
-    /// <summary>Normalized community approval in <c>[0, 1]</c> (from votes or synthetic sampling).</summary>
     float CommunityVote,
-    /// <summary>Effective channel relevance in <c>[0, 1]</c>.</summary>
     float ChannelRelevance,
-    /// <summary>Thread continuity prior in <c>[0, 1]</c>.</summary>
     float ThreadContinuity,
-    /// <summary>Previous student score prior in <c>[0, 1]</c>.</summary>
     float PriorScore,
     float AppliedSubjectCountNorm = 0f,
     float ExactSubjectMatch = 0f,
@@ -78,11 +72,7 @@ public sealed record ChatMonitoringNeuralModelInput(
 /// </summary>
 public sealed record ChatMonitoringNeuralModelTargets(float Evidence, float Relevance, int CategoryIndex = -1);
 
-/// <summary>
-/// Student inference output. <see cref="Evidence"/>, <see cref="Relevance"/>,
-/// <see cref="Confidence"/>, and <see cref="CategoryConfidence"/> are probabilities in
-/// <c>[0, 1]</c>; <see cref="Category"/> is a taxonomy slug (moderation concept or tutoring label).
-/// </summary>
+/// <summary>Evidence/relevance/confidence are probabilities in <c>[0, 1]</c>.</summary>
 public sealed record ChatMonitoringNeuralModelPrediction(
     float Evidence,
     float Relevance,

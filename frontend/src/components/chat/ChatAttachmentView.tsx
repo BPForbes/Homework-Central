@@ -205,7 +205,6 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
           <div className="chat-attachment-hazard-preview">
             <p className="chat-attachment-hazard-banner">Code file — review before running.</p>
             <pre className="hc-code-block rich-content">
-              {/* HTML from highlightCode (highlight.js escapes entity content). */}
               <code className="hljs" dangerouslySetInnerHTML={{ __html: codeHtml }} />
             </pre>
           </div>
@@ -223,7 +222,6 @@ export function ChatAttachmentView({ attachment }: ChatAttachmentViewProps) {
       return (
         <div className="chat-attachment-inline">
           <pre className="hc-code-block rich-content chat-attachment-text-block">
-            {/* HTML from highlightCode (highlight.js escapes entity content). */}
             <code className="hljs" dangerouslySetInnerHTML={{ __html: codeHtml }} />
           </pre>
           <button

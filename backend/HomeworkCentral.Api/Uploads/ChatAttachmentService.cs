@@ -13,11 +13,6 @@ using Microsoft.Extensions.Options;
 
 namespace HomeworkCentral.Api.Uploads;
 
-/// <summary>
-/// Client-facing attachment metadata returned after upload and on message DTOs.
-/// <see cref="DownloadUrl"/> is a short-lived signed URL; <see cref="ScanStatus"/> is the
-/// stored <see cref="MalwareScanResult"/> name. See docs/chat.md.
-/// </summary>
 public sealed record ChatAttachmentDto(
     Guid AttachmentId,
     string FileName,
@@ -29,8 +24,8 @@ public sealed record ChatAttachmentDto(
     string ScanStatus);
 
 /// <summary>
-/// Result of opening an attachment for download. <see cref="Stream"/> is null when the caller
-/// must acknowledge risk (<see cref="RequiresCaution"/>) before bytes are released.
+/// <see cref="Stream"/> is null when <see cref="RequiresCaution"/> is true until the caller
+/// acknowledges risk; used so infected downloads can return 409 without leaking bytes.
 /// </summary>
 public sealed record AttachmentReadResult(
     Stream? Stream,
@@ -39,23 +34,14 @@ public sealed record AttachmentReadResult(
     MalwareScanResult ScanStatus,
     bool RequiresCaution);
 
-/// <summary>
-/// Upload, authorized read, and orphan delete for chat attachments. Enforces feature bits,
-/// MIME/hazard inspection, malware scan status, room-or-token download auth, and infected
-/// caution gating. See docs/chat.md.
-/// </summary>
+/// <summary>Chat attachment upload/read/delete. Auth, scan, and caution rules: docs/chat.md.</summary>
 public interface IChatAttachmentService
 {
-    /// <summary>
-    /// Validates size/feature bits, inspects type, scans, stores bytes, and returns metadata
-    /// with a signed download URL. Throws <see cref="InvalidOperationException"/> on policy failures.
-    /// </summary>
     Task<ChatAttachmentDto> UploadAsync(Guid userId, IFormFile file, CancellationToken ct = default);
 
     /// <summary>
-    /// Opens an attachment when the caller owns it, can access a linked room, or presents a
-    /// validated access token. Returns null when inaccessible; sets <see cref="AttachmentReadResult.RequiresCaution"/>
-    /// for infected files until <paramref name="riskAcknowledged"/> is true.
+    /// Owner, room-linked peer, or validated access token. Infected files stay caution-gated
+    /// until <paramref name="riskAcknowledged"/> is true.
     /// </summary>
     Task<AttachmentReadResult?> OpenReadAsync(
         Guid attachmentId,
@@ -64,10 +50,7 @@ public interface IChatAttachmentService
         bool accessTokenValidated = false,
         bool riskAcknowledged = false);
 
-    /// <summary>
-    /// Deletes an uploader-owned attachment that is not yet linked to a message.
-    /// Returns false when missing, not owned, or already attached.
-    /// </summary>
+    /// <summary>Only unattached uploads owned by the caller (linked messages keep the file).</summary>
     Task<bool> DeleteUnattachedAsync(Guid attachmentId, Guid userId, CancellationToken ct = default);
 }
 

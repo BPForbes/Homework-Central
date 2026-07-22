@@ -5,10 +5,6 @@ using Microsoft.Extensions.Options;
 
 namespace HomeworkCentral.Api.Uploads;
 
-/// <summary>
-/// Periodically runs <see cref="IOrphanAttachmentCleanupService"/> on
-/// <see cref="UploadOptions.CleanupIntervalMinutes"/>.
-/// </summary>
 public sealed class OrphanAttachmentCleanupWorker(
     IServiceScopeFactory scopeFactory,
     IOptions<UploadOptions> options,

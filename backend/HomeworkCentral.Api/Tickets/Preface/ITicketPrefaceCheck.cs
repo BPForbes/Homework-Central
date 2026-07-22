@@ -41,17 +41,14 @@ public interface ITicketPrefaceCheck
     TicketPrefaceExtraction Extract(string? freeText);
 }
 
-/// <summary>DI-discovered preface checks keyed by intake question id and optional portal filter.</summary>
 public interface ITicketPrefaceCheckResolver
 {
     /// <summary>Resolve a check for an intake question, optionally scoped by portal filter name.</summary>
     ITicketPrefaceCheck? Resolve(string questionId, string? filterName = null);
 
-    /// <summary>All registered checks (built-in plus custom portal extensions).</summary>
     IReadOnlyList<ITicketPrefaceCheck> All { get; }
 }
 
-/// <summary>One verified vocabulary hit extracted from free text.</summary>
 public sealed record TicketPrefaceHit(
     string Category,
     string Label,
@@ -59,7 +56,7 @@ public sealed record TicketPrefaceHit(
     string MatchedKey,
     string? RawToken = null);
 
-/// <summary>Lenient structured extraction used for monitoring / cascade inputs (never blocks intake).</summary>
+/// <summary>Lenient extraction for monitoring / cascade inputs; never blocks ticket intake.</summary>
 public sealed record TicketPrefaceExtraction(
     IReadOnlyList<string> Categories,
     IReadOnlyList<string> SpecificLabels,
@@ -69,7 +66,6 @@ public sealed record TicketPrefaceExtraction(
     public static TicketPrefaceExtraction Empty { get; } = new([], [], [], null);
 }
 
-/// <summary>Per-token verification outcome for strict intake validation.</summary>
 public sealed record TicketPrefaceTokenResult(
     string RawToken,
     string NormalizedToken,
@@ -80,8 +76,8 @@ public sealed record TicketPrefaceTokenResult(
     string? FailureReason);
 
 /// <summary>
-/// Intake preface outcome. When <see cref="Ok"/> is false, ticket open fails with
-/// <see cref="ErrorMessage"/>; on success <see cref="CanonicalDisplay"/> may rewrite the answer.
+/// When <see cref="Ok"/> is false, ticket open fails with <see cref="ErrorMessage"/>.
+/// On success, intake may rewrite the answer to <see cref="CanonicalDisplay"/>.
 /// </summary>
 public sealed record TicketPrefaceResult(
     bool Ok,

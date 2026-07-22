@@ -7,63 +7,36 @@ using System.Text.Json;
 
 namespace HomeworkCentral.Api.Assessment;
 
-/// <summary>Outcome of deleting a synthetic training session from the admin Neural Net UI.</summary>
 public enum NeuralNetTrainingSessionRemovalResult
 {
     Removed,
     NotFound,
-    /// <summary>Session is claimed by the worker; deletion would race mid-training.</summary>
+    /// <summary>Claimed by the worker; deleting would race mid-training.</summary>
     Running,
 }
 
 /// <summary>
-/// Admin contract for ticket AI training feedback, synthetic sessions, replay reports, and
-/// visualizer summaries. Mutates training examples and session rows; canonical promotion is
-/// handled separately by <see cref="NeuralNetTrainingPromoter"/>. See docs/tickets.md.
+/// Admin training feedback, synthetic sessions, and replay reports.
+/// Canonical promotion is handled by <see cref="NeuralNetTrainingPromoter"/>, not this service.
 /// </summary>
 public interface INeuralNetTrainingService
 {
-    /// <summary>Lists reviewer score events awaiting staff approve/reject for student training.</summary>
     Task<IReadOnlyList<NeuralNetTrainingFeedbackDto>> GetPendingFeedbackAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Approves reviewer labels into a <c>TicketModelTrainingExample</c>, trains the in-process
-    /// student model, and upserts the vector store entry. Throws <see cref="InvalidOperationException"/>
-    /// when the event is missing, rejected, or incomplete.
-    /// </summary>
     Task<NeuralNetTrainingFeedbackDto> ApproveAsync(Guid scoreEventId, Guid actorUserId, CancellationToken ct = default);
-
-    /// <summary>Marks feedback rejected so it cannot later train the student.</summary>
     Task RejectAsync(Guid scoreEventId, Guid actorUserId, CancellationToken ct = default);
-
-    /// <summary>Aggregate counts for approved examples, pending feedback, and session history.</summary>
     Task<NeuralNetDataManagementDto> GetDataManagementAsync(CancellationToken ct = default);
-
-    /// <summary>Cascade topology / stage shapes for the admin visualizer panel.</summary>
     Task<NeuralNetVisualizerDto> GetVisualizerAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Enqueues a synthetic training session (bounded queue). Returns Accepted-shaped DTO;
-    /// work runs on <see cref="NeuralNetTrainingWorker"/>.
-    /// </summary>
     Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default);
-
-    /// <summary>Recent sessions with per-monitor run status and replay availability.</summary>
     Task<IReadOnlyList<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Returns V2 replay JSON for a monitor kind, or legacy session report JSON when
-    /// <paramref name="chatMonitoringKind"/> is null. Null when the report is missing.
+    /// V2 replay JSON for a monitor kind, or legacy session report JSON when
+    /// <paramref name="chatMonitoringKind"/> is null.
     /// </summary>
     Task<string?> GetSessionReportAsync(Guid sessionId, NeuralModelKindChatMonitoring? chatMonitoringKind = null, CancellationToken ct = default);
 
-    /// <summary>Worker entry point: runs one queued session to Completed/Failed/Cancelled.</summary>
     Task RunSyntheticSessionAsync(Guid sessionId, CancellationToken ct = default);
-
-    /// <summary>Drains the next queued session if present. Returns false when the queue is empty.</summary>
     Task<bool> RunNextSyntheticSessionAsync(CancellationToken ct = default);
-
-    /// <summary>Removes a non-running session and frees its queue slot when still pending.</summary>
     Task<NeuralNetTrainingSessionRemovalResult> RemoveSessionAsync(Guid sessionId, CancellationToken ct = default);
 }
 

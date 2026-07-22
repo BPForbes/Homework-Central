@@ -1,9 +1,7 @@
 namespace HomeworkCentral.Api.Uploads;
 
 /// <summary>
-/// MIME/hazard classification from byte sniffing. Hazards never receive an
-/// <see cref="InlinePreviewKind"/>; non-hazard kinds are <c>image</c>, <c>video</c>,
-/// <c>audio</c>, <c>pdf</c>, or <c>text</c>.
+/// Byte-sniffed type. Hazards never get an <see cref="InlinePreviewKind"/> (no inline media/code preview).
 /// </summary>
 public sealed record AttachmentTypeInspectionResult(
     string ContentType,
