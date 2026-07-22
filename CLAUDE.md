@@ -28,6 +28,16 @@ Hard rules:
 
 - Do not use C# `var`; use explicit local and iteration types.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
+- Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
+  unindented at the end of the function.
+- Prefer speakable names. Abbreviations that cannot be spoken clearly as words or standard
+  domain terms must be renamed (for example prefer `roomId` over `rid`, `eligibleUsers`
+  over `eus`). Conventional short forms such as `ct` for `CancellationToken` and small
+  loop indices remain acceptable.
+- Prefer `Where` / `Select` / `ToDictionary` / `ToHashSet` / `map` / `filter` (and similar)
+  for transforming or selecting members of collections when that is clearer than a
+  hand-written `for` loop. Use an explicit loop when the body has multi-step side effects,
+  early exits that do not map cleanly, or performance-critical inner kernels.
 - Comments must explain project-specific intent, constraints, trust boundaries, state
   ownership, lifecycle behavior, or non-obvious implementation decisions.
 - Comments must not be self-referential and must not mention an AI agent, prompt,

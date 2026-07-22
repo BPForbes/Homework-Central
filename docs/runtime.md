@@ -152,12 +152,14 @@ resource limits, and launcher heap behavior.
 | Hot path | Current behavior |
 |---|---|
 | Effective masks | Memoized only within the current request or hub invocation. |
+| Catalog room lookup | `ChatRoomCatalog.RoomsById` provides `O(1)` room-id lookup for access and nav. |
 | Custom room lookup | `CustomChannelStore` atomically refreshes snapshots and uses a room-id dictionary. |
+| Mention / ticket recipients | Username and user-id dictionaries index eligible users after one scoped load. |
 | Chat history | EF split queries load independent votes, attachments, and link previews without cartesian multiplication. |
 | Attachments | Multiple attachment UUIDs load in one query before send. |
 | Npgsql master pool | Capped at 20 connections with idle pruning and a bounded auto-prepare cache. |
 | Tenant pools | Capped at 4 connections per tenant database. |
-| Browser room state | The active room retains at most 250 messages; older history remains pageable. |
+| Browser room state | The active room retains at most 250 messages; live dedupe uses a message-id set. |
 
 Database work in one request is batched, projected, or cached. Do not run
 parallel operations on the same EF `DbContext`; use separate contexts only for
@@ -196,54 +198,53 @@ constraints. See the Comment Documentation Guide.
 
 #### Chat
 
-| Hot path | Time | Space | Improvable? | Improvement direction |
-|---|---|---|---|---|
-| Message send without mentions | `O(L + A)` plus DB I/O | `O(A)` | No for current page sizes | — |
-| Message send with mentions | Dominated by recipient resolve: `O(U + K·U)` | `O(U + K)` | **Yes** | Index usernames/`UserId` once; avoid full `U` scan per mention token |
-| Mentions / ticket recipient resolve (DevAdmin fan-out) | `O(N_tenants · U)` load | `O(U)` | **Yes** | Short-TTL scoped eligible-user cache |
-| Catalog room id lookup (`FindById`) | `O(R)` linear scan | Static | **Yes** | Room-id dictionary / frozen map |
-| Accessible nav build | `O(R² + C·Rule)` if each room re-scans catalog | `O(R + C)` | **Yes** | Filter with definition overload + `O(1)` id lookup |
-| Chat history page | DB order `O(M log M)` + map `O(M · (A_i + votes_i))` | `O(M)` | No at fixed page size | Split queries already avoid join blowup |
-| Client live append dedupe (`useChatRoom`) | `O(M)` membership per live message → bursty `O(M²)` | `O(M)` capped 250 | **Yes** | Keep a `Set` of message ids beside the array |
+| Hot path | Time | Space | Status |
+|---|---|---|---|
+| Message send without mentions | `O(L + A)` plus DB I/O | `O(A)` | Acceptable at current page sizes |
+| Message send with mentions | Load eligible users `O(U)` once; username lookup `O(1)` per token; role/everyone still scan `O(U)` | `O(U + K)` | Username index applied; role/`@everyone` scan remains expected |
+| Mentions / ticket recipient resolve (DevAdmin fan-out) | `O(N_tenants · U)` load | `O(U)` | Still improvable with short-TTL scoped eligible-user cache |
+| Catalog room id lookup (`FindById`) | `O(1)` via `RoomsById` | Static dictionary | Optimized |
+| Accessible nav build | `O(R + C·Rule)` using definition overload + `O(1)` id lookup | `O(R + C)` | Optimized (was `O(R²)`) |
+| Chat history page | DB order `O(M log M)` + map `O(M · (A_i + votes_i))` | `O(M)` | Acceptable at fixed page size |
+| Client live append dedupe (`useChatRoom`) | `O(1)` membership via `knownMessageIds` set; trim rebuild `O(M)` | `O(M)` capped 250 | Optimized |
 
 #### Tickets and preface
 
-| Hot path | Time | Space | Improvable? | Improvement direction |
-|---|---|---|---|---|
-| Open ticket (core persist) | Intake `O(Q)` + channel/watches + nav refresh `O(C)` | `O(Q + W)` | Mild | `HashSet` for watch de-dupe when `W` grows |
-| Open-ticket inbox recipient resolve | Same as chat mentions: `O(U + Rule·U)` | `O(U)` | **Yes** | Same username/`UserId` indexes as chat |
-| Preface vocabulary phrase hits | `O(V · L)` (`Contains` over keys) | `O(V)` | **Yes** | Trie / Aho-Corasick |
-| Preface fuzzy token match (Levenshtein) | Worst `O(Tok · V · ℓ²)` | `O(V)` | **Yes** | Length-bucketed index / BK-tree; fuzzy only on exact miss |
+| Hot path | Time | Space | Status |
+|---|---|---|---|
+| Open ticket (core persist) | Intake `O(Q)` + channel/watches + nav refresh `O(C)` | `O(Q + W)` | Mild: `HashSet` for watch de-dupe if `W` grows |
+| Open-ticket inbox recipient resolve | `UserId` dictionary `O(1)` for allowed-user rules; role rules still `O(U)` | `O(U)` | User-id index applied; ticket master load no longer N+1 |
+| Preface vocabulary phrase hits | Word-window lookups into `Exact` ≈ `O(W²)` windows (`W` = tokens in answer), not `O(V·L)` over all keys | `O(V)` vocab | Optimized toward answer length |
+| Preface fuzzy token match (Levenshtein) | Worst `O(Tok · V · ℓ²)` | `O(V)` | Still improvable (length-bucket / BK-tree) |
 
 #### Assessment / neural
 
-| Hot path | Time | Space | Improvable? | Improvement direction |
-|---|---|---|---|---|
-| Feature encode | `O(T)` into fixed `F` bins | `O(F)` | No | Fixed hash width is intentional |
-| Stage-2 forward / backprop | `Θ(P)` dense matmuls | Activations `O(Σ hidden)` | No for dense MLP | Architecture cost |
-| Predict + support cosine | Forward `O(P)` + support `O(S · F)` | `O(F + S·F)` | **Yes** | Skip dense forward-trace on hot path; prototypes / capped support vs full scan |
-| Support eviction (`RemoveAt(0)`) | `O(S)` | `O(S · F)` | **Yes** | Ring buffer / queue for `O(1)` eviction |
-| Moderation concept text scan | `O(G · L)` slug `Contains` | `O(L)` | **Yes** | Automaton / single token pass |
-| Vector similarity retrieve | `O(D · F)` + sort `O(D log D)` | `O(D · F)` | **Yes at scale** | ANN / pgvector when `D` grows past hundreds |
-| Mini-batch train | `O(E · B · (T + P + P_router))` | Gradients `O(P)` | Mild | Keep Full param-delta traces rare |
+| Hot path | Time | Space | Status |
+|---|---|---|---|
+| Feature encode | `O(T)` into fixed `F` bins | `O(F)` | Intentional fixed width |
+| Stage-2 forward / backprop | `Θ(P)` dense matmuls | Activations `O(Σ hidden)` | Architecture cost |
+| Predict + support cosine | Forward `O(P)` + support `O(S · F)` | `O(F + S·F)` | Support scan still full; prototypes remain optional later |
+| Support eviction | `O(1)` `Queue.Dequeue` | `O(S · F)` | Optimized (was `RemoveAt(0)`) |
+| Moderation concept text scan | Word/hyphen windows + `TryGet` ≈ `O(W · window)` | `O(L)` | Optimized (was `O(G · L)` slug `Contains`) |
+| Vector similarity retrieve | `O(D · F)` + sort `O(D log D)` | `O(D · F)` | Fine at `D≤200`; ANN later at scale |
+| Mini-batch train | `O(E · B · (T + P + P_router))` | Gradients `O(P)` | Keep Full param-delta traces rare |
 
 #### Identity / infrastructure
 
-| Hot path | Time | Space | Improvable? | Improvement direction |
-|---|---|---|---|---|
-| Effective mask read (request-cached) | `O(1)` after first rebuild | `O(1)` | No | — |
-| Effective mask rebuild | `O(roles + subjects + hierarchy)` | `O(roles + subjects)` | Mild | Write-path only |
-| Authorization catalog seed / current check | Catalog-sized counts and compares | Process cache | No for request path | Startup / provision only |
-| Custom channel store refresh | `O(C · Rule)` | `O(C)` + room-id dict | Mild | Incremental snapshot if `C` becomes huge |
-| Custom channel lookup by room id | `O(1)` | — | No | — |
+| Hot path | Time | Space | Status |
+|---|---|---|---|
+| Effective mask read (request-cached) | `O(1)` after first rebuild | `O(1)` | — |
+| Effective mask rebuild | `O(roles + subjects + hierarchy)` | `O(roles + subjects)` | Write-path only |
+| Authorization catalog seed / current check | Catalog-sized counts and compares | Process cache | Startup / provision only |
+| Custom channel store refresh | `O(C · Rule)` | `O(C)` + room-id dict | Incremental snapshot only if `C` becomes huge |
+| Custom channel lookup by room id | `O(1)` | — | — |
 
-#### Highest-ROI improvements (not yet required)
+#### Remaining optional improvements
 
-1. Chat nav / catalog: `O(1)` room-id lookup; stop `O(R²)` nav filtering.
-2. Mention and ticket recipient resolve: hash maps for username/`UserId`; short-TTL eligible-user cache.
-3. Neural predict: no dense forward-trace on the hot path; cheaper support similarity; ring-buffer support.
-4. Preface / moderation concept matching: automaton or trie instead of `O(V·L)` / `O(G·L)`.
-5. Frontend chat: id-set for live message dedupe.
+1. Short-TTL eligible-user cache for DevAdmin mention/ticket fan-out loads.
+2. Neural predict: skip dense forward-trace on the hot path; support prototypes instead of full `O(S·F)` cosine.
+3. Preface fuzzy matching: length-bucketed index / BK-tree.
+4. Vector retrieve: ANN / pgvector when `D` grows past hundreds.
 
 When changing these hot paths, update this section and answer in review: what are
 the time and space complexities, and can they be improved without harming

@@ -63,6 +63,9 @@ constraint, or risk that is not obvious from the code alone.
 | Explain the project | Document Homework Central behavior, decisions, and invariants; skip language tutorials. |
 | Prefer readable code | Rename, simplify, or decompose before adding comments. |
 | Prefer pattern matching | Prefer `switch` expressions and patterns over large `if` / `else if` chains for closed-set decisions. |
+| Prefer fail-first | Validate and return/throw early; keep the happy path least indented. |
+| Prefer speakable names | Names must be pronounceable words or clear domain terms; rename cryptic abbreviations. |
+| Prefer collection transforms | Prefer `Where` / `Select` / `ToDictionary` / `map` / `filter` for member transforms when clearer than a hand-rolled loop. |
 | Prefer naming over comments | A precise name is stronger than a sentence explaining an imprecise name. |
 | Document why and constraints | Comments should explain policy, risk, invariants, or non-obvious tradeoffs. |
 | Keep comments current | A stale comment is a defect. Update comments with the code they describe. |
@@ -79,20 +82,24 @@ Before approving or merging changes, reviewers must check:
 2. **Explicit C# locals** — C# local variables use explicit types; `var` is not allowed.
 3. **Pattern matching** — closed-set decisions use `switch` expressions/patterns
    instead of large `if` / `else if` chains when branches are pure mappings.
-4. **Comment value** — comments explain project intent, invariants, trust boundaries,
+4. **Fail-first** — guards return or throw early; the success path is not buried in nesting.
+5. **Speakable names** — identifiers can be spoken aloud as words or clear domain terms.
+6. **Collection transforms** — member selection/projection uses `Where` / `Select` /
+   `map` / `filter` (and similar) when that is clearer than an imperative loop.
+7. **Comment value** — comments explain project intent, invariants, trust boundaries,
    or operational behavior.
-5. **No process language** — comments and docs do not reference AI, prompts, branch
+8. **No process language** — comments and docs do not reference AI, prompts, branch
    state, personal authorship, or implementation chronology.
-6. **Complexity thresholds** — functions exceeding warning bands are reviewed for
+9. **Complexity thresholds** — functions exceeding warning bands are reviewed for
    simplification; functions exceeding hard limits are refactored.
-7. **Asymptotic cost** — new or changed algorithms and hot paths state time and
+10. **Asymptotic cost** — new or changed algorithms and hot paths state time and
    space complexity (Big-O) in review or in `docs/runtime.md`, and answer whether
    the cost can be improved. Do not put Big-O comments on individual functions.
-8. **Canonical docs** — user-facing or operator-facing knowledge is added to the
+11. **Canonical docs** — user-facing or operator-facing knowledge is added to the
    most relevant existing Markdown file.
-9. **Cross-references** — source comments point to stable docs only when the code
+12. **Cross-references** — source comments point to stable docs only when the code
    cannot carry the full rationale safely.
-10. **Tests as documentation** — behavior encoded in comments or Markdown has
+13. **Tests as documentation** — behavior encoded in comments or Markdown has
    corresponding tests when it is executable behavior.
 
 ## Documentation decision guide
