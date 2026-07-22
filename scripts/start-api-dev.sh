@@ -4,6 +4,10 @@
 # Local Postgres credentials are fixed: postgres / postgres
 # Sets HC_DEV_BYPASS=1 so localhost dev auth endpoints and the styled 403 root page are enabled.
 #
+# By default uses `dotnet watch run` so file changes (including after git pull) rebuild/restart
+# the API. This is process restart / .NET Hot Reload — not Vite-style HMR. Set HC_API_WATCH=0
+# to use a one-shot `dotnet run` instead.
+#
 # Usage:
 #   scripts/start-api-dev.sh
 #
@@ -42,9 +46,19 @@ export HC_DEV_BYPASS=1
 export ConnectionStrings__MasterConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 export ConnectionStrings__PostgresAdmin="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=postgres;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 export Tenancy__ClusterEnvironment=dev
+export DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER=1
+
+USE_WATCH=1
+if [[ "${HC_API_WATCH:-1}" == "0" ]]; then
+  USE_WATCH=0
+fi
 
 printf 'Homework Central API - http://localhost:5000\n'
 printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
+if [[ "$USE_WATCH" == "1" ]]; then
+  printf 'API watch enabled (dotnet watch). File changes / git pull rebuild or hot-reload the process.\n'
+  printf 'Set HC_API_WATCH=0 for a one-shot run without watching.\n'
+fi
 printf 'Note: first-run EF logs about missing __EF*MigrationsHistory tables are normal.\n'
 printf 'Note: first startup provisions ~70 persona databases and may take several minutes.\n'
 
@@ -75,7 +89,7 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
-if [[ "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
+if [[ "$USE_WATCH" != "1" && "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
   printf '==> Building API\n'
   dotnet build "$API_PROJECT" -c Debug -v q
 fi
@@ -84,7 +98,12 @@ fi
 # constrained; preserve an explicit caller override.
 export DOTNET_GCHeapHardLimit="${DOTNET_GCHeapHardLimit:-18000000}"
 set +e
-dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+if [[ "$USE_WATCH" == "1" ]]; then
+  # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+  dotnet watch --non-interactive run --project "$API_PROJECT" --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+else
+  dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+fi
 api_status=$?
 set -e
 

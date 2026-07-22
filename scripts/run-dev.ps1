@@ -55,8 +55,8 @@ development migrations and seeds. Unset it after pulling migrations/catalog chan
 or after resetting the local database.
 
 After startup (each server opens in its own terminal window):
-  Frontend  http://localhost:5173
-  API       http://localhost:5000
+  Frontend  http://localhost:5173   (Vite HMR)
+  API       http://localhost:5000   (dotnet watch by default; set HC_API_WATCH=0 to disable)
   Health    http://localhost:5000/healthz
 
 Stop:

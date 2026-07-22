@@ -78,8 +78,8 @@ After a successful run, these services are available:
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Frontend** | http://localhost:5173/login | React app (Vite dev server) |
-| **API** | http://localhost:5000 | ASP.NET Core backend |
+| **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
+| **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
 | **Health check** | http://localhost:5000/healthz | API readiness probe |
 | **Postgres** | `localhost:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |

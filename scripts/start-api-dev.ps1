@@ -3,6 +3,10 @@
 # Local Postgres credentials are fixed: postgres / postgres
 # Sets HC_DEV_BYPASS=1 so localhost dev auth endpoints and the styled 403 root page are enabled.
 #
+# By default uses `dotnet watch run` so file changes (including after git pull) rebuild/restart
+# the API. This is process restart / .NET Hot Reload — not Vite-style HMR. Set HC_API_WATCH=0
+# to use a one-shot `dotnet run` instead.
+#
 # Usage:
 #   scripts/start-api-dev.ps1
 #   scripts/start-api-dev.ps1 -SkipDocker
@@ -43,9 +47,17 @@ $env:HC_DEV_BYPASS = '1'
 $env:ConnectionStrings__MasterConnection = $connectionString
 $env:ConnectionStrings__PostgresAdmin = $adminConnectionString
 $env:Tenancy__ClusterEnvironment = 'dev'
+# Avoid interactive "restart?" prompts when a change cannot hot-reload.
+$env:DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER = '1'
+
+$useWatch = $env:HC_API_WATCH -ne '0'
 
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
 Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
+if ($useWatch) {
+    Write-Host 'API watch enabled (dotnet watch). File changes / git pull rebuild or hot-reload the process.' -ForegroundColor DarkGray
+    Write-Host 'Set HC_API_WATCH=0 for a one-shot run without watching.' -ForegroundColor DarkGray
+}
 Write-Host "Note: first-run EF logs about missing __EF*MigrationsHistory tables are normal." -ForegroundColor DarkGray
 Write-Host "Note: persona databases provision in the background after the API starts listening." -ForegroundColor DarkGray
 
@@ -75,7 +87,7 @@ try {
     $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
     if (Test-Path $errorLog) { Remove-Item $errorLog -Force }
 
-    if ($env:HC_SKIP_DOTNET_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+    if (-not $useWatch -and $env:HC_SKIP_DOTNET_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
         Write-Host '==> Building API' -ForegroundColor DarkGray
         dotnet build $ApiProject -c Debug -v q
         if ($LASTEXITCODE -ne 0) {
@@ -89,8 +101,16 @@ try {
         # leaving native/runtime overhead outside the managed-heap allowance.
         $env:DOTNET_GCHeapHardLimit = '18000000'
     }
-    dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
-        Tee-Object -FilePath $errorLog
+
+    if ($useWatch) {
+        # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+        dotnet watch --non-interactive run --project $ApiProject --no-launch-profile --urls http://localhost:5000 2>&1 |
+            Tee-Object -FilePath $errorLog
+    }
+    else {
+        dotnet run --project $ApiProject --no-build --no-launch-profile --urls http://localhost:5000 2>&1 |
+            Tee-Object -FilePath $errorLog
+    }
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0 -and (Test-Path $errorLog) -and (Get-Item $errorLog).Length -gt 0) {
