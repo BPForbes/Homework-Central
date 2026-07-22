@@ -45,6 +45,11 @@ hljs.registerLanguage('html', xml)
 hljs.registerLanguage('yaml', yaml)
 hljs.registerLanguage('yml', yaml)
 
+/**
+ * Syntax-highlight untrusted attachment/source text for `dangerouslySetInnerHTML`.
+ * highlight.js escapes HTML entities in the returned markup; do not bypass this helper
+ * with raw user bytes.
+ */
 export function highlightCode(code: string): string {
   return hljs.highlightAuto(code).value
 }

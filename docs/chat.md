@@ -445,6 +445,10 @@ types use authenticated blob downloads through `useAuthenticatedAttachment` and
 do not receive image, PDF, audio, or video inline previews; code-like hazards can
 be expanded as text for review.
 
+Text/code previews render through `highlightCode` (`highlight.js`), which escapes
+HTML entities before `dangerouslySetInnerHTML`. Attachment bytes must not be
+injected as raw HTML.
+
 ```tsx
 const requiresCaution = attachment.scanStatus === 'Infected'
 

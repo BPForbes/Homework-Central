@@ -5,6 +5,10 @@ using Microsoft.Extensions.Options;
 
 namespace HomeworkCentral.Api.Uploads;
 
+/// <summary>
+/// Deletes unattached <c>ChatAttachment</c> rows and files older than
+/// <see cref="UploadOptions.OrphanTtlHours"/>. Invoked by <see cref="OrphanAttachmentCleanupWorker"/>.
+/// </summary>
 public sealed class OrphanAttachmentCleanupService(
     AppDbContext db,
     IOptions<UploadOptions> options) : IOrphanAttachmentCleanupService

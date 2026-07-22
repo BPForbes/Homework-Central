@@ -6,15 +6,22 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace HomeworkCentral.Api.Controllers;
 
+/// <summary>
+/// Infrastructure-admin Neural Net endpoints for reviewer feedback, synthetic training sessions,
+/// visualizer topology, and V2 replay downloads. Requires
+/// <see cref="AuthorizationPolicyNames.ManageServerInfrastructure"/>. See docs/tickets.md.
+/// </summary>
 [ApiController]
 [Route("api/neural-net")]
 [Authorize(Policy = AuthorizationPolicyNames.ManageServerInfrastructure)]
 public sealed class NeuralNetController(INeuralNetTrainingService training) : ControllerBase
 {
+    /// <summary>Pending reviewer score events awaiting staff approve/reject.</summary>
     [HttpGet("training-feedback")]
     public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingFeedbackDto>>> GetTrainingFeedback(CancellationToken ct) =>
         Ok(await training.GetPendingFeedbackAsync(ct));
 
+    /// <summary>Approves labels into a training example and updates the in-process student model.</summary>
     [HttpPost("training-feedback/{scoreEventId:guid}/approve")]
     public async Task<ActionResult<NeuralNetTrainingFeedbackDto>> Approve(Guid scoreEventId, CancellationToken ct)
     {
@@ -24,6 +31,7 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    /// <summary>Rejects feedback so it cannot train the student.</summary>
     [HttpPost("training-feedback/{scoreEventId:guid}/reject")]
     public async Task<IActionResult> Reject(Guid scoreEventId, CancellationToken ct)
     {
@@ -33,14 +41,17 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    /// <summary>Aggregate training-data counts for the admin data-management panel.</summary>
     [HttpGet("data-management")]
     public async Task<ActionResult<NeuralNetDataManagementDto>> GetDataManagement(CancellationToken ct) =>
         Ok(await training.GetDataManagementAsync(ct));
 
+    /// <summary>Cascade topology summaries for the admin visualizer.</summary>
     [HttpGet("visualizer")]
     public async Task<ActionResult<NeuralNetVisualizerDto>> GetVisualizer(CancellationToken ct) =>
         Ok(await training.GetVisualizerAsync(ct));
 
+    /// <summary>Queues a synthetic training session; returns 202 with the session DTO.</summary>
     [HttpPost("training")]
     public async Task<ActionResult<NeuralNetTrainingSessionDto>> StartTraining([FromBody] StartNeuralNetTrainingRequest request, CancellationToken ct)
     {
@@ -49,10 +60,12 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         return Accepted(await training.StartSyntheticSessionAsync(request, userId.Value, ct));
     }
 
+    /// <summary>Lists recent synthetic sessions and replay availability.</summary>
     [HttpGet("training")]
     public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingSessionDto>>> GetTrainingSessions(CancellationToken ct) =>
         Ok(await training.GetTrainingSessionsAsync(ct));
 
+    /// <summary>Deletes a queued/completed session. Running sessions return 409 Conflict.</summary>
     [HttpDelete("training/{sessionId:guid}")]
     public async Task<IActionResult> RemoveTrainingSession(Guid sessionId, CancellationToken ct)
     {
@@ -65,6 +78,10 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         };
     }
 
+    /// <summary>
+    /// Downloads worker V2 replay JSON for <paramref name="chatMonitoringKind"/>, or legacy
+    /// session report JSON when the kind query is omitted.
+    /// </summary>
     [HttpGet("training/{sessionId:guid}/report")]
     public async Task<IActionResult> DownloadTrainingReport(Guid sessionId, [FromQuery] NeuralModelKindChatMonitoring? chatMonitoringKind, CancellationToken ct)
     {

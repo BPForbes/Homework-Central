@@ -2,10 +2,20 @@ using System.Runtime.CompilerServices;
 
 namespace HomeworkCentral.Api.Assessment;
 
+/// <summary>
+/// In-process FIFO of synthetic training session IDs waiting for
+/// <see cref="NeuralNetTrainingWorker"/>. Supports cancel-before-claim removal so deleted
+/// sessions free capacity immediately.
+/// </summary>
 public interface INeuralNetTrainingQueue
 {
+    /// <summary>Enqueues when under capacity. Returns false when the queue is full (capacity 8).</summary>
     bool TryEnqueue(Guid sessionId);
+
+    /// <summary>Removes a still-pending session ID. Returns false when already claimed or unknown.</summary>
     bool TryRemove(Guid sessionId);
+
+    /// <summary>Yields claimed session IDs until cancellation. Removed entries may wake the waiter with no yield.</summary>
     IAsyncEnumerable<Guid> ReadAllAsync(CancellationToken ct);
 }
 
@@ -64,6 +74,10 @@ public sealed class NeuralNetTrainingQueue : INeuralNetTrainingQueue
     }
 }
 
+/// <summary>
+/// Single-threaded consumer for <see cref="INeuralNetTrainingQueue"/>; each session runs in its
+/// own DI scope so scoped DbContext/model factories do not leak across jobs.
+/// </summary>
 public sealed class NeuralNetTrainingWorker(
     INeuralNetTrainingQueue queue,
     IServiceScopeFactory scopeFactory,
