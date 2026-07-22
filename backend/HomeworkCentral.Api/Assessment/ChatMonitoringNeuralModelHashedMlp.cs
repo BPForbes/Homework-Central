@@ -126,6 +126,10 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     /// it is invoked at the start of each epoch (so f(x) can be refreshed). When
     /// <paramref name="onSampleInputGradients"/> is set, it receives ∂C_x/∂x per sample after
     /// backprop and before the stage-2 weight update — used to chain-rule into f.
+    /// Readability exception: physical length and nesting remain above normal
+    /// limits because separating the forward pass, ∂C/∂x cascade hook, and
+    /// momentum update would obscure the chain-rule training path. Replay
+    /// validation and hashed-MLP tests are the guardrails; see docs/tickets.md.
     /// </summary>
     internal TrainingPassTrace TrainMiniBatchWithTrace(
         IReadOnlyList<ChatMonitoringNeuralModelTrainingExample> examples,
