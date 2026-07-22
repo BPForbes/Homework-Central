@@ -49,6 +49,9 @@ public sealed class MentionRecipientResolver(
     {
         HashSet<Guid> recipients = [];
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(senderAccountClass, senderTenantDatabaseName, ct);
+        Dictionary<string, UserMaskSnapshot> eligibleUsersByUsername = new(StringComparer.OrdinalIgnoreCase);
+        foreach (UserMaskSnapshot user in eligibleUsers)
+            eligibleUsersByUsername.TryAdd(user.Username, user);
 
         foreach (ParsedMention mention in activeMentions.Where(m => m.IsActive))
         {
@@ -59,7 +62,7 @@ public sealed class MentionRecipientResolver(
                         mention.Token,
                         senderAccountClass,
                         senderTenantDatabaseName,
-                        eligibleUsers,
+                        eligibleUsersByUsername,
                         ct);
 
                     if (mentionedUser is not null
@@ -115,24 +118,28 @@ public sealed class MentionRecipientResolver(
                     break;
 
                 case MentionKind.Everyone:
-                    foreach (UserMaskSnapshot snapshot in eligibleUsers)
+                    foreach (Guid recipientId in eligibleUsers
+                                 .Where(snapshot => snapshot.UserId != senderId)
+                                 .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+                                 .Select(snapshot => snapshot.UserId))
                     {
-                        if (snapshot.UserId == senderId)
-                            continue;
-
-                        if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                            recipients.Add(snapshot.UserId);
+                        recipients.Add(recipientId);
                     }
 
                     break;
 
                 case MentionKind.Here:
                     IReadOnlyCollection<Guid> online = onlineTracker.GetOnlineUserIds(groupKey);
-                    HashSet<Guid> eligibleIds = eligibleUsers.Select(u => u.UserId).ToHashSet();
+                    HashSet<Guid> eligibleIds = eligibleUsers.Select(user => user.UserId).ToHashSet();
                     foreach (Guid onlineUserId in online)
                     {
-                        if (onlineUserId != senderId && eligibleIds.Contains(onlineUserId))
-                            recipients.Add(onlineUserId);
+                        if (onlineUserId == senderId)
+                            continue;
+
+                        if (!eligibleIds.Contains(onlineUserId))
+                            continue;
+
+                        recipients.Add(onlineUserId);
                     }
 
                     break;
@@ -149,16 +156,13 @@ public sealed class MentionRecipientResolver(
         Guid senderId,
         short roleBit)
     {
-        foreach (UserMaskSnapshot snapshot in eligibleUsers)
+        foreach (Guid recipientId in eligibleUsers
+                     .Where(snapshot => snapshot.UserId != senderId)
+                     .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, roleBit))
+                     .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+                     .Select(snapshot => snapshot.UserId))
         {
-            if (snapshot.UserId == senderId)
-                continue;
-
-            if (!BitMask.HasBit(snapshot.RoleMask, roleBit))
-                continue;
-
-            if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                recipients.Add(snapshot.UserId);
+            recipients.Add(recipientId);
         }
     }
 
@@ -169,16 +173,13 @@ public sealed class MentionRecipientResolver(
         Guid senderId,
         Guid customRoleId)
     {
-        foreach (UserMaskSnapshot snapshot in eligibleUsers)
+        foreach (Guid recipientId in eligibleUsers
+                     .Where(snapshot => snapshot.UserId != senderId)
+                     .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
+                     .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+                     .Select(snapshot => snapshot.UserId))
         {
-            if (snapshot.UserId == senderId)
-                continue;
-
-            if (!snapshot.Masks.CustomRoleIds.Contains(customRoleId))
-                continue;
-
-            if (chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                recipients.Add(snapshot.UserId);
+            recipients.Add(recipientId);
         }
     }
 
@@ -196,13 +197,10 @@ public sealed class MentionRecipientResolver(
         string username,
         AccountClass senderAccountClass,
         string? senderTenantDatabaseName,
-        List<UserMaskSnapshot> eligibleUsers,
+        Dictionary<string, UserMaskSnapshot> eligibleUsersByUsername,
         CancellationToken ct)
     {
-        UserMaskSnapshot? fromEligible = eligibleUsers.FirstOrDefault(
-            user => string.Equals(user.Username, username, StringComparison.OrdinalIgnoreCase));
-
-        if (fromEligible is not null)
+        if (eligibleUsersByUsername.TryGetValue(username, out UserMaskSnapshot? fromEligible))
             return fromEligible;
 
         if (senderAccountClass == AccountClass.RealAccount)

@@ -179,14 +179,39 @@ public static class ChatMonitoringModerationConceptSignals
     private static string? ParseConceptFromTexts(IReadOnlyList<string?> texts)
     {
         string haystack = string.Join(' ', texts.Where(t => !string.IsNullOrWhiteSpace(t))).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(haystack))
+            return null;
+
+        string[] atoms = haystack
+            .Split([' ', '\t', '\r', '\n', '/', '_', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '"', '\''],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .SelectMany(token => token.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(atom => atom.Length > 0)
+            .ToArray();
+
+        if (atoms.Length == 0)
+            return null;
+
         string? best = null;
         int bestLength = -1;
-        foreach (string slug in ChatMonitoringModerationConcepts.Slugs)
+        const int maxSlugParts = 8;
+        int maxWindow = Math.Min(maxSlugParts, atoms.Length);
+
+        for (int windowSize = maxWindow; windowSize >= 1; windowSize--)
         {
-            if (haystack.Contains(slug, StringComparison.Ordinal) && slug.Length > bestLength)
+            for (int start = 0; start <= atoms.Length - windowSize; start++)
             {
-                best = slug;
-                bestLength = slug.Length;
+                string candidate = windowSize == 1
+                    ? atoms[start]
+                    : string.Join('-', atoms.AsSpan(start, windowSize));
+                if (candidate.Length <= bestLength)
+                    continue;
+
+                if (!ChatMonitoringModerationConcepts.TryGet(candidate, out _))
+                    continue;
+
+                best = candidate;
+                bestLength = candidate.Length;
             }
         }
 

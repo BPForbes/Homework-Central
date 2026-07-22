@@ -46,7 +46,7 @@ public sealed class ChatRoomAccessService(
         List<ChatNavCategoryDto> categories = new();
 
         List<ChatRoomDefinition> accessibleGeneralRooms = ChatRoomCatalog.GeneralRooms
-            .Where(room => CanAccessRoom(masks, userId, room.Id))
+            .Where(room => CanAccessRoom(masks, room))
             .ToList();
 
         if (accessibleGeneralRooms.Count > 0)
@@ -55,7 +55,7 @@ public sealed class ChatRoomAccessService(
         }
 
         foreach (IGrouping<string, ChatRoomDefinition> subjectGroup in ChatRoomCatalog.SubjectRooms
-                     .Where(room => CanAccessRoom(masks, userId, room.Id))
+                     .Where(room => CanAccessRoom(masks, room))
                      .GroupBy(room => room.CategoryKey, StringComparer.Ordinal))
         {
             ChatRoomDefinition first = subjectGroup.First();
@@ -63,7 +63,7 @@ public sealed class ChatRoomAccessService(
         }
 
         List<ChatRoomDefinition> accessibleStaffRooms = ChatRoomCatalog.StaffRooms
-            .Where(room => CanAccessRoom(masks, userId, room.Id))
+            .Where(room => CanAccessRoom(masks, room))
             .ToList();
 
         if (accessibleStaffRooms.Count > 0)
@@ -75,11 +75,14 @@ public sealed class ChatRoomAccessService(
             .Where(channel => CanAccessCustomChannel(masks, userId, channel))
             .ToList();
 
+        Dictionary<string, ChatNavCategoryDto> categoriesByKey = categories
+            .ToDictionary(category => category.Key, StringComparer.Ordinal);
+
         List<CustomChannelSnapshot> unmatchedCustomChannels = new();
 
         foreach (CustomChannelSnapshot channel in accessibleCustomChannels)
         {
-            if (TryMergeCustomChannel(categories, channel))
+            if (TryMergeCustomChannel(categories, categoriesByKey, channel))
                 continue;
 
             unmatchedCustomChannels.Add(channel);
@@ -115,15 +118,13 @@ public sealed class ChatRoomAccessService(
 
     private static bool TryMergeCustomChannel(
         List<ChatNavCategoryDto> categories,
+        Dictionary<string, ChatNavCategoryDto> categoriesByKey,
         CustomChannelSnapshot channel)
     {
         if (!ChatRoomCatalog.TryGetCatalogCategoryTemplate(channel.CategoryKey, out ChatRoomCatalog.CatalogCategoryTemplate template))
             return false;
 
-        ChatNavCategoryDto? category = categories.FirstOrDefault(existing =>
-            string.Equals(existing.Key, template.Key, StringComparison.Ordinal));
-
-        if (category is null)
+        if (!categoriesByKey.TryGetValue(template.Key, out ChatNavCategoryDto? category))
         {
             category = new ChatNavCategoryDto
             {
@@ -133,6 +134,7 @@ public sealed class ChatRoomAccessService(
                 IsPrivateCategory = ChatRoomCatalog.IsPrivateCategory(template.CategoryKind),
             };
             categories.Add(category);
+            categoriesByKey[template.Key] = category;
         }
 
         category.Rooms.Add(MapCustomRoom(channel, template.Key, template.CategoryKind.ToString()));

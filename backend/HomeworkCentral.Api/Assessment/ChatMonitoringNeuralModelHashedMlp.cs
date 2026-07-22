@@ -32,7 +32,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly float[][] weightVelocity;
     private readonly float[][] biasVelocity;
     private readonly NeuralNetTopologySnapshot topology;
-    private readonly List<SupportExample> support = [];
+    private readonly Queue<SupportExample> support = new();
     private readonly object gate = new();
 
     protected ChatMonitoringNeuralModelHashedMlp(
@@ -288,9 +288,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 for (int i = 0; i < n; i++)
                 {
                     string category = categoryLabels[lastCategoryIndices[i]];
-                    support.Add(new SupportExample(lastEncoded[i], category));
+                    support.Enqueue(new SupportExample(lastEncoded[i], category));
                     if (support.Count > 512)
-                        support.RemoveAt(0);
+                        support.Dequeue();
                 }
             }
 

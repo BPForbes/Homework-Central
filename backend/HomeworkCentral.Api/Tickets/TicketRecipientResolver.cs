@@ -40,26 +40,30 @@ public sealed class TicketRecipientResolver(
     {
         HashSet<Guid> recipients = [];
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(ownerAccountClass, tenantDatabaseName, ct);
+        Dictionary<Guid, UserMaskSnapshot> eligibleUsersById = eligibleUsers
+            .ToDictionary(user => user.UserId);
 
         foreach (CustomChannelAccessRuleInput rule in rules)
         {
             if (rule.AllowedUserId is Guid allowedUserId)
             {
-                UserMaskSnapshot? allowed = eligibleUsers.FirstOrDefault(user => user.UserId == allowedUserId);
-                if (allowed is not null && chatRoomAccess.CanAccessRoom(allowed.Masks, allowedUserId, roomId))
+                if (eligibleUsersById.TryGetValue(allowedUserId, out UserMaskSnapshot? allowed)
+                    && chatRoomAccess.CanAccessRoom(allowed.Masks, allowedUserId, roomId))
+                {
                     recipients.Add(allowedUserId);
+                }
+
                 continue;
             }
 
             if (rule.PlatformRoleBit is short platformBit)
             {
-                foreach (UserMaskSnapshot snapshot in eligibleUsers)
+                foreach (Guid recipientId in eligibleUsers
+                             .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, platformBit))
+                             .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
+                             .Select(snapshot => snapshot.UserId))
                 {
-                    if (!BitMask.HasBit(snapshot.RoleMask, platformBit))
-                        continue;
-
-                    if (chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
-                        recipients.Add(snapshot.UserId);
+                    recipients.Add(recipientId);
                 }
 
                 continue;
@@ -67,13 +71,12 @@ public sealed class TicketRecipientResolver(
 
             if (rule.CustomRoleId is Guid customRoleId)
             {
-                foreach (UserMaskSnapshot snapshot in eligibleUsers)
+                foreach (Guid recipientId in eligibleUsers
+                             .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
+                             .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
+                             .Select(snapshot => snapshot.UserId))
                 {
-                    if (!snapshot.Masks.CustomRoleIds.Contains(customRoleId))
-                        continue;
-
-                    if (chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
-                        recipients.Add(snapshot.UserId);
+                    recipients.Add(recipientId);
                 }
             }
         }
@@ -160,18 +163,25 @@ public sealed class TicketRecipientResolver(
             .Include(mask => mask.SubjectExpertiseMasks)
             .ToListAsync(ct);
 
-        HashSet<Guid> userIds = masks.Select(mask => mask.UserId).ToHashSet();
+        Dictionary<Guid, string> usernames = await masterDb.Users
+            .AsNoTracking()
+            .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))
+            .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
+
+        HashSet<Guid> userIds = masks
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Select(mask => mask.UserId)
+            .ToHashSet();
         Dictionary<Guid, List<Guid>> customRoleIdsByUser =
             await LoadCustomRoleIdsByUserAsync(masterDb, userIds, ct);
 
         List<UserMaskSnapshot> snapshots = [];
         foreach (UserEffectiveMask mask in masks)
         {
-            User? user = await masterDb.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == mask.UserId, ct);
-            if (user is null)
+            if (!usernames.TryGetValue(mask.UserId, out string? username))
                 continue;
 
-            bool isDevAdmin = string.Equals(user.Username, DevBypass.DevAdminUsername, StringComparison.Ordinal);
+            bool isDevAdmin = string.Equals(username, DevBypass.DevAdminUsername, StringComparison.Ordinal);
             if (realUsersOnly && isDevAdmin)
                 continue;
 

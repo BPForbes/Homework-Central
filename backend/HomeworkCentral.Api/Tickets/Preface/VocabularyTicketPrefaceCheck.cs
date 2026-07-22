@@ -74,16 +74,41 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
 
     private void AddPhraseHits(string freeText, PrefaceExtractionBuilder builder)
     {
-        string padded = $" {NormalizeKey(freeText)} ";
-        string paddedCompact = $" {Compact(NormalizeKey(freeText))} ";
-        foreach (string key in _vocab.Value.KeysLongestFirst)
+        string normalized = NormalizeKey(freeText);
+        if (normalized.Length == 0)
+            return;
+
+        Dictionary<string, VocabEntry> exact = _vocab.Value.Exact;
+        Dictionary<string, VocabEntry> phraseHits = new(StringComparer.Ordinal);
+
+        string[] words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (int windowSize = words.Length; windowSize >= 1; windowSize--)
         {
-            if (key.Length < 3)
-                continue;
-            if (!_vocab.Value.Exact.TryGetValue(key, out VocabEntry? entry) || entry is null)
-                continue;
-            if (!ContainsToken(padded, key) && !ContainsToken(paddedCompact, key))
-                continue;
+            for (int start = 0; start <= words.Length - windowSize; start++)
+            {
+                string phrase = windowSize == 1
+                    ? words[start]
+                    : string.Join(' ', words.AsSpan(start, windowSize));
+                if (phrase.Length < 3)
+                    continue;
+
+                if (exact.TryGetValue(phrase, out VocabEntry? spacedEntry) && spacedEntry is not null)
+                    phraseHits.TryAdd(phrase, spacedEntry);
+            }
+        }
+
+        string compact = Compact(normalized);
+        if (compact.Length >= 3
+            && exact.TryGetValue(compact, out VocabEntry? compactEntry)
+            && compactEntry is not null)
+        {
+            phraseHits.TryAdd(compact, compactEntry);
+        }
+
+        foreach ((string key, VocabEntry entry) in phraseHits
+                     .OrderByDescending(pair => pair.Key.Length)
+                     .ThenBy(pair => pair.Key, StringComparer.Ordinal))
+        {
             builder.Add(entry, key);
         }
     }
@@ -413,28 +438,6 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
     protected static string Compact(string normalized) =>
         normalized.Replace(" ", string.Empty, StringComparison.Ordinal);
 
-    private static bool ContainsToken(string paddedLowerHaystack, string needle)
-    {
-        if (string.IsNullOrEmpty(needle) || paddedLowerHaystack.Length < needle.Length + 2)
-            return false;
-
-        int index = 0;
-        while ((index = paddedLowerHaystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
-        {
-            char before = paddedLowerHaystack[index - 1];
-            char after = index + needle.Length < paddedLowerHaystack.Length
-                ? paddedLowerHaystack[index + needle.Length]
-                : ' ';
-            bool boundaryBefore = !char.IsLetterOrDigit(before);
-            bool boundaryAfter = !char.IsLetterOrDigit(after);
-            if (boundaryBefore && boundaryAfter)
-                return true;
-            index += needle.Length;
-        }
-
-        return false;
-    }
-
     private static int MaxEditDistance(int length) => length switch
     {
         <= 3 => 0,
@@ -558,13 +561,8 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
         public Vocabulary(IReadOnlyDictionary<string, VocabEntry> exact)
         {
             Exact = exact.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
-            KeysLongestFirst = Exact.Keys
-                .OrderByDescending(k => k.Length)
-                .ThenBy(k => k, StringComparer.Ordinal)
-                .ToArray();
         }
 
         public Dictionary<string, VocabEntry> Exact { get; }
-        public string[] KeysLongestFirst { get; }
     }
 }

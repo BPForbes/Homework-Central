@@ -44,11 +44,29 @@ function mergeServerHistoryMessages(
   return sortAndRetainMessages(Array.from(messagesById.values()))
 }
 
-function appendLiveMessage(previousMessages: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  if (previousMessages.some((existing) => existing.messageId === message.messageId))
+function rebuildKnownMessageIds(knownMessageIds: Set<string>, messages: ChatMessage[]) {
+  knownMessageIds.clear()
+  for (const message of messages)
+    knownMessageIds.add(message.messageId)
+}
+
+function appendLiveMessage(
+  previousMessages: ChatMessage[],
+  message: ChatMessage,
+  knownMessageIds: Set<string>,
+): ChatMessage[] {
+  if (knownMessageIds.has(message.messageId))
     return previousMessages
 
-  return [...previousMessages, message].slice(-MAX_RETAINED_MESSAGES)
+  const nextMessages = [...previousMessages, message]
+  if (nextMessages.length <= MAX_RETAINED_MESSAGES) {
+    knownMessageIds.add(message.messageId)
+    return nextMessages
+  }
+
+  const retainedMessages = nextMessages.slice(-MAX_RETAINED_MESSAGES)
+  rebuildKnownMessageIds(knownMessageIds, retainedMessages)
+  return retainedMessages
 }
 
 function applyBroadcastVoteUpdate(message: ChatMessage, payload: MessageVoteUpdate): ChatMessage {
@@ -84,13 +102,18 @@ async function loadRoomHistory(
   setMessages: MessageSetter,
   setError: StringSetter,
   setLoading: BooleanSetter,
+  knownMessageIds: Set<string>,
 ) {
   try {
     const { data } = await chatApi.getMessages(roomId)
     if (isCancelled())
       return
 
-    setMessages((previousMessages) => mergeServerHistoryMessages(data, previousMessages))
+    setMessages((previousMessages) => {
+      const mergedMessages = mergeServerHistoryMessages(data, previousMessages)
+      rebuildKnownMessageIds(knownMessageIds, mergedMessages)
+      return mergedMessages
+    })
   } catch {
     if (!isCancelled())
       setError('Could not load messages for this room.')
@@ -240,9 +263,13 @@ export function useChatRoom(
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const isTypingRef = useRef(false)
+  const knownMessageIdsRef = useRef<Set<string>>(new Set())
 
   const addMessage = useCallback((message: ChatMessage) => {
-    setMessages((previousMessages) => appendLiveMessage(previousMessages, message))
+    setMessages((previousMessages) => {
+      const nextMessages = appendLiveMessage(previousMessages, message, knownMessageIdsRef.current)
+      return nextMessages
+    })
   }, [])
 
   useEffect(() => {
@@ -251,13 +278,21 @@ export function useChatRoom(
     setError(null)
     setMessages([])
     setReplyTarget(null)
+    knownMessageIdsRef.current = new Set()
 
     if (!roomId) {
       setLoading(false)
       return
     }
 
-    void loadRoomHistory(roomId, () => cancelled, setMessages, setError, setLoading)
+    void loadRoomHistory(
+      roomId,
+      () => cancelled,
+      setMessages,
+      setError,
+      setLoading,
+      knownMessageIdsRef.current,
+    )
     return () => {
       cancelled = true
     }
