@@ -40,6 +40,8 @@ public sealed class TicketRecipientResolver(
     {
         HashSet<Guid> recipients = [];
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(ownerAccountClass, tenantDatabaseName, ct);
+        // Portal mention/staff rules often target AllowedUserId; index once so each
+        // rule does not rescan the eligible set. See docs/tickets.md.
         Dictionary<Guid, UserMaskSnapshot> eligibleUsersById = eligibleUsers
             .ToDictionary(user => user.UserId);
 
@@ -156,6 +158,10 @@ public sealed class TicketRecipientResolver(
             mask.EffectiveRoleMask);
     }
 
+    /// <summary>
+    /// Loads master masks with one username dictionary for the batch — avoids a Users
+    /// query per mask row when filtering DevAdmin. See docs/tickets.md.
+    /// </summary>
     private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
     {
         List<UserEffectiveMask> masks = await masterDb.UserEffectiveMasks
@@ -163,6 +169,7 @@ public sealed class TicketRecipientResolver(
             .Include(mask => mask.SubjectExpertiseMasks)
             .ToListAsync(ct);
 
+        // One username map for the whole mask set (DevAdmin filter + snapshot build).
         Dictionary<Guid, string> usernames = await masterDb.Users
             .AsNoTracking()
             .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))

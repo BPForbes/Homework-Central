@@ -32,6 +32,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly float[][] weightVelocity;
     private readonly float[][] biasVelocity;
     private readonly NeuralNetTopologySnapshot topology;
+    // FIFO support set: train enqueues examples and drops the oldest past 512.
+    // Queue.Dequeue avoids shifting a List on every eviction. See docs/runtime.md.
     private readonly Queue<SupportExample> support = new();
     private readonly object gate = new();
 
@@ -288,6 +290,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 for (int i = 0; i < n; i++)
                 {
                     string category = categoryLabels[lastCategoryIndices[i]];
+                    // Cap at 512 by dequeuing the oldest example after each enqueue.
                     support.Enqueue(new SupportExample(lastEncoded[i], category));
                     if (support.Count > 512)
                         support.Dequeue();

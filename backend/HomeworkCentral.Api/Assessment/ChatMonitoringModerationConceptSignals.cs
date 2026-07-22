@@ -176,6 +176,10 @@ public static class ChatMonitoringModerationConceptSignals
         ChatMonitoringModerationConcepts.TryGet(concept, out _)
         || string.Equals(concept, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal);
 
+    /// <summary>
+    /// Maps free text to a moderation concept slug: longest Exact hyphen windows via
+    /// <c>TryGet</c> win over shorter tokens. Prefer Exact dictionary hits. See docs/chat.md.
+    /// </summary>
     private static string? ParseConceptFromTexts(IReadOnlyList<string?> texts)
     {
         string haystack = string.Join(' ', texts.Where(t => !string.IsNullOrWhiteSpace(t))).ToLowerInvariant();
@@ -197,6 +201,7 @@ public static class ChatMonitoringModerationConceptSignals
         const int maxSlugParts = 8;
         int maxWindow = Math.Min(maxSlugParts, atoms.Length);
 
+        // Longest windows first so multi-part lexicon slugs beat single tokens.
         for (int windowSize = maxWindow; windowSize >= 1; windowSize--)
         {
             for (int start = 0; start <= atoms.Length - windowSize; start++)

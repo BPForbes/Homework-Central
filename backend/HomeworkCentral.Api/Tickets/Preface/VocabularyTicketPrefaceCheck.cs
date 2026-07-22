@@ -72,6 +72,10 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
         }
     }
 
+    /// <summary>
+    /// Scores multi-word vocabulary hits via Exact dictionary windows over tokens,
+    /// longest windows first. Prefer Exact before fuzzy token resolve. See docs/tickets.md.
+    /// </summary>
     private void AddPhraseHits(string freeText, PrefaceExtractionBuilder builder)
     {
         string normalized = NormalizeKey(freeText);
@@ -81,6 +85,7 @@ public abstract partial class VocabularyTicketPrefaceCheck : ITicketPrefaceCheck
         Dictionary<string, VocabEntry> exact = _vocab.Value.Exact;
         Dictionary<string, VocabEntry> phraseHits = new(StringComparer.Ordinal);
 
+        // Exact word windows + TryGetValue — cheaper than Fuzzy/Levenshtein on every phrase × word.
         string[] words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         for (int windowSize = words.Length; windowSize >= 1; windowSize--)
         {

@@ -49,6 +49,8 @@ public sealed class MentionRecipientResolver(
     {
         HashSet<Guid> recipients = [];
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(senderAccountClass, senderTenantDatabaseName, ct);
+        // Mentions resolve many @username tokens against one scoped load; the map
+        // keeps username lookup off a repeated linear scan. See docs/chat.md.
         Dictionary<string, UserMaskSnapshot> eligibleUsersByUsername = new(StringComparer.OrdinalIgnoreCase);
         foreach (UserMaskSnapshot user in eligibleUsers)
             eligibleUsersByUsername.TryAdd(user.Username, user);
@@ -307,6 +309,10 @@ public sealed class MentionRecipientResolver(
         return dto;
     }
 
+    /// <summary>
+    /// Loads master masks with one username dictionary for the batch — avoids a Users
+    /// query per mask row when filtering DevAdmin. See docs/chat.md.
+    /// </summary>
     private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
     {
         List<UserEffectiveMask> masks = await masterDb.UserEffectiveMasks
@@ -314,6 +320,7 @@ public sealed class MentionRecipientResolver(
             .Include(mask => mask.SubjectExpertiseMasks)
             .ToListAsync(ct);
 
+        // One username map for the whole mask set (DevAdmin filter + snapshot build).
         Dictionary<Guid, string> usernames = await masterDb.Users
             .AsNoTracking()
             .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))

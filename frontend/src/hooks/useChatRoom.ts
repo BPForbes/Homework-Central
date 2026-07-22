@@ -50,11 +50,14 @@ function rebuildKnownMessageIds(knownMessageIds: Set<string>, messages: ChatMess
     knownMessageIds.add(message.messageId)
 }
 
+// Live SignalR appends check the Set instead of scanning the messages array.
+// Cap rebuild keeps membership aligned after the 250-message retain trim.
 function appendLiveMessage(
   previousMessages: ChatMessage[],
   message: ChatMessage,
   knownMessageIds: Set<string>,
 ): ChatMessage[] {
+  // Fail-first: skip when history, own send, or a prior live event already recorded the id.
   if (knownMessageIds.has(message.messageId))
     return previousMessages
 
@@ -111,6 +114,7 @@ async function loadRoomHistory(
 
     setMessages((previousMessages) => {
       const mergedMessages = mergeServerHistoryMessages(data, previousMessages)
+      // Seed membership from REST history before further SignalR appends.
       rebuildKnownMessageIds(knownMessageIds, mergedMessages)
       return mergedMessages
     })
@@ -263,6 +267,7 @@ export function useChatRoom(
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const isTypingRef = useRef(false)
+  // Membership set for live dedupe; see appendLiveMessage and docs/runtime.md.
   const knownMessageIdsRef = useRef<Set<string>>(new Set())
 
   const addMessage = useCallback((message: ChatMessage) => {
@@ -278,6 +283,7 @@ export function useChatRoom(
     setError(null)
     setMessages([])
     setReplyTarget(null)
+    // Room switch: drop prior ids so a reused message id cannot suppress a fresh history row.
     knownMessageIdsRef.current = new Set()
 
     if (!roomId) {
