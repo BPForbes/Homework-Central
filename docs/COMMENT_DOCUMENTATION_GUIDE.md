@@ -1266,4 +1266,6 @@ Use this checklist before submitting or approving a change:
 - [ ] TODO/FIXME/HACK/NOTE markers include a clear condition or issue reference.
 - [ ] React, CSS, database, and deployment comments follow their local rules.
 - [ ] Tests cover changed executable behavior and use descriptive domain names.
-- [ ] AI-assisted content contains no AI, prompt, branch-diff, or authorship notes.
+- [ ] AI-assisted content contains no AI, prompt, branch-diff, or authorship notes
+      outside the narrow exception for `AGENTS.md` / `CLAUDE.md` / install-only
+      `SETUP.md` (see [AI contributor requirements](#ai-contributor-requirements)).
