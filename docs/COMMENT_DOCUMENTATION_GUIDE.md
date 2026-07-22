@@ -8,20 +8,21 @@ source cross-references, and Markdown links. Do not invent alternate titles.
 | Form | Required value |
 |---|---|
 | Canonical title | Comment Documentation Guide |
-| Short name | `COMMENT_STANDARD` |
-| Repository path | `docs/COMMENT_STANDARD.md` |
+| File name | `COMMENT_DOCUMENTATION_GUIDE.md` |
+| Short name | `COMMENT_DOCUMENTATION_GUIDE` |
+| Repository path | `docs/COMMENT_DOCUMENTATION_GUIDE.md` |
 | H1 heading | `# Comment Documentation Guide` |
-| Link from `docs/` | `[Comment Documentation Guide](./COMMENT_STANDARD.md)` |
-| Link from repository root | `[Comment Documentation Guide](./docs/COMMENT_STANDARD.md)` |
+| Link from `docs/` | `[Comment Documentation Guide](./COMMENT_DOCUMENTATION_GUIDE.md)` |
+| Link from repository root | `[Comment Documentation Guide](./docs/COMMENT_DOCUMENTATION_GUIDE.md)` |
 
 Acceptable shorthand in tight contexts: "the Comment Documentation Guide" or
-`` `docs/COMMENT_STANDARD.md` ``. Avoid informal aliases such as "comment format
-file", "docs style guide", "naming md", or "readability doc" when referring to
-this standard.
+`` `docs/COMMENT_DOCUMENTATION_GUIDE.md` ``. Avoid informal aliases such as
+"comment format file", "COMMENT_STANDARD", "docs style guide", "naming md", or
+"readability doc" when referring to this standard.
 
-The former long title ("Comment, documentation, readability, and naming
-standard") describes the guide's scope; the **canonical title** for references
-is **Comment Documentation Guide**.
+The former file name `docs/COMMENT_STANDARD.md` and the former long title
+("Comment, documentation, readability, and naming standard") are obsolete. Use
+**Comment Documentation Guide** / `docs/COMMENT_DOCUMENTATION_GUIDE.md`.
 
 ## Purpose
 
@@ -741,7 +742,7 @@ Canonical feature docs today:
 
 | Feature / module | Canonical file |
 |---|---|
-| Comment Documentation Guide (comments, naming, readability) | `docs/COMMENT_STANDARD.md` |
+| Comment Documentation Guide (comments, naming, readability) | `docs/COMMENT_DOCUMENTATION_GUIDE.md` |
 | Identity, sessions, tenancy | `docs/identity.md` |
 | Chat rooms, messages, uploads | `docs/chat.md` |
 | Tickets and assessment (incl. neural) | `docs/tickets.md` |

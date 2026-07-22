@@ -820,5 +820,5 @@ limit is the effective default application limit.
   watches, votes, neural scoring, and reviewer fallback.
 - [Runtime and operations](runtime.md) — ClamAV service choice, local service
   topology, and Docker resource guidance for the opt-in antivirus profile.
-- [Comment Documentation Guide](COMMENT_STANDARD.md)
+- [Comment Documentation Guide](COMMENT_DOCUMENTATION_GUIDE.md)
   — durable documentation and source-comment standards.

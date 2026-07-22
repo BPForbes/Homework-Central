@@ -2,7 +2,7 @@
 #
 # CodeRabbit review configuration for Homework Central.
 # Project context mirrors AGENTS.md. System architecture lives under docs/*.
-# Comment/documentation rules: docs/COMMENT_STANDARD.md (Comment Documentation Guide).
+# Comment/documentation rules: docs/COMMENT_DOCUMENTATION_GUIDE.md (Comment Documentation Guide).
 
 language: en-US
 reviews:
@@ -31,7 +31,7 @@ reviews:
         ## Comments, documentation, naming, and readability
 
         Before approving comments, XML docs, Markdown, naming, or function structure
-        changes, enforce the Comment Documentation Guide at `docs/COMMENT_STANDARD.md`.
+        changes, enforce the Comment Documentation Guide at `docs/COMMENT_DOCUMENTATION_GUIDE.md`.
 
         Prefer improving structure, names, and explicit type declarations before adding comments.
 
@@ -56,7 +56,7 @@ reviews:
         - `docs/chat.md` — rooms, messages, SignalR, uploads, ClamAV, downloads
         - `docs/tickets.md` — portals, preface checks, votes, neural scoring
         - `docs/runtime.md` — hot paths, queues, Docker profiles, Windows resources
-        - `docs/COMMENT_STANDARD.md` — Comment Documentation Guide (comments, naming, readability)
+        - `docs/COMMENT_DOCUMENTATION_GUIDE.md` — Comment Documentation Guide (comments, naming, readability)
         - `design.md` — UI design tokens and motion (frontend styling)
 
         Cite the relevant `docs/*` file in review comments when behavior or policy is unclear.
@@ -81,10 +81,10 @@ reviews:
         - CI rejects unparameterized EF raw SQL (`FromSqlRaw` / `ExecuteSqlRaw` / `SqlQueryRaw`)
           in `backend/HomeworkCentral.Api`.
 
-    - path: "docs/COMMENT_STANDARD.md"
+    - path: "docs/COMMENT_DOCUMENTATION_GUIDE.md"
       instructions: |
         This file is the Comment Documentation Guide (canonical path
-        `docs/COMMENT_STANDARD.md`). Review changes for clarity, accuracy, and
+        `docs/COMMENT_DOCUMENTATION_GUIDE.md`). Review changes for clarity, accuracy, and
         consistency with its own naming convention section. Flag renamed titles or
         alternate informal names that diverge from the guide's naming convention.
 
@@ -98,7 +98,7 @@ reviews:
 
     - path: "backend/**/*.cs"
       instructions: |
-        Enforce the Comment Documentation Guide (`docs/COMMENT_STANDARD.md`) on all
+        Enforce the Comment Documentation Guide (`docs/COMMENT_DOCUMENTATION_GUIDE.md`) on all
         new and changed C# code: no `var`, prefer pattern matching for closed sets,
         project-intent comments only, and canonical doc updates under `docs/`.
 
@@ -123,7 +123,7 @@ reviews:
 
         Structural readability starts at 100 and subtracts weighted complexity,
         nesting, lines, parameters, boolean terms, side effects, `var` usage, and
-        weak naming (full formula in `docs/COMMENT_STANDARD.md`).
+        weak naming (full formula in `docs/COMMENT_DOCUMENTATION_GUIDE.md`).
 
         Flag hard-limit breaches as must-fix before merge unless an approved
         readability exception is documented near the function and in the owning
@@ -135,7 +135,7 @@ reviews:
 
     - path: "frontend/**/*.{ts,tsx}"
       instructions: |
-        Enforce the Comment Documentation Guide (`docs/COMMENT_STANDARD.md`) on new
+        Enforce the Comment Documentation Guide (`docs/COMMENT_DOCUMENTATION_GUIDE.md`) on new
         and changed TypeScript. Prefer precise names and project-intent comments.
         Keep styling token-driven per `design.md` / `frontend/src/index.css`.
 
@@ -145,7 +145,7 @@ reviews:
 
         Hard complexity gates apply to non-UI TypeScript modules (`*.ts`) such as
         API clients, protocol/state-machine hooks, and pure utilities — same metric
-        table as backend (see `docs/COMMENT_STANDARD.md`).
+        table as backend (see `docs/COMMENT_DOCUMENTATION_GUIDE.md`).
 
         Hard complexity gates do **not** apply to React component files (`*.tsx`);
         still note clearly excessive nesting or mixed protocol logic that should
@@ -162,7 +162,7 @@ reviews:
     - path: "{AGENTS.md,CLAUDE.md}"
       instructions: |
         Keep AGENTS.md and CLAUDE.md aligned with each other and with the
-        Comment Documentation Guide (`docs/COMMENT_STANDARD.md`). They must continue
+        Comment Documentation Guide (`docs/COMMENT_DOCUMENTATION_GUIDE.md`). They must continue
         to point agents at `docs/` for system understanding and at the Comment
         Documentation Guide for comment/naming/readability rules.
 
@@ -171,7 +171,7 @@ knowledge_base:
     enabled: true
     filePatterns:
       # Comment Documentation Guide — enforce on all source under review
-      - files: "docs/COMMENT_STANDARD.md"
+      - files: "docs/COMMENT_DOCUMENTATION_GUIDE.md"
         applyTo:
           - "backend/**/*.{cs,csproj}"
           - "frontend/**/*.{ts,tsx,css,html}"

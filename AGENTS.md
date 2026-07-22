@@ -18,7 +18,7 @@ gate for account verification, and an admin "Server Maintenance" panel.
 
 Before adding or modifying source comments, XML documentation, Markdown files, naming,
 or function structure, read and follow the Comment Documentation Guide at
-[`docs/COMMENT_STANDARD.md`](./docs/COMMENT_STANDARD.md).
+[`docs/COMMENT_DOCUMENTATION_GUIDE.md`](./docs/COMMENT_DOCUMENTATION_GUIDE.md).
 
 Inspect the implementation, related infrastructure, tests, configuration, and the
 current branch diff against the integration base. Improve structure, names, and

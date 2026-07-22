@@ -7,11 +7,11 @@ remains in [`SETUP.md`](../SETUP.md).
 
 Documentation is **feature-level**: one Markdown file per module, not one file
 per class, endpoint, TSX panel, or complexity finding. See
-[`COMMENT_STANDARD.md`](./COMMENT_STANDARD.md#feature-level-documents).
+[`COMMENT_DOCUMENTATION_GUIDE.md`](./COMMENT_DOCUMENTATION_GUIDE.md#feature-level-documents).
 
 ## Engineering standards
 
-- [Comment Documentation Guide](./COMMENT_STANDARD.md) (`docs/COMMENT_STANDARD.md`)
+- [Comment Documentation Guide](./COMMENT_DOCUMENTATION_GUIDE.md) (`docs/COMMENT_DOCUMENTATION_GUIDE.md`)
 
 ## Feature-level architecture
 
@@ -31,7 +31,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 
 | Topic | Canonical document |
 |---|---|
-| Comment Documentation Guide (comments, naming, readability, XML/Markdown rules) | [`COMMENT_STANDARD.md`](./COMMENT_STANDARD.md) |
+| Comment Documentation Guide (comments, naming, readability, XML/Markdown rules) | [`COMMENT_DOCUMENTATION_GUIDE.md`](./COMMENT_DOCUMENTATION_GUIDE.md) |
 | Authentication, sessions, account classes, tenant visibility | [`identity.md`](./identity.md) |
 | Chat rooms, messages, uploads, scanning, downloads | [`chat.md`](./chat.md) |
 | Ticket portals, Trial Tutor, votes, AI scoring | [`tickets.md`](./tickets.md) |

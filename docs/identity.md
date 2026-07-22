@@ -479,5 +479,5 @@ captcha challenge, role verification, and FCaptcha assessment endpoints.
   assessment flows, ticket chat, and neural scoring boundaries.
 - [Runtime and operations](runtime.md) — service topology choices, local Docker
   resource guidance, and ClamAV/Ollama profile costs.
-- [Comment Documentation Guide](COMMENT_STANDARD.md)
+- [Comment Documentation Guide](COMMENT_DOCUMENTATION_GUIDE.md)
   — durable documentation and source-comment standards.

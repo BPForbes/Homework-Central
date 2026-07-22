@@ -1,5 +1,5 @@
 # Prefer explicit types instead of var in C#.
-# See docs/COMMENT_STANDARD.md.
+# See docs/COMMENT_DOCUMENTATION_GUIDE.md.
 [*.cs]
 csharp_style_var_for_built_in_types = false:error
 csharp_style_var_when_type_is_apparent = false:error

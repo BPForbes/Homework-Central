@@ -149,7 +149,7 @@ Architecture, trust boundaries, and engineering standards live under
 
 | Document | Topic |
 |----------|-------|
-| [`docs/COMMENT_STANDARD.md`](docs/COMMENT_STANDARD.md) | Comment Documentation Guide (comments, naming, readability) |
+| [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](docs/COMMENT_DOCUMENTATION_GUIDE.md) | Comment Documentation Guide (comments, naming, readability) |
 | [`docs/identity.md`](docs/identity.md) | Authentication, sessions, account classes, tenant visibility |
 | [`docs/chat.md`](docs/chat.md) | Chat categories, rooms, messages, attachments |
 | [`docs/tickets.md`](docs/tickets.md) | Ticket portals, Trial Tutor, votes, AI scoring |
