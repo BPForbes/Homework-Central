@@ -367,92 +367,18 @@ public sealed class InfrastructureService(
         CreateCustomChannelRequest request,
         CancellationToken ct = default)
     {
-        if (!Enum.TryParse(request.RoomType, ignoreCase: true, out CustomRoomType roomType))
-            throw new InvalidOperationException("Invalid room type.");
-
-        if (!Enum.TryParse(request.TieType, ignoreCase: true, out ChannelTieType tieType))
-            throw new InvalidOperationException("Invalid tie type.");
-
-        Guid channelId = Guid.NewGuid();
-        string roomId = CustomChannelIds.BuildRoomId(channelId);
-        DateTime now = DateTime.UtcNow;
+        (CustomRoomType roomType, ChannelTieType tieType) = ParseRoomAndTieTypes(request.RoomType, request.TieType);
         AccessScope scope = RequireScope();
+        DateTime now = DateTime.UtcNow;
 
-        (string categoryKey, string categoryDisplayName) = NormalizeCategory(
-            request.CategoryKey,
-            request.CategoryDisplayName);
-
-        CustomChannel channel = new CustomChannel
-        {
-            ChannelId = channelId,
-            RoomId = roomId,
-            DisplayName = request.DisplayName.Trim(),
-            IconName = NormalizeIconName(request.IconName),
-            CategoryKey = categoryKey,
-            CategoryDisplayName = categoryDisplayName,
-            RoomType = roomType,
-            IsPrivate = request.IsPrivate,
-            InfoContent = request.InfoContent,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now,
-            CreatedByUserId = actorUserId,
-            OwnerAccountClass = scope.AccountClass,
-            TieType = tieType,
-            TieSubjectMask = request.TieSubjectMask,
-            TieSubjectBitIndex = request.TieSubjectBitIndex,
-            TiePlatformRoleBit = request.TiePlatformRoleBit,
-        };
-
+        CustomChannel channel = BuildCustomChannelEntity(actorUserId, request, scope, roomType, tieType, now);
         await ApplyAccessRulesAsync(channel, request.AccessRules, request.IsPrivate, request.Password, actorUserId, ct);
-
-        if (roomType == CustomRoomType.RoleClaim
-            && channel.IsPrivate
-            && await RoleClaimCycleValidator.WouldBeSelfReferentialAsync(
-                db,
-                roomId,
-                channel.AccessRules.Where(r => r.CustomRoleId.HasValue).Select(r => r.CustomRoleId!.Value),
-                ct))
-        {
-            throw new InvalidOperationException(
-                "This role-claim room would be self-referential: a required access role can only be claimed inside this same room.");
-        }
+        await EnsureRoleClaimAccessIsNotSelfReferentialAsync(channel, ct);
 
         db.CustomChannels.Add(channel);
-        if (roomType == CustomRoomType.Ticket)
-        {
-            string purpose = string.IsNullOrWhiteSpace(request.DisplayName)
-                ? "General"
-                : request.DisplayName.Trim();
+        EnsureDefaultTicketPortalConfig(channel, request.DisplayName, now);
 
-            db.TicketPortalConfigs.Add(new TicketPortalConfig
-            {
-                ChannelId = channelId,
-                CtaLabel = "Open Ticket",
-                Description = string.Empty,
-                Purpose = purpose,
-                FilterName = purpose,
-                NextDisplayNumber = 1,
-                TrackingMode = TicketTrackingModes.None,
-                DecisionLabelsJson = "[]",
-                MentionRoleRulesJson = "[]",
-                StaffAccessRulesJson = "[]",
-                IntakeSchemaJson = "[]",
-                UpdatedAtUtc = now,
-            });
-        }
-
-        await db.SaveChangesAsync(ct);
-        await channelStore.RefreshAsync(ct);
-        await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
-
-        UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
-            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
-
-        return MapChannel(await db.CustomChannels
-            .AsNoTracking()
-            .Include(c => c.AccessRules)
-            .ThenInclude(r => r.CustomRole)
-            .FirstAsync(c => c.ChannelId == channel.ChannelId, ct), mask);
+        return await PersistAndMapChannelAsync(channel, actorUserId, ct);
     }
 
     public async Task<CustomChannelDto?> UpdateCustomChannelAsync(
@@ -461,98 +387,23 @@ public sealed class InfrastructureService(
         UpdateCustomChannelRequest request,
         CancellationToken ct = default)
     {
-        CustomChannel? channel = await db.CustomChannels
-            .Include(c => c.AccessRules)
-            .ThenInclude(r => r.CustomRole)
-            .FirstOrDefaultAsync(c => c.ChannelId == channelId && !c.IsArchived, ct);
-
+        CustomChannel? channel = await LoadEditableCustomChannelAsync(channelId, ct);
         if (channel is null)
-            return null;
-
-        AccessScope scope = RequireScope();
-        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass))
             return null;
 
         UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
             ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
 
-        if (request.InfoContent is not null
-            && !string.Equals(request.InfoContent, channel.InfoContent, StringComparison.Ordinal)
-            && !InfoRoomEditPolicy.CanEditInfoRoom(mask, channel))
-        {
-            throw new InvalidOperationException(
-                "You cannot edit this info room. Administrators may only edit info rooms within three days of creation; Owner and System Administrator can always edit.");
-        }
-
-        if (request.DisplayName is not null)
-            channel.DisplayName = request.DisplayName.Trim();
-        if (request.IconName is not null)
-            channel.IconName = NormalizeIconName(request.IconName);
-        if (request.CategoryKey is not null || request.CategoryDisplayName is not null)
-        {
-            (string categoryKey, string categoryDisplayName) = NormalizeCategory(
-                request.CategoryKey ?? channel.CategoryKey,
-                request.CategoryDisplayName ?? channel.CategoryDisplayName);
-            channel.CategoryKey = categoryKey;
-            channel.CategoryDisplayName = categoryDisplayName;
-        }
-
+        EnsureInfoRoomEditAllowed(mask, channel, request);
         bool wasPrivate = channel.IsPrivate;
-        if (request.IsPrivate.HasValue)
-            channel.IsPrivate = request.IsPrivate.Value;
-        if (request.InfoContent is not null)
-            channel.InfoContent = request.InfoContent;
-        if (request.TieType is not null && Enum.TryParse(request.TieType, ignoreCase: true, out ChannelTieType tieType))
-            channel.TieType = tieType;
-        if (request.TieSubjectMask is not null)
-            channel.TieSubjectMask = request.TieSubjectMask;
-        if (request.TieSubjectBitIndex.HasValue)
-            channel.TieSubjectBitIndex = request.TieSubjectBitIndex;
-        if (request.TiePlatformRoleBit.HasValue)
-            channel.TiePlatformRoleBit = request.TiePlatformRoleBit;
-
-        bool isPrivateNow = channel.IsPrivate;
+        ApplyChannelFieldUpdates(channel, request);
 
         await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(ct);
         try
         {
-            if (!isPrivateNow)
-            {
-                await ClearChannelAccessRulesAsync(channel, ct);
-            }
-            else if (request.AccessRules is not null)
-            {
-                if (request.AccessRules.Count == 0)
-                {
-                    throw new InvalidOperationException("Private rooms must specify at least one access role.");
-                }
-
-                await ClearChannelAccessRulesAsync(channel, ct);
-                await ApplyAccessRulesAsync(
-                    channel,
-                    request.AccessRules,
-                    isPrivate: true,
-                    request.Password,
-                    actorUserId,
-                    ct);
-            }
-            else if (!wasPrivate)
-            {
-                throw new InvalidOperationException("Private rooms must specify at least one access role.");
-            }
-
-            if (channel.RoomType == CustomRoomType.RoleClaim
-                && channel.IsPrivate
-                && await RoleClaimCycleValidator.WouldBeSelfReferentialAsync(
-                    db,
-                    channel.RoomId,
-                    channel.AccessRules.Where(r => r.CustomRoleId.HasValue).Select(r => r.CustomRoleId!.Value),
-                    ct))
-            {
-                throw new InvalidOperationException(
-                    "This role-claim room would be self-referential: a required access role can only be claimed inside this same room.");
-            }
+            await SyncAccessRulesForPrivacyChangeAsync(channel, wasPrivate, request, actorUserId, ct);
+            await EnsureRoleClaimAccessIsNotSelfReferentialAsync(channel, ct);
 
             channel.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
@@ -567,11 +418,7 @@ public sealed class InfrastructureService(
         await channelStore.RefreshAsync(ct);
         await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
 
-        return MapChannel(await db.CustomChannels
-            .AsNoTracking()
-            .Include(c => c.AccessRules)
-            .ThenInclude(r => r.CustomRole)
-            .FirstAsync(c => c.ChannelId == channelId, ct), mask);
+        return MapChannel(await LoadChannelForMapAsync(channelId, ct), mask);
     }
 
     public async Task<bool> ArchiveCustomChannelAsync(Guid channelId, CancellationToken ct = default)
@@ -1302,6 +1149,213 @@ public sealed class InfrastructureService(
         await chatNavNotifier.NotifyNavChangedAsync(role.OwnerAccountClass, ct);
         return true;
     }
+
+    private static (CustomRoomType RoomType, ChannelTieType TieType) ParseRoomAndTieTypes(
+        string roomTypeValue,
+        string tieTypeValue)
+    {
+        if (!Enum.TryParse(roomTypeValue, ignoreCase: true, out CustomRoomType roomType))
+            throw new InvalidOperationException("Invalid room type.");
+
+        if (!Enum.TryParse(tieTypeValue, ignoreCase: true, out ChannelTieType tieType))
+            throw new InvalidOperationException("Invalid tie type.");
+
+        return (roomType, tieType);
+    }
+
+    private static CustomChannel BuildCustomChannelEntity(
+        Guid actorUserId,
+        CreateCustomChannelRequest request,
+        AccessScope scope,
+        CustomRoomType roomType,
+        ChannelTieType tieType,
+        DateTime now)
+    {
+        Guid channelId = Guid.NewGuid();
+        (string categoryKey, string categoryDisplayName) = NormalizeCategory(
+            request.CategoryKey,
+            request.CategoryDisplayName);
+
+        return new CustomChannel
+        {
+            ChannelId = channelId,
+            RoomId = CustomChannelIds.BuildRoomId(channelId),
+            DisplayName = request.DisplayName.Trim(),
+            IconName = NormalizeIconName(request.IconName),
+            CategoryKey = categoryKey,
+            CategoryDisplayName = categoryDisplayName,
+            RoomType = roomType,
+            IsPrivate = request.IsPrivate,
+            InfoContent = request.InfoContent,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedByUserId = actorUserId,
+            OwnerAccountClass = scope.AccountClass,
+            TieType = tieType,
+            TieSubjectMask = request.TieSubjectMask,
+            TieSubjectBitIndex = request.TieSubjectBitIndex,
+            TiePlatformRoleBit = request.TiePlatformRoleBit,
+        };
+    }
+
+    private void EnsureDefaultTicketPortalConfig(CustomChannel channel, string displayName, DateTime now)
+    {
+        if (channel.RoomType != CustomRoomType.Ticket)
+            return;
+
+        string purpose = string.IsNullOrWhiteSpace(displayName)
+            ? "General"
+            : displayName.Trim();
+
+        db.TicketPortalConfigs.Add(new TicketPortalConfig
+        {
+            ChannelId = channel.ChannelId,
+            CtaLabel = "Open Ticket",
+            Description = string.Empty,
+            Purpose = purpose,
+            FilterName = purpose,
+            NextDisplayNumber = 1,
+            TrackingMode = TicketTrackingModes.None,
+            DecisionLabelsJson = "[]",
+            MentionRoleRulesJson = "[]",
+            StaffAccessRulesJson = "[]",
+            IntakeSchemaJson = "[]",
+            UpdatedAtUtc = now,
+        });
+    }
+
+    private async Task<CustomChannel?> LoadEditableCustomChannelAsync(Guid channelId, CancellationToken ct)
+    {
+        CustomChannel? channel = await db.CustomChannels
+            .Include(c => c.AccessRules)
+            .ThenInclude(r => r.CustomRole)
+            .FirstOrDefaultAsync(c => c.ChannelId == channelId && !c.IsArchived, ct);
+
+        if (channel is null)
+            return null;
+
+        AccessScope scope = RequireScope();
+        if (!InfrastructureAccountScope.CanViewInfrastructure(scope, channel.OwnerAccountClass))
+            return null;
+
+        return channel;
+    }
+
+    private static void EnsureInfoRoomEditAllowed(
+        UserEffectiveMask mask,
+        CustomChannel channel,
+        UpdateCustomChannelRequest request)
+    {
+        if (request.InfoContent is not null
+            && !string.Equals(request.InfoContent, channel.InfoContent, StringComparison.Ordinal)
+            && !InfoRoomEditPolicy.CanEditInfoRoom(mask, channel))
+        {
+            throw new InvalidOperationException(
+                "You cannot edit this info room. Administrators may only edit info rooms within three days of creation; Owner and System Administrator can always edit.");
+        }
+    }
+
+    private static void ApplyChannelFieldUpdates(CustomChannel channel, UpdateCustomChannelRequest request)
+    {
+        if (request.DisplayName is not null)
+            channel.DisplayName = request.DisplayName.Trim();
+        if (request.IconName is not null)
+            channel.IconName = NormalizeIconName(request.IconName);
+        if (request.CategoryKey is not null || request.CategoryDisplayName is not null)
+        {
+            (string categoryKey, string categoryDisplayName) = NormalizeCategory(
+                request.CategoryKey ?? channel.CategoryKey,
+                request.CategoryDisplayName ?? channel.CategoryDisplayName);
+            channel.CategoryKey = categoryKey;
+            channel.CategoryDisplayName = categoryDisplayName;
+        }
+
+        if (request.IsPrivate.HasValue)
+            channel.IsPrivate = request.IsPrivate.Value;
+        if (request.InfoContent is not null)
+            channel.InfoContent = request.InfoContent;
+        if (request.TieType is not null && Enum.TryParse(request.TieType, ignoreCase: true, out ChannelTieType tieType))
+            channel.TieType = tieType;
+        if (request.TieSubjectMask is not null)
+            channel.TieSubjectMask = request.TieSubjectMask;
+        if (request.TieSubjectBitIndex.HasValue)
+            channel.TieSubjectBitIndex = request.TieSubjectBitIndex;
+        if (request.TiePlatformRoleBit.HasValue)
+            channel.TiePlatformRoleBit = request.TiePlatformRoleBit;
+    }
+
+    private async Task SyncAccessRulesForPrivacyChangeAsync(
+        CustomChannel channel,
+        bool wasPrivate,
+        UpdateCustomChannelRequest request,
+        Guid actorUserId,
+        CancellationToken ct)
+    {
+        if (!channel.IsPrivate)
+        {
+            await ClearChannelAccessRulesAsync(channel, ct);
+            return;
+        }
+
+        if (request.AccessRules is not null)
+        {
+            if (request.AccessRules.Count == 0)
+                throw new InvalidOperationException("Private rooms must specify at least one access role.");
+
+            await ClearChannelAccessRulesAsync(channel, ct);
+            await ApplyAccessRulesAsync(
+                channel,
+                request.AccessRules,
+                isPrivate: true,
+                request.Password,
+                actorUserId,
+                ct);
+            return;
+        }
+
+        if (!wasPrivate)
+            throw new InvalidOperationException("Private rooms must specify at least one access role.");
+    }
+
+    private async Task EnsureRoleClaimAccessIsNotSelfReferentialAsync(
+        CustomChannel channel,
+        CancellationToken ct)
+    {
+        if (channel.RoomType != CustomRoomType.RoleClaim || !channel.IsPrivate)
+            return;
+
+        if (await RoleClaimCycleValidator.WouldBeSelfReferentialAsync(
+                db,
+                channel.RoomId,
+                channel.AccessRules.Where(r => r.CustomRoleId.HasValue).Select(r => r.CustomRoleId!.Value),
+                ct))
+        {
+            throw new InvalidOperationException(
+                "This role-claim room would be self-referential: a required access role can only be claimed inside this same room.");
+        }
+    }
+
+    private async Task<CustomChannelDto> PersistAndMapChannelAsync(
+        CustomChannel channel,
+        Guid actorUserId,
+        CancellationToken ct)
+    {
+        await db.SaveChangesAsync(ct);
+        await channelStore.RefreshAsync(ct);
+        await chatNavNotifier.NotifyNavChangedAsync(channel.OwnerAccountClass, ct);
+
+        UserEffectiveMask mask = await effectiveMaskService.GetUserEffectiveMaskAsync(actorUserId, ct)
+            ?? await effectiveMaskService.RebuildUserEffectiveMaskAsync(actorUserId, ct);
+
+        return MapChannel(await LoadChannelForMapAsync(channel.ChannelId, ct), mask);
+    }
+
+    private async Task<CustomChannel> LoadChannelForMapAsync(Guid channelId, CancellationToken ct) =>
+        await db.CustomChannels
+            .AsNoTracking()
+            .Include(c => c.AccessRules)
+            .ThenInclude(r => r.CustomRole)
+            .FirstAsync(c => c.ChannelId == channelId, ct);
 
     private static string? NormalizeIconName(string? iconName)
     {

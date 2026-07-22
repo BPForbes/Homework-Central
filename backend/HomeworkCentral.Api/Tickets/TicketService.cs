@@ -133,88 +133,47 @@ public sealed class TicketService(
         OpenTicketRequest request,
         CancellationToken ct = default)
     {
-        EffectiveMaskDto openerMasks = await effectiveMaskService.GetEffectiveMaskDtoAsync(openerUserId, ct);
-        if (MentionPermissions.IsGuest(BitMask.FromBase64(openerMasks.RoleMask, 64)))
-            throw new InvalidOperationException("Guests cannot open tickets.");
-        if (!chatRoomAccess.CanAccessRoom(openerMasks, openerUserId, portalRoomId))
-            throw new InvalidOperationException("You cannot access this ticket portal.");
+        await EnsureCanOpenTicketAsync(portalRoomId, openerUserId, ct);
 
         await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(ct);
 
-        TicketPortalConfig portal = await db.TicketPortalConfigs
-            .Include(p => p.Channel)
-            .FirstOrDefaultAsync(
-                p => p.Channel.RoomId == portalRoomId
-                     && p.Channel.RoomType == CustomRoomType.Ticket
-                     && !p.Channel.IsArchived,
-                ct)
-            ?? throw new InvalidOperationException("Ticket portal was not found.");
-
-        if (!CanViewChannelScope(portal.Channel))
-            throw new InvalidOperationException("Ticket portal is not available in your account scope.");
-
+        TicketPortalConfig portal = await LoadPortalForOpenAsync(portalRoomId, ct);
         List<TicketIntakeQuestionDto> schema = TicketJson.DeserializeIntakeSchema(portal.IntakeSchemaJson);
         Dictionary<string, TicketPrefaceResult> prefaceResults =
             TicketIntakeValidator.ValidateAnswers(schema, request.Answers, prefaceChecks, filterName: portal.FilterName);
 
-        // Display numbers advance inside the transaction so each portal owns one
-        // channel-title sequence.
-        int displayNumber = portal.NextDisplayNumber;
-        portal.NextDisplayNumber = checked(displayNumber + 1);
-        portal.UpdatedAtUtc = DateTime.UtcNow;
-
-        string purpose = portal.Purpose;
-        string filterName = string.IsNullOrWhiteSpace(portal.FilterName) ? purpose : portal.FilterName;
-        string displayName = TicketDisplayNames.Open(filterName, displayNumber);
-        DateTime now = DateTime.UtcNow;
+        AllocatedTicketIdentity identity = AllocateTicketIdentity(portal);
         bool aiOptOut = TicketIntakeValidator.IsAiOptOut(schema, request.Answers);
 
         CustomChannel chatChannel = await CreateTicketChatChannelAsync(
             portal,
             openerUserId,
-            displayName,
-            now,
+            identity.DisplayName,
+            identity.CreatedAtUtc,
             ct);
 
-        Ticket ticket = new()
-        {
-            TicketId = Guid.NewGuid(),
-            PortalChannelId = portal.ChannelId,
-            ChatChannelId = chatChannel.ChannelId,
-            RoomId = chatChannel.RoomId,
-            DisplayNumber = displayNumber,
-            Purpose = purpose,
-            FilterName = filterName,
-            OpenedByUserId = openerUserId,
-            CreatedAtUtc = now,
-            IntakeAnswersJson = TicketJson.SerializeStoredAnswers(request.Answers),
-            AiTrackingOptOut = aiOptOut,
-            TrackingTemplateJson = aiOptOut
-                ? null
-                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers, prefaceResults),
-        };
+        Ticket ticket = BuildOpenedTicket(
+            portal,
+            chatChannel,
+            openerUserId,
+            identity,
+            request,
+            schema,
+            prefaceResults,
+            aiOptOut);
 
-        db.CustomChannels.Add(chatChannel);
-        db.Tickets.Add(ticket);
-        // AI opt-out skips initial watches because watches feed automated
-        // assessment work; staff inbox notification still records the ticket.
-        if (!aiOptOut)
-            await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, now, ct);
-
-        CreateCandidateApplicationIfNeeded(ticket, schema, request.Answers, now);
-
-        await db.SaveChangesAsync(ct);
-
-        List<TicketIntakeAnswerDto> intakeAnswers = TicketJson.BuildIntakeAnswerDtos(schema, request.Answers);
-        await CreateTicketOpenedInboxNotificationsAsync(
+        await PersistOpenedTicketAsync(
             ticket,
             chatChannel,
             portal,
-            intakeAnswers,
+            schema,
+            request,
+            openerUserId,
+            identity.CreatedAtUtc,
+            aiOptOut,
             ct);
 
-        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
         await channelStore.RefreshAsync(ct);
@@ -670,6 +629,122 @@ public sealed class TicketService(
 
         return ticket;
     }
+
+    private async Task EnsureCanOpenTicketAsync(
+        string portalRoomId,
+        Guid openerUserId,
+        CancellationToken ct)
+    {
+        EffectiveMaskDto openerMasks = await effectiveMaskService.GetEffectiveMaskDtoAsync(openerUserId, ct);
+        if (MentionPermissions.IsGuest(BitMask.FromBase64(openerMasks.RoleMask, 64)))
+            throw new InvalidOperationException("Guests cannot open tickets.");
+        if (!chatRoomAccess.CanAccessRoom(openerMasks, openerUserId, portalRoomId))
+            throw new InvalidOperationException("You cannot access this ticket portal.");
+    }
+
+    private async Task<TicketPortalConfig> LoadPortalForOpenAsync(string portalRoomId, CancellationToken ct)
+    {
+        TicketPortalConfig portal = await db.TicketPortalConfigs
+            .Include(p => p.Channel)
+            .FirstOrDefaultAsync(
+                p => p.Channel.RoomId == portalRoomId
+                     && p.Channel.RoomType == CustomRoomType.Ticket
+                     && !p.Channel.IsArchived,
+                ct)
+            ?? throw new InvalidOperationException("Ticket portal was not found.");
+
+        if (!CanViewChannelScope(portal.Channel))
+            throw new InvalidOperationException("Ticket portal is not available in your account scope.");
+
+        return portal;
+    }
+
+    private static AllocatedTicketIdentity AllocateTicketIdentity(TicketPortalConfig portal)
+    {
+        // Display numbers advance inside the transaction so each portal owns one
+        // channel-title sequence.
+        int displayNumber = portal.NextDisplayNumber;
+        portal.NextDisplayNumber = checked(displayNumber + 1);
+        portal.UpdatedAtUtc = DateTime.UtcNow;
+
+        string purpose = portal.Purpose;
+        string filterName = string.IsNullOrWhiteSpace(portal.FilterName) ? purpose : portal.FilterName;
+        string displayName = TicketDisplayNames.Open(filterName, displayNumber);
+        DateTime createdAtUtc = DateTime.UtcNow;
+
+        return new AllocatedTicketIdentity(displayNumber, purpose, filterName, displayName, createdAtUtc);
+    }
+
+    private static Ticket BuildOpenedTicket(
+        TicketPortalConfig portal,
+        CustomChannel chatChannel,
+        Guid openerUserId,
+        AllocatedTicketIdentity identity,
+        OpenTicketRequest request,
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, TicketPrefaceResult> prefaceResults,
+        bool aiOptOut) =>
+        new()
+        {
+            TicketId = Guid.NewGuid(),
+            PortalChannelId = portal.ChannelId,
+            ChatChannelId = chatChannel.ChannelId,
+            RoomId = chatChannel.RoomId,
+            DisplayNumber = identity.DisplayNumber,
+            Purpose = identity.Purpose,
+            FilterName = identity.FilterName,
+            OpenedByUserId = openerUserId,
+            CreatedAtUtc = identity.CreatedAtUtc,
+            IntakeAnswersJson = TicketJson.SerializeStoredAnswers(request.Answers),
+            AiTrackingOptOut = aiOptOut,
+            TrackingTemplateJson = aiOptOut
+                ? null
+                : TicketTrackingTemplateBuilder.Build(
+                    identity.FilterName,
+                    schema,
+                    request.Answers,
+                    prefaceResults),
+        };
+
+    private async Task PersistOpenedTicketAsync(
+        Ticket ticket,
+        CustomChannel chatChannel,
+        TicketPortalConfig portal,
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        OpenTicketRequest request,
+        Guid openerUserId,
+        DateTime createdAtUtc,
+        bool aiOptOut,
+        CancellationToken ct)
+    {
+        db.CustomChannels.Add(chatChannel);
+        db.Tickets.Add(ticket);
+        // AI opt-out skips initial watches because watches feed automated
+        // assessment work; staff inbox notification still records the ticket.
+        if (!aiOptOut)
+            await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, createdAtUtc, ct);
+
+        CreateCandidateApplicationIfNeeded(ticket, schema, request.Answers, createdAtUtc);
+
+        await db.SaveChangesAsync(ct);
+
+        List<TicketIntakeAnswerDto> intakeAnswers = TicketJson.BuildIntakeAnswerDtos(schema, request.Answers);
+        await CreateTicketOpenedInboxNotificationsAsync(
+            ticket,
+            chatChannel,
+            portal,
+            intakeAnswers,
+            ct);
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private readonly record struct AllocatedTicketIdentity(
+        int DisplayNumber,
+        string Purpose,
+        string FilterName,
+        string DisplayName,
+        DateTime CreatedAtUtc);
 
     private async Task<CustomChannel> CreateTicketChatChannelAsync(
         TicketPortalConfig portal,

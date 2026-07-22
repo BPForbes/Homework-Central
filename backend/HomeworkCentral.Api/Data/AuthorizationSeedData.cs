@@ -71,7 +71,27 @@ public static class AuthorizationSeedData
         SeededDatabases.TryAdd(cacheKey, 0);
     }
 
+    /// <summary>
+    /// Returns true when built-in roles, permissions, ties, masks, and subject
+    /// hierarchy match <see cref="AuthorizationCatalog"/>. See docs/identity.md.
+    /// </summary>
     internal static async Task<bool> IsCatalogCurrentAsync(AppDbContext db, CancellationToken ct)
+    {
+        if (!await CatalogCountsMatchAsync(db, ct))
+            return false;
+        if (!await PermissionsMatchCatalogAsync(db, ct))
+            return false;
+        if (!await RolePermissionTiesMatchCatalogAsync(db, ct))
+            return false;
+        if (!await RolesAndMasksMatchCatalogAsync(db, ct))
+            return false;
+        if (!await SubjectsMatchCatalogAsync(db, ct))
+            return false;
+
+        return true;
+    }
+
+    private static async Task<bool> CatalogCountsMatchAsync(AppDbContext db, CancellationToken ct)
     {
         if (await db.Roles.CountAsync(role => !role.IsCustom, ct) != AuthorizationCatalog.Roles.Count)
             return false;
@@ -81,11 +101,15 @@ public static class AuthorizationSeedData
 
         if (await db.RolePermissions.CountAsync(rolePermission => !rolePermission.Role.IsCustom, ct)
             != AuthorizationCatalog.TotalRolePermissionTieCount)
+        {
             return false;
+        }
 
-        if (await db.Permissions.CountAsync(ct) != AuthorizationCatalog.Permissions.Count)
-            return false;
+        return await db.Permissions.CountAsync(ct) == AuthorizationCatalog.Permissions.Count;
+    }
 
+    private static async Task<bool> PermissionsMatchCatalogAsync(AppDbContext db, CancellationToken ct)
+    {
         List<Permission> permissions = await db.Permissions.AsNoTracking().ToListAsync(ct);
         Dictionary<short, Permission> permissionsById = permissions.ToDictionary(permission => permission.PermissionId);
 
@@ -101,6 +125,11 @@ public static class AuthorizationSeedData
             }
         }
 
+        return true;
+    }
+
+    private static async Task<bool> RolePermissionTiesMatchCatalogAsync(AppDbContext db, CancellationToken ct)
+    {
         HashSet<(Guid RoleId, short PermissionId)> expectedRolePermissionTies =
             AuthorizationCatalog.RolePermissionTies
                 .Select(tie => (tie.RoleId, tie.PermissionId))
@@ -113,9 +142,11 @@ public static class AuthorizationSeedData
             .Select(rolePermission => (rolePermission.RoleId, rolePermission.PermissionId))
             .ToHashSet();
 
-        if (!expectedRolePermissionTies.SetEquals(actualRolePermissionTies))
-            return false;
+        return expectedRolePermissionTies.SetEquals(actualRolePermissionTies);
+    }
 
+    private static async Task<bool> RolesAndMasksMatchCatalogAsync(AppDbContext db, CancellationToken ct)
+    {
         // Check every role's masks (not just Owner) so a RoleMaskBuilder regression affecting
         // any single role's PermissionMask/RoleMask/FeatureMask reliably forces a reseed instead
         // of silently persisting under a coincidentally-still-matching Owner check.
@@ -136,11 +167,15 @@ public static class AuthorizationSeedData
             }
         }
 
+        return true;
+    }
+
+    private static async Task<bool> SubjectsMatchCatalogAsync(AppDbContext db, CancellationToken ct)
+    {
         // Check every subject's parent relationship matches the catalog's declared hierarchy.
         List<Subject> subjects = await db.Subjects.AsNoTracking().ToListAsync(ct);
         Dictionary<(string SubjectMask, short BitIndex), Subject> subjectsByKey = subjects
             .ToDictionary(subject => (subject.SubjectMask, subject.BitIndex));
-        Dictionary<Guid, Subject> subjectsById = subjects.ToDictionary(subject => subject.SubjectId);
 
         foreach (AuthorizationCatalog.SubjectDefinition subjectDefinition in AuthorizationCatalog.Subjects)
         {
