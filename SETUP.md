@@ -9,12 +9,11 @@ is in [`README.md`](README.md). Agent entry rules live in [`AGENTS.md`](AGENTS.m
 and [`CLAUDE.md`](CLAUDE.md). Architecture and security baselines live under
 [`docs/`](docs/README.md).
 
-**SonarQube** (shared C# + TypeScript analysis / quality gate) is configured in
-CI when GitHub Actions secrets and variables are set. Enablement steps and the
-local `scripts/run-sonar.sh` helper are documented under
+**GitHub CodeQL** (C# + JavaScript/TypeScript security and quality scanning) runs
+via `.github/workflows/codeql.yml`. Enablement and branch-protection notes are
+under
 [Analyzer and CI expectations](docs/COMMENT_DOCUMENTATION_GUIDE.md#analyzer-and-ci-expectations)
-in the Comment Documentation Guide. Do not add a root `sonar-project.properties`
-file — this repo uses SonarScanner for .NET with `sonar.scanner.scanAll=true`.
+in the Comment Documentation Guide.
 
 ---
 

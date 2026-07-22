@@ -27,16 +27,6 @@ appsettings.Local.json
 .code-review-graph/
 claude-mem/
 
-# SonarQube / SonarScanner local caches (CI installs under .sonar/scanner)
-.sonar/
-.scannerwork/
-
-# SonarQube for IDE binding may include secrets in local overrides; commit only
-# connectedMode.json after copying from connectedMode.example.json (no tokens).
-.sonarlint/*
-!.sonarlint/connectedMode.example.json
-!.sonarlint/connectedMode.json
-
 # OS
 .DS_Store
 Thumbs.db
