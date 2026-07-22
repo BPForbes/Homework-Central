@@ -155,10 +155,12 @@ Variable names must identify role, domain, and unit when relevant.
 | Include source when comparing | `jwtAccountClass`, `resourceAccountClass` | `left`, `right` |
 | Include lifecycle state | `pendingUploadScan` | `scan` |
 | Avoid abbreviations except common project terms | `moderationConceptSlug` | `mcs` |
+| Prefer speakable names | `eligibleUsers`, `roomId` | `eus`, `rid`, `tmpUsr` |
 
-Single-letter variables are allowed only for conventional math in a small local
-scope, such as neural network formulas in tests or training helpers. Prefer
-domain names even there when the value crosses more than a few lines.
+Names must be speakable aloud as words or clear domain phrases. Cryptic
+consonant clusters and unexplained initialisms fail review unless they are
+established Homework Central or industry terms (`JWT`, `DTO`, `EF`). Conventional
+short forms such as `ct` for `CancellationToken` remain acceptable.
 
 ## Loop counters and indexes
 
@@ -1265,8 +1267,11 @@ Maintenance rules:
 Use this checklist before submitting or approving a change:
 
 - [ ] Names describe Homework Central domain behavior accurately.
+- [ ] Names are speakable; cryptic abbreviations were renamed.
 - [ ] C# locals use explicit types; no `var` appears in hand-authored code.
 - [ ] Closed-set decisions use pattern matching instead of large `if` chains.
+- [ ] Fail-first guards keep the happy path unindented.
+- [ ] Collection member transforms prefer Where/Select/map/filter when clearer than a for-loop.
 - [ ] Functions stay below hard complexity limits or have an approved exception.
 - [ ] Warning-band complexity has been considered for decomposition.
 - [ ] Algorithm / hot-path changes state time and space complexity (Big-O) and
