@@ -39,10 +39,10 @@ public class TicketTrackingTemplateBuilderTests
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement intake = document.RootElement.GetProperty("intake");
         Assert.Equal(schema.Count, intake.GetArrayLength());
-        Assert.True(
-            intake.EnumerateArray().Any(item =>
-                item.GetProperty("id").GetString() == "ai-opt-out"
-                && !item.TryGetProperty("answer", out _)));
+        Assert.Contains(
+            intake.EnumerateArray(),
+            item => item.GetProperty("id").GetString() == "ai-opt-out"
+                && !item.TryGetProperty("answer", out _));
     }
 
     [Fact]
