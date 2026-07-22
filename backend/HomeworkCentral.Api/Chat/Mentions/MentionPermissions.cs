@@ -31,14 +31,9 @@ public static class MentionPermissions
         BitMask.HasBit(roleMask, PlatformRoles.Owner)
         || BitMask.HasBit(roleMask, PlatformRoles.Administrator);
 
-    private static bool HasAnyRoleAboveGuest(System.Collections.BitArray roleMask)
-    {
-        for (short bit = PlatformRoles.VerifiedUser; bit <= PlatformRoles.TrialTutor; bit++)
-        {
-            if (bit < roleMask.Length && roleMask[bit])
-                return true;
-        }
-
-        return false;
-    }
+    private static bool HasAnyRoleAboveGuest(System.Collections.BitArray roleMask) =>
+        Enumerable.Range(
+                PlatformRoles.VerifiedUser,
+                PlatformRoles.TrialTutor - PlatformRoles.VerifiedUser + 1)
+            .Any(bit => bit < roleMask.Length && roleMask[bit]);
 }

@@ -671,22 +671,26 @@ public sealed class InfrastructureService(
                 .Select(ur => ur.Role.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            for (short bit = PlatformRoles.Guest; bit <= PlatformRoles.Founder; bit++)
-            {
-                if (!PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string roleName))
-                    continue;
-
-                bool assigned = assignedNames.Contains(roleName);
-                bool roleBelowActor = PlatformRoleCatalog.CanGrantRole(actorLevel, bit);
-                result.PlatformRoles.Add(new PlatformRoleAssignmentDto
+            result.PlatformRoles.AddRange(Enumerable
+                .Range(PlatformRoles.Guest, PlatformRoles.Founder - PlatformRoles.Guest + 1)
+                .Select(static bit => (short)bit)
+                .Select(bit =>
                 {
-                    Name = roleName,
-                    Bit = bit,
-                    IsAssigned = assigned,
-                    CanGrant = !assigned && targetBelowActor && roleBelowActor,
-                    CanRevoke = assigned && targetBelowActor && roleBelowActor,
-                });
-            }
+                    if (!PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string roleName))
+                        return null;
+
+                    bool assigned = assignedNames.Contains(roleName);
+                    bool roleBelowActor = PlatformRoleCatalog.CanGrantRole(actorLevel, bit);
+                    return new PlatformRoleAssignmentDto
+                    {
+                        Name = roleName,
+                        Bit = bit,
+                        IsAssigned = assigned,
+                        CanGrant = !assigned && targetBelowActor && roleBelowActor,
+                        CanRevoke = assigned && targetBelowActor && roleBelowActor,
+                    };
+                })
+                .OfType<PlatformRoleAssignmentDto>());
 
             UserEffectiveMask? effective = await location.Db.UserEffectiveMasks
                 .AsNoTracking()
@@ -851,12 +855,13 @@ public sealed class InfrastructureService(
         IReadOnlyList<(User User, string? TenantDatabaseName)> users =
             await userDirectory.ListUsersForAssignmentAsync(ct);
 
-        List<AssignableUserDto> results = [];
-        foreach ((User user, string? tenantDatabaseName) in users)
+        return users.Select(entry =>
         {
+            User user = entry.User;
+            string? tenantDatabaseName = entry.TenantDatabaseName;
             short targetLevel = InfrastructureUserDirectory.GetHighestPlatformRoleBit(user);
-            bool alreadyAssigned = user.UserRoles.Any(ur => ur.RoleId == roleId);
-            results.Add(new AssignableUserDto
+            bool alreadyAssigned = user.UserRoles.Any(userRole => userRole.RoleId == roleId);
+            return new AssignableUserDto
             {
                 UserId = user.UserId,
                 Username = user.Username,
@@ -868,10 +873,8 @@ public sealed class InfrastructureService(
                 CanAssign = !alreadyAssigned
                     && user.UserId != actorUserId
                     && PlatformRoleCatalog.CanGrantRole(actorLevel, targetLevel),
-            });
-        }
-
-        return results;
+            };
+        }).ToList();
     }
 
     public async Task<int> BulkAssignCustomRoleAsync(

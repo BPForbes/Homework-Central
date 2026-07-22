@@ -398,14 +398,7 @@ public static class AuthorizationSeedData
     private static bool MasksMatch(System.Collections.BitArray left, System.Collections.BitArray right)
     {
         int length = Math.Max(left.Length, right.Length);
-        for (int bit = 0; bit < length; bit++)
-        {
-            bool leftValue = bit < left.Length && left[bit];
-            bool rightValue = bit < right.Length && right[bit];
-            if (leftValue != rightValue)
-                return false;
-        }
-
-        return true;
+        return Enumerable.Range(0, length).All(bit =>
+            (bit < left.Length && left[bit]) == (bit < right.Length && right[bit]));
     }
 }

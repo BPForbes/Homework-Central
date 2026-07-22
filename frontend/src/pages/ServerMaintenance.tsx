@@ -169,12 +169,13 @@ export function ServerMaintenance() {
   }
 
   function buildAccessRulesPayload(): CustomChannelAccessRuleInput[] {
-    const rules: CustomChannelAccessRuleInput[] = []
-    for (const rule of accessRules) {
-      if (rule.customRoleId) rules.push({ customRoleId: rule.customRoleId })
-      else if (rule.platformRoleBit != null) rules.push({ platformRoleBit: rule.platformRoleBit })
-    }
-    return rules
+    return accessRules.flatMap((rule): CustomChannelAccessRuleInput[] => {
+      if (rule.customRoleId)
+        return [{ customRoleId: rule.customRoleId }]
+      if (rule.platformRoleBit != null)
+        return [{ platformRoleBit: rule.platformRoleBit }]
+      return []
+    })
   }
 
   function buildPayload(password?: string): Record<string, unknown> {

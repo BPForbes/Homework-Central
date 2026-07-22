@@ -176,8 +176,9 @@ function registerSignalRHandlers(
   connection.on('TypingUsersSnapshot', (users: ChatTypingUser[]) => {
     const visibleUsers = users.filter((user) => user.userId !== options.currentUserId)
     options.knownTypingUserIds.clear()
-    for (const user of visibleUsers)
+    visibleUsers.forEach((user) => {
       options.knownTypingUserIds.add(user.userId)
+    })
     options.setTypingUsers(visibleUsers)
   })
 }

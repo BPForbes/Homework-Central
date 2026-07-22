@@ -51,9 +51,12 @@ public sealed class MentionRecipientResolver(
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(senderAccountClass, senderTenantDatabaseName, ct);
         // Mentions resolve many @username tokens against one scoped load; the map
         // keeps username lookup off a repeated linear scan.
-        Dictionary<string, UserMaskSnapshot> eligibleUsersByUsername = new(StringComparer.OrdinalIgnoreCase);
-        foreach (UserMaskSnapshot user in eligibleUsers)
-            eligibleUsersByUsername.TryAdd(user.Username, user);
+        Dictionary<string, UserMaskSnapshot> eligibleUsersByUsername = eligibleUsers
+            .GroupBy(user => user.Username, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First(),
+                StringComparer.OrdinalIgnoreCase);
 
         foreach (ParsedMention mention in activeMentions.Where(m => m.IsActive))
         {

@@ -266,14 +266,12 @@ public static class TicketIntakeValidator
         if (question.Options is not { Count: > 0 })
             return;
 
-        foreach (JsonElement element in value.EnumerateArray())
+        if (!value.EnumerateArray().All(element =>
+                element.ValueKind == JsonValueKind.String
+                && question.Options.Contains(element.GetString()!, StringComparer.Ordinal)))
         {
-            if (element.ValueKind != JsonValueKind.String
-                || !question.Options.Contains(element.GetString()!, StringComparer.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"Answer for '{question.Prompt}' contains an invalid option.");
-            }
+            throw new InvalidOperationException(
+                $"Answer for '{question.Prompt}' contains an invalid option.");
         }
     }
 
@@ -285,11 +283,8 @@ public static class TicketIntakeValidator
             StringComparer.Ordinal);
 
         // Mixed answers preserve each part kind for ticket AI evidence and moderator review.
-        foreach (JsonElement part in value.EnumerateArray())
+        if (!value.EnumerateArray().All(part => IsAllowedMixedPart(part, allowedResponseKinds)))
         {
-            if (IsAllowedMixedPart(part, allowedResponseKinds))
-                continue;
-
             throw new InvalidOperationException(
                 $"Answer for '{question.Prompt}' contains an invalid part.");
         }
