@@ -104,19 +104,12 @@ public static class AuthorizationSeedData
         List<Permission> permissions = await db.Permissions.AsNoTracking().ToListAsync(ct);
         Dictionary<short, Permission> permissionsById = permissions.ToDictionary(permission => permission.PermissionId);
 
-        foreach (AuthorizationCatalog.PermissionDefinition permissionDefinition in AuthorizationCatalog.Permissions)
-        {
-            if (!permissionsById.TryGetValue(permissionDefinition.PermissionId, out Permission? permission)
-                || permission.Name != permissionDefinition.Name
-                || permission.DisplayName != permissionDefinition.Name
-                || permission.Description != permissionDefinition.Description
-                || permission.Category != "Moderation")
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return AuthorizationCatalog.Permissions.All(permissionDefinition =>
+            permissionsById.TryGetValue(permissionDefinition.PermissionId, out Permission? permission)
+            && permission.Name == permissionDefinition.Name
+            && permission.DisplayName == permissionDefinition.Name
+            && permission.Description == permissionDefinition.Description
+            && permission.Category == "Moderation");
     }
 
     private static async Task<bool> RolePermissionTiesMatchCatalogAsync(AppDbContext db, CancellationToken ct)
@@ -144,21 +137,16 @@ public static class AuthorizationSeedData
         List<Role> roles = await db.Roles.AsNoTracking().Where(role => !role.IsCustom).ToListAsync(ct);
         Dictionary<Guid, Role> rolesById = roles.ToDictionary(role => role.RoleId);
 
-        foreach (AuthorizationCatalog.RoleDefinition roleDefinition in AuthorizationCatalog.Roles)
+        return AuthorizationCatalog.Roles.All(roleDefinition =>
         {
             if (!rolesById.TryGetValue(roleDefinition.RoleId, out Role? role) || role.Name != roleDefinition.Name)
                 return false;
 
             RoleMaskBuilder.RoleMaskSet expectedMasks = AuthorizationCatalog.GetRoleMasks(roleDefinition.Name);
-            if (!MasksMatch(role.PermissionMask, expectedMasks.PermissionMask)
-                || !MasksMatch(role.RoleMask, expectedMasks.RoleMask)
-                || !MasksMatch(role.FeatureMask, expectedMasks.FeatureMask))
-            {
-                return false;
-            }
-        }
-
-        return true;
+            return MasksMatch(role.PermissionMask, expectedMasks.PermissionMask)
+                && MasksMatch(role.RoleMask, expectedMasks.RoleMask)
+                && MasksMatch(role.FeatureMask, expectedMasks.FeatureMask);
+        });
     }
 
     private static async Task<bool> SubjectsMatchCatalogAsync(AppDbContext db, CancellationToken ct)

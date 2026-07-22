@@ -24,16 +24,8 @@ public static class MentionPermissions
         BitMask.HasBit(roleMask, PlatformRoles.Guest)
         && !HasAnyRoleAboveGuest(roleMask);
 
-    public static bool IsSeniorStaff(System.Collections.BitArray roleMask)
-    {
-        foreach (short bit in SeniorStaffRoleBits)
-        {
-            if (BitMask.HasBit(roleMask, bit))
-                return true;
-        }
-
-        return false;
-    }
+    public static bool IsSeniorStaff(System.Collections.BitArray roleMask) =>
+        SeniorStaffRoleBits.Any(bit => BitMask.HasBit(roleMask, bit));
 
     public static bool CanUseBroadcastMentions(System.Collections.BitArray roleMask) =>
         BitMask.HasBit(roleMask, PlatformRoles.Owner)

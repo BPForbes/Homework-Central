@@ -56,13 +56,10 @@ public sealed class ChatRoomAccessService(
             categories.Add(BuildCategoryDto(accessibleGeneralRooms[0], accessibleGeneralRooms));
         }
 
-        foreach (IGrouping<string, ChatRoomDefinition> subjectGroup in ChatRoomCatalog.SubjectRooms
-                     .Where(room => CanAccessRoom(masks, room))
-                     .GroupBy(room => room.CategoryKey, StringComparer.Ordinal))
-        {
-            ChatRoomDefinition first = subjectGroup.First();
-            categories.Add(BuildCategoryDto(first, subjectGroup));
-        }
+        categories.AddRange(ChatRoomCatalog.SubjectRooms
+            .Where(room => CanAccessRoom(masks, room))
+            .GroupBy(room => room.CategoryKey, StringComparer.Ordinal)
+            .Select(subjectGroup => BuildCategoryDto(subjectGroup.First(), subjectGroup)));
 
         List<ChatRoomDefinition> accessibleStaffRooms = ChatRoomCatalog.StaffRooms
             .Where(room => CanAccessRoom(masks, room))
@@ -82,8 +79,8 @@ public sealed class ChatRoomAccessService(
         Dictionary<string, ChatNavCategoryDto> categoriesByKey = categories
             .ToDictionary(category => category.Key, StringComparer.Ordinal);
 
+        // Merge has side effects on categories; keep an explicit loop for that seam.
         List<CustomChannelSnapshot> unmatchedCustomChannels = new();
-
         foreach (CustomChannelSnapshot channel in accessibleCustomChannels)
         {
             if (TryMergeCustomChannel(categories, categoriesByKey, channel))
@@ -92,22 +89,23 @@ public sealed class ChatRoomAccessService(
             unmatchedCustomChannels.Add(channel);
         }
 
-        foreach (IGrouping<string, CustomChannelSnapshot> customGroup in unmatchedCustomChannels
-                     .GroupBy(channel => channel.CategoryKey, StringComparer.Ordinal))
-        {
-            CustomChannelSnapshot first = customGroup.First();
-            categories.Add(new ChatNavCategoryDto
+        categories.AddRange(unmatchedCustomChannels
+            .GroupBy(channel => channel.CategoryKey, StringComparer.Ordinal)
+            .Select(customGroup =>
             {
-                Key = first.CategoryKey,
-                Name = first.CategoryDisplayName,
-                CategoryKind = "Custom",
-                IsPrivateCategory = customGroup.Any(c => c.IsPrivate),
-                Rooms = customGroup
-                    .OrderBy(c => c.DisplayName, StringComparer.Ordinal)
-                    .Select(channel => MapCustomRoom(channel, channel.CategoryKey, "Custom"))
-                    .ToList(),
-            });
-        }
+                CustomChannelSnapshot first = customGroup.First();
+                return new ChatNavCategoryDto
+                {
+                    Key = first.CategoryKey,
+                    Name = first.CategoryDisplayName,
+                    CategoryKind = "Custom",
+                    IsPrivateCategory = customGroup.Any(c => c.IsPrivate),
+                    Rooms = customGroup
+                        .OrderBy(c => c.DisplayName, StringComparer.Ordinal)
+                        .Select(channel => MapCustomRoom(channel, channel.CategoryKey, "Custom"))
+                        .ToList(),
+                };
+            }));
 
         categories.Sort((left, right) =>
         {
@@ -194,23 +192,12 @@ public sealed class ChatRoomAccessService(
         if (!channel.IsPrivate)
             return true;
 
-        foreach (CustomChannelAccessSnapshot rule in channel.AccessRules)
-        {
-            if (userId != Guid.Empty
+        return channel.AccessRules.Any(rule =>
+            (userId != Guid.Empty
                 && rule.AllowedUserId is Guid allowedUserId
                 && allowedUserId == userId)
-            {
-                return true;
-            }
-
-            if (rule.PlatformRoleBit is short platformBit && HasRole(masks.RoleMask, platformBit))
-                return true;
-
-            if (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId))
-                return true;
-        }
-
-        return false;
+            || (rule.PlatformRoleBit is short platformBit && HasRole(masks.RoleMask, platformBit))
+            || (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId)));
     }
 
     private static ChatNavCategoryDto BuildCategoryDto(

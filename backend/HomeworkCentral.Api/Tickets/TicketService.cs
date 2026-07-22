@@ -1150,25 +1150,19 @@ public sealed class TicketService(
                 .Where(role => customRoleIds.Contains(role.RoleId))
                 .ToDictionaryAsync(role => role.RoleId, role => role.Name, ct);
 
-        List<CustomChannelAccessRuleDto> result = [];
-        foreach (CustomChannelAccessRuleInput rule in rules)
+        return rules.Select(rule => new CustomChannelAccessRuleDto
         {
-            result.Add(new CustomChannelAccessRuleDto
-            {
-                CustomRoleId = rule.CustomRoleId,
-                CustomRoleName = rule.CustomRoleId is Guid roleId && roleNames.TryGetValue(roleId, out string? name)
-                    ? name
-                    : null,
-                PlatformRoleBit = rule.PlatformRoleBit,
-                PlatformRoleName = rule.PlatformRoleBit is short bit
-                                   && PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string? platformName)
-                    ? platformName
-                    : null,
-                AllowedUserId = rule.AllowedUserId,
-            });
-        }
-
-        return result;
+            CustomRoleId = rule.CustomRoleId,
+            CustomRoleName = rule.CustomRoleId is Guid roleId && roleNames.TryGetValue(roleId, out string? name)
+                ? name
+                : null,
+            PlatformRoleBit = rule.PlatformRoleBit,
+            PlatformRoleName = rule.PlatformRoleBit is short bit
+                               && PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string? platformName)
+                ? platformName
+                : null,
+            AllowedUserId = rule.AllowedUserId,
+        }).ToList();
     }
 
     private async Task<TicketDto?> MapTicketAsync(
@@ -1300,22 +1294,11 @@ public sealed class TicketService(
         if (HasElevatedRoomAccess(masks))
             return true;
 
-        foreach (CustomChannelAccessRuleInput rule in TicketJson.DeserializeAccessRules(ticket.Portal.StaffAccessRulesJson))
-        {
-            if (rule.AllowedUserId == actorUserId)
-                return true;
-
-            if (rule.PlatformRoleBit is short platformRoleBit
-                && BitMask.HasBit(BitMask.FromBase64(masks.RoleMask, 64), platformRoleBit))
-            {
-                return true;
-            }
-
-            if (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId))
-                return true;
-        }
-
-        return false;
+        System.Collections.BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
+        return TicketJson.DeserializeAccessRules(ticket.Portal.StaffAccessRulesJson).Any(rule =>
+            rule.AllowedUserId == actorUserId
+            || (rule.PlatformRoleBit is short platformRoleBit && BitMask.HasBit(roleMask, platformRoleBit))
+            || (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId)));
     }
 
     private static bool HasElevatedRoomAccess(EffectiveMaskDto masks) =>

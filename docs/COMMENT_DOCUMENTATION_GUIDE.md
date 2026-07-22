@@ -228,7 +228,7 @@ member transform, filter, or aggregation. Informal review language often says
 | Aggregating elements | `reduce()` | `Aggregate()` / `Sum()` |
 
 Related C# helpers that fit the same preference: `ToDictionary()`, `ToHashSet()`,
-`ToList()`, `Any()`, `All()`, `FirstOrDefault()` when they replace clearer than a
+`ToList()`, `Any()`, `All()`, `FirstOrDefault()` when they are clearer than a
 manual accumulation loop.
 
 Use an explicit `for` / `foreach` when the body has multi-step side effects, early

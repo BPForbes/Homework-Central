@@ -35,10 +35,11 @@ function mergeServerHistoryMessages(
   locallyReceivedMessages: ChatMessage[],
 ): ChatMessage[] {
   const messagesById = new Map(serverMessages.map((message) => [message.messageId, message]))
-  for (const message of locallyReceivedMessages) {
-    if (!messagesById.has(message.messageId))
+  locallyReceivedMessages
+    .filter((message) => !messagesById.has(message.messageId))
+    .forEach((message) => {
       messagesById.set(message.messageId, message)
-  }
+    })
 
   // Server timestamps remain authoritative when HTTP history and SignalR delivery
   // race each other for the same room. See docs/chat.md.
@@ -47,8 +48,9 @@ function mergeServerHistoryMessages(
 
 function rebuildKnownMessageIds(knownMessageIds: Set<string>, messages: ChatMessage[]) {
   knownMessageIds.clear()
-  for (const message of messages)
+  messages.forEach((message) => {
     knownMessageIds.add(message.messageId)
+  })
 }
 
 // Live SignalR appends check the Set instead of scanning the messages array.

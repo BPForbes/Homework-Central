@@ -123,30 +123,18 @@ public sealed class MentionRecipientResolver(
                     break;
 
                 case MentionKind.Everyone:
-                    foreach (Guid recipientId in eligibleUsers
-                                 .Where(snapshot => snapshot.UserId != senderId)
-                                 .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                                 .Select(snapshot => snapshot.UserId))
-                    {
-                        recipients.Add(recipientId);
-                    }
-
+                    recipients.UnionWith(eligibleUsers
+                        .Where(snapshot => snapshot.UserId != senderId)
+                        .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+                        .Select(snapshot => snapshot.UserId));
                     break;
 
                 case MentionKind.Here:
                     IReadOnlyCollection<Guid> online = onlineTracker.GetOnlineUserIds(groupKey);
                     HashSet<Guid> eligibleIds = eligibleUsers.Select(user => user.UserId).ToHashSet();
-                    foreach (Guid onlineUserId in online)
-                    {
-                        if (onlineUserId == senderId)
-                            continue;
-
-                        if (!eligibleIds.Contains(onlineUserId))
-                            continue;
-
-                        recipients.Add(onlineUserId);
-                    }
-
+                    recipients.UnionWith(online
+                        .Where(onlineUserId => onlineUserId != senderId)
+                        .Where(eligibleIds.Contains));
                     break;
             }
         }
@@ -161,14 +149,11 @@ public sealed class MentionRecipientResolver(
         Guid senderId,
         short roleBit)
     {
-        foreach (Guid recipientId in eligibleUsers
-                     .Where(snapshot => snapshot.UserId != senderId)
-                     .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, roleBit))
-                     .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                     .Select(snapshot => snapshot.UserId))
-        {
-            recipients.Add(recipientId);
-        }
+        recipients.UnionWith(eligibleUsers
+            .Where(snapshot => snapshot.UserId != senderId)
+            .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, roleBit))
+            .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+            .Select(snapshot => snapshot.UserId));
     }
 
     private void AddCustomRoleRecipients(
@@ -178,14 +163,11 @@ public sealed class MentionRecipientResolver(
         Guid senderId,
         Guid customRoleId)
     {
-        foreach (Guid recipientId in eligibleUsers
-                     .Where(snapshot => snapshot.UserId != senderId)
-                     .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
-                     .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
-                     .Select(snapshot => snapshot.UserId))
-        {
-            recipients.Add(recipientId);
-        }
+        recipients.UnionWith(eligibleUsers
+            .Where(snapshot => snapshot.UserId != senderId)
+            .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
+            .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, roomId))
+            .Select(snapshot => snapshot.UserId));
     }
 
     private static bool IsEligibleRecipient(
@@ -329,7 +311,6 @@ public sealed class MentionRecipientResolver(
             .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))
             .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
 
-        List<UserMaskSnapshot> snapshots = [];
         HashSet<Guid> userIds = masks
             .Where(mask => usernames.ContainsKey(mask.UserId))
             .Select(mask => mask.UserId)
@@ -337,25 +318,22 @@ public sealed class MentionRecipientResolver(
         Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
             await LoadCustomRoleIdsByUserAsync(masterDb, userIds, ct);
 
-        foreach (UserEffectiveMask mask in masks)
-        {
-            if (!usernames.TryGetValue(mask.UserId, out string? username))
-                continue;
-
-            bool isDevAdmin = string.Equals(username, DevBypass.DevAdminUsername, StringComparison.Ordinal);
-            if (realUsersOnly && isDevAdmin)
-                continue;
-
-            AccountClass accountClass = isDevAdmin ? AccountClass.DevAdmin : AccountClass.RealAccount;
-            snapshots.Add(CreateSnapshot(
-                mask,
-                username,
-                accountClass,
-                null,
-                customRoleIdsByUser));
-        }
-
-        return snapshots;
+        return masks
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Where(mask => !(realUsersOnly
+                && string.Equals(usernames[mask.UserId], DevBypass.DevAdminUsername, StringComparison.Ordinal)))
+            .Select(mask =>
+            {
+                string username = usernames[mask.UserId];
+                bool isDevAdmin = string.Equals(username, DevBypass.DevAdminUsername, StringComparison.Ordinal);
+                return CreateSnapshot(
+                    mask,
+                    username,
+                    isDevAdmin ? AccountClass.DevAdmin : AccountClass.RealAccount,
+                    null,
+                    customRoleIdsByUser);
+            })
+            .ToList();
     }
 
     private static async Task<List<UserMaskSnapshot>> LoadMasksFromContextAsync(
@@ -410,19 +388,11 @@ public sealed class MentionRecipientResolver(
                 (userRole, role) => new ValueTuple<Guid, Guid>(userRole.UserId, role.RoleId))
             .ToListAsync(ct);
 
-        Dictionary<Guid, HashSet<Guid>> byUser = [];
-        foreach ((Guid userId, Guid roleId) in assignments)
-        {
-            if (!byUser.TryGetValue(userId, out HashSet<Guid>? roleIds))
-            {
-                roleIds = [];
-                byUser[userId] = roleIds;
-            }
-
-            roleIds.Add(roleId);
-        }
-
-        return byUser;
+        return assignments
+            .GroupBy(assignment => assignment.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(assignment => assignment.RoleId).ToHashSet());
     }
 
     private static UserMaskSnapshot CreateSnapshot(
