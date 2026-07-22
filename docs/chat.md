@@ -171,17 +171,6 @@ subject expertise index classes and staff rooms from platform role bits.
 `ChatNavRoomDto` exposes `IsPrivate`, `CategoryKey`, `CategoryKind`,
 `RoomType`, and optional `IconName` for the frontend icon layer.
 
-### Examples
-
-- Science + Biology bits -> Science dropdown with Biology room only.
-- Science claimed on Get Roles -> Science dropdown with all private Science
-  rooms.
-- Calculus bit only -> Mathematics -> Calculus.
-- Tutor role -> Staff -> Tutors.
-- Owner -> all catalog and visible custom rooms.
-- Public custom info room -> visible in its category for authenticated viewers
-  in the same real/developer infrastructure bucket.
-
 ## Behavior / control flow
 
 ### Navigation and room entry
