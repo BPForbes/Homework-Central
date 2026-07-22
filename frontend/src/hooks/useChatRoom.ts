@@ -21,6 +21,7 @@ interface SignalRHandlerOptions {
   addMessage: (message: ChatMessage) => void
   setMessages: MessageSetter
   setTypingUsers: TypingUsersSetter
+  knownTypingUserIds: Set<string>
 }
 
 function sortAndRetainMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -52,7 +53,6 @@ function rebuildKnownMessageIds(knownMessageIds: Set<string>, messages: ChatMess
 
 // Live SignalR appends check the Set instead of scanning the messages array.
 // Cap rebuild keeps membership aligned after the 250-message retain trim.
-// Time: O(1) membership; trim rebuild O(M). Space: O(M) capped at 250. See docs/runtime.md.
 function appendLiveMessage(
   previousMessages: ChatMessage[],
   message: ChatMessage,
@@ -157,21 +157,26 @@ function registerSignalRHandlers(
     if (payload.userId === options.currentUserId)
       return
 
-    options.setTypingUsers((previousUsers) => {
-      if (previousUsers.some((user) => user.userId === payload.userId))
-        return previousUsers
-      return [...previousUsers, payload]
-    })
+    if (options.knownTypingUserIds.has(payload.userId))
+      return
+
+    options.knownTypingUserIds.add(payload.userId)
+    options.setTypingUsers((previousUsers) => [...previousUsers, payload])
   })
 
   connection.on('UserStoppedTyping', (userId: string) => {
+    options.knownTypingUserIds.delete(userId)
     options.setTypingUsers((previousUsers) => previousUsers.filter((user) => user.userId !== userId))
   })
 
   // JoinRoom snapshots close the gap for users who started typing before the
   // current connection entered the SignalR group.
   connection.on('TypingUsersSnapshot', (users: ChatTypingUser[]) => {
-    options.setTypingUsers(users.filter((user) => user.userId !== options.currentUserId))
+    const visibleUsers = users.filter((user) => user.userId !== options.currentUserId)
+    options.knownTypingUserIds.clear()
+    for (const user of visibleUsers)
+      options.knownTypingUserIds.add(user.userId)
+    options.setTypingUsers(visibleUsers)
   })
 }
 
@@ -268,8 +273,9 @@ export function useChatRoom(
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const isTypingRef = useRef(false)
-  // Membership set for live dedupe (O(1) has/add); see appendLiveMessage and docs/runtime.md.
+  // Membership set for live dedupe; see appendLiveMessage.
   const knownMessageIdsRef = useRef<Set<string>>(new Set())
+  const knownTypingUserIdsRef = useRef<Set<string>>(new Set())
 
   const addMessage = useCallback((message: ChatMessage) => {
     setMessages((previousMessages) => {
@@ -286,6 +292,8 @@ export function useChatRoom(
     setReplyTarget(null)
     // Room switch: drop prior ids so a reused message id cannot suppress a fresh history row.
     knownMessageIdsRef.current = new Set()
+    knownTypingUserIdsRef.current = new Set()
+    setTypingUsers([])
 
     if (!roomId) {
       setLoading(false)
@@ -311,6 +319,7 @@ export function useChatRoom(
 
     const connection = buildChatConnection()
     connectionRef.current = connection
+    knownTypingUserIdsRef.current = new Set()
 
     registerSignalRHandlers(connection, {
       currentUserId,
@@ -318,6 +327,7 @@ export function useChatRoom(
       addMessage,
       setMessages,
       setTypingUsers,
+      knownTypingUserIds: knownTypingUserIdsRef.current,
     })
     registerReconnectHandlers(connection, roomId, isTypingRef, setConnected)
 
@@ -325,6 +335,7 @@ export function useChatRoom(
 
     return () => {
       cleanupRoomConnection(connection, roomId, isTypingRef, setConnected, setTypingUsers)
+      knownTypingUserIdsRef.current = new Set()
       connectionRef.current = null
     }
   }, [roomId, currentUserId, addMessage, enableVotes])

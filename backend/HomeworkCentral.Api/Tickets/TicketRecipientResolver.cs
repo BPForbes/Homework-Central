@@ -42,45 +42,42 @@ public sealed class TicketRecipientResolver(
         List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(ownerAccountClass, tenantDatabaseName, ct);
         // Portal mention/staff rules often target AllowedUserId; index once so each
         // rule does not rescan the eligible set.
-        // Time: AllowedUserId O(1); role rules still O(U). Space: O(U). See docs/runtime.md.
         Dictionary<Guid, UserMaskSnapshot> eligibleUsersById = eligibleUsers
             .ToDictionary(user => user.UserId);
 
         foreach (CustomChannelAccessRuleInput rule in rules)
         {
-            if (rule.AllowedUserId is Guid allowedUserId)
+            switch (rule)
             {
-                if (eligibleUsersById.TryGetValue(allowedUserId, out UserMaskSnapshot? allowed)
-                    && chatRoomAccess.CanAccessRoom(allowed.Masks, allowedUserId, roomId))
-                {
+                case { AllowedUserId: Guid allowedUserId }:
+                    if (!eligibleUsersById.TryGetValue(allowedUserId, out UserMaskSnapshot? allowed))
+                        break;
+                    if (!chatRoomAccess.CanAccessRoom(allowed.Masks, allowedUserId, roomId))
+                        break;
                     recipients.Add(allowedUserId);
-                }
+                    break;
 
-                continue;
-            }
+                case { PlatformRoleBit: short platformBit }:
+                    foreach (Guid recipientId in eligibleUsers
+                                 .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, platformBit))
+                                 .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
+                                 .Select(snapshot => snapshot.UserId))
+                    {
+                        recipients.Add(recipientId);
+                    }
 
-            if (rule.PlatformRoleBit is short platformBit)
-            {
-                foreach (Guid recipientId in eligibleUsers
-                             .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, platformBit))
-                             .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
-                             .Select(snapshot => snapshot.UserId))
-                {
-                    recipients.Add(recipientId);
-                }
+                    break;
 
-                continue;
-            }
+                case { CustomRoleId: Guid customRoleId }:
+                    foreach (Guid recipientId in eligibleUsers
+                                 .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
+                                 .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
+                                 .Select(snapshot => snapshot.UserId))
+                    {
+                        recipients.Add(recipientId);
+                    }
 
-            if (rule.CustomRoleId is Guid customRoleId)
-            {
-                foreach (Guid recipientId in eligibleUsers
-                             .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
-                             .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
-                             .Select(snapshot => snapshot.UserId))
-                {
-                    recipients.Add(recipientId);
-                }
+                    break;
             }
         }
 
@@ -161,8 +158,7 @@ public sealed class TicketRecipientResolver(
 
     /// <summary>
     /// Loads master masks with one username dictionary for the batch — avoids a Users
-    /// query per mask row when filtering DevAdmin.
-    /// Time: one username query + O(U) assemble. Space: O(U). See docs/tickets.md.
+    /// query per mask row when filtering DevAdmin. See docs/tickets.md.
     /// </summary>
     private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
     {
@@ -181,7 +177,7 @@ public sealed class TicketRecipientResolver(
             .Where(mask => usernames.ContainsKey(mask.UserId))
             .Select(mask => mask.UserId)
             .ToHashSet();
-        Dictionary<Guid, List<Guid>> customRoleIdsByUser =
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
             await LoadCustomRoleIdsByUserAsync(masterDb, userIds, ct);
 
         List<UserMaskSnapshot> snapshots = [];
@@ -212,13 +208,13 @@ public sealed class TicketRecipientResolver(
             .ToListAsync(ct);
 
         HashSet<Guid> userIds = masks.Select(mask => mask.UserId).ToHashSet();
-        Dictionary<Guid, List<Guid>> customRoleIdsByUser =
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
             await LoadCustomRoleIdsByUserAsync(db, userIds, ct);
 
         return masks.Select(mask => CreateSnapshot(mask, customRoleIdsByUser)).ToList();
     }
 
-    private static async Task<Dictionary<Guid, List<Guid>>> LoadCustomRoleIdsByUserAsync(
+    private static async Task<Dictionary<Guid, HashSet<Guid>>> LoadCustomRoleIdsByUserAsync(
         AppDbContext db,
         IReadOnlyCollection<Guid> userIds,
         CancellationToken ct)
@@ -236,10 +232,10 @@ public sealed class TicketRecipientResolver(
                 (userRole, role) => new ValueTuple<Guid, Guid>(userRole.UserId, role.RoleId))
             .ToListAsync(ct);
 
-        Dictionary<Guid, List<Guid>> byUser = [];
+        Dictionary<Guid, HashSet<Guid>> byUser = [];
         foreach ((Guid userId, Guid roleId) in assignments)
         {
-            if (!byUser.TryGetValue(userId, out List<Guid>? roleIds))
+            if (!byUser.TryGetValue(userId, out HashSet<Guid>? roleIds))
             {
                 roleIds = [];
                 byUser[userId] = roleIds;
@@ -258,9 +254,9 @@ public sealed class TicketRecipientResolver(
         CancellationToken ct)
     {
         EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
-        Dictionary<Guid, List<Guid>> customRoleIdsByUser =
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
             await LoadCustomRoleIdsByUserAsync(db, [userId], ct);
-        if (customRoleIdsByUser.TryGetValue(userId, out List<Guid>? customRoleIds))
+        if (customRoleIdsByUser.TryGetValue(userId, out HashSet<Guid>? customRoleIds))
             dto.CustomRoleIds = customRoleIds;
 
         return dto;
@@ -268,10 +264,10 @@ public sealed class TicketRecipientResolver(
 
     private static UserMaskSnapshot CreateSnapshot(
         UserEffectiveMask mask,
-        Dictionary<Guid, List<Guid>> customRoleIdsByUser)
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser)
     {
         EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
-        if (customRoleIdsByUser.TryGetValue(mask.UserId, out List<Guid>? customRoleIds))
+        if (customRoleIdsByUser.TryGetValue(mask.UserId, out HashSet<Guid>? customRoleIds))
             dto.CustomRoleIds = customRoleIds;
 
         return new UserMaskSnapshot(mask.UserId, dto, mask.EffectiveRoleMask);

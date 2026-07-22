@@ -168,6 +168,11 @@ public static class AuthorizationSeedData
         Dictionary<(string SubjectMask, short BitIndex), Subject> subjectsByKey = subjects
             .ToDictionary(subject => (subject.SubjectMask, subject.BitIndex));
 
+        Dictionary<string, AuthorizationCatalog.SubjectDefinition> catalogSubjectsByName =
+            AuthorizationCatalog.Subjects.ToDictionary(
+                definition => definition.Name,
+                StringComparer.Ordinal);
+
         foreach (AuthorizationCatalog.SubjectDefinition subjectDefinition in AuthorizationCatalog.Subjects)
         {
             if (!subjectsByKey.TryGetValue((subjectDefinition.SubjectMask, subjectDefinition.BitIndex), out Subject? subject)
@@ -179,8 +184,9 @@ public static class AuthorizationSeedData
 
             Guid? expectedParentId = subjectDefinition.ParentName is null
                 ? null
-                : AuthorizationCatalog.Subjects
-                    .FirstOrDefault(s => s.Name == subjectDefinition.ParentName)?.SubjectId;
+                : catalogSubjectsByName.TryGetValue(subjectDefinition.ParentName, out AuthorizationCatalog.SubjectDefinition? parent)
+                    ? parent.SubjectId
+                    : null;
 
             if (subject.ParentSubjectId != expectedParentId)
                 return false;
