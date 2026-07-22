@@ -417,13 +417,9 @@ captcha challenge, role verification, and FCaptcha assessment endpoints.
 
 - [Chat](chat.md) — room access, shared community resource behavior, chat
   attachments, and attachment download tokens.
-- [Tickets, media, and assessment](tickets-assessment.md) — ticket portal
-  rooms, user watches, assessment flows, and ticket chat.
-- [Ticket AI confidence scoring](ticket-ai-scoring.md) — neural and reviewer
-  scoring boundaries for moderation/tutoring workflows.
-- [System efficiency and service choices](system-efficiency.md) — service
-  topology choices that affect local development and operations.
-- [Windows Docker resources](windows-docker-resources.md) — local Docker
-  resource guidance, including ClamAV profile costs.
+- [Tickets and assessment](tickets.md) — ticket portal rooms, user watches,
+  assessment flows, ticket chat, and neural scoring boundaries.
+- [Runtime and operations](runtime.md) — service topology choices, local Docker
+  resource guidance, and ClamAV/Ollama profile costs.
 - [Comment, documentation, readability, and naming standard](COMMENT_STANDARD.md)
   — durable documentation and source-comment standards.

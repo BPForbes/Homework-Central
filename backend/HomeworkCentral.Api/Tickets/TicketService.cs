@@ -125,7 +125,7 @@ public sealed class TicketService(
     /// <summary>
     /// Validates portal intake and persists the private ticket channel, watches,
     /// inbox notifications, and navigation refresh for a new ticket. See
-    /// docs/tickets-assessment.md for the open-ticket lifecycle.
+    /// docs/tickets.md#open-lifecycle for the open-ticket lifecycle.
     /// </summary>
     public async Task<TicketDto> OpenTicketAsync(
         string portalRoomId,

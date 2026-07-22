@@ -245,7 +245,8 @@ public sealed class AssessmentPipelineService(
         Guid messageId)
     {
         // Neural-only mode prevents Ollama reviewer calls; disabled Ollama keeps
-        // scoring on the local neural model. See docs/ticket-ai-scoring.md.
+        // scoring on the local neural model. See
+        // docs/tickets.md#neural-monitors-and-ollama-blend.
         return !ticketOptions.NeuralOnlyScoring
                && ticketOptions.OllamaEnabled
                && TicketReviewPolicy.ShouldReview(
@@ -275,7 +276,8 @@ public sealed class AssessmentPipelineService(
         TicketReviewerEvaluation? review = reviewerEvaluationAttempt.Review;
 
         // Reviewer output is advisory; deterministic blend weight bounds how far
-        // Ollama can move neural evidence. See docs/ticket-ai-scoring.md.
+        // Ollama can move neural evidence. See
+        // docs/tickets.md#neural-monitors-and-ollama-blend.
         double evidence = review switch
         {
             TicketReviewerEvaluation reviewerEvaluation => TicketReviewPolicy.Blend(
@@ -309,7 +311,8 @@ public sealed class AssessmentPipelineService(
         SubjectSignalSnapshot subjectSignals)
     {
         // Multi-subject tutoring tickets reward exact or related subject channels;
-        // unrelated channels barely move confidence. See docs/ticket-ai-scoring.md.
+        // unrelated channels barely move confidence. See
+        // docs/tickets.md#neural-monitors-and-ollama-blend.
         return chatMonitoringKind switch
         {
             NeuralModelKindChatMonitoring.Tutoring => Math.Clamp(relevance * subjectSignals.RewardScale, 0, 1),

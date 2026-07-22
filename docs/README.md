@@ -1,45 +1,41 @@
 # Project documentation
 
 Homework Central documentation explains project-specific architecture, trust
-boundaries, operations, and engineering standards. Application setup remains in
-[`README.md`](../README.md). AI agent tooling setup remains in
-[`SETUP.md`](../SETUP.md).
+boundaries, operations, deployment, design, and engineering standards.
+Application setup remains in [`README.md`](../README.md). AI agent tooling setup
+remains in [`SETUP.md`](../SETUP.md).
 
 ## Engineering standards
 
 - [Comment, documentation, readability, and naming standard](./COMMENT_STANDARD.md)
 
-## Architecture
+## Feature-level architecture
 
-- [Authentication and sessions](./auth-and-sessions.md)
-- [Tenancy and account-class isolation](./tenancy-isolation.md)
-- [Chat room access](./chat-room-access.md)
-- [Tickets, media, and assessment](./tickets-assessment.md)
-- [Ticket AI confidence scoring](./ticket-ai-scoring.md)
-- [Uploads and malware scanning](./uploads-and-scanning.md)
+- [Identity](./identity.md) — authentication, sessions, account classes, and
+  tenant visibility.
+- [Chat](./chat.md) — rooms, messages, SignalR behavior, uploads, scanning, and
+  attachment downloads.
+- [Tickets and assessment](./tickets.md) — ticket portals, ticket chat, votes,
+  neural scoring, reviewer blend, and training archives.
+- [Runtime and operations](./runtime.md) — hot paths, service choices, local
+  Docker profiles, Windows resource caps, and operational commands.
 
-## Infrastructure and operations
-
-- [System efficiency and service choices](./system-efficiency.md)
-- [Windows Docker resources](./windows-docker-resources.md)
-- [Kubernetes workloads](../deploy/kubernetes/README.md)
-
-## Design
+## Design and deployment
 
 - [UI design system](../design.md)
+- [Kubernetes workloads](../deploy/kubernetes/README.md)
 
 ## Authoritative sources
 
 | Topic | Canonical document |
 |---|---|
 | Comments, naming, readability, XML/Markdown rules | [`COMMENT_STANDARD.md`](./COMMENT_STANDARD.md) |
-| Account classes and resource visibility | [`tenancy-isolation.md`](./tenancy-isolation.md) |
-| JWT, captcha, refresh cookies, developer login | [`auth-and-sessions.md`](./auth-and-sessions.md) |
-| Chat categories, rooms, and access bits | [`chat-room-access.md`](./chat-room-access.md) |
-| Ticket portals, Trial Tutor, votes | [`tickets-assessment.md`](./tickets-assessment.md) |
-| Neural monitors, Ollama blend, promotion | [`ticket-ai-scoring.md`](./ticket-ai-scoring.md) |
-| Attachment inspect/scan/download | [`uploads-and-scanning.md`](./uploads-and-scanning.md) |
+| Authentication, sessions, account classes, tenant visibility | [`identity.md`](./identity.md) |
+| Chat rooms, messages, uploads, scanning, downloads | [`chat.md`](./chat.md) |
+| Ticket portals, Trial Tutor, votes, AI scoring | [`tickets.md`](./tickets.md) |
+| Runtime efficiency, service tradeoffs, Windows Docker resources | [`runtime.md`](./runtime.md) |
 | Design tokens and motion | [`design.md`](../design.md) |
+| Kubernetes deployment | [`deploy/kubernetes/README.md`](../deploy/kubernetes/README.md) |
 
 When documents overlap, update the canonical file and link from secondary notes.
 Do not invent parallel standards.

@@ -134,13 +134,13 @@ Ollama are separate `antivirus` and `ai` profiles because an 8 GiB Windows machi
 run both together. CPU values are ceilings rather than reservations. The default development
 scripts run the API and frontend directly on the host, so Docker limits do not cap those two host
 processes. Windows users should also cap Docker Desktop's WSL 2 utility VM; see
-[`docs/windows-docker-resources.md`](docs/windows-docker-resources.md).
+[`docs/runtime.md`](docs/runtime.md#windows-8-gib-docker-profiles).
 
 Ticket AI uses bounded per-message confidence changes with an auditable vector
-archive; see [`docs/ticket-ai-scoring.md`](docs/ticket-ai-scoring.md).
+archive; see [`docs/tickets.md`](docs/tickets.md#neural-monitors-and-ollama-blend).
 
 Backend query, shared-memory, service-alternative, and RabbitMQ tradeoffs are
-documented in [`docs/system-efficiency.md`](docs/system-efficiency.md).
+documented in [`docs/runtime.md`](docs/runtime.md).
 
 ### Documentation
 
@@ -150,14 +150,12 @@ Architecture, trust boundaries, and engineering standards live under
 | Document | Topic |
 |----------|-------|
 | [`docs/COMMENT_STANDARD.md`](docs/COMMENT_STANDARD.md) | Comments, naming, readability, XML/Markdown rules |
-| [`docs/auth-and-sessions.md`](docs/auth-and-sessions.md) | JWT, captcha, refresh cookies, developer login |
-| [`docs/tenancy-isolation.md`](docs/tenancy-isolation.md) | Account classes and resource visibility |
-| [`docs/chat-room-access.md`](docs/chat-room-access.md) | Chat categories, rooms, and access bits |
-| [`docs/tickets-assessment.md`](docs/tickets-assessment.md) | Ticket portals, Trial Tutor, votes |
-| [`docs/ticket-ai-scoring.md`](docs/ticket-ai-scoring.md) | Neural monitors and confidence scoring |
-| [`docs/uploads-and-scanning.md`](docs/uploads-and-scanning.md) | Attachments, ClamAV, download tokens |
-| [`docs/windows-docker-resources.md`](docs/windows-docker-resources.md) | 8 GiB Windows Docker profiles |
+| [`docs/identity.md`](docs/identity.md) | Authentication, sessions, account classes, tenant visibility |
+| [`docs/chat.md`](docs/chat.md) | Chat categories, rooms, messages, attachments |
+| [`docs/tickets.md`](docs/tickets.md) | Ticket portals, Trial Tutor, votes, AI scoring |
+| [`docs/runtime.md`](docs/runtime.md) | Runtime efficiency, service tradeoffs, Windows Docker resources |
 | [`design.md`](design.md) | UI design tokens and motion |
+| [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md) | Kubernetes deployment |
 
 ### Fast repeat starts
 

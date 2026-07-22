@@ -691,13 +691,9 @@ limit is the effective default application limit.
 
 - [Identity](identity.md) — JWT claims, effective masks, account classes,
   scoped-resource rules, refresh rotation, captcha, and developer login.
-- [Tickets, media, and assessment](tickets-assessment.md) — ticket portals,
-  ticket chat channels, watches, votes, and assessment behavior.
-- [Ticket AI confidence scoring](ticket-ai-scoring.md) — neural scoring,
-  reviewer fallback, and chat-monitor boundaries.
-- [System efficiency and service choices](system-efficiency.md) — ClamAV service
-  choice and local service topology.
-- [Windows Docker resources](windows-docker-resources.md) — Docker resource
-  guidance for the opt-in antivirus profile.
+- [Tickets and assessment](tickets.md) — ticket portals, ticket chat channels,
+  watches, votes, neural scoring, and reviewer fallback.
+- [Runtime and operations](runtime.md) — ClamAV service choice, local service
+  topology, and Docker resource guidance for the opt-in antivirus profile.
 - [Comment, documentation, readability, and naming standard](COMMENT_STANDARD.md)
   — durable documentation and source-comment standards.

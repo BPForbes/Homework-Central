@@ -19,12 +19,10 @@ This document owns the feature-level behavior for:
 - training examples, reviewer corrections, neural promotion, and retrieval
   archives.
 
-Room visibility, tenant scope, and upload scanning stay with their specialized
-docs:
+Room visibility, tenant scope, and upload scanning stay with their feature docs:
 
-- [docs/chat-room-access.md](chat-room-access.md)
-- [docs/tenancy-isolation.md](tenancy-isolation.md)
-- [docs/uploads-and-scanning.md](uploads-and-scanning.md)
+- [docs/chat.md](chat.md)
+- [docs/identity.md](identity.md)
 
 ## Architecture
 
@@ -467,7 +465,8 @@ private static bool ShouldInvokeOptionalReviewer(
     Guid messageId)
 {
     // Neural-only mode prevents Ollama reviewer calls; disabled Ollama keeps
-    // scoring on the local neural model. See docs/ticket-ai-scoring.md.
+    // scoring on the local neural model. See
+    // docs/tickets.md#neural-monitors-and-ollama-blend.
     return !ticketOptions.NeuralOnlyScoring
            && ticketOptions.OllamaEnabled
            && TicketReviewPolicy.ShouldReview(
@@ -491,7 +490,8 @@ private static BlendedScoreInputs BlendReviewerSignals(
     TicketReviewerEvaluation? review = reviewerEvaluationAttempt.Review;
 
     // Reviewer output is advisory; deterministic blend weight bounds how far
-    // Ollama can move neural evidence. See docs/ticket-ai-scoring.md.
+    // Ollama can move neural evidence. See
+    // docs/tickets.md#neural-monitors-and-ollama-blend.
     double evidence = review switch
     {
         TicketReviewerEvaluation reviewerEvaluation => TicketReviewPolicy.Blend(
@@ -685,8 +685,6 @@ Primary tests:
 ### Related docs
 
 - [docs/runtime.md](runtime.md) — assessment queue, local resource limits, Ollama concurrency, and service tradeoffs
-- [docs/uploads-and-scanning.md](uploads-and-scanning.md) — ticket attachment upload, scanning, and download safety
-- [docs/chat-room-access.md](chat-room-access.md) — room categories, access bits, and portal visibility
-- [docs/auth-and-sessions.md](auth-and-sessions.md) — JWT, account class, and developer login
-- [docs/tenancy-isolation.md](tenancy-isolation.md) — account-class visibility and content safety baselines
+- [docs/chat.md](chat.md) — room categories, access bits, portal visibility, ticket attachments, scanning, and download safety
+- [docs/identity.md](identity.md) — JWT, account class, developer login, and account-class visibility
 - [docs/README.md](README.md) — documentation index

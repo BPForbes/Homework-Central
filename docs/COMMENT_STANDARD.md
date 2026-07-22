@@ -76,7 +76,7 @@ Use the smallest durable documentation surface that captures the information.
 |---|---|---|
 | Clarify a non-obvious line or block | Inline comment near the code | Tenant filter intentionally omits tenant ID for shared chat traffic. |
 | Explain public API contract | XML doc or exported TypeScript type doc | `IChatRoomAccessService.CanAccessRoom` authorization contract. |
-| Explain architecture or trust boundary | Existing Markdown in `docs/` | `docs/tenancy-isolation.md`, `docs/chat-room-access.md`. |
+| Explain architecture or trust boundary | Existing feature Markdown in `docs/` | `docs/identity.md`, `docs/chat.md`, `docs/tickets.md`. |
 | Record a decision and alternatives | ADR | Choice to keep built-in chat rooms catalog-driven. |
 | Describe operations or incident response | Runbook | Restoring Postgres, rotating captcha secrets, handling failed migrations. |
 | Explain local setup | `README.md`, `SETUP.md`, or script comments | Required tools, ports, reset commands. |
@@ -86,11 +86,11 @@ Use the smallest durable documentation surface that captures the information.
 When several files could own the information, choose the document closest to the
 runtime boundary:
 
-- account class and tenant rules -> `docs/tenancy-isolation.md`;
-- chat room visibility -> `docs/chat-room-access.md`;
-- ticket assessment and AI scoring -> `docs/tickets-assessment.md` or
-  `docs/ticket-ai-scoring.md`;
-- environment setup -> `README.md`, `SETUP.md`, or `docs/windows-docker-resources.md`;
+- account class, auth, and tenant rules -> `docs/identity.md`;
+- chat room visibility, messages, and uploads -> `docs/chat.md`;
+- ticket portals, assessment, and AI scoring -> `docs/tickets.md`;
+- runtime efficiency and local Docker resources -> `docs/runtime.md`;
+- environment setup -> `README.md` or `SETUP.md`;
 - design tokens and visual language -> `design.md`.
 
 ## Naming before commenting
@@ -614,7 +614,7 @@ Example:
 
 ```csharp
 // Shared chat traffic is isolated by account class only; per-tenant matching
-// would split the community room model. See docs/chat-room-access.md.
+// would split the community room model. See docs/chat.md.
 query = query.Where(message => message.OwnerAccountClass == scope.AccountClass);
 ```
 
@@ -670,7 +670,57 @@ bool CanQuery(ResourceVisibilityScope scope, IScopedResource resource);
 Markdown files are the durable home for architecture, operations, setup, and
 cross-cutting standards.
 
-Markdown standards:
+### Feature-level documents
+
+Prefer **one Markdown file per feature or subsystem**, not one file per
+endpoint, class, helper, or small topic.
+
+| Prefer | Avoid |
+|---|---|
+| `docs/tickets.md` for portals, intake, votes, AI scoring, and promotion | Multiple Markdown files for the same ticket feature |
+| `docs/chat.md` for rooms, messages, attachments, and scanning | Separate room-access and uploads docs when both are chat behavior |
+| `docs/identity.md` for auth, sessions, and tenancy isolation | Separate auth and tenancy docs that must be read together |
+| `docs/runtime.md` for efficiency, Docker profiles, and resource ceilings | Separate efficiency and Windows-resource notes for the same runtime story |
+
+Create a new Markdown file only when the subject is a distinct feature,
+subsystem, standard, ADR, or runbook. Do not create a file merely because one
+class, enum, endpoint, or config key changed.
+
+When a feature grows, add headings and sections inside the existing feature
+document. Split only when the resulting file covers unrelated trust boundaries
+or unrelated operators cannot share one narrative.
+
+Canonical feature docs today:
+
+| Feature | Canonical file |
+|---|---|
+| Comments, naming, readability | `docs/COMMENT_STANDARD.md` |
+| Identity, sessions, tenancy | `docs/identity.md` |
+| Chat rooms, messages, uploads | `docs/chat.md` |
+| Tickets and assessment | `docs/tickets.md` |
+| Runtime efficiency and local resources | `docs/runtime.md` |
+| UI design tokens | `design.md` |
+
+### Required content for feature docs
+
+Each feature Markdown file should include, when applicable:
+
+1. **Purpose and scope** — what the feature owns and intentionally excludes.
+2. **Architecture** — at least one Mermaid diagram (flowchart, sequence, or
+   state) that matches the current implementation.
+3. **Current behavior** — durable control flow and ownership rules.
+4. **Code behavior** — short, accurate snippets from current source that show
+   important behavior changes or invariants. Use explicit C# types; do not use
+   `var`. Cite the source path near the snippet.
+5. **Implementation files** — the primary backend, frontend, deploy, and script
+   paths that implement the feature.
+6. **Trust boundaries, failure handling, and configuration** — without secrets.
+7. **Related documentation** — links to other feature docs, not duplicate copies.
+
+Snippets must reflect current code. When behavior changes, update the snippet
+and the implementation-file list in the same change as the code.
+
+### Markdown standards
 
 - Start with a clear H1.
 - Explain project-specific context before implementation detail.
@@ -680,10 +730,11 @@ Markdown standards:
 - Include command examples that can be copied safely.
 - Mark destructive commands clearly.
 - Keep headings stable so source comments can link to them.
-- Update existing docs when the topic already has an owner.
+- Update existing feature docs when the topic already has an owner.
 
 Avoid creating:
 
+- one Markdown file per class, endpoint, DTO, or config key;
 - duplicate setup guides;
 - one-off branch notes;
 - temporary comparison documents;
@@ -758,7 +809,7 @@ Use repository-relative paths:
 
 ```csharp
 // Real and developer traffic must stay separated at query time.
-// See docs/tenancy-isolation.md.
+// See docs/identity.md.
 ```
 
 Do not link to branch comparisons, AI transcripts, ephemeral issue comments, or

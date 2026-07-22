@@ -234,7 +234,8 @@ public sealed class ChatAttachmentService(
     private static bool RequiresCautionGate(MalwareScanResult scanStatus)
     {
         // Only confirmed malware prompts the caution gate. Scanner downtime and NotScanned
-        // fail open for ordinary downloads; see docs/uploads-and-scanning.md.
+        // fail open for ordinary downloads; see
+        // docs/chat.md#download-authorization-and-caution-gate.
         return scanStatus is MalwareScanResult.Infected;
     }
 

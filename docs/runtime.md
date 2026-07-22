@@ -19,9 +19,9 @@ Feature-specific behavior remains with the feature docs:
 
 - [docs/tickets.md](tickets.md) for ticket assessment, neural monitors, and
   Ollama scoring.
-- [docs/uploads-and-scanning.md](uploads-and-scanning.md) for upload inspection,
-  ClamAV scan results, and download safety.
-- [docs/auth-and-sessions.md](auth-and-sessions.md) for authentication and
+- [docs/chat.md](chat.md) for upload inspection, ClamAV scan results, room
+  access, navigation behavior, and download safety.
+- [docs/identity.md](identity.md) for authentication, tenant isolation, and
   rate-limit context.
 
 ## Architecture
@@ -546,8 +546,6 @@ the Docker daemon and WSL kernel fit under the 4 GiB VM cap.
 ### Related docs
 
 - [docs/tickets.md](tickets.md) — assessment pipeline, neural monitors, Ollama blend, and training notes
-- [docs/uploads-and-scanning.md](uploads-and-scanning.md) — attachment scan statuses and fail behavior
-- [docs/auth-and-sessions.md](auth-and-sessions.md) — authentication, captcha, and rate-limit context
-- [docs/chat-room-access.md](chat-room-access.md) — room access and navigation behavior
-- [docs/tenancy-isolation.md](tenancy-isolation.md) — account-class and tenant isolation
+- [docs/chat.md](chat.md) — attachment scan statuses, fail behavior, room access, and navigation behavior
+- [docs/identity.md](identity.md) — authentication, captcha, account-class, and tenant isolation
 - [docs/README.md](README.md) — documentation index

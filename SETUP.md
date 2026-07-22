@@ -68,7 +68,7 @@ All web-facing code in this project must follow these security requirements. Age
 
 Homework Central–specific XSS and SQL baselines (sanitizer usage, EF Core
 rules, CSP middleware) are maintained in
-[`docs/tenancy-isolation.md`](docs/tenancy-isolation.md). Treat that document
+[`docs/identity.md`](docs/identity.md). Treat that document
 as authoritative for this repository; the checklist below is a general agent
 reference.
 
