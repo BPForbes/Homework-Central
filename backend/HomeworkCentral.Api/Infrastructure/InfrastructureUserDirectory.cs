@@ -75,18 +75,19 @@ public sealed class InfrastructureUserDirectory(
         // Prefix match on username and email (@T → users starting with T).
         string prefix = term.ToLowerInvariant();
         List<(User User, string? TenantDatabaseName)> results = [];
+        HashSet<Guid> seenUserIds = [];
 
         if (!string.IsNullOrEmpty(scope.TenantDatabaseName))
         {
             AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(scope.TenantDatabaseName, ct);
             await using (tenantDb)
             {
-                await SearchDbUsersAsync(tenantDb, prefix, scope.TenantDatabaseName, scope, results, ct);
+                await SearchDbUsersAsync(tenantDb, prefix, scope.TenantDatabaseName, scope, results, seenUserIds, ct);
             }
         }
         else
         {
-            await SearchDbUsersAsync(masterDb, prefix, tenantDatabaseName: null, scope, results, ct);
+            await SearchDbUsersAsync(masterDb, prefix, tenantDatabaseName: null, scope, results, seenUserIds, ct);
 
             if (scope.AccountClass == AccountClass.DevAdmin)
             {
@@ -95,7 +96,7 @@ public sealed class InfrastructureUserDirectory(
                     AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
                     await using (tenantDb)
                     {
-                        await SearchDbUsersAsync(tenantDb, prefix, databaseName, scope, results, ct);
+                        await SearchDbUsersAsync(tenantDb, prefix, databaseName, scope, results, seenUserIds, ct);
                     }
                 }
             }
@@ -112,18 +113,19 @@ public sealed class InfrastructureUserDirectory(
     {
         AccessScope scope = RequireScope();
         List<(User User, string? TenantDatabaseName)> results = [];
+        HashSet<Guid> seenUserIds = [];
 
         if (!string.IsNullOrEmpty(scope.TenantDatabaseName))
         {
             AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(scope.TenantDatabaseName, ct);
             await using (tenantDb)
             {
-                await ListDbUsersAsync(tenantDb, scope.TenantDatabaseName, scope, results, ct);
+                await ListDbUsersAsync(tenantDb, scope.TenantDatabaseName, scope, results, seenUserIds, ct);
             }
         }
         else
         {
-            await ListDbUsersAsync(masterDb, tenantDatabaseName: null, scope, results, ct);
+            await ListDbUsersAsync(masterDb, tenantDatabaseName: null, scope, results, seenUserIds, ct);
 
             if (scope.AccountClass == AccountClass.DevAdmin)
             {
@@ -132,7 +134,7 @@ public sealed class InfrastructureUserDirectory(
                     AppDbContext tenantDb = await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
                     await using (tenantDb)
                     {
-                        await ListDbUsersAsync(tenantDb, databaseName, scope, results, ct);
+                        await ListDbUsersAsync(tenantDb, databaseName, scope, results, seenUserIds, ct);
                     }
                 }
             }
@@ -159,6 +161,7 @@ public sealed class InfrastructureUserDirectory(
         string? tenantDatabaseName,
         AccessScope scope,
         List<(User User, string? TenantDatabaseName)> results,
+        HashSet<Guid> seenUserIds,
         CancellationToken ct)
     {
         List<User> users = await db.Users
@@ -174,7 +177,7 @@ public sealed class InfrastructureUserDirectory(
             if (!CanViewUser(scope, user, tenantDatabaseName))
                 continue;
 
-            if (results.Any(entry => entry.User.UserId == user.UserId))
+            if (!seenUserIds.Add(user.UserId))
                 continue;
 
             results.Add((user, tenantDatabaseName));
@@ -186,6 +189,7 @@ public sealed class InfrastructureUserDirectory(
         string? tenantDatabaseName,
         AccessScope scope,
         List<(User User, string? TenantDatabaseName)> results,
+        HashSet<Guid> seenUserIds,
         CancellationToken ct)
     {
         List<User> users = await db.Users
@@ -199,7 +203,7 @@ public sealed class InfrastructureUserDirectory(
             if (!CanViewUser(scope, user, tenantDatabaseName))
                 continue;
 
-            if (results.Any(entry => entry.User.UserId == user.UserId))
+            if (!seenUserIds.Add(user.UserId))
                 continue;
 
             results.Add((user, tenantDatabaseName));

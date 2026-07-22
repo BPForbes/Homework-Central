@@ -25,6 +25,15 @@ public sealed class ChatTypingTracker : IChatTypingTracker
 
     public void SetTyping(string connectionId, string groupKey, Guid userId, string username)
     {
+        // A connection can only be actively typing in one room at a time, but a prior NotifyTyping
+        // in another room is not automatically cleared when the client moves rooms (e.g. a reconnect
+        // that re-JoinRoom's without LeaveRoom first). Drop any stale room entry before updating.
+        if (_connections.TryGetValue(connectionId, out (string GroupKey, Guid UserId) prior)
+            && (prior.GroupKey != groupKey || prior.UserId != userId))
+        {
+            RemoveConnectionFromRoom(prior.GroupKey, prior.UserId, connectionId);
+        }
+
         ConcurrentDictionary<Guid, TypingEntry> room =
             _rooms.GetOrAdd(groupKey, _ => new ConcurrentDictionary<Guid, TypingEntry>());
         TypingEntry entry = room.GetOrAdd(userId, _ => new TypingEntry(username));
@@ -45,11 +54,24 @@ public sealed class ChatTypingTracker : IChatTypingTracker
     /// the room, or null if the connection wasn't marked as typing anywhere.</summary>
     public (string GroupKey, Guid UserId)? ClearTypingForConnection(string connectionId)
     {
-        if (!_connections.TryRemove(connectionId, out (string GroupKey, Guid UserId) entry))
-            return null;
+        _connections.TryRemove(connectionId, out _);
 
-        bool wasLastConnection = RemoveConnectionFromRoom(entry.GroupKey, entry.UserId, connectionId);
-        return wasLastConnection ? entry : null;
+        // Sweep every room: a connection can leak into a room if SetTyping moved rooms without
+        // clearing the old entry (fixed above, but this also cleans up state left by older builds).
+        (string GroupKey, Guid UserId)? notify = null;
+        foreach (KeyValuePair<string, ConcurrentDictionary<Guid, TypingEntry>> roomPair in _rooms.ToArray())
+        {
+            foreach (KeyValuePair<Guid, TypingEntry> userPair in roomPair.Value.ToArray())
+            {
+                if (!userPair.Value.ConnectionIds.ContainsKey(connectionId))
+                    continue;
+
+                if (RemoveConnectionFromRoom(roomPair.Key, userPair.Key, connectionId))
+                    notify = (roomPair.Key, userPair.Key);
+            }
+        }
+
+        return notify;
     }
 
     /// <summary>Returns every user currently marked as typing in <paramref name="groupKey"/>,

@@ -3,12 +3,12 @@ import * as signalR from '@microsoft/signalr'
 import { getAccessToken, getFreshAccessToken } from '../api/tokenManager'
 
 /** Listens for server-side chat nav changes and invokes the callback (e.g. refetch sidebar). */
-export function useChatNavSync(onRefresh: () => void) {
+export function useChatNavSync(onRefresh: () => void, sessionKey?: string | null) {
   const onRefreshRef = useRef(onRefresh)
   onRefreshRef.current = onRefresh
 
   useEffect(() => {
-    if (!getAccessToken())
+    if (!sessionKey || !getAccessToken())
       return
 
     const connection = new signalR.HubConnectionBuilder()
@@ -27,5 +27,5 @@ export function useChatNavSync(onRefresh: () => void) {
     return () => {
       void connection.stop()
     }
-  }, [])
+  }, [sessionKey])
 }

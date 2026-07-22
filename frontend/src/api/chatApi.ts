@@ -38,10 +38,22 @@ export const chatApi = {
       contentType: string
       sizeBytes: number
       downloadUrl: string
+      isHazard: boolean
+      inlinePreviewKind?: string | null
+      scanStatus: 'Clean' | 'Infected' | 'ScanFailed' | 'NotScanned' | 'Unknown'
     }>('/chat/attachments', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+
+  downloadAttachmentBlob: (attachmentId: string, riskAcknowledged = false) =>
+    api.get<Blob>(`/chat/attachments/${attachmentId}`, {
+      params: riskAcknowledged ? { riskAcknowledged: true } : undefined,
+      responseType: 'blob',
+    }),
+
+  deleteAttachment: (attachmentId: string) =>
+    api.delete(`/chat/attachments/${attachmentId}`),
 
   getMentionRoles: () => api.get<MentionRoleOption[]>('/chat/mention-roles'),
 

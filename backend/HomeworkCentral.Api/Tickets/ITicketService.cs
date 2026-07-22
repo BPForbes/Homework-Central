@@ -2,6 +2,10 @@ using HomeworkCentral.Api.DTOs;
 
 namespace HomeworkCentral.Api.Tickets;
 
+/// <summary>
+/// Ticket portal configuration, open/close lifecycle, watches, and reviewer scoring actions.
+/// Implementations enforce account-class scope and portal/staff access before mutating tickets.
+/// </summary>
 public interface ITicketService
 {
     Task<TicketPortalConfigDto?> GetPortalConfigAsync(
@@ -15,6 +19,10 @@ public interface ITicketService
         UpdateTicketPortalConfigRequest request,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Opens a ticket from a portal room: validates intake, allocates a display number,
+    /// creates the ticket chat channel, and fans out inbox notifications.
+    /// </summary>
     Task<TicketDto> OpenTicketAsync(
         string portalRoomId,
         Guid openerUserId,
@@ -32,6 +40,8 @@ public interface ITicketService
         UpsertTicketWatchRequest request,
         CancellationToken ct = default);
     Task<TicketAnalyzeResultDto> AnalyzeAsync(Guid ticketId, Guid actorUserId, CancellationToken ct = default);
+    Task<TicketMessageScoreDto> ApproveScoreTrainingAsync(
+        Guid ticketId, Guid scoreEventId, Guid actorUserId, CancellationToken ct = default);
     Task<TicketDto> ApproveDecisionAsync(
         Guid ticketId,
         Guid actorUserId,

@@ -168,6 +168,22 @@ public class TicketsController(ITicketService tickets) : ControllerBase
         }
     }
 
+    [HttpPost("api/tickets/{ticketId:guid}/scores/{scoreEventId:guid}/approve-training")]
+    public async Task<ActionResult<TicketMessageScoreDto>> ApproveScoreTraining(
+        Guid ticketId, Guid scoreEventId, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null) return Unauthorized();
+        try
+        {
+            return Ok(await tickets.ApproveScoreTrainingAsync(ticketId, scoreEventId, userId.Value, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private Guid? GetUserId()
     {
         string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value

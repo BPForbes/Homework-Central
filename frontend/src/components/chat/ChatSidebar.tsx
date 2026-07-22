@@ -33,7 +33,7 @@ export function ChatSidebar() {
 
   useChatNavSync(() => {
     void loadNav()
-  })
+  }, user?.userId)
 
   useEffect(() => {
     void loadNav()

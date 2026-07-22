@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowUp, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { faArrowUp, faPaperclip, faReply, faXmark } from '@fortawesome/free-solid-svg-icons'
 import type { ChatMessage, MentionRoleOption } from '../../types/chat'
+import { useAuth } from '../../context/useAuth'
+import { chatApi } from '../../api/chatApi'
 import {
   buildMentionCandidates,
   buildMentionStyleLookup,
@@ -14,13 +16,23 @@ import { RichTextToolbar } from '../../richtext/RichTextToolbar'
 import { RichContent } from '../../richtext/RichContent'
 import { FormattingToggleButton } from '../../richtext/FormattingToggleButton'
 
+/** Matches backend PlatformFeatures.FileUploads / ImageUploads. */
+const FEATURE_FILE_UPLOADS = 15
+const FEATURE_IMAGE_UPLOADS = 16
+
+type PendingAttachment = {
+  localId: string
+  attachmentId: string
+  fileName: string
+}
+
 interface ChatComposerProps {
   disabled?: boolean
   sending?: boolean
   replyTarget?: ChatMessage | null
   messages?: ChatMessage[]
   mentionRoles?: MentionRoleOption[]
-  onSend: (content: string) => Promise<boolean>
+  onSend: (content: string, attachmentIds?: string[]) => Promise<boolean>
   onTyping: () => void
   onStopTyping: () => void
   onCancelReply?: () => void
@@ -37,12 +49,19 @@ export function ChatComposer({
   onStopTyping,
   onCancelReply,
 }: ChatComposerProps) {
+  const { hasFeature, user } = useAuth()
+  const isDeveloperSession = user?.accountClass === 'DeveloperAccount' || user?.accountClass === 'DevAdmin'
+  const canUpload = isDeveloperSession || hasFeature(FEATURE_FILE_UPLOADS) || hasFeature(FEATURE_IMAGE_UPLOADS)
   const [draft, setDraft] = useState('')
   const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [showFormatting, setShowFormatting] = useState(false)
   const [remoteUsers, setRemoteUsers] = useState<MentionCandidate[]>([])
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [attachError, setAttachError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const localCandidates = mentionQuery
     ? buildMentionCandidates(messages, mentionRoles, mentionQuery.query)
@@ -60,6 +79,8 @@ export function ChatComposer({
     () => buildMentionStyleLookup(messages, mentionRoles),
     [messages, mentionRoles],
   )
+
+  const canSubmit = (draft.trim().length > 0 || pendingAttachments.length > 0) && !disabled && !sending && !uploading
 
   useEffect(() => {
     if (replyTarget)
@@ -80,7 +101,6 @@ export function ChatComposer({
     const handle = window.setTimeout(() => {
       void (async () => {
         try {
-          const { chatApi } = await import('../../api/chatApi')
           const { data } = await chatApi.searchUsers(mentionQuery.query)
           if (cancelled) return
           setRemoteUsers(data.map((user) => ({
@@ -121,19 +141,68 @@ export function ChatComposer({
       onStopTyping()
   }
 
+  async function uploadFiles(files: File[]) {
+    setAttachError(null)
+    setUploading(true)
+    try {
+      for (const file of files) {
+        try {
+          const { data } = await chatApi.uploadAttachment(file)
+          setPendingAttachments((prev) => [
+            ...prev,
+            {
+              localId: `${data.attachmentId}-${file.name}`,
+              attachmentId: data.attachmentId,
+              fileName: data.fileName,
+            },
+          ])
+        } catch {
+          setAttachError('Could not upload this file. Please try again.')
+          break
+        }
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0 || !canUpload)
+      return
+
+    setAttachError(null)
+    await uploadFiles(files)
+  }
+
+  function removePendingAttachment(localId: string) {
+    setPendingAttachments((prev) => prev.filter((item) => item.localId !== localId))
+  }
+
   async function handleSubmit(event?: FormEvent) {
     event?.preventDefault()
-    if (!draft.trim() || disabled || sending)
+    if (!canSubmit)
       return
 
     const content = draft
+    const attachmentsSnapshot = pendingAttachments
+    const attachmentIds = attachmentsSnapshot.map((item) => item.attachmentId)
     setDraft('')
+    setPendingAttachments([])
     setMentionQuery(null)
     setShowFormatting(false)
-    const sent = await onSend(content)
+    setAttachError(null)
+    const sent = await onSend(content, attachmentIds.length > 0 ? attachmentIds : undefined)
     if (!sent) {
       setDraft(content)
-      onTyping()
+      setPendingAttachments(attachmentsSnapshot)
+      // Attachment-only restores have blank content; do not re-broadcast typing
+      // (there is no server-side typing timeout, and refocus won't stop it).
+      if (content.trim())
+        onTyping()
+      else
+        onStopTyping()
     }
 
     textareaRef.current?.focus()
@@ -213,6 +282,26 @@ export function ChatComposer({
           </button>
         </div>
       )}
+      {pendingAttachments.length > 0 && (
+        <ul className="chat-composer-attachments" aria-label="Attachments to send">
+          {pendingAttachments.map((item) => (
+            <li key={item.localId} className="chat-composer-attachment-chip">
+              <span className="chat-composer-attachment-name">{item.fileName}</span>
+              <button
+                type="button"
+                className="chat-composer-attachment-remove"
+                onClick={() => removePendingAttachment(item.localId)}
+                aria-label={`Remove ${item.fileName}`}
+                title="Remove attachment"
+                disabled={sending || uploading}
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {attachError && <p className="chat-composer-attach-error">{attachError}</p>}
       <div className="chat-composer-toolbar-row">
         <RichTextToolbar textareaRef={textareaRef} value={draft} onChange={handleChange} compact />
         <FormattingToggleButton
@@ -222,6 +311,30 @@ export function ChatComposer({
         />
       </div>
       <form className="chat-composer" onSubmit={handleSubmit}>
+        {canUpload && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="chat-composer-file-input"
+              multiple
+              onChange={(event) => void handleFilesSelected(event)}
+              disabled={disabled || sending || uploading}
+              tabIndex={-1}
+              aria-hidden
+            />
+            <button
+              type="button"
+              className="chat-attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || sending || uploading}
+              aria-label="Attach file"
+              title="Attach file"
+            >
+              <FontAwesomeIcon icon={faPaperclip} />
+            </button>
+          </>
+        )}
         <div className="chat-composer-input-wrap">
           {!showFormatting && mentionCandidates.length > 0 && mentionQuery && (
             <ul className="chat-mention-autocomplete" role="listbox" aria-label="Mention suggestions">
@@ -281,7 +394,7 @@ export function ChatComposer({
         <button
           type="submit"
           className="chat-send-btn"
-          disabled={disabled || sending || !draft.trim()}
+          disabled={!canSubmit}
           aria-label="Send message"
         >
           <FontAwesomeIcon icon={faArrowUp} />

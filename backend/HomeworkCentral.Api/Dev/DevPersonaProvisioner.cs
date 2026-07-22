@@ -59,10 +59,12 @@ public sealed class DevPersonaProvisioner(
     /// as provisioned: a database existing tells us nothing about whether its schema/seed data
     /// are actually up to date (e.g. after pulling new migrations or catalog changes), so every
     /// persona — new or pre-existing — still goes through the real migrate/seed verification in
-    /// <see cref="ProvisionAllRemainingAsync"/>. That verification is fast when there's nothing
-    /// to do (EF's MigrateAsync and this app's own AuthorizationSeedData caching both no-op
-    /// quickly against an up-to-date database) and runs in the background, so this doesn't
-    /// reintroduce a blocking startup cost — it only fixes silently trusting a stale database.
+    /// <see cref="EnsureProvisionedAsync"/> (on demand at dev login, or via
+    /// <see cref="ProvisionAllRemainingAsync"/> when eager provisioning is opted in). That
+    /// verification is fast when there's nothing to do (EF's MigrateAsync and this app's own
+    /// AuthorizationSeedData caching both no-op quickly against an up-to-date database), so this
+    /// doesn't reintroduce a blocking startup cost — it only fixes silently trusting a stale
+    /// database.
     /// </summary>
     public async Task InitializeFromExistingDatabasesAsync(CancellationToken ct = default)
     {
@@ -80,7 +82,7 @@ public sealed class DevPersonaProvisioner(
         if (existingDatabases.Count > 0)
         {
             logger.LogInformation(
-                "Detected {ExistingCount}/{TotalCount} existing persona databases; verifying migrations/seed data in the background.",
+                "Detected {ExistingCount}/{TotalCount} existing persona databases; each is re-verified (migrations/seed) before first use.",
                 existingDatabases.Count,
                 TotalPersonaCount);
         }

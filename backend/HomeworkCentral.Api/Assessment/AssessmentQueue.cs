@@ -4,10 +4,10 @@ namespace HomeworkCentral.Api.Assessment;
 
 public enum AssessmentJobKind
 {
-    /// <summary>Full eligibility + LLM rubric + community blend for a new message.</summary>
+    /// <summary>Bounded ticket-evidence classification for a new message.</summary>
     Full = 0,
 
-    /// <summary>Re-aggregate community votes and adjust combined scores without re-calling the LLM.</summary>
+    /// <summary>Reserved for vote-driven recalculation; AI confidence currently ignores votes.</summary>
     CommunityRecalc = 1,
 }
 
@@ -20,21 +20,27 @@ public sealed record AssessmentMessageJob(
 
 public interface IAssessmentQueue
 {
-    ValueTask EnqueueAsync(AssessmentMessageJob job, CancellationToken ct = default);
+    bool TryEnqueue(AssessmentMessageJob job);
     IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(CancellationToken ct);
 }
 
-public sealed class AssessmentQueue : IAssessmentQueue
+public sealed class AssessmentQueue(ILogger<AssessmentQueue> logger) : IAssessmentQueue
 {
     private readonly Channel<AssessmentMessageJob> _channel =
-        Channel.CreateUnbounded<AssessmentMessageJob>(new UnboundedChannelOptions
+        Channel.CreateBounded<AssessmentMessageJob>(new BoundedChannelOptions(256)
         {
             SingleReader = true,
             SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
         });
 
-    public ValueTask EnqueueAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
-        _channel.Writer.WriteAsync(job, ct);
+    public bool TryEnqueue(AssessmentMessageJob job)
+    {
+        bool accepted = _channel.Writer.TryWrite(job);
+        if (!accepted)
+            logger.LogWarning("Assessment queue is full; message {MessageId} remains unscored.", job.MessageId);
+        return accepted;
+    }
 
     public IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(CancellationToken ct) =>
         _channel.Reader.ReadAllAsync(ct);

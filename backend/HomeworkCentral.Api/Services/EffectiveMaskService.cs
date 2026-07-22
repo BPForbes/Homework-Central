@@ -24,6 +24,11 @@ public class EffectiveMaskService(
 {
     private AppDbContext? _tenantDb;
     private IRoleMaskService? _tenantRoleMaskService;
+    // This service is scoped, so this cache lives for only one HTTP request or hub invocation.
+    // Controllers and downstream services frequently ask for the same mask more than once.
+    private Guid? _cachedUserId;
+    private string? _cachedTenantDatabase;
+    private EffectiveMaskDto? _cachedMaskDto;
 
     public async Task<UserEffectiveMask?> GetUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
@@ -36,11 +41,19 @@ public class EffectiveMaskService(
 
     public async Task<EffectiveMaskDto> GetEffectiveMaskDtoAsync(Guid userId, CancellationToken ct = default)
     {
+        string? tenantDatabase = ResolveTenantDatabaseName();
+        if (_cachedMaskDto is not null
+            && _cachedUserId == userId
+            && string.Equals(_cachedTenantDatabase, tenantDatabase, StringComparison.Ordinal))
+        {
+            return _cachedMaskDto;
+        }
+
         (AppDbContext db, _) = await GetContextAsync(ct);
         UserEffectiveMask mask = await GetUserEffectiveMaskAsync(userId, ct)
             ?? await RebuildUserEffectiveMaskAsync(userId, ct);
 
-        List<Guid> customRoleIds = await db.UserRoles
+        HashSet<Guid> customRoleIds = (await db.UserRoles
             .AsNoTracking()
             .Where(ur => ur.UserId == userId)
             .Join(
@@ -48,15 +61,21 @@ public class EffectiveMaskService(
                 ur => ur.RoleId,
                 role => role.RoleId,
                 (ur, role) => role.RoleId)
-            .ToListAsync(ct);
+            .ToListAsync(ct)).ToHashSet();
 
         EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
         dto.CustomRoleIds = customRoleIds;
+        _cachedUserId = userId;
+        _cachedTenantDatabase = tenantDatabase;
+        _cachedMaskDto = dto;
         return dto;
     }
 
     public async Task<UserEffectiveMask> RebuildUserEffectiveMaskAsync(Guid userId, CancellationToken ct = default)
     {
+        if (_cachedUserId == userId)
+            _cachedMaskDto = null;
+
         (AppDbContext db, IRoleMaskService roleMaskService) = await GetContextAsync(ct);
         return await RebuildOnContextAsync(db, roleMaskService, userId, ct);
     }

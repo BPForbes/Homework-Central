@@ -24,6 +24,10 @@ public class TenantConnectionResolver : ITenantConnectionResolver
         NpgsqlConnectionStringBuilder builder = new(_baseConnectionString)
         {
             Database = databaseName,
+            // Each tenant database has a distinct Npgsql pool. Keep those pools tiny or dozens
+            // of developer personas can retain more idle connections than PostgreSQL allows.
+            MaxPoolSize = 4,
+            MaxAutoPrepare = 16,
         };
         return builder.ConnectionString;
     }

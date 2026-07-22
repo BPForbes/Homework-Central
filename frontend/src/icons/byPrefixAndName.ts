@@ -1,7 +1,12 @@
 import {
   faArrowDown,
+  faBackwardStep,
+  faDownload,
   faEnvelope,
   faExclamation,
+  faFileCircleExclamation,
+  faPause,
+  faPlay,
   faServer,
   faUsersGear,
 } from '@fortawesome/free-solid-svg-icons'
@@ -14,7 +19,12 @@ export const byPrefixAndName = {
     server: faServer,
     'users-gear': faUsersGear,
     'arrow-down': faArrowDown,
+    'backward-step': faBackwardStep,
+    download: faDownload,
     exclamation: faExclamation,
+    'file-circle-exclamation': faFileCircleExclamation,
+    pause: faPause,
+    play: faPlay,
   },
   far: {
     comments: faComments,

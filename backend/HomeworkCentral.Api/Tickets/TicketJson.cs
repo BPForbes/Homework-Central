@@ -89,22 +89,16 @@ public static class TicketJson
         IReadOnlyList<TicketIntakeQuestionDto> schema,
         IReadOnlyDictionary<string, JsonElement> answers)
     {
-        List<TicketIntakeAnswerDto> result = [];
-        foreach (TicketIntakeQuestionDto question in schema)
-        {
-            if (!answers.TryGetValue(question.Id, out JsonElement value))
-                continue;
-
-            result.Add(new TicketIntakeAnswerDto
+        return schema
+            .Where(question => answers.ContainsKey(question.Id))
+            .Select(question => new TicketIntakeAnswerDto
             {
                 QuestionId = question.Id,
                 Prompt = question.Prompt,
                 Type = question.Type,
-                ValueDisplay = FormatValueDisplay(question, value),
-            });
-        }
-
-        return result;
+                ValueDisplay = FormatValueDisplay(question, answers[question.Id]),
+            })
+            .ToList();
     }
 
     public static string FormatValueDisplay(TicketIntakeQuestionDto question, JsonElement value)

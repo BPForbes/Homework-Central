@@ -61,12 +61,8 @@ export function getCategoryIcon(categoryKey: string): IconDefinition {
 }
 
 export function getRoomIcon(roomName: string, categoryKey: string): IconDefinition {
-  for (const hint of ROOM_ICON_HINTS) {
-    if (hint.pattern.test(roomName))
-      return hint.icon
-  }
-
-  return getCategoryIcon(categoryKey)
+  return ROOM_ICON_HINTS.find((hint) => hint.pattern.test(roomName))?.icon
+    ?? getCategoryIcon(categoryKey)
 }
 
 export function getStaffRoomIcon(roomName: string): IconDefinition {

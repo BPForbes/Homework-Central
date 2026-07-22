@@ -178,6 +178,54 @@ public class ChatRoomAccessServiceTests
         Assert.Contains(general.Rooms, room => room.Name == "Get Roles");
     }
 
+    [Fact]
+    public void Developer_viewer_sees_developer_ticket_portals_but_not_real_ones()
+    {
+        Guid realId = Guid.NewGuid();
+        Guid devId = Guid.NewGuid();
+        CustomChannelSnapshot realPortal = TicketPortalSnapshot(
+            realId,
+            "Notify Mods",
+            AccountClass.RealAccount);
+        CustomChannelSnapshot devPortal = TicketPortalSnapshot(
+            devId,
+            "Notify Mods",
+            AccountClass.DeveloperAccount);
+
+        ChatRoomAccessService service = new(
+            new FixedCustomChannelStore(realPortal, devPortal),
+            new FixedAccessScopeAccessor(AccountClass.DeveloperAccount));
+
+        ChatNavDto nav = service.GetAccessibleNav(CreateMasks(), UserId);
+
+        ChatNavCategoryDto general = nav.Categories.Single(c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
+        Assert.Contains(general.Rooms, room => room.Id == $"custom:{devId:N}" && room.RoomType == "Ticket");
+        Assert.DoesNotContain(general.Rooms, room => room.Id == $"custom:{realId:N}");
+    }
+
+    private static CustomChannelSnapshot TicketPortalSnapshot(
+        Guid channelId,
+        string displayName,
+        AccountClass ownerAccountClass) =>
+        new(
+            channelId,
+            $"custom:{channelId:N}",
+            displayName,
+            "ticket",
+            ChatRoomBlueprint.GeneralCategoryKey,
+            ChatRoomBlueprint.GeneralCategoryDisplayName,
+            CustomRoomType.Ticket,
+            IsPrivate: false,
+            InfoContent: null,
+            CreatedAtUtc: DateTime.UtcNow,
+            UpdatedAtUtc: DateTime.UtcNow,
+            OwnerAccountClass: ownerAccountClass,
+            TieType: ChannelTieType.None,
+            TieSubjectMask: null,
+            TieSubjectBitIndex: null,
+            TiePlatformRoleBit: null,
+            AccessRules: []);
+
     private static EffectiveMaskDto CreateMasks(
         IEnumerable<short>? roles = null,
         IEnumerable<short>? generalSubjects = null,

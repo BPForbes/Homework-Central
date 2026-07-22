@@ -82,8 +82,13 @@ public static class ChatRoomCatalog
     public static readonly IReadOnlyList<ChatRoomDefinition> AllRooms =
         GeneralRooms.Concat(SubjectRooms).Concat(StaffRooms).ToList();
 
+    // Access and nav resolve rooms by id on every request; the static map keeps
+    // catalog lookup off the linear AllRooms scan.
+    private static readonly IReadOnlyDictionary<string, ChatRoomDefinition> RoomsById =
+        AllRooms.ToDictionary(room => room.Id, StringComparer.Ordinal);
+
     public static ChatRoomDefinition? FindById(string roomId) =>
-        AllRooms.FirstOrDefault(room => string.Equals(room.Id, roomId, StringComparison.Ordinal));
+        RoomsById.TryGetValue(roomId, out ChatRoomDefinition? room) ? room : null;
 
     public static bool IsPrivateCategory(ChatCategoryKind categoryKind) =>
         categoryKind is ChatCategoryKind.Subject or ChatCategoryKind.Staff;

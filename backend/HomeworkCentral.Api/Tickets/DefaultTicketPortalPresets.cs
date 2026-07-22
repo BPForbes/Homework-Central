@@ -3,7 +3,10 @@ using HomeworkCentral.Api.DTOs;
 
 namespace HomeworkCentral.Api.Tickets;
 
-/// <summary>Canonical default ticket portals seeded per tenant/master database.</summary>
+/// <summary>
+/// Canonical default ticket portals seeded on the master database once per
+/// <see cref="Authorization.AccountClass"/> (RealAccount and DeveloperAccount).
+/// </summary>
 public static class DefaultTicketPortalPresets
 {
     public const string TutorDisplayName = "Apply for Tutor Positions";
@@ -30,7 +33,9 @@ public static class DefaultTicketPortalPresets
         {
             Id = "tutor-subjects",
             Type = "shortText",
-            Prompt = "What do you want to tutor in?",
+            Prompt =
+                "What do you want to tutor in? Use known subjects (e.g. Biology, Rust, Mathematics). "
+                + "Separate multiple with commas. Unknown topics will ask you to re-enter.",
             Required = true,
         },
         new()
@@ -68,7 +73,9 @@ public static class DefaultTicketPortalPresets
         {
             Id = "report-reason",
             Type = "longText",
-            Prompt = "Why is this being reported?",
+            Prompt =
+                "Why is this being reported? Describe what happened. Naming a known issue type "
+                + "(e.g. payment solicitation, harassment, spam) helps monitoring — unknown wording is still accepted.",
             Required = true,
         },
         new()
