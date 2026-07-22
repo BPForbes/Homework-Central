@@ -102,17 +102,50 @@ Mixed answers may contain `text`, `file`, `link`, or `forward` parts when allowe
 by the question. A portal may define at most one AI opt-out question, and that
 question must be `checkbox` or `trueFalse`.
 
-Preface checks are resolved by question id and filter name:
+Preface checks run before ticket creation and convert selected free-text answers
+into structured tracking hints. The extension point is intentionally narrow:
+`ITicketPrefaceCheck` describes the question binding and processing mode,
+`TicketPrefaceCheckResolver` chooses the check for a question/filter pair, and
+`VocabularyTicketPrefaceCheck` supplies the shared vocabulary engine used by
+the built-in Tutor and Mod-Mail checks.
+
+```mermaid
+flowchart TD
+    IntakeSchema[Ticket intake schema] --> Validator[TicketIntakeValidator]
+    Validator --> Resolver[TicketPrefaceCheckResolver]
+    Resolver -->|QuestionId + FilterName| Check{Resolved check?}
+    Check -->|Tutor / tutor-subjects| Tutor[TutorSubjectPrefaceCheck]
+    Check -->|Mod-Mail / report-reason| Moderation[ModerationConceptPrefaceCheck]
+    Check -->|none| Plain[Plain answer validation]
+    Tutor --> Base[VocabularyTicketPrefaceCheck]
+    Moderation --> Base
+    Base -->|Strict failure| Reject[Reject intake with re-enter message]
+    Base -->|Success| Template[Tracking template prefaceCategory / prefaceSpecifics]
+    Base -->|Lenient unknown wording| Narrative[Keep original narrative answer]
+```
+
+Built-in preface checks:
 
 | Portal | Check | Question | Behavior |
 |---|---|---|---|
 | Tutor | `TutorSubjectPrefaceCheck` | `tutor-subjects` | strict; unknown subjects reject intake |
 | Mod-Mail | `ModerationConceptPrefaceCheck` | `report-reason` | lenient; unknown wording remains narrative |
 
-The vocabulary checks lowercase input, normalize aliases such as `biology` and
-`rust`, retain specific labels for neural cascade input, spell-check known terms,
-and store `prefaceCategory` / `prefaceSpecifics` in tracking templates when
-available.
+Strict mode (`TutorSubjectPrefaceCheck`) requires every token to resolve to a
+known subject or expertise label. Successful strict checks may rewrite the stored
+answer to the canonical display string, such as `Biology, Rust`.
+
+Lenient mode (`ModerationConceptPrefaceCheck`) extracts verified moderation
+concepts while preserving the reporter's original narrative. Unknown wording
+therefore stays available to staff and to the reviewer prompt instead of
+blocking a Mod-Mail report.
+
+`VocabularyTicketPrefaceCheck` lowercases input, normalizes aliases such as
+`biology`, `rust`, `c++`, and `.net`, adds compact aliases, applies bounded
+Levenshtein spell-checking, keeps both broad categories and specific labels,
+and exposes `Extract` for the moderation and tutoring cascade feature builders.
+When a check returns categories or specifics, `TicketTrackingTemplateBuilder`
+stores `prefaceCategory` and `prefaceSpecifics` in the frozen tracking template.
 
 ### Open lifecycle
 
@@ -183,18 +216,42 @@ current score   = clamp(previous score + requested delta, 0, 1)
 
 The default maximum movement is `0.15` per message.
 
+## Neural / ticket analysis stack
+
 ### Neural monitors and Ollama blend
 
-The first pass uses one of two CPU hashed-MLP chat monitors:
+The first pass uses one of two CPU hashed-MLP chat monitors. Both monitors are
+two-stage cascades: stage 1 (`f`) embeds ticket context and stage 2 (`g`) scores
+evidence, relevance, and category from the shared 86-float feature vector.
 
-| Monitor | When selected | Topology |
-|---|---|---|
-| Moderation cascade | default for conduct/filter tickets | stage-1 router `30 -> 24 -> 8`; stage-2 `86 -> 48 -> 72 -> 64 -> 56 -> 103` |
-| Tutoring cascade | Tutor application tickets | stage-1 router `62 -> 32 -> 8`; stage-2 `86 -> 40 -> 56 -> 48 -> 40 -> 16` |
+```mermaid
+flowchart LR
+    Watch[TicketUserWatch + message] --> Kind{ChatMonitoringTicketContext.ResolveKind}
+    Kind -->|Tutor filter, tutor context, or subject-help text| TutorRouter[Tutoring stage 1<br/>subject-context router<br/>62 -> 32 -> 8]
+    Kind -->|All other ticket watches| ModRouter[Moderation stage 1<br/>concept-context router<br/>30 -> 24 -> 8]
+    TutorRouter --> TutorSlots[features 78-85]
+    ModRouter --> ModSlots[features 78-85]
+    TutorSlots --> TutorScorer[Tutoring stage 2<br/>86 -> 40 -> 56 -> 48 -> 40 -> 16]
+    ModSlots --> ModScorer[Moderation stage 2<br/>86 -> 48 -> 72 -> 64 -> 56 -> 103]
+    TutorScorer --> Outputs[Evidence + relevance + category]
+    ModScorer --> Outputs
+```
 
-Inputs are 86 dense features: hashed text, community/prior metadata,
-applied-subject multi-hot and count, channel-subject multi-hot, tutoring
-relatedness, and an 8-dimensional cascade stage-1 embedding in slots 78-85.
+| Monitor | When selected | Stage-1 role | Stage-2 output head |
+|---|---|---|---|
+| Moderation cascade | Default for conduct, report, and filter tickets. | Concept-context router using reported moderation concept, related concept count, family one-hot values, and concept/family text matches. | Evidence, relevance, and `100` fine moderation concepts plus catch-all. |
+| Tutoring cascade | Tutor application and subject-help contexts detected from filter name, watch context, tracking instructions, or frozen template text. | Subject-context router using applied subjects, channel subject, exact/related/cross-subject support, and expertise hash bins. | Evidence, relevance, and tutoring subject/competency categories. |
+
+The stage-2 input layout is shared across both monitors:
+
+| Feature slots | Source |
+|---|---|
+| `0-43` | Hashed tokens from requirement, thread context, and message text. |
+| `44-47` | Community vote, effective channel relevance, thread continuity, and prior ticket score. |
+| `48-51` | Applied-subject count, exact channel match, related match, and cross-subject support. |
+| `52-64` | Applied general-subject multi-hot values for the 13 Mask-C subject groups. |
+| `65-77` | Channel general-subject multi-hot values. |
+| `78-85` | Cascade stage-1 embedding: concept context for moderation, subject context for tutoring. |
 
 Live scoring can run without Ollama when `Tickets:NeuralOnlyScoring=true` or
 `Tickets:OllamaEnabled=false`. Otherwise, student confidence below `0.75` is sent
@@ -203,34 +260,155 @@ confidence predictions is reviewed for audit. Reviewer evidence and relevance us
 the configured `ReviewerBlendWeight` default of `0.70`. If the reviewer is not
 called or cannot return a valid review, bounded neural output is still recorded.
 
-### Vector archive and training notes
+### Live scoring path vs training path
+
+Live scoring is message-driven and follows the [Assessment pipeline](#assessment-pipeline):
+
+1. `ChatMessageService` saves a visible message and enqueues an `AssessmentMessageJob`.
+2. `AssessmentWorker` reads the bounded queue and calls `AssessmentPipelineService`.
+3. `ScoreWatchWithNeuralModel` resolves the moderation or tutoring monitor, builds
+   subject/concept features, predicts the student score, and optionally invokes the
+   Ollama reviewer.
+4. Deterministic code blends student/reviewer signals, clamps score movement, writes
+   one `TicketMessageScores` audit row, and mirrors the score event to vector search.
+
+Training is example-driven:
+
+- staff-approved reviewer feedback creates `TicketModelTrainingExamples` with source
+  `StaffApprovedReviewer`, immediately trains the matching in-memory monitor, and
+  mirrors the approved example to the `ticket_training_example` vector namespace;
+- synthetic administrator sessions create fictional ticket threads, train
+  `Moderation`, `Tutoring`, or both cascades, persist approved synthetic examples,
+  record replay JSON, and queue canonical promotion.
 
 `TicketMessageScores` is the authoritative append-only score-event ledger. Each
 row contains score-event, ticket, message, tracked-user ids, previous score,
 delta, current score, evidence confidence, relevance, rationale, model version,
-raw JSON, context snapshot, reviewer fields, and timestamp. Database constraints
-bound scores to `[0, 1]` and enforce uniqueness per ticket/message.
+raw JSON, context snapshot, student fields, reviewer fields, training approval or
+rejection fields, and timestamp. Database constraints bound scores to `[0, 1]`
+and enforce uniqueness per ticket/message.
 
-The vector store mirrors:
+Student and reviewer score fields stay separate:
+
+| Table | Field group | Meaning |
+|---|---|---|
+| `TicketMessageScores` | `StudentScore`, `StudentConfidence`, `StudentRelevance`, `StudentCategory`, `StudentReasoning` | Local cascade output before optional reviewer blend. |
+| `TicketMessageScores` | `ReviewerInvoked`, `ReviewerScore`, `ReviewerConfidence`, `ReviewerRelevance`, `CorrectionNeeded`, `ReviewerExplanation`, `ReviewerGuidance` | Optional Ollama review result and training guidance. |
+| `TicketMessageScores` | `TrainingApprovedAtUtc`, `TrainingApprovedByUserId`, `TrainingRejectedAtUtc`, `TrainingRejectedByUserId` | Staff decision on whether reviewer feedback becomes a training example. |
+| `TicketModelTrainingExamples` | `TargetScore`, `TargetRelevance`, `Category`, `ChatMonitoringKind`, `Source` | Approved target used by the matching chat-monitor lineage. |
+
+The vector store mirrors relational rows:
 
 | Namespace | Canonical source | Purpose |
 |---|---|---|
-| `ticket_message_evidence` | `TicketMessageScores` | score-event retrieval/audit mirror |
-| `ticket_training_example` | `TicketModelTrainingExamples` | approved training-example retrieval |
+| `ticket_message_evidence` | `TicketMessageScores` | Score-event retrieval/audit mirror. |
+| `ticket_training_example` | `TicketModelTrainingExamples` | Approved training-example retrieval. |
 
-`TicketModelTrainingExamples` stores the monitor kind (`Moderation` or
-`Tutoring`), requirement, target score, target relevance, category, source,
-approver, and timestamp. Live rows reference the `ChatMessages.MessageId` and
-score-event UUID instead of duplicating message text. Bootstrap rows may store
-inline text because they do not correspond to real messages.
+### Synthetic training sessions, queue, and worker
 
-Synthetic admin training can run `Both`, `Moderation`, or `Tutoring`. In `Both`
-mode, each monitor has its own run, worker/promotion replay, and canonical
-checkpoint lineage. Training labels are reused across epochs; persistence and
-vector upserts are batched; full parameter-delta traces are sampled.
+`NeuralNetTrainingService.StartSyntheticSessionAsync` creates one
+`NeuralNetTrainingSession` and one `ChatMonitoringNeuralModelRun` per requested
+monitor kind. `NeuralNetTrainingQueue` is a bounded FIFO with capacity `8`; queued
+sessions can be removed before the worker claims them.
 
-Reviewer corrections require staff approval before training. Startup rebuilds
-in-memory monitor weights from approved rows for that monitor kind.
+`NeuralNetTrainingWorker` reads session ids, calls `RunSyntheticSessionAsync`, and
+then asks `NeuralNetTrainingPromoter` to promote the next claimable promotion.
+Training sessions:
+
+- clamp requested tickets to `1-10` and maximum passes per ticket to `1-6`;
+- generate synthetic ticket scenarios concurrently;
+- select matching-domain tickets plus a configured cross-domain sample;
+- train mini-batches with momentum SGD and cascade chain-rule updates;
+- persist examples and vector mirrors in batches;
+- sample full traces while compacting routine replay frames.
+
+### Replay traces, checkpoints, and canonical promotion
+
+Worker model weights are diagnostic candidates. Canonical promotion always
+replays approved examples into a fresh session-local hashed-MLP model, publishes
+a checkpoint, and marks examples with the canonical generation that consumed
+them.
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant Controller as NeuralNetController
+    participant Service as NeuralNetTrainingService
+    participant Queue as NeuralNetTrainingQueue
+    participant Worker as NeuralNetTrainingWorker
+    participant Promoter as NeuralNetTrainingPromoter
+    participant Checkpoints as NeuralNetCheckpointStore
+    participant Database as PostgreSQL
+    participant Live as Live chat monitor
+
+    Admin->>Controller: POST /training-feedback/{scoreEventId}/approve
+    Controller->>Service: ApproveAsync(scoreEventId, actor)
+    Service->>Database: approve score + insert TicketModelTrainingExample
+    Service->>Live: Train approved reviewer example
+    Admin->>Controller: POST /training
+    Controller->>Service: StartSyntheticSessionAsync
+    Service->>Database: session + per-kind run rows
+    Service->>Queue: TryEnqueue(sessionId)
+    Worker->>Service: RunSyntheticSessionAsync(sessionId)
+    Service->>Database: examples + worker replay JSON
+    Service->>Promoter: QueueSessionAsync(sessionId)
+    Worker->>Promoter: PromoteNextAsync
+    Promoter->>Database: lease Pending / RetryPending as Promoting
+    Promoter->>Checkpoints: PublishAsync(kind, snapshot)
+    Checkpoints->>Database: NeuralNetCanonicalCheckpoints generation
+    Promoter->>Database: Promoted + promotion replay JSON
+    Live->>Checkpoints: refresh current generation
+```
+
+Promotion lease states:
+
+| State | Meaning |
+|---|---|
+| `Pending` | Promotion exists and has not been claimed. |
+| `Promoting` | Worker holds a lease until `LeaseExpiresAtUtc`; expired leases are claimable. |
+| `RetryPending` | Previous attempt failed and can be retried when no live lease exists or the lease expired. |
+| `Promoted` | Checkpoint was published and examples were marked with the generation. |
+| `Rejected` | Promotion failed after the configured attempts. |
+
+`NeuralNetCanonicalCheckpoint` is keyed by `ChatMonitoringKind` and `Generation`
+and stores model version, architecture version, runtime kind, base64-packed
+float32 parameters, checksum, and creation time. `NeuralNetCheckpointRefreshService`
+reloads singleton live monitors when another worker publishes a newer checksum.
+
+### NeuralNetController API surface
+
+All `api/neural-net` routes require the `ManageServerInfrastructure` policy.
+
+| Endpoint | Service call | Behavior |
+|---|---|---|
+| `GET /training-feedback` | `GetPendingFeedbackAsync` | Lists up to 200 reviewer-completed score events awaiting staff approval or rejection. |
+| `POST /training-feedback/{scoreEventId}/approve` | `ApproveAsync` | Creates a `StaffApprovedReviewer` training example, trains the matching live monitor, and mirrors the example to vector search. |
+| `POST /training-feedback/{scoreEventId}/reject` | `RejectAsync` | Marks reviewer feedback as rejected when it has not already been approved. |
+| `GET /data-management` | `GetDataManagementAsync` | Returns pending/approved/rejected counts, training/vector totals, and category counts. |
+| `GET /visualizer` | `GetVisualizerAsync` | Returns model topology summaries for both cascades. |
+| `POST /training` | `StartSyntheticSessionAsync` | Queues a synthetic training session and returns `202 Accepted`. |
+| `GET /training` | `GetTrainingSessionsAsync` | Lists recent sessions with per-monitor run status and replay availability. |
+| `DELETE /training/{sessionId}` | `RemoveSessionAsync` | Removes a queued/completed/failed session; running sessions return `409 Conflict`. |
+| `GET /training/{sessionId}/report?chatMonitoringKind=` | `GetSessionReportAsync` | Downloads worker replay JSON for a monitor kind or legacy session report JSON. |
+
+### Frontend neural administration UI
+
+`frontend/src/pages/NeuralNet.tsx` owns the Server Maintenance neural page. The
+route path selects one of four views:
+
+| View | Admin capability |
+|---|---|
+| Training | Queue `Both`, `Moderation`, or `Tutoring` synthetic sessions; choose ticket count and maximum passes; remove non-running sessions; download per-monitor replay JSON. |
+| Training Feedback | Approve or reject reviewer-completed score events. |
+| Data Management | Inspect approved examples, vector mirrors, pending feedback, and category distribution. |
+| Visualizer & Replay | Fetch cascade topology summaries, display stage-1/stage-2 shapes, import V2 replay JSON, and step through recorded frames. |
+
+`ReplayViewer.tsx` filters replay frames by ticket, supports step/playback
+controls, respects `prefers-reduced-motion`, renders recorded topology and active
+parameters, and exposes the selected frame payload for inspection.
+`neuralNetApi.ts` is the typed Axios boundary, and `types/neuralNet.ts`,
+`types/neuralNetReplay.ts`, and `utils/neuralNetReplay.ts` define the page
+contracts and replay import limits.
 
 ## Code behavior
 
@@ -424,6 +602,96 @@ private static void ValidateAnswerValue(TicketIntakeQuestionDto question, JsonEl
 }
 ```
 
+### Preface check resolution
+
+`backend/HomeworkCentral.Api/Tickets/Preface/TicketPrefaceCheckResolver.cs`
+selects checks by question id first, then prefers a portal filter match when
+one is available:
+
+```csharp
+public ITicketPrefaceCheck? Resolve(string questionId, string? filterName = null)
+{
+    if (string.IsNullOrWhiteSpace(questionId))
+        return null;
+
+    List<ITicketPrefaceCheck> byQuestion = _checks
+        .Where(c => string.Equals(c.QuestionId, questionId, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    if (byQuestion.Count == 0)
+        return null;
+
+    if (!string.IsNullOrWhiteSpace(filterName))
+    {
+        ITicketPrefaceCheck? filterMatch = byQuestion.FirstOrDefault(c =>
+            c.FilterName is not null
+            && string.Equals(c.FilterName, filterName, StringComparison.OrdinalIgnoreCase));
+        if (filterMatch is not null)
+            return filterMatch;
+    }
+
+    // Prefer unbound (custom-portal-friendly) checks, then first registered.
+    return byQuestion.FirstOrDefault(c => c.FilterName is null) ?? byQuestion[0];
+}
+```
+
+`backend/HomeworkCentral.Api/Tickets/Preface/VocabularyTicketPrefaceCheck.cs`
+drives strict and lenient behavior from the shared base class:
+
+```csharp
+public TicketPrefaceResult Process(string? freeText) =>
+    ProcessCore(freeText, requireAllVerified: Mode == TicketPrefaceMode.Strict);
+
+public TicketPrefaceResult ProcessStrict(string? freeText) =>
+    ProcessCore(freeText, requireAllVerified: true);
+
+public TicketPrefaceResult ProcessLenient(string? freeText) =>
+    ProcessCore(freeText, requireAllVerified: false);
+
+private TicketPrefaceResult ProcessCore(string? freeText, bool requireAllVerified)
+{
+    if (string.IsNullOrWhiteSpace(freeText))
+    {
+        return FailEmpty(requireAllVerified);
+    }
+
+    List<string> rawTokens = SplitTokens(freeText);
+    if (rawTokens.Count == 0)
+        return FailEmpty(requireAllVerified);
+
+    List<TicketPrefaceTokenResult> tokenResults = [];
+    List<string> categories = [];
+    List<string> specifics = [];
+    List<string> displayLabels = [];
+    List<string> failures = [];
+```
+
+The Tutor specialization binds strictly to the seeded Tutor portal and rewrites
+successful answers to canonical subject labels:
+
+```csharp
+public override string CheckId => CheckIdValue;
+public override string QuestionId => QuestionIdValue;
+public override string? FilterName => DefaultTicketPortalPresets.TutorFilterName;
+public override TicketPrefaceMode Mode => TicketPrefaceMode.Strict;
+public override bool RewriteAnswerOnSuccess => true;
+
+protected override void RegisterVocabulary(VocabularyBuilder builder)
+{
+    builder.Add("mathematics", SubjectMaskNames.Mathematics, "Mathematics");
+    builder.Add("math", SubjectMaskNames.Mathematics, "Mathematics");
+    builder.Add("maths", SubjectMaskNames.Mathematics, "Mathematics");
+
+    builder.Add("science", SubjectMaskNames.Science, "Science");
+
+    builder.Add("computer science", SubjectMaskNames.ComputerScience, "Computer Science");
+    builder.Add("computerscience", SubjectMaskNames.ComputerScience, "Computer Science");
+    builder.Add("comp sci", SubjectMaskNames.ComputerScience, "Computer Science");
+    builder.Add("compsci", SubjectMaskNames.ComputerScience, "Computer Science");
+    builder.Add("cs", SubjectMaskNames.ComputerScience, "Computer Science");
+    builder.Add("coding", SubjectMaskNames.ComputerScience, "Computer Science");
+    builder.Add("programming", SubjectMaskNames.ComputerScience, "Computer Science");
+```
+
 ### Assessment pipeline
 
 `backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs` loads active
@@ -523,6 +791,178 @@ private async Task PersistScoreAndVectorAsync(
         canonicalRecordId: scoringResult.ScoreEvent.ScoreEventId,
 ```
 
+### Neural monitor selection and topology
+
+`backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs`
+keeps moderation and tutoring as separate singleton lineages and resolves
+training mode to one or both monitors:
+
+```csharp
+public IChatMonitoringNeuralModel Get(NeuralModelKindChatMonitoring kind) => kind switch
+{
+    NeuralModelKindChatMonitoring.Moderation => moderation,
+    NeuralModelKindChatMonitoring.Tutoring => tutoring,
+    _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown chat-monitoring neural model."),
+};
+
+public IReadOnlyList<IChatMonitoringNeuralModel> Resolve(NeuralTrainingMode mode) => mode switch
+{
+    NeuralTrainingMode.Moderation => [moderation],
+    NeuralTrainingMode.Tutoring => [tutoring],
+    NeuralTrainingMode.Both => [moderation, tutoring],
+    _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown neural training mode."),
+};
+```
+
+`backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs`
+builds the stage-2 scorer from the shared 86-feature encoder and per-monitor
+hidden widths:
+
+```csharp
+protected ChatMonitoringNeuralModelHashedMlp(
+    NeuralModelKindChatMonitoring kind,
+    string modelVersion,
+    int firstHidden,
+    int secondHidden,
+    int thirdHidden,
+    int fourthHidden,
+    IReadOnlyList<string> layerLabels,
+    IReadOnlyList<string> categoryLabels,
+    int seed)
+{
+    Kind = kind;
+    ModelVersion = modelVersion;
+    this.layerLabels = layerLabels.ToArray();
+    this.categoryLabels = categoryLabels.ToArray();
+    int outputCount = 2 + this.categoryLabels.Length;
+    layerWidths = [ChatMonitoringFeatureEncoder.FeatureCount, firstHidden, secondHidden, thirdHidden, fourthHidden, outputCount];
+```
+
+`backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs` selects
+the live monitor and creates the shared model input before reviewer blending:
+
+```csharp
+string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
+string modelRequirement = $"{requirement}\nRunning ticket confidence before this message: {previousScore:F3}.";
+NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
+IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
+SubjectSignalSnapshot subjectSignals = ResolveSubjectSignals(
+    chatMonitoringKind,
+    watch,
+    scoringContext.Job.RoomId);
+ChatMonitoringNeuralModelInput modelInput = CreateChatMonitoringModelInput(
+    modelRequirement,
+    scoringContext,
+    previousScore,
+    subjectSignals);
+ChatMonitoringNeuralModelPrediction prediction = model.Predict(modelInput);
+```
+
+### Synthetic session enqueue and worker run
+
+`backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs` persists a
+session and per-kind run rows before queueing bounded background work:
+
+```csharp
+NeuralNetTrainingSession session = new()
+{
+    SessionId = Guid.NewGuid(), StartedByUserId = actorUserId,
+    RequestedTicketCount = Math.Clamp(request.TicketCount, 1, 10),
+    MaxPassesPerTicket = Math.Clamp(request.MaxPassesPerTicket, 1, 6),
+    Mode = request.Mode,
+    Status = "Queued", CreatedAtUtc = DateTime.UtcNow,
+};
+db.NeuralNetTrainingSessions.Add(session);
+foreach (NeuralModelKindChatMonitoring chatMonitoringKind in GetChatMonitoringKinds(request.Mode))
+{
+    db.ChatMonitoringNeuralModelRuns.Add(new ChatMonitoringNeuralModelRun
+    {
+        RunId = Guid.NewGuid(),
+        SessionId = session.SessionId,
+        ChatMonitoringKind = chatMonitoringKind,
+        Status = "Queued",
+        CreatedAtUtc = session.CreatedAtUtc,
+    });
+}
+await db.SaveChangesAsync(ct);
+if (!queue.TryEnqueue(session.SessionId))
+```
+
+The same service claims queued sessions and runs each monitor lineage for the
+session:
+
+```csharp
+DateTime claimedAt = DateTime.UtcNow;
+int claimed = await db.NeuralNetTrainingSessions
+    .Where(x => x.SessionId == sessionId && x.Status == "Queued")
+    .ExecuteUpdateAsync(setters => setters
+        .SetProperty(x => x.Status, "Running")
+        .SetProperty(x => x.StartedAtUtc, claimedAt), ct);
+if (claimed == 0) return;
+NeuralNetTrainingSession? session = await db.NeuralNetTrainingSessions.FirstOrDefaultAsync(x => x.SessionId == sessionId, ct);
+if (session is null) return;
+TrainingSessionTimings timings = new();
+```
+
+### Canonical promotion
+
+`backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingPromoter.cs` claims one
+pending promotion at a time by lease, replays approved examples into a fresh
+session-local model, and publishes the next checkpoint generation:
+
+```csharp
+DateTime now = DateTime.UtcNow;
+Guid lease = Guid.NewGuid();
+NeuralNetTrainingPromotion? candidate = await db.NeuralNetTrainingPromotions
+    .Where(x => x.Status != "Promoted" && x.Status != "Rejected")
+    .OrderBy(x => x.ChatMonitoringKind).ThenBy(x => x.PromotionSequence).FirstOrDefaultAsync(ct);
+if (candidate is null || !CanClaim(candidate.Status, candidate.LeaseExpiresAtUtc, now)) return false;
+
+int claimed = await db.NeuralNetTrainingPromotions.Where(x => x.PromotionId == candidate.PromotionId
+        && (x.Status == "Pending" || (x.Status == "RetryPending" && (x.LeaseExpiresAtUtc == null || x.LeaseExpiresAtUtc < now)) || (x.Status == "Promoting" && x.LeaseExpiresAtUtc < now)))
+    .ExecuteUpdateAsync(setters => setters
+        .SetProperty(x => x.Status, "Promoting")
+        .SetProperty(x => x.LeaseId, lease)
+        .SetProperty(x => x.LeaseExpiresAtUtc, now.AddMinutes(10))
+        .SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1), ct);
+if (claimed == 0) return false;
+```
+
+```csharp
+IChatMonitoringNeuralModelTelemetry model = CreateSessionLocalModel(candidate.ChatMonitoringKind);
+NeuralNetCanonicalCheckpoint? current = await checkpoints.GetCurrentAsync(candidate.ChatMonitoringKind, ct);
+NeuralNetParameterSnapshot initial = current is null
+    ? model.GetParameterSnapshot(null, 0)
+    : new NeuralNetParameterSnapshot(current.Generation, 0, "ieee754-float32-le", "dense-base64", model.GetTopologySnapshot().Parameters.Count, current.ParametersBase64, current.Checksum);
+if (current is not null) model.LoadParameterSnapshot(initial);
+foreach (TicketModelTrainingExample example in examples)
+{
+    ChatMonitoringNeuralModelInput input = new(example.Requirement, example.ContextSnapshot ?? string.Empty,
+        example.BootstrapMessage ?? string.Empty, 0, 1, 0, .5f);
+    model.Train(input, new ChatMonitoringNeuralModelTargets((float)example.TargetScore, (float)example.TargetRelevance));
+}
+NeuralNetParameterSnapshot snapshot = model.GetParameterSnapshot(null, examples.Count);
+```
+
+### Neural frontend API
+
+`frontend/src/api/neuralNetApi.ts` exposes the typed calls used by
+`NeuralNet.tsx` and `ReplayViewer.tsx`:
+
+```typescript
+export const neuralNetApi = {
+  listFeedback: () => api.get<NeuralNetTrainingFeedback[]>('/training-feedback'),
+  approve: (scoreEventId: string) => api.post<NeuralNetTrainingFeedback>(`/training-feedback/${scoreEventId}/approve`),
+  reject: (scoreEventId: string) => api.post(`/training-feedback/${scoreEventId}/reject`),
+  getDataManagement: () => api.get<NeuralNetDataManagement>('/data-management'),
+  getVisualizer: () => api.get<NeuralNetVisualizer>('/visualizer'),
+  startTraining: (request: StartNeuralNetTrainingRequest) => api.post<NeuralNetTrainingSession>('/training', request),
+  listTrainingSessions: () => api.get<NeuralNetTrainingSession[]>('/training'),
+  removeTrainingSession: (sessionId: string) => api.delete(`/training/${sessionId}`),
+  downloadTrainingReport: (sessionId: string, chatMonitoringKind?: NeuralModelKindChatMonitoring) => api.get(`/training/${sessionId}/report`, { params: chatMonitoringKind ? { chatMonitoringKind } : undefined, responseType: 'blob' }),
+}
+```
+
 ### Vote service
 
 `backend/HomeworkCentral.Api/Chat/ChatMessageVoteService.cs` enforces vote
@@ -576,69 +1016,130 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 
 ## Implementation files
 
-Primary backend files:
+### Ticket portals, lifecycle, and preface checks
 
-- [backend/HomeworkCentral.Api/Tickets/TicketService.cs](../backend/HomeworkCentral.Api/Tickets/TicketService.cs)
-- [backend/HomeworkCentral.Api/Tickets/ITicketService.cs](../backend/HomeworkCentral.Api/Tickets/ITicketService.cs)
-- [backend/HomeworkCentral.Api/Tickets/TicketIntakeValidator.cs](../backend/HomeworkCentral.Api/Tickets/TicketIntakeValidator.cs)
-- [backend/HomeworkCentral.Api/Tickets/TicketJson.cs](../backend/HomeworkCentral.Api/Tickets/TicketJson.cs)
-- [backend/HomeworkCentral.Api/Tickets/TicketPortalSeedData.cs](../backend/HomeworkCentral.Api/Tickets/TicketPortalSeedData.cs)
-- [backend/HomeworkCentral.Api/Tickets/DefaultTicketPortalPresets.cs](../backend/HomeworkCentral.Api/Tickets/DefaultTicketPortalPresets.cs)
-- [backend/HomeworkCentral.Api/Tickets/TicketTrackingTemplateBuilder.cs](../backend/HomeworkCentral.Api/Tickets/TicketTrackingTemplateBuilder.cs)
-- [backend/HomeworkCentral.Api/Tickets/OllamaTicketTrackingAnalyzer.cs](../backend/HomeworkCentral.Api/Tickets/OllamaTicketTrackingAnalyzer.cs)
-- [backend/HomeworkCentral.Api/Tickets/Preface/TutorSubjectPrefaceCheck.cs](../backend/HomeworkCentral.Api/Tickets/Preface/TutorSubjectPrefaceCheck.cs)
-- [backend/HomeworkCentral.Api/Tickets/Preface/ModerationConceptPrefaceCheck.cs](../backend/HomeworkCentral.Api/Tickets/Preface/ModerationConceptPrefaceCheck.cs)
-- [backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs)
-- [backend/HomeworkCentral.Api/Assessment/AssessmentQueue.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentQueue.cs)
-- [backend/HomeworkCentral.Api/Assessment/ChatMonitoringTicketContext.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringTicketContext.cs)
-- [backend/HomeworkCentral.Api/Assessment/ChatMonitoringSubjectSignals.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringSubjectSignals.cs)
-- [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs)
-- [backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs](../backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs)
-- [backend/HomeworkCentral.Api/Chat/ChatMessageVoteService.cs](../backend/HomeworkCentral.Api/Chat/ChatMessageVoteService.cs)
-- [backend/HomeworkCentral.Api/Controllers/TicketsController.cs](../backend/HomeworkCentral.Api/Controllers/TicketsController.cs)
-- [backend/HomeworkCentral.Api/Controllers/ChatController.cs](../backend/HomeworkCentral.Api/Controllers/ChatController.cs)
-- [backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs](../backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs)
-- [backend/HomeworkCentral.Api/Data/AppDbContext.cs](../backend/HomeworkCentral.Api/Data/AppDbContext.cs)
+| Path | Role |
+|---|---|
+| [backend/HomeworkCentral.Api/Tickets/TicketService.cs](../backend/HomeworkCentral.Api/Tickets/TicketService.cs) | Ticket open/close/reopen/delete, private room creation, watches, candidate side effects, inbox notifications, and navigation refresh. |
+| [backend/HomeworkCentral.Api/Tickets/ITicketService.cs](../backend/HomeworkCentral.Api/Tickets/ITicketService.cs) | Ticket service contract used by controllers. |
+| [backend/HomeworkCentral.Api/Tickets/TicketIntakeValidator.cs](../backend/HomeworkCentral.Api/Tickets/TicketIntakeValidator.cs) | Intake answer validation and preface invocation. |
+| [backend/HomeworkCentral.Api/Tickets/TicketJson.cs](../backend/HomeworkCentral.Api/Tickets/TicketJson.cs) | Intake schema, answers, and access-rule JSON helpers. |
+| [backend/HomeworkCentral.Api/Tickets/TicketPortalSeedData.cs](../backend/HomeworkCentral.Api/Tickets/TicketPortalSeedData.cs) | Seeded portal persistence. |
+| [backend/HomeworkCentral.Api/Tickets/DefaultTicketPortalPresets.cs](../backend/HomeworkCentral.Api/Tickets/DefaultTicketPortalPresets.cs) | Tutor and Mod-Mail preset schema/filter definitions. |
+| [backend/HomeworkCentral.Api/Tickets/TicketTrackingTemplateBuilder.cs](../backend/HomeworkCentral.Api/Tickets/TicketTrackingTemplateBuilder.cs) | Frozen watch template construction, including preface category/specifics. |
+| [backend/HomeworkCentral.Api/Tickets/OllamaTicketTrackingAnalyzer.cs](../backend/HomeworkCentral.Api/Tickets/OllamaTicketTrackingAnalyzer.cs) | Optional portal tracking analyzer. |
+| [backend/HomeworkCentral.Api/Tickets/Preface/ITicketPrefaceCheck.cs](../backend/HomeworkCentral.Api/Tickets/Preface/ITicketPrefaceCheck.cs) | Preface check contract, mode enum, resolver contract, and result records. |
+| [backend/HomeworkCentral.Api/Tickets/Preface/TicketPrefaceCheckResolver.cs](../backend/HomeworkCentral.Api/Tickets/Preface/TicketPrefaceCheckResolver.cs) | Question/filter preface resolution. |
+| [backend/HomeworkCentral.Api/Tickets/Preface/VocabularyTicketPrefaceCheck.cs](../backend/HomeworkCentral.Api/Tickets/Preface/VocabularyTicketPrefaceCheck.cs) | Shared strict/lenient vocabulary engine. |
+| [backend/HomeworkCentral.Api/Tickets/Preface/TutorSubjectPrefaceCheck.cs](../backend/HomeworkCentral.Api/Tickets/Preface/TutorSubjectPrefaceCheck.cs) | Strict Tutor subject and expertise extraction. |
+| [backend/HomeworkCentral.Api/Tickets/Preface/ModerationConceptPrefaceCheck.cs](../backend/HomeworkCentral.Api/Tickets/Preface/ModerationConceptPrefaceCheck.cs) | Lenient Mod-Mail moderation concept extraction. |
 
-Primary model, DTO, and migration files:
+### Assessment, neural monitors, training, and retrieval
 
-- [backend/HomeworkCentral.Api/Models/TicketPortalConfig.cs](../backend/HomeworkCentral.Api/Models/TicketPortalConfig.cs)
-- [backend/HomeworkCentral.Api/Models/Ticket.cs](../backend/HomeworkCentral.Api/Models/Ticket.cs)
-- [backend/HomeworkCentral.Api/Models/ChatMessage.cs](../backend/HomeworkCentral.Api/Models/ChatMessage.cs)
-- [backend/HomeworkCentral.Api/Models/ChatAttachment.cs](../backend/HomeworkCentral.Api/Models/ChatAttachment.cs)
-- [backend/HomeworkCentral.Api/DTOs/TicketDto.cs](../backend/HomeworkCentral.Api/DTOs/TicketDto.cs)
-- [backend/HomeworkCentral.Api/DTOs/ChatMessageDto.cs](../backend/HomeworkCentral.Api/DTOs/ChatMessageDto.cs)
-- [backend/HomeworkCentral.Api/DTOs/ChatInboxDto.cs](../backend/HomeworkCentral.Api/DTOs/ChatInboxDto.cs)
-- [backend/HomeworkCentral.Api/Migrations/AddTickets.cs](../backend/HomeworkCentral.Api/Migrations/AddTickets.cs)
-- [backend/HomeworkCentral.Api/Migrations/AddTicketsMediaAssessment.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketsMediaAssessment.cs)
-- [backend/HomeworkCentral.Api/Migrations/AddTicketMessageScores.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketMessageScores.cs)
-- [backend/HomeworkCentral.Api/Migrations/AddTicketMessageContextSnapshots.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketMessageContextSnapshots.cs)
-- [backend/HomeworkCentral.Api/Migrations/AddTicketStudentReviewer.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketStudentReviewer.cs)
-- [backend/HomeworkCentral.Api/Migrations/AddTrainingFeedbackRejections.cs](../backend/HomeworkCentral.Api/Migrations/AddTrainingFeedbackRejections.cs)
+| Path | Role |
+|---|---|
+| [backend/HomeworkCentral.Api/Assessment/AssessmentQueue.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentQueue.cs) | Bounded live message assessment queue. |
+| [backend/HomeworkCentral.Api/Assessment/AssessmentWorker.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentWorker.cs) | Background live assessment worker. |
+| [backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs) | Live scoring, optional reviewer invocation, score ledger persistence, and vector mirror writes. |
+| [backend/HomeworkCentral.Api/Assessment/TicketConfidenceScoring.cs](../backend/HomeworkCentral.Api/Assessment/TicketConfidenceScoring.cs) | Deterministic confidence delta and clamp math. |
+| [backend/HomeworkCentral.Api/Assessment/TicketReviewerEvaluation.cs](../backend/HomeworkCentral.Api/Assessment/TicketReviewerEvaluation.cs) | Reviewer parse and policy types. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs) | Chat-monitor model inputs, targets, predictions, traces, telemetry, and factory contracts. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs) | Moderation/tutoring model selection and training-mode resolution. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs) | CPU hashed-MLP scorer, cascade wrappers, SGD, telemetry, topology, and parameter snapshots. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs) | Shared 86-float feature encoder and vector embedding helper. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringTicketContext.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringTicketContext.cs) | Requirement construction, moderation/tutoring routing, and category index mapping. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringCategoryTaxonomy.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringCategoryTaxonomy.cs) | Moderation and tutoring category vocabularies. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringSubjectSignals.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringSubjectSignals.cs) | Tutor subject/channel relatedness and multi-hot signals. |
+| [backend/HomeworkCentral.Api/Assessment/TutorSubjectTextProcessor.cs](../backend/HomeworkCentral.Api/Assessment/TutorSubjectTextProcessor.cs) | Subject extraction helper used by tutoring signals. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringModerationConcepts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringModerationConcepts.cs) | Fine moderation concept taxonomy and relations. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringModerationConceptSignals.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringModerationConceptSignals.cs) | Moderation concept/family feature extraction. |
+| [backend/HomeworkCentral.Api/Assessment/ModerationConceptContextRouter.cs](../backend/HomeworkCentral.Api/Assessment/ModerationConceptContextRouter.cs) | Moderation cascade stage-1 router. |
+| [backend/HomeworkCentral.Api/Assessment/TutoringSubjectContextRouter.cs](../backend/HomeworkCentral.Api/Assessment/TutoringSubjectContextRouter.cs) | Tutoring cascade stage-1 router. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs) | Synthetic training, replay, audit, tolerance, and batching options. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingQueue.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingQueue.cs) | Bounded synthetic-session FIFO and training worker. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs) | Reviewer feedback approval, data summaries, visualizer data, synthetic sessions, replay reports, and example persistence. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingPromoter.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingPromoter.cs) | Promotion queueing, lease claiming, canonical replay, checkpoint publication, and retry/reject handling. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetCheckpointStore.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetCheckpointStore.cs) | Canonical checkpoint read/write operations. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetCheckpointRefreshService.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetCheckpointRefreshService.cs) | Live monitor refresh from published canonical checkpoints. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelWarmupService.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelWarmupService.cs) | Startup warmup and approved-example replay for live monitors. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetReplayModels.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetReplayModels.cs) | Replay DTOs for topology, frames, payloads, parameters, and promotion validation. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetReplaySerializer.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetReplaySerializer.cs) | Canonical replay JSON serialization and checksums. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs) | Finite numeric guards for traces and parameters. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs) | Vector lineage position ids. |
+| [backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs](../backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs) | Retrieval mirror storage and similarity lookup. |
+| [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs) | Synthetic ticket/thread scenario generation and fallback fixtures. |
+| [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs) | Synthetic scenario, message, and training report models. |
+| [backend/HomeworkCentral.Api/Assessment/SyntheticCommunitySignalResolver.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticCommunitySignalResolver.cs) | Synthetic community vote and confidence sampling. |
+| [backend/HomeworkCentral.Api/Assessment/CommunityScoreAggregator.cs](../backend/HomeworkCentral.Api/Assessment/CommunityScoreAggregator.cs) | Community signal aggregation contract implementation. |
+| [backend/HomeworkCentral.Api/Assessment/ScoringReferenceSeedData.cs](../backend/HomeworkCentral.Api/Assessment/ScoringReferenceSeedData.cs) | Reference scoring seed data. |
+| [backend/HomeworkCentral.Api/Assessment/LlmClient.cs](../backend/HomeworkCentral.Api/Assessment/LlmClient.cs) | Local language-model HTTP client used by reviewer and synthetic scenario paths. |
+| [backend/HomeworkCentral.Api/Assessment/DeterministicScoring.cs](../backend/HomeworkCentral.Api/Assessment/DeterministicScoring.cs) | Deterministic scoring helpers. |
+| [backend/HomeworkCentral.Api/Assessment/CandidateStateService.cs](../backend/HomeworkCentral.Api/Assessment/CandidateStateService.cs) | Candidate state updates related to ticket decisions. |
 
-Primary frontend files:
+### Controllers, models, DTOs, and migrations
 
-- [frontend/src/api/ticketsApi.ts](../frontend/src/api/ticketsApi.ts)
-- [frontend/src/api/chatApi.ts](../frontend/src/api/chatApi.ts)
-- [frontend/src/types/tickets.ts](../frontend/src/types/tickets.ts)
-- [frontend/src/types/chat.ts](../frontend/src/types/chat.ts)
-- [frontend/src/types/inbox.ts](../frontend/src/types/inbox.ts)
-- [frontend/src/pages/ChatRoom.tsx](../frontend/src/pages/ChatRoom.tsx)
-- [frontend/src/pages/NeuralNet.tsx](../frontend/src/pages/NeuralNet.tsx)
-- [frontend/src/hooks/useChatRoom.ts](../frontend/src/hooks/useChatRoom.ts)
-- [frontend/src/components/tickets/TicketPortalPanel.tsx](../frontend/src/components/tickets/TicketPortalPanel.tsx)
-- [frontend/src/components/tickets/TicketIntakeWizard.tsx](../frontend/src/components/tickets/TicketIntakeWizard.tsx)
-- [frontend/src/components/tickets/TicketChatChrome.tsx](../frontend/src/components/tickets/TicketChatChrome.tsx)
-- [frontend/src/components/tickets/TicketBuilderPanel.tsx](../frontend/src/components/tickets/TicketBuilderPanel.tsx)
-- [frontend/src/components/tickets/TicketIntakeSummary.tsx](../frontend/src/components/tickets/TicketIntakeSummary.tsx)
-- [frontend/src/components/inbox/TicketInboxItem.tsx](../frontend/src/components/inbox/TicketInboxItem.tsx)
+| Path | Role |
+|---|---|
+| [backend/HomeworkCentral.Api/Controllers/TicketsController.cs](../backend/HomeworkCentral.Api/Controllers/TicketsController.cs) | Ticket HTTP API. |
+| [backend/HomeworkCentral.Api/Controllers/NeuralNetController.cs](../backend/HomeworkCentral.Api/Controllers/NeuralNetController.cs) | Neural administration HTTP API. |
+| [backend/HomeworkCentral.Api/Controllers/ChatController.cs](../backend/HomeworkCentral.Api/Controllers/ChatController.cs) | Chat, attachment, vote, user search, and inbox API used by tickets and messages. |
+| [backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs](../backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs) | Custom channel and portal administration API. |
+| [backend/HomeworkCentral.Api/Data/AppDbContext.cs](../backend/HomeworkCentral.Api/Data/AppDbContext.cs) | EF sets, constraints, relationships, and indexes for ticket/neural tables. |
+| [backend/HomeworkCentral.Api/Models/TicketPortalConfig.cs](../backend/HomeworkCentral.Api/Models/TicketPortalConfig.cs) | Portal configuration model. |
+| [backend/HomeworkCentral.Api/Models/Ticket.cs](../backend/HomeworkCentral.Api/Models/Ticket.cs) | Ticket, watch, score ledger, training example, session, promotion, checkpoint, and run models. |
+| [backend/HomeworkCentral.Api/Models/ChatMessage.cs](../backend/HomeworkCentral.Api/Models/ChatMessage.cs) | Chat message entity scored by assessment. |
+| [backend/HomeworkCentral.Api/Models/ChatAttachment.cs](../backend/HomeworkCentral.Api/Models/ChatAttachment.cs) | Attachment metadata used by ticket intake/message contexts. |
+| [backend/HomeworkCentral.Api/DTOs/TicketDto.cs](../backend/HomeworkCentral.Api/DTOs/TicketDto.cs) | Ticket API DTOs. |
+| [backend/HomeworkCentral.Api/DTOs/NeuralNetDto.cs](../backend/HomeworkCentral.Api/DTOs/NeuralNetDto.cs) | Neural administration DTOs. |
+| [backend/HomeworkCentral.Api/DTOs/ChatMessageDto.cs](../backend/HomeworkCentral.Api/DTOs/ChatMessageDto.cs) | Chat message and attachment DTOs. |
+| [backend/HomeworkCentral.Api/DTOs/ChatInboxDto.cs](../backend/HomeworkCentral.Api/DTOs/ChatInboxDto.cs) | Inbox DTOs for ticket notifications. |
+| [backend/HomeworkCentral.Api/Migrations/AddTickets.cs](../backend/HomeworkCentral.Api/Migrations/AddTickets.cs) | Ticket, watch, and portal tables. |
+| [backend/HomeworkCentral.Api/Migrations/AddTicketsMediaAssessment.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketsMediaAssessment.cs) | Ticket intake media/assessment additions. |
+| [backend/HomeworkCentral.Api/Migrations/AddTicketMessageScores.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketMessageScores.cs) | `TicketMessageScores` score-event ledger. |
+| [backend/HomeworkCentral.Api/Migrations/AddTicketMessageContextSnapshots.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketMessageContextSnapshots.cs) | Score context snapshots. |
+| [backend/HomeworkCentral.Api/Migrations/AddTicketStudentReviewer.cs](../backend/HomeworkCentral.Api/Migrations/AddTicketStudentReviewer.cs) | Student/reviewer score fields and `TicketModelTrainingExamples`. |
+| [backend/HomeworkCentral.Api/Migrations/AddTrainingFeedbackRejections.cs](../backend/HomeworkCentral.Api/Migrations/AddTrainingFeedbackRejections.cs) | Training rejection audit fields. |
+| [backend/HomeworkCentral.Api/Migrations/AddNeuralNetTrainingMode.cs](../backend/HomeworkCentral.Api/Migrations/AddNeuralNetTrainingMode.cs) | Synthetic training mode column. |
+| [backend/HomeworkCentral.Api/Migrations/AddNeuralNetTrainingSessions.cs](../backend/HomeworkCentral.Api/Migrations/AddNeuralNetTrainingSessions.cs) | Synthetic training session table and reports. |
+| [backend/HomeworkCentral.Api/Migrations/20260720194500_AddNeuralNetExampleSession.cs](../backend/HomeworkCentral.Api/Migrations/20260720194500_AddNeuralNetExampleSession.cs) | Links training examples to synthetic sessions. |
+| [backend/HomeworkCentral.Api/Migrations/20260720193000_AddNeuralNetPromotionLineage.cs](../backend/HomeworkCentral.Api/Migrations/20260720193000_AddNeuralNetPromotionLineage.cs) | Promotion queue and canonical checkpoint lineage. |
+| [backend/HomeworkCentral.Api/Migrations/20260720201500_AddNeuralNetExamplePromotion.cs](../backend/HomeworkCentral.Api/Migrations/20260720201500_AddNeuralNetExamplePromotion.cs) | Tracks canonical generation applied to examples. |
+| [backend/HomeworkCentral.Api/Migrations/20260720213000_AddChatMonitoringNeuralModelLineages.cs](../backend/HomeworkCentral.Api/Migrations/20260720213000_AddChatMonitoringNeuralModelLineages.cs) | Per-kind moderation/tutoring lineages and run rows. |
 
-Primary tests:
+### Frontend files
 
-- [backend/HomeworkCentral.Api.Tests/Assessment/TicketTrackingTemplateBuilderTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TicketTrackingTemplateBuilderTests.cs)
-- [backend/HomeworkCentral.Api.Tests/Assessment/TutorSubjectTextProcessorTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TutorSubjectTextProcessorTests.cs)
-- [backend/HomeworkCentral.Api.Tests/Assessment/TicketPrefaceCheckTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TicketPrefaceCheckTests.cs)
-- [backend/HomeworkCentral.Api.Tests/Chat/ChatMessageVoteServiceTests.cs](../backend/HomeworkCentral.Api.Tests/Chat/ChatMessageVoteServiceTests.cs)
+| Path | Role |
+|---|---|
+| [frontend/src/api/ticketsApi.ts](../frontend/src/api/ticketsApi.ts) | Ticket endpoint client. |
+| [frontend/src/api/chatApi.ts](../frontend/src/api/chatApi.ts) | Chat endpoint client used for forwarded messages and attachments. |
+| [frontend/src/api/neuralNetApi.ts](../frontend/src/api/neuralNetApi.ts) | Neural administration endpoint client. |
+| [frontend/src/types/tickets.ts](../frontend/src/types/tickets.ts) | Ticket TypeScript contracts. |
+| [frontend/src/types/chat.ts](../frontend/src/types/chat.ts) | Chat, attachment, forwarded-message, vote, and mention contracts. |
+| [frontend/src/types/inbox.ts](../frontend/src/types/inbox.ts) | Inbox item contracts. |
+| [frontend/src/types/neuralNet.ts](../frontend/src/types/neuralNet.ts) | Neural administration DTO contracts. |
+| [frontend/src/types/neuralNetReplay.ts](../frontend/src/types/neuralNetReplay.ts) | Replay import contracts. |
+| [frontend/src/utils/neuralNetReplay.ts](../frontend/src/utils/neuralNetReplay.ts) | Replay schema, topology, frame, and size validation. |
+| [frontend/src/pages/ChatRoom.tsx](../frontend/src/pages/ChatRoom.tsx) | Room metadata loading and chat/custom-room panel routing. |
+| [frontend/src/pages/NeuralNet.tsx](../frontend/src/pages/NeuralNet.tsx) | Server Maintenance neural page. |
+| [frontend/src/hooks/useChatRoom.ts](../frontend/src/hooks/useChatRoom.ts) | Message loading, SignalR connection, send, vote, and typing behavior. |
+| [frontend/src/components/neuralNet/ReplayViewer.tsx](../frontend/src/components/neuralNet/ReplayViewer.tsx) | V2 replay visualization and frame inspector. |
+| [frontend/src/components/tickets/TicketPortalPanel.tsx](../frontend/src/components/tickets/TicketPortalPanel.tsx) | Portal room panel. |
+| [frontend/src/components/tickets/TicketIntakeWizard.tsx](../frontend/src/components/tickets/TicketIntakeWizard.tsx) | Intake question rendering and answer collection. |
+| [frontend/src/components/tickets/TicketChatChrome.tsx](../frontend/src/components/tickets/TicketChatChrome.tsx) | Ticket-room chrome. |
+| [frontend/src/components/tickets/TicketBuilderPanel.tsx](../frontend/src/components/tickets/TicketBuilderPanel.tsx) | Portal builder/editor. |
+| [frontend/src/components/tickets/TicketIntakeSummary.tsx](../frontend/src/components/tickets/TicketIntakeSummary.tsx) | Intake answer summary. |
+| [frontend/src/components/inbox/TicketInboxItem.tsx](../frontend/src/components/inbox/TicketInboxItem.tsx) | Ticket inbox notification rendering. |
+
+### Tests
+
+| Path | Role |
+|---|---|
+| [backend/HomeworkCentral.Api.Tests/Assessment/TicketTrackingTemplateBuilderTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TicketTrackingTemplateBuilderTests.cs) | Tracking template and preface persistence behavior. |
+| [backend/HomeworkCentral.Api.Tests/Assessment/TutorSubjectTextProcessorTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TutorSubjectTextProcessorTests.cs) | Tutor subject extraction behavior. |
+| [backend/HomeworkCentral.Api.Tests/Assessment/TicketPrefaceCheckTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TicketPrefaceCheckTests.cs) | Preface strict/lenient validation behavior. |
+| [backend/HomeworkCentral.Api.Tests/Assessment/TicketConfidenceScoringTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/TicketConfidenceScoringTests.cs) | Score movement math. |
+| [backend/HomeworkCentral.Api.Tests/Assessment/ChatMonitoringNeuralModelHashedMlpTests.cs](../backend/HomeworkCentral.Api.Tests/Assessment/ChatMonitoringNeuralModelHashedMlpTests.cs) | Hashed-MLP training/trace behavior. |
+| [backend/HomeworkCentral.Api.Tests/Chat/ChatMessageVoteServiceTests.cs](../backend/HomeworkCentral.Api.Tests/Chat/ChatMessageVoteServiceTests.cs) | Vote eligibility and toggle behavior. |
 
 ## Failure / config / related docs
 

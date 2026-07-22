@@ -309,6 +309,70 @@ is requested without `riskAcknowledged=true`, `ChatController` returns
 local development without ClamAV therefore fails open as `NotScanned` rather
 than quarantining ordinary uploads.
 
+### Frontend attachment UX
+
+`ChatAttachmentView` keeps browser rendering conservative. Confirmed infected
+attachments show a warning modal before any view or download attempt and pass
+`riskAcknowledged=true` only after the user chooses to proceed. Hazardous file
+types use authenticated blob downloads through `useAuthenticatedAttachment` and
+do not receive image, PDF, audio, or video inline previews; code-like hazards can
+be expanded as text for review.
+
+```tsx
+const requiresCaution = attachment.scanStatus === 'Infected'
+
+const needsBlob = (
+  useBlobFallback
+  || classification.mode === 'hazard'
+  || classification.mode === 'link'
+  || (classification.mode === 'inline' && classification.inlineKind === 'text')
+  || (requiresCaution && riskAcknowledged)
+) && (!requiresCaution || riskAcknowledged)
+
+const { blobUrl, loading, error, download } = useAuthenticatedAttachment(
+  attachment.attachmentId,
+  needsBlob,
+  riskAcknowledged,
+)
+
+if (requiresCaution && !riskAcknowledged) {
+  return (
+    <ConfirmModal
+      title="Warning — potentially malicious file"
+      onClose={() => setShowSafetyWarning(false)}
+      actions={[
+        { label: 'Cancel', variant: 'secondary', onClick: () => setShowSafetyWarning(false) },
+        {
+          label: 'Proceed anyway',
+          variant: 'primary',
+          onClick: () => {
+            setRiskAcknowledged(true)
+            setShowSafetyWarning(false)
+            if (classification.mode !== 'inline')
+              void download(attachment.fileName, true)
+          },
+        },
+      ]}
+    >
+```
+
+`frontend/src/utils/attachmentClassification.ts` enforces the no-inline-preview
+rule for hazards before content type or server-provided inline kind is considered:
+
+```typescript
+export function classifyAttachment(
+  contentType: string,
+  isHazard: boolean,
+  inlinePreviewKind?: string | null,
+): AttachmentClassification {
+  if (isHazard)
+    return { mode: 'hazard' }
+
+  const kind = inlinePreviewKind as AttachmentClassification['inlineKind'] | undefined
+  if (kind)
+    return { mode: 'inline', inlineKind: kind }
+```
+
 ### Deletion and orphan cleanup
 
 The uploader may delete an attachment only while it has no message links. Linked
@@ -590,6 +654,7 @@ return cached is not null;
 | [frontend/src/components/chat/ChatMessageBubble.tsx](../frontend/src/components/chat/ChatMessageBubble.tsx) | Individual message, reply, forward, vote, and attachment rendering. |
 | [frontend/src/components/chat/ChatAttachmentView.tsx](../frontend/src/components/chat/ChatAttachmentView.tsx) | Attachment preview, download, hazard, and infected-file caution UI. |
 | [frontend/src/hooks/useAuthenticatedAttachment.ts](../frontend/src/hooks/useAuthenticatedAttachment.ts) | Bearer-authenticated attachment blob download fallback. |
+| [frontend/src/utils/attachmentClassification.ts](../frontend/src/utils/attachmentClassification.ts) | Frontend attachment display classification and hazard no-inline-preview rule. |
 | [frontend/src/types/chat.ts](../frontend/src/types/chat.ts) | Chat navigation, message, attachment, typing, and mention TypeScript types. |
 
 ## Trust boundaries / failure handling
