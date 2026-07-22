@@ -69,7 +69,8 @@ public class ChatMessageServiceTests
             new FakeMentionRecipientResolver(),
             new FakeRoleAppearanceService(),
             new FakeHubContext(),
-            new FakeAssessmentQueue());
+            new FakeAssessmentQueue(),
+            new ChatMessageServiceTestSupport.NoOpAttachmentAccessTokenService());
     }
 
     private static UserEffectiveMask ToUserEffectiveMask(Guid userId, EffectiveMaskDto dto) =>
@@ -220,8 +221,7 @@ public class ChatMessageServiceTests
 
     private sealed class FakeAssessmentQueue : IAssessmentQueue
     {
-        public ValueTask EnqueueAsync(AssessmentMessageJob job, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public bool TryEnqueue(AssessmentMessageJob job) => true;
 
         public async IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(
             [EnumeratorCancellation] CancellationToken ct)

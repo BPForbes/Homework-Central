@@ -55,8 +55,8 @@ development migrations and seeds. Unset it after pulling migrations/catalog chan
 or after resetting the local database.
 
 After startup:
-  Frontend  http://localhost:5173
-  API       http://localhost:5000
+  Frontend  http://localhost:5173   (Vite HMR)
+  API       http://localhost:5000   (dotnet watch by default; set HC_API_WATCH=0 to disable)
   Health    http://localhost:5000/healthz
 
 Stop:
@@ -369,6 +369,22 @@ start_fcaptcha() {
     || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
 }
 
+start_clamav() {
+  if ! dev_clamav_opted_in; then
+    log "Skipping ClamAV (set HC_ENABLE_CLAMAV=1 to scan uploads; scans fail open without it)"
+    return 0
+  fi
+
+  require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
+  fi
+
+  log "Starting ClamAV (Docker) on localhost:${DEV_STACK_CLAMAV_HOST_PORT}"
+  ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" \
+    || fail "Failed to start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Check: docker compose logs clamav"
+}
+
 build_postgres_host_check() {
   dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
@@ -512,7 +528,8 @@ run_stack() {
   # Vite has no API dependency, so bind the frontend immediately rather than waiting for
   # migrations and seed data to finish on port 5000.
   log "Starting frontend on http://localhost:5173"
-  VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
+  NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=384}" \
+    VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
   FRONTEND_PID=$!
 
   if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
@@ -595,8 +612,9 @@ main() {
   if [[ "$SKIP_DOCKER" == false ]]; then
     start_postgres
     start_fcaptcha
+    start_clamav
   else
-    log "Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / --skip-docker)"
+    log "Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / --skip-docker)"
   fi
 
   run_stack

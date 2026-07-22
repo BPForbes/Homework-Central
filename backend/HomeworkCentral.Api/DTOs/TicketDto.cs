@@ -111,8 +111,36 @@ public class TicketAnalyzeResultDto
     public bool Available { get; set; }
     public string? Decision { get; set; }
     public string? Summary { get; set; }
+    public double? CurrentScore { get; set; }
+    public List<TicketMessageScoreDto> MessageScores { get; set; } = [];
     public List<TicketUserWatchDto> Watches { get; set; } = [];
     public int InboxRecipientsNotified { get; set; }
+}
+
+public class TicketMessageScoreDto
+{
+    public Guid ScoreEventId { get; set; }
+    public Guid MessageId { get; set; }
+    public Guid TrackedUserId { get; set; }
+    public double PreviousScore { get; set; }
+    public double ScoreDelta { get; set; }
+    public double CurrentScore { get; set; }
+    public double EvidenceConfidence { get; set; }
+    public double Relevance { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public double StudentScore { get; set; }
+    public double StudentConfidence { get; set; }
+    public double StudentRelevance { get; set; }
+    public string StudentCategory { get; set; } = "general";
+    public string StudentReasoning { get; set; } = string.Empty;
+    public bool ReviewerInvoked { get; set; }
+    public double? ReviewerScore { get; set; }
+    public double? ReviewerConfidence { get; set; }
+    public bool CorrectionNeeded { get; set; }
+    public string? ReviewerExplanation { get; set; }
+    public string? ReviewerGuidance { get; set; }
+    public DateTime? TrainingApprovedAtUtc { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
 }
 
 public class TicketDecisionPayloadDto

@@ -316,7 +316,7 @@ body {
   .chat-composer-wrap,
   .rich-toolbar,
   .rich-toolbar-btn,
-  .chat-bubble,
+  .chat-thread-item,
   button,
   input,
   textarea,
@@ -2173,10 +2173,10 @@ a {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem 1.25rem;
+  padding: 0.5rem 1.25rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0;
 }
 
 .chat-messages-status,
@@ -2187,126 +2187,137 @@ a {
   font-size: 0.9rem;
 }
 
-.chat-bubble-row {
+/* Continuous thread: full-width posts separated by dividers (no POV bubbles). */
+.chat-thread-item {
   display: flex;
-  align-items: center;
-  position: relative;
-}
-
-.chat-bubble-row--own {
-  justify-content: flex-end;
-}
-
-.chat-bubble-row--other {
-  justify-content: flex-start;
-}
-
-.chat-bubble-row--entering {
-  animation: message-in var(--duration-base) var(--ease-out);
-}
-
-.chat-bubble-swipe-hint {
-  position: absolute;
-  left: 0;
-  color: var(--color-primary);
-  font-size: 1rem;
-  transition: opacity 0.1s linear;
-  pointer-events: none;
-}
-
-.chat-bubble {
-  position: relative;
-  /* Flex items default to min-width:auto, which lets an unbreakable child (a long code line, a
-     wide equation) force the bubble past max-width instead of respecting it — min-width:0 makes
-     the cap actually stick, so overflow is handled by the specific child's own scroll container
-     (.hc-code-block, .katex-display) instead of spilling past the bubble's rounded background. */
+  flex-direction: column;
+  gap: 0.45rem;
   min-width: 0;
-  /* The 75%/28rem cap lives on .chat-message-thread (the bubble's always-present wrapper);
-     repeating it here would compound to 56% of the row (75% of 75%). */
-  max-width: 100%;
-  width: fit-content;
-  padding: 0.6rem 0.85rem;
-  border-radius: var(--radius-lg);
+  width: 100%;
+  padding: 0.85rem 0.15rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-ink);
   line-height: 1.45;
   overflow-wrap: break-word;
-  white-space: pre-wrap;
-  transition: transform var(--duration-base) var(--ease-spring), box-shadow var(--duration-fast) var(--ease-out);
   touch-action: pan-y;
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-.chat-bubble--own {
-  align-self: flex-end;
-  background: var(--color-bubble-own);
-  color: var(--color-ink);
-  box-shadow: var(--shadow-sm);
+.chat-thread-item:first-child {
+  border-top: 1px solid var(--color-border);
 }
 
-.chat-bubble--other {
-  align-self: flex-start;
-  background: var(--color-interactive-fill);
-  color: var(--color-ink);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
+.chat-thread-item--highlighted {
+  animation: chat-thread-highlight-flash 1.4s var(--ease-in-out);
 }
 
-.chat-bubble--highlighted {
-  animation: chat-bubble-highlight-flash 1.4s var(--ease-in-out);
+@keyframes chat-thread-highlight-flash {
+  0%, 100% { background-color: transparent; }
+  20%, 60% { background-color: var(--color-primary-soft); }
 }
 
-@keyframes chat-bubble-highlight-flash {
-  0%, 100% { box-shadow: var(--shadow-sm); }
-  20%, 60% { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+.chat-thread-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-.chat-bubble-score {
-  position: absolute;
-  top: 0.35rem;
-  right: 0.5rem;
-  min-width: 1.5rem;
-  text-align: center;
+.chat-thread-sender {
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--color-ink-secondary);
+}
+
+.chat-thread-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.chat-thread-score {
+  min-width: 1.7rem;
+  height: 1.7rem;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-ink-secondary);
-  opacity: 1;
-  transition: opacity var(--duration-fast) var(--ease-out);
-  pointer-events: none;
-}
-
-.chat-bubble--own .chat-bubble-score {
-  right: auto;
-  left: 0.5rem;
-}
-
-.chat-bubble:hover .chat-bubble-score,
-.chat-bubble:focus-within .chat-bubble-score {
-  opacity: 0;
-}
-
-.chat-bubble-actions {
-  position: absolute;
-  top: -0.85rem;
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.2rem;
-  border-radius: var(--radius-full);
-  background: var(--color-surface);
+  background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-md);
-  opacity: 0;
-  transform: translateY(2px) scale(0.94);
   pointer-events: none;
-  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+  user-select: none;
 }
 
-.chat-bubble-action-btn.is-active {
+.chat-thread-content {
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+  min-width: 0;
+}
+
+.chat-thread-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.15rem;
+}
+
+.chat-thread-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chat-thread-time {
+  font-size: 0.68rem;
+  color: var(--color-ink-tertiary);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.chat-thread-action-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-ink-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.chat-thread-action-btn:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+  border-color: var(--color-border-strong);
+}
+
+.chat-thread-action-btn.is-active {
   color: var(--color-accent);
   background: var(--color-primary-soft);
+  border-color: var(--color-border-strong);
+}
+
+.chat-thread-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .chat-attachment-list,
 .chat-link-preview-list {
   list-style: none;
-  margin: 0.5rem 0 0;
+  margin: 0.25rem 0 0;
   padding: 0;
 }
 
@@ -2315,9 +2326,87 @@ a {
   border-radius: var(--radius-sm);
 }
 
+.chat-attachment-hazard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-danger);
+}
+
+.chat-attachment-inline {
+  position: relative;
+  max-width: 100%;
+}
+
+.chat-attachment-pdf,
+.chat-attachment-text,
+.chat-attachment-text-block {
+  width: 100%;
+  min-height: 12rem;
+  max-height: 20rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.chat-attachment-video,
+.chat-attachment-audio {
+  max-width: 100%;
+}
+
+.chat-attachment-download-btn {
+  margin-top: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+
+.chat-attachment-download-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.chat-attachment-loading,
+.chat-attachment-error {
+  font-size: 0.875rem;
+  color: var(--color-ink-secondary);
+}
+
+.chat-attachment-error {
+  color: var(--color-danger);
+}
+
+.chat-attachment-expand-btn {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.chat-attachment-hazard-preview {
+  flex-basis: 100%;
+}
+
+.chat-attachment-hazard-banner {
+  margin: 0.35rem 0;
+  font-size: 0.8125rem;
+  color: var(--color-danger);
+}
+
 .chat-link-preview-card,
 .chat-forward-card {
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -2329,56 +2418,36 @@ a {
   color: var(--color-ink-tertiary);
 }
 
-.chat-bubble--other .chat-bubble-actions {
-  right: -0.4rem;
-}
-
-.chat-bubble--own .chat-bubble-actions {
-  left: -0.4rem;
-}
-
-.chat-bubble:hover .chat-bubble-actions,
-.chat-bubble:focus-within .chat-bubble-actions {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
-}
-
-.chat-bubble-action-btn {
-  width: 1.7rem;
-  height: 1.7rem;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--color-ink-tertiary);
+.chat-reply-snippet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  max-width: 100%;
+  padding: 0.4rem 0.65rem;
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  appearance: none;
 }
 
-.chat-bubble-action-btn:hover {
-  background: var(--color-primary-soft);
+.chat-reply-snippet-author {
+  font-size: 0.72rem;
+  font-weight: 700;
   color: var(--color-primary-hover);
 }
 
-/* Reply thread: a standalone quote "bubble" connected to the actual message bubble below it via
- * an L-shaped connector line, rather than the quote being nested inside the message bubble. */
-.chat-message-thread {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  max-width: min(75%, 28rem);
-}
-
-.chat-message-thread--other {
-  align-items: flex-start;
-}
-
-.chat-message-thread--own {
-  align-items: flex-end;
+.chat-reply-snippet-text {
+  font-size: 0.78rem;
+  color: var(--color-ink-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .chat-reply-quote-bubble {
@@ -2387,7 +2456,6 @@ a {
   gap: 0.4rem;
   max-width: 100%;
   padding: 0.4rem 0.7rem;
-  margin-left: 0.9rem;
   border: 1px solid var(--color-primary-soft-strong);
   border-radius: var(--radius-md);
   background: var(--color-primary-soft);
@@ -2397,13 +2465,6 @@ a {
   color: inherit;
   appearance: none;
   transition: background var(--duration-fast) var(--ease-out);
-}
-
-.chat-message-thread--own .chat-reply-quote-bubble {
-  margin-left: 0;
-  margin-right: 0.9rem;
-  background: var(--color-primary-soft-strong);
-  border-color: var(--color-primary-soft-strong);
 }
 
 .chat-reply-quote-bubble:hover {
@@ -2439,93 +2500,32 @@ a {
   max-width: 16rem;
 }
 
-.chat-reply-connector {
-  display: block;
-  width: 1.5rem;
-  height: 0.85rem;
-  margin-left: 0.9rem;
-  border-left: 2px solid var(--color-primary-soft-strong);
-  border-bottom: 2px solid var(--color-primary-soft-strong);
-  border-bottom-left-radius: 0.6rem;
-}
-
-.chat-message-thread--own .chat-reply-connector {
-  margin-left: 0;
-  margin-right: 0.9rem;
-  align-self: flex-end;
-  border-left: none;
-  border-right: 2px solid var(--color-primary-soft-strong);
-  border-bottom: 2px solid var(--color-primary-soft-strong);
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0.6rem;
-}
-
-.chat-message-thread--has-reply.chat-message-thread--other .chat-bubble {
-  margin-left: calc(0.9rem + 1.5rem);
-}
-
-.chat-message-thread--has-reply.chat-message-thread--own .chat-bubble {
-  margin-right: calc(0.9rem + 1.5rem);
-}
-
-.chat-bubble-sender {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-ink-secondary);
-  margin-bottom: 0.2rem;
-}
-
-.chat-bubble--own .chat-bubble-sender {
-  display: none;
-}
-
-.chat-bubble-content {
-  font-size: 0.95rem;
-}
-
-.chat-bubble-time {
-  display: block;
-  font-size: 0.68rem;
-  margin-top: 0.3rem;
-  opacity: 0.72;
-}
-
-.chat-bubble--own .chat-bubble-time {
-  text-align: right;
-  color: var(--color-primary-hover);
-}
-
-.chat-bubble--other .chat-bubble-time {
-  color: var(--color-ink-tertiary);
-}
-
 .typing-indicator {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  align-self: flex-start;
-  max-width: min(75%, 28rem);
+  width: 100%;
+  padding: 0.85rem 0.15rem;
+  border-bottom: 1px solid var(--color-border);
   animation: rise-in var(--duration-fast) var(--ease-out);
 }
 
 .typing-indicator-sender {
-  font-size: 0.75rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: var(--color-ink-secondary);
-  margin-bottom: 0.2rem;
-  padding-left: 0.15rem;
+  margin-bottom: 0.35rem;
 }
 
 .typing-bubble {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  border-bottom-left-radius: 4px;
-  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.15rem 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .typing-dot {
@@ -2652,6 +2652,100 @@ a {
   padding: 0.75rem 1rem;
   flex-shrink: 0;
   width: 100%;
+}
+
+.chat-composer-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chat-attach-btn {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: var(--color-surface-alt);
+  color: var(--color-ink-secondary);
+  border: 1px solid var(--color-border-strong);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-spring), background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.chat-attach-btn:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+  transform: scale(1.06);
+}
+
+.chat-attach-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-composer-attachments {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 1rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chat-composer-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.25rem 0.45rem 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  font-size: 0.8rem;
+  color: var(--color-ink-secondary);
+}
+
+.chat-composer-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14rem;
+}
+
+.chat-composer-attachment-remove {
+  width: 1.4rem;
+  height: 1.4rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-ink-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-composer-attachment-remove:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.chat-composer-attach-error {
+  margin: 0.35rem 1rem 0;
+  font-size: 0.8rem;
+  color: var(--color-danger);
 }
 
 .chat-composer-input {
@@ -4115,7 +4209,7 @@ a {
 .rich-content {
   overflow-wrap: anywhere;
   /* Markdown emits real block tags (<p>, <ul>, <pre>) with newlines between them; without this,
-     a pre-wrap ancestor (.chat-bubble) renders those inter-tag newlines as phantom blank lines.
+     a pre-wrap ancestor (.chat-thread-content) renders those inter-tag newlines as phantom blank lines.
      Author line breaks are preserved as <br> by the renderer (breaks: true), not by whitespace. */
   white-space: normal;
   /* Last-resort containment for wide content with no scroll container of its own — chiefly long
@@ -4344,8 +4438,7 @@ a {
 .infra-list-item,
 .custom-role-icon-option,
 .chat-room-link,
-.chat-bubble,
-.chat-bubble-action-btn,
+.chat-thread-action-btn,
 .chat-reply-quote-bubble,
 .chat-send-btn,
 .get-roles-button,
@@ -4375,8 +4468,7 @@ a {
   .infra-list-item,
   .custom-role-icon-option,
   .chat-room-link,
-  .chat-bubble,
-  .chat-bubble-action-btn,
+  .chat-thread-action-btn,
   .chat-reply-quote-bubble,
   .chat-send-btn,
   .get-roles-button,
@@ -4405,8 +4497,7 @@ a {
   .infra-list-item,
   .custom-role-icon-option,
   .chat-room-link,
-  .chat-bubble,
-  .chat-bubble-action-btn,
+  .chat-thread-action-btn,
   .chat-reply-quote-bubble,
   .chat-send-btn,
   .get-roles-button,
@@ -4780,6 +4871,39 @@ a {
   color: var(--color-text-muted);
 }
 
+.ticket-watch-chip-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ticket-watch-chip-remove {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.ticket-watch-chip-remove:hover:not(:disabled) {
+  background: var(--color-danger);
+  color: var(--color-on-accent);
+}
+
+.ticket-watch-chip-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .ticket-chat-chrome-actions {
   display: flex;
   flex-wrap: wrap;
@@ -4870,3 +4994,172 @@ a {
   color: var(--color-text-muted);
 }
 
+
+.neural-graph-panel { overflow: hidden; }
+.neural-zoom { width: min(100%, 22rem); accent-color: var(--color-primary); }
+.neural-graph { display: block; width: 100%; min-height: 18rem; margin-top: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-sunken); }
+.neural-edge { stroke: var(--color-accent); stroke-width: 2; transition: opacity var(--duration-fast) var(--ease-out); }
+.neural-node { fill: var(--color-surface-alt); stroke: var(--color-border-strong); stroke-width: 2; transition: transform var(--duration-fast) var(--ease-out), fill var(--duration-fast) var(--ease-out); transform-box: fill-box; transform-origin: center; }
+.neural-node-group { cursor: pointer; }
+.neural-node-group:hover .neural-node, .neural-node--selected { fill: var(--color-primary-soft-strong); stroke: var(--color-primary); transform: scale(1.06); }
+.neural-node-text, .neural-layer-label { fill: var(--color-ink); font-family: var(--font-sans); font-size: 14px; font-weight: 600; pointer-events: none; }
+.neural-edge--recorded { stroke: var(--color-primary); stroke-width: 1.25; opacity: .42; }
+.neural-edge--active { stroke: var(--color-on-accent); stroke-width: 2.25; opacity: 1; }
+.neural-edge--accepted { stroke: var(--color-success); }
+.neural-edge--revision { stroke: var(--color-danger); }
+.neural-edge--backward { stroke: var(--color-danger); stroke-dasharray: 5 4; opacity: .7; }
+.neural-layer-label { fill: var(--color-ink-secondary); font-size: 13px; }
+
+.neural-cascade-tabs { flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0 1rem; }
+.neural-cascade-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+  align-items: stretch;
+  margin: 0 0 1rem;
+}
+.neural-cascade-stage {
+  padding: 0.75rem 0.85rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-alt);
+}
+.neural-cascade-stage--f { box-shadow: inset 3px 0 0 var(--color-accent); }
+.neural-cascade-stage--g { box-shadow: inset 3px 0 0 var(--color-primary); }
+.neural-cascade-stage-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+.neural-cascade-stage-path {
+  margin: 0.2rem 0 0.4rem;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: var(--color-ink-secondary);
+}
+.neural-cascade-mini {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 7rem;
+}
+.neural-edge--cascade { stroke: var(--color-accent); stroke-width: 1.1; opacity: 0.28; }
+.neural-node--cascade { fill: var(--color-surface); stroke: var(--color-border-strong); }
+.neural-cascade-stage--g .neural-edge--cascade { stroke: var(--color-primary); }
+.neural-cascade-bridge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-width: 7.5rem;
+  padding: 0.5rem 0.25rem;
+  text-align: center;
+}
+.neural-cascade-bridge-formula {
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: 0.02em;
+}
+.neural-cascade-bridge-arrow {
+  display: block;
+  width: 3.5rem;
+  height: 0.2rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-primary));
+  position: relative;
+  animation: neural-cascade-pulse 2.8s var(--ease-out) infinite;
+}
+.neural-cascade-bridge-arrow::after {
+  content: '';
+  position: absolute;
+  right: -0.15rem;
+  top: 50%;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid var(--color-primary);
+  border-top: 2px solid var(--color-primary);
+  transform: translateY(-50%) rotate(45deg);
+}
+.neural-cascade-bridge-rule {
+  max-width: 9rem;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--color-ink-tertiary);
+}
+.neural-cascade-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.neural-cascade-meta dt {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-tertiary);
+}
+.neural-cascade-meta dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.neural-cascade-detail-label { margin-bottom: 0.25rem; }
+.neural-graph--cascade-detail { animation: neural-cascade-fade-in var(--duration-base) var(--ease-out); }
+.neural-category-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+.neural-category-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-secondary);
+  font-size: 0.78rem;
+}
+
+@keyframes neural-cascade-pulse {
+  0%, 100% { opacity: 0.55; transform: scaleX(0.92); }
+  50% { opacity: 1; transform: scaleX(1); }
+}
+@keyframes neural-cascade-fade-in {
+  from { opacity: 0.55; transform: translateY(0.35rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 720px) {
+  .neural-cascade-overview {
+    grid-template-columns: 1fr;
+  }
+  .neural-cascade-bridge {
+    min-width: 0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .neural-cascade-bridge-arrow {
+    width: 2.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neural-cascade-bridge-arrow,
+  .neural-graph--cascade-detail {
+    animation: none;
+  }
+}

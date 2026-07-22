@@ -15,13 +15,17 @@ public static class EffectiveMaskMapper
 {
     public static EffectiveMaskDto ToEffectiveMaskDto(this UserEffectiveMask effectiveMask)
     {
+        // Index rows by category once; catalog categories then resolve without rescanning the collection.
+        Dictionary<string, UserSubjectExpertiseMask> rowsByCategory = effectiveMask.SubjectExpertiseMasks
+            .GroupBy(row => row.Category, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
         Dictionary<string, string> subjectExpertiseMasks = SubjectExpertiseCatalog.AllExpertiseCategoryNames()
             .ToDictionary(
                 category => category,
                 category =>
                 {
-                    UserSubjectExpertiseMask? row = effectiveMask.SubjectExpertiseMasks
-                        .FirstOrDefault(m => m.Category == category);
+                    rowsByCategory.TryGetValue(category, out UserSubjectExpertiseMask? row);
                     return BitMask.ToBase64(row?.ExpertiseMask ?? BitMask.Create(128));
                 },
                 StringComparer.Ordinal);

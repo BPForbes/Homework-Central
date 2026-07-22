@@ -75,4 +75,36 @@ public class ChatTypingTrackerTests
         Assert.Single(typers);
         Assert.Equal(aliceId, typers[0].UserId);
     }
+
+    [Fact]
+    public void SetTyping_clears_prior_room_when_connection_moves_to_another_group()
+    {
+        ChatTypingTracker tracker = new ChatTypingTracker();
+        Guid aliceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        const string otherGroupKey = "chat:staff:0:dev";
+
+        tracker.SetTyping("conn-alice", GroupKey, aliceId, "Alice");
+        tracker.SetTyping("conn-alice", otherGroupKey, aliceId, "Alice");
+
+        Assert.Empty(tracker.GetActiveTypers(GroupKey));
+        Assert.Single(tracker.GetActiveTypers(otherGroupKey));
+    }
+
+    [Fact]
+    public void ClearTypingForConnection_sweeps_orphaned_room_entries()
+    {
+        ChatTypingTracker tracker = new ChatTypingTracker();
+        Guid aliceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        const string otherGroupKey = "chat:staff:0:dev";
+
+        tracker.SetTyping("conn-alice", GroupKey, aliceId, "Alice");
+        tracker.SetTyping("conn-alice", otherGroupKey, aliceId, "Alice");
+
+        (string GroupKey, Guid UserId)? cleared = tracker.ClearTypingForConnection("conn-alice");
+
+        Assert.Equal(otherGroupKey, cleared?.GroupKey);
+        Assert.Equal(aliceId, cleared?.UserId);
+        Assert.Empty(tracker.GetActiveTypers(GroupKey));
+        Assert.Empty(tracker.GetActiveTypers(otherGroupKey));
+    }
 }

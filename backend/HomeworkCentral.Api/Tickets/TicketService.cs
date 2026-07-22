@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.Data;
@@ -8,6 +9,7 @@ using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Tickets.Preface;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,7 +23,10 @@ public sealed class TicketService(
     IChatNavNotifier chatNavNotifier,
     IAccessScopeAccessor accessScope,
     ITicketRecipientResolver recipientResolver,
-    ITicketTrackingAnalyzer trackingAnalyzer) : ITicketService
+    ITicketTrackingAnalyzer trackingAnalyzer,
+    IChatMonitoringNeuralModelFactory chatMonitoringModels,
+    IVectorDocumentStore vectors,
+    ITicketPrefaceCheckResolver prefaceChecks) : ITicketService
 {
     private static readonly Guid SystemInboxMessageId =
         Guid.Parse("00000000-0000-0000-0000-00000000c002");
@@ -117,133 +122,58 @@ public sealed class TicketService(
         return await MapPortalConfigAsync(config, ct);
     }
 
+    /// <summary>
+    /// Validates portal intake and persists the private ticket channel, watches,
+    /// inbox notifications, and navigation refresh for a new ticket. See
+    /// docs/tickets.md#open-lifecycle for the open-ticket lifecycle.
+    /// </summary>
     public async Task<TicketDto> OpenTicketAsync(
         string portalRoomId,
         Guid openerUserId,
         OpenTicketRequest request,
         CancellationToken ct = default)
     {
-        EffectiveMaskDto openerMasks = await effectiveMaskService.GetEffectiveMaskDtoAsync(openerUserId, ct);
-        if (MentionPermissions.IsGuest(BitMask.FromBase64(openerMasks.RoleMask, 64)))
-            throw new InvalidOperationException("Guests cannot open tickets.");
-        if (!chatRoomAccess.CanAccessRoom(openerMasks, openerUserId, portalRoomId))
-            throw new InvalidOperationException("You cannot access this ticket portal.");
+        await EnsureCanOpenTicketAsync(portalRoomId, openerUserId, ct);
 
         await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(ct);
 
-        TicketPortalConfig portal = await db.TicketPortalConfigs
-            .Include(p => p.Channel)
-            .FirstOrDefaultAsync(
-                p => p.Channel.RoomId == portalRoomId
-                     && p.Channel.RoomType == CustomRoomType.Ticket
-                     && !p.Channel.IsArchived,
-                ct)
-            ?? throw new InvalidOperationException("Ticket portal was not found.");
-
-        if (!CanViewChannelScope(portal.Channel))
-            throw new InvalidOperationException("Ticket portal is not available in your account scope.");
-
+        TicketPortalConfig portal = await LoadPortalForOpenAsync(portalRoomId, ct);
         List<TicketIntakeQuestionDto> schema = TicketJson.DeserializeIntakeSchema(portal.IntakeSchemaJson);
-        TicketIntakeValidator.ValidateAnswers(schema, request.Answers);
+        Dictionary<string, TicketPrefaceResult> prefaceResults =
+            TicketIntakeValidator.ValidateAnswers(schema, request.Answers, prefaceChecks, filterName: portal.FilterName);
 
-        int displayNumber = portal.NextDisplayNumber;
-        portal.NextDisplayNumber = checked(displayNumber + 1);
-        portal.UpdatedAtUtc = DateTime.UtcNow;
-
-        string purpose = portal.Purpose;
-        string filterName = string.IsNullOrWhiteSpace(portal.FilterName) ? purpose : portal.FilterName;
-        string displayName = TicketDisplayNames.Open(filterName, displayNumber);
-        DateTime now = DateTime.UtcNow;
-        Guid chatChannelId = Guid.NewGuid();
-        string roomId = CustomChannelIds.BuildRoomId(chatChannelId);
-        CustomChannel portalChannel = portal.Channel;
+        AllocatedTicketIdentity identity = AllocateTicketIdentity(portal);
         bool aiOptOut = TicketIntakeValidator.IsAiOptOut(schema, request.Answers);
 
-        CustomChannel chatChannel = new()
-        {
-            ChannelId = chatChannelId,
-            RoomId = roomId,
-            DisplayName = displayName,
-            CategoryKey = portalChannel.CategoryKey,
-            CategoryDisplayName = portalChannel.CategoryDisplayName,
-            RoomType = CustomRoomType.Chat,
-            IsPrivate = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now,
-            CreatedByUserId = openerUserId,
-            OwnerAccountClass = portalChannel.OwnerAccountClass,
-            TieType = ChannelTieType.None,
-        };
+        CustomChannel chatChannel = await CreateTicketChatChannelAsync(
+            portal,
+            openerUserId,
+            identity.DisplayName,
+            identity.CreatedAtUtc,
+            ct);
 
-        List<CustomChannelAccessRuleInput> staffRules =
-            TicketJson.DeserializeAccessRules(portal.StaffAccessRulesJson);
-        await ApplyTicketAccessRulesAsync(chatChannel, staffRules, ct);
-        CustomChannelAccessRule openerRule = new()
-        {
-            AccessRuleId = Guid.NewGuid(),
-            ChannelId = chatChannelId,
-            AllowedUserId = openerUserId,
-        };
-        db.CustomChannelAccessRules.Add(openerRule);
-        chatChannel.AccessRules.Add(openerRule);
+        Ticket ticket = BuildOpenedTicket(
+            portal,
+            chatChannel,
+            openerUserId,
+            identity,
+            request,
+            schema,
+            prefaceResults,
+            aiOptOut);
 
-        Ticket ticket = new()
-        {
-            TicketId = Guid.NewGuid(),
-            PortalChannelId = portal.ChannelId,
-            ChatChannelId = chatChannelId,
-            RoomId = roomId,
-            DisplayNumber = displayNumber,
-            Purpose = purpose,
-            FilterName = filterName,
-            OpenedByUserId = openerUserId,
-            CreatedAtUtc = now,
-            IntakeAnswersJson = TicketJson.SerializeStoredAnswers(request.Answers),
-            AiTrackingOptOut = aiOptOut,
-            TrackingTemplateJson = aiOptOut
-                ? null
-                : TicketTrackingTemplateBuilder.Build(filterName, schema, request.Answers),
-        };
-
-        db.CustomChannels.Add(chatChannel);
-        db.Tickets.Add(ticket);
-        if (!aiOptOut)
-            await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, now, ct);
-
-        if (string.Equals(filterName, DefaultTicketPortalPresets.TutorFilterName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase))
-        {
-            db.CandidateApplications.Add(new CandidateApplication
-            {
-                CandidateApplicationId = Guid.NewGuid(),
-                UserId = string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
-                    && schema.FirstOrDefault(q => q.TracksUser) is { } tracks
-                    && request.Answers.TryGetValue(tracks.Id, out JsonElement tracked)
-                    && TicketIntakeValidator.TryParseUserId(tracked, out Guid reportedUserId)
-                    ? reportedUserId
-                    : openerUserId,
-                PositionId = string.Equals(filterName, DefaultTicketPortalPresets.ModFilterName, StringComparison.OrdinalIgnoreCase)
-                    ? "mod_report"
-                    : "tutor",
-                Status = CandidateApplicationStatuses.InsufficientEvidence,
-                TicketId = ticket.TicketId,
-                AiOptOut = aiOptOut,
-                CreatedAtUtc = now,
-            });
-        }
-
-        await db.SaveChangesAsync(ct);
-
-        List<TicketIntakeAnswerDto> intakeAnswers = TicketJson.BuildIntakeAnswerDtos(schema, request.Answers);
-        await CreateTicketOpenedInboxNotificationsAsync(
+        await PersistOpenedTicketAsync(
             ticket,
             chatChannel,
             portal,
-            intakeAnswers,
+            schema,
+            request,
+            openerUserId,
+            identity.CreatedAtUtc,
+            aiOptOut,
             ct);
 
-        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
         await channelStore.RefreshAsync(ct);
@@ -401,6 +331,18 @@ public sealed class TicketService(
             ?? await db.TicketPortalConfigs.AsNoTracking()
                 .FirstAsync(p => p.ChannelId == ticket.PortalChannelId, ct);
 
+        List<TicketMessageScoreDto> existingScores = await MapMessageScoresAsync(ticket.TicketId, ct);
+        if (ticket.AiTrackingOptOut)
+        {
+            return new TicketAnalyzeResultDto
+            {
+                Available = false,
+                CurrentScore = existingScores.LastOrDefault()?.CurrentScore,
+                MessageScores = existingScores,
+                Watches = await MapWatchesAsync(ticket.TicketId, ct),
+            };
+        }
+
         List<ChatMessage> messages = await db.ChatMessages
             .AsNoTracking()
             .Where(message => message.RoomId == ticket.RoomId)
@@ -413,6 +355,8 @@ public sealed class TicketService(
             return new TicketAnalyzeResultDto
             {
                 Available = false,
+                CurrentScore = existingScores.LastOrDefault()?.CurrentScore,
+                MessageScores = existingScores,
                 Watches = await MapWatchesAsync(ticket.TicketId, ct),
             };
         }
@@ -435,15 +379,122 @@ public sealed class TicketService(
             await db.SaveChangesAsync(ct);
         }
 
+        List<TicketMessageScoreDto> messageScores = await MapMessageScoresAsync(ticket.TicketId, ct);
         return new TicketAnalyzeResultDto
         {
             Available = true,
             Decision = analysis.Decision,
             Summary = analysis.Summary,
+            CurrentScore = messageScores.LastOrDefault()?.CurrentScore,
+            MessageScores = messageScores,
             Watches = await MapWatchesAsync(ticket.TicketId, ct),
             InboxRecipientsNotified = notified,
         };
     }
+
+    private async Task<List<TicketMessageScoreDto>> MapMessageScoresAsync(
+        Guid ticketId,
+        CancellationToken ct)
+    {
+        List<TicketMessageScore> newest = await db.TicketMessageScores.AsNoTracking()
+            .Where(score => score.TicketId == ticketId)
+            .OrderByDescending(score => score.CreatedAtUtc)
+            .Take(200)
+            .ToListAsync(ct);
+
+        return newest
+            .OrderBy(score => score.CreatedAtUtc)
+            .Select(score => new TicketMessageScoreDto
+            {
+                ScoreEventId = score.ScoreEventId,
+                MessageId = score.MessageId,
+                TrackedUserId = score.TrackedUserId,
+                PreviousScore = score.PreviousScore,
+                ScoreDelta = score.ScoreDelta,
+                CurrentScore = score.CurrentScore,
+                EvidenceConfidence = score.EvidenceConfidence,
+                Relevance = score.Relevance,
+                Reason = score.Reason,
+                StudentScore = score.StudentScore,
+                StudentConfidence = score.StudentConfidence,
+                StudentRelevance = score.StudentRelevance,
+                StudentCategory = score.StudentCategory,
+                StudentReasoning = score.StudentReasoning,
+                ReviewerInvoked = score.ReviewerInvoked,
+                ReviewerScore = score.ReviewerScore,
+                ReviewerConfidence = score.ReviewerConfidence,
+                CorrectionNeeded = score.CorrectionNeeded,
+                ReviewerExplanation = score.ReviewerExplanation,
+                ReviewerGuidance = score.ReviewerGuidance,
+                TrainingApprovedAtUtc = score.TrainingApprovedAtUtc,
+                CreatedAtUtc = score.CreatedAtUtc,
+            })
+            .ToList();
+    }
+
+    public async Task<TicketMessageScoreDto> ApproveScoreTrainingAsync(
+        Guid ticketId,
+        Guid scoreEventId,
+        Guid actorUserId,
+        CancellationToken ct = default)
+    {
+        Ticket ticket = await LoadAccessibleTicketForMutationAsync(ticketId, actorUserId, ct);
+        TicketMessageScore score = await db.TicketMessageScores
+            .FirstOrDefaultAsync(x => x.TicketId == ticketId && x.ScoreEventId == scoreEventId, ct)
+            ?? throw new InvalidOperationException("Score event was not found.");
+        if (score.ReviewerScore is null || score.ReviewerRelevance is null)
+            throw new InvalidOperationException("Only a completed reviewer correction can train the student.");
+
+        ChatMessage message = await db.ChatMessages.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.MessageId == score.MessageId, ct)
+            ?? throw new InvalidOperationException("The referenced message no longer exists.");
+        TicketUserWatch watch = ticket.Watches.FirstOrDefault(x => x.TrackedUserId == score.TrackedUserId)
+            ?? throw new InvalidOperationException("The score no longer has a matching ticket watch.");
+        string requirement = ChatMonitoringTicketContext.BuildRequirement(watch, 4000);
+        NeuralModelKindChatMonitoring chatMonitoringKind = ChatMonitoringTicketContext.ResolveKind(watch);
+
+        TicketModelTrainingExample? training = await db.TicketModelTrainingExamples
+            .FirstOrDefaultAsync(x => x.ScoreEventId == scoreEventId, ct);
+        if (training is null)
+        {
+            DateTime now = DateTime.UtcNow;
+            training = new TicketModelTrainingExample
+            {
+                TrainingExampleId = Guid.NewGuid(), MessageId = message.MessageId, ScoreEventId = score.ScoreEventId,
+                Requirement = requirement, TargetScore = score.ReviewerScore.Value,
+                TargetRelevance = score.ReviewerRelevance.Value, Category = score.StudentCategory,
+                Source = "StaffApprovedReviewer", ApprovedAtUtc = now, ApprovedByUserId = actorUserId,
+                ChatMonitoringKind = chatMonitoringKind,
+            };
+            db.TicketModelTrainingExamples.Add(training);
+            score.TrainingApprovedAtUtc = now;
+            score.TrainingApprovedByUserId = actorUserId;
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
+            model.Train(new ChatMonitoringNeuralModelInput(requirement, string.Empty, message.RawContent, 0, 1, 0, .5f),
+                new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
+            await vectors.UpsertAsync(
+                VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
+                ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind), training.TrainingExampleId,
+                new { training.TrainingExampleId, training.MessageId, training.ScoreEventId, training.Category, training.TargetScore, training.TargetRelevance, training.Source, chatMonitoringKind }, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return MapMessageScore(score);
+    }
+
+    private static TicketMessageScoreDto MapMessageScore(TicketMessageScore score) => new()
+    {
+        ScoreEventId = score.ScoreEventId, MessageId = score.MessageId, TrackedUserId = score.TrackedUserId,
+        PreviousScore = score.PreviousScore, ScoreDelta = score.ScoreDelta, CurrentScore = score.CurrentScore,
+        EvidenceConfidence = score.EvidenceConfidence, Relevance = score.Relevance, Reason = score.Reason,
+        StudentScore = score.StudentScore, StudentConfidence = score.StudentConfidence,
+        StudentRelevance = score.StudentRelevance, StudentCategory = score.StudentCategory,
+        StudentReasoning = score.StudentReasoning, ReviewerInvoked = score.ReviewerInvoked,
+        ReviewerScore = score.ReviewerScore, ReviewerConfidence = score.ReviewerConfidence,
+        CorrectionNeeded = score.CorrectionNeeded, ReviewerExplanation = score.ReviewerExplanation,
+        ReviewerGuidance = score.ReviewerGuidance, TrainingApprovedAtUtc = score.TrainingApprovedAtUtc,
+        CreatedAtUtc = score.CreatedAtUtc,
+    };
 
     public async Task<TicketDto> ApproveDecisionAsync(
         Guid ticketId,
@@ -577,6 +628,233 @@ public sealed class TicketService(
             throw new InvalidOperationException("You do not have permission to manage this ticket.");
 
         return ticket;
+    }
+
+    private async Task EnsureCanOpenTicketAsync(
+        string portalRoomId,
+        Guid openerUserId,
+        CancellationToken ct)
+    {
+        EffectiveMaskDto openerMasks = await effectiveMaskService.GetEffectiveMaskDtoAsync(openerUserId, ct);
+        if (MentionPermissions.IsGuest(BitMask.FromBase64(openerMasks.RoleMask, 64)))
+            throw new InvalidOperationException("Guests cannot open tickets.");
+        if (!chatRoomAccess.CanAccessRoom(openerMasks, openerUserId, portalRoomId))
+            throw new InvalidOperationException("You cannot access this ticket portal.");
+    }
+
+    private async Task<TicketPortalConfig> LoadPortalForOpenAsync(string portalRoomId, CancellationToken ct)
+    {
+        TicketPortalConfig portal = await db.TicketPortalConfigs
+            .Include(p => p.Channel)
+            .FirstOrDefaultAsync(
+                p => p.Channel.RoomId == portalRoomId
+                     && p.Channel.RoomType == CustomRoomType.Ticket
+                     && !p.Channel.IsArchived,
+                ct)
+            ?? throw new InvalidOperationException("Ticket portal was not found.");
+
+        if (!CanViewChannelScope(portal.Channel))
+            throw new InvalidOperationException("Ticket portal is not available in your account scope.");
+
+        return portal;
+    }
+
+    private static AllocatedTicketIdentity AllocateTicketIdentity(TicketPortalConfig portal)
+    {
+        // Display numbers advance inside the transaction so each portal owns one
+        // channel-title sequence.
+        int displayNumber = portal.NextDisplayNumber;
+        portal.NextDisplayNumber = checked(displayNumber + 1);
+        portal.UpdatedAtUtc = DateTime.UtcNow;
+
+        string purpose = portal.Purpose;
+        string filterName = string.IsNullOrWhiteSpace(portal.FilterName) ? purpose : portal.FilterName;
+        string displayName = TicketDisplayNames.Open(filterName, displayNumber);
+        DateTime createdAtUtc = DateTime.UtcNow;
+
+        return new AllocatedTicketIdentity(displayNumber, purpose, filterName, displayName, createdAtUtc);
+    }
+
+    private static Ticket BuildOpenedTicket(
+        TicketPortalConfig portal,
+        CustomChannel chatChannel,
+        Guid openerUserId,
+        AllocatedTicketIdentity identity,
+        OpenTicketRequest request,
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, TicketPrefaceResult> prefaceResults,
+        bool aiOptOut) =>
+        new()
+        {
+            TicketId = Guid.NewGuid(),
+            PortalChannelId = portal.ChannelId,
+            ChatChannelId = chatChannel.ChannelId,
+            RoomId = chatChannel.RoomId,
+            DisplayNumber = identity.DisplayNumber,
+            Purpose = identity.Purpose,
+            FilterName = identity.FilterName,
+            OpenedByUserId = openerUserId,
+            CreatedAtUtc = identity.CreatedAtUtc,
+            IntakeAnswersJson = TicketJson.SerializeStoredAnswers(request.Answers),
+            AiTrackingOptOut = aiOptOut,
+            TrackingTemplateJson = aiOptOut
+                ? null
+                : TicketTrackingTemplateBuilder.Build(
+                    identity.FilterName,
+                    schema,
+                    request.Answers,
+                    prefaceResults),
+        };
+
+    private async Task PersistOpenedTicketAsync(
+        Ticket ticket,
+        CustomChannel chatChannel,
+        TicketPortalConfig portal,
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        OpenTicketRequest request,
+        Guid openerUserId,
+        DateTime createdAtUtc,
+        bool aiOptOut,
+        CancellationToken ct)
+    {
+        db.CustomChannels.Add(chatChannel);
+        db.Tickets.Add(ticket);
+        // AI opt-out skips initial watches because watches feed automated
+        // assessment work; staff inbox notification still records the ticket.
+        if (!aiOptOut)
+            await CreateInitialWatchesAsync(ticket, portal, schema, request.Answers, openerUserId, createdAtUtc, ct);
+
+        CreateCandidateApplicationIfNeeded(ticket, schema, request.Answers, createdAtUtc);
+
+        await db.SaveChangesAsync(ct);
+
+        List<TicketIntakeAnswerDto> intakeAnswers = TicketJson.BuildIntakeAnswerDtos(schema, request.Answers);
+        await CreateTicketOpenedInboxNotificationsAsync(
+            ticket,
+            chatChannel,
+            portal,
+            intakeAnswers,
+            ct);
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private readonly record struct AllocatedTicketIdentity(
+        int DisplayNumber,
+        string Purpose,
+        string FilterName,
+        string DisplayName,
+        DateTime CreatedAtUtc);
+
+    private async Task<CustomChannel> CreateTicketChatChannelAsync(
+        TicketPortalConfig portal,
+        Guid openerUserId,
+        string displayName,
+        DateTime now,
+        CancellationToken ct)
+    {
+        Guid chatChannelId = Guid.NewGuid();
+        CustomChannel portalChannel = portal.Channel;
+        CustomChannel chatChannel = new()
+        {
+            ChannelId = chatChannelId,
+            RoomId = CustomChannelIds.BuildRoomId(chatChannelId),
+            DisplayName = displayName,
+            CategoryKey = portalChannel.CategoryKey,
+            CategoryDisplayName = portalChannel.CategoryDisplayName,
+            RoomType = CustomRoomType.Chat,
+            IsPrivate = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedByUserId = openerUserId,
+            OwnerAccountClass = portalChannel.OwnerAccountClass,
+            TieType = ChannelTieType.None,
+        };
+
+        List<CustomChannelAccessRuleInput> staffRules =
+            TicketJson.DeserializeAccessRules(portal.StaffAccessRulesJson);
+        await ApplyTicketStaffAccessRulesAsync(chatChannel, staffRules, ct);
+        ApplyTicketOpenerAccess(chatChannel, openerUserId);
+
+        return chatChannel;
+    }
+
+    private void ApplyTicketOpenerAccess(CustomChannel chatChannel, Guid openerUserId)
+    {
+        // Private ticket channels need a direct opener rule; portal eligibility
+        // does not grant membership in the newly allocated chat room.
+        CustomChannelAccessRule openerRule = new()
+        {
+            AccessRuleId = Guid.NewGuid(),
+            ChannelId = chatChannel.ChannelId,
+            AllowedUserId = openerUserId,
+        };
+        db.CustomChannelAccessRules.Add(openerRule);
+        chatChannel.AccessRules.Add(openerRule);
+    }
+
+    private void CreateCandidateApplicationIfNeeded(
+        Ticket ticket,
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, JsonElement> answers,
+        DateTime now)
+    {
+        CandidateApplication? candidateApplication = ticket.FilterName switch
+        {
+            string filterName when string.Equals(
+                filterName,
+                DefaultTicketPortalPresets.ModFilterName,
+                StringComparison.OrdinalIgnoreCase)
+                => CreateCandidateApplication(
+                    ticket,
+                    ResolveModReportCandidateUserId(schema, answers, ticket.OpenedByUserId),
+                    "mod_report",
+                    now),
+            string filterName when string.Equals(
+                filterName,
+                DefaultTicketPortalPresets.TutorFilterName,
+                StringComparison.OrdinalIgnoreCase)
+                => CreateCandidateApplication(ticket, ticket.OpenedByUserId, "tutor", now),
+            _ => null,
+        };
+
+        if (candidateApplication is not null)
+            db.CandidateApplications.Add(candidateApplication);
+    }
+
+    private static CandidateApplication CreateCandidateApplication(
+        Ticket ticket,
+        Guid candidateUserId,
+        string positionId,
+        DateTime now) =>
+        new CandidateApplication
+        {
+            CandidateApplicationId = Guid.NewGuid(),
+            UserId = candidateUserId,
+            PositionId = positionId,
+            Status = CandidateApplicationStatuses.InsufficientEvidence,
+            TicketId = ticket.TicketId,
+            AiOptOut = ticket.AiTrackingOptOut,
+            CreatedAtUtc = now,
+        };
+
+    private static Guid ResolveModReportCandidateUserId(
+        IReadOnlyList<TicketIntakeQuestionDto> schema,
+        IReadOnlyDictionary<string, JsonElement> answers,
+        Guid openerUserId)
+    {
+        // Mod-report assessment follows the reported account; malformed or
+        // missing tracked-user answers fall back to the opener.
+        TicketIntakeQuestionDto? trackedUserQuestion = schema.FirstOrDefault(question => question.TracksUser);
+        if (trackedUserQuestion is null)
+            return openerUserId;
+
+        if (!answers.TryGetValue(trackedUserQuestion.Id, out JsonElement trackedUserAnswer))
+            return openerUserId;
+
+        return TicketIntakeValidator.TryParseUserId(trackedUserAnswer, out Guid reportedUserId)
+            ? reportedUserId
+            : openerUserId;
     }
 
     private async Task CreateInitialWatchesAsync(
@@ -793,7 +1071,7 @@ public sealed class TicketService(
         return recipients.Count;
     }
 
-    private async Task ApplyTicketAccessRulesAsync(
+    private async Task ApplyTicketStaffAccessRulesAsync(
         CustomChannel channel,
         IReadOnlyList<CustomChannelAccessRuleInput> rules,
         CancellationToken ct)
@@ -872,25 +1150,19 @@ public sealed class TicketService(
                 .Where(role => customRoleIds.Contains(role.RoleId))
                 .ToDictionaryAsync(role => role.RoleId, role => role.Name, ct);
 
-        List<CustomChannelAccessRuleDto> result = [];
-        foreach (CustomChannelAccessRuleInput rule in rules)
+        return rules.Select(rule => new CustomChannelAccessRuleDto
         {
-            result.Add(new CustomChannelAccessRuleDto
-            {
-                CustomRoleId = rule.CustomRoleId,
-                CustomRoleName = rule.CustomRoleId is Guid roleId && roleNames.TryGetValue(roleId, out string? name)
-                    ? name
-                    : null,
-                PlatformRoleBit = rule.PlatformRoleBit,
-                PlatformRoleName = rule.PlatformRoleBit is short bit
-                                   && PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string? platformName)
-                    ? platformName
-                    : null,
-                AllowedUserId = rule.AllowedUserId,
-            });
-        }
-
-        return result;
+            CustomRoleId = rule.CustomRoleId,
+            CustomRoleName = rule.CustomRoleId is Guid roleId && roleNames.TryGetValue(roleId, out string? name)
+                ? name
+                : null,
+            PlatformRoleBit = rule.PlatformRoleBit,
+            PlatformRoleName = rule.PlatformRoleBit is short bit
+                               && PlatformRoleCatalog.TryGetRoleNameFromBit(bit, out string? platformName)
+                ? platformName
+                : null,
+            AllowedUserId = rule.AllowedUserId,
+        }).ToList();
     }
 
     private async Task<TicketDto?> MapTicketAsync(
@@ -1022,22 +1294,11 @@ public sealed class TicketService(
         if (HasElevatedRoomAccess(masks))
             return true;
 
-        foreach (CustomChannelAccessRuleInput rule in TicketJson.DeserializeAccessRules(ticket.Portal.StaffAccessRulesJson))
-        {
-            if (rule.AllowedUserId == actorUserId)
-                return true;
-
-            if (rule.PlatformRoleBit is short platformRoleBit
-                && BitMask.HasBit(BitMask.FromBase64(masks.RoleMask, 64), platformRoleBit))
-            {
-                return true;
-            }
-
-            if (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId))
-                return true;
-        }
-
-        return false;
+        System.Collections.BitArray roleMask = BitMask.FromBase64(masks.RoleMask, 64);
+        return TicketJson.DeserializeAccessRules(ticket.Portal.StaffAccessRulesJson).Any(rule =>
+            rule.AllowedUserId == actorUserId
+            || (rule.PlatformRoleBit is short platformRoleBit && BitMask.HasBit(roleMask, platformRoleBit))
+            || (rule.CustomRoleId is Guid customRoleId && masks.CustomRoleIds.Contains(customRoleId)));
     }
 
     private static bool HasElevatedRoomAccess(EffectiveMaskDto masks) =>

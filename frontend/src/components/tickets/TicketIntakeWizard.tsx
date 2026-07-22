@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ticketsApi } from '../../api/ticketsApi'
+import { chatApi } from '../../api/chatApi'
 import type { Ticket, TicketAnswers, TicketIntakeQuestion } from '../../types/tickets'
 
 type TicketIntakeWizardProps = {
@@ -15,17 +16,21 @@ function needsOptions(type: TicketIntakeQuestion['type']): boolean {
 }
 
 function validateAnswers(questions: TicketIntakeQuestion[], answers: TicketAnswers): string | null {
-  for (const question of questions) {
-    if (!question.required) continue
+  const missingQuestion = questions.find((question) => {
+    if (!question.required)
+      return false
     const value = answers[question.id]
-    if (value === null || value === undefined || value === '') {
-      return `“${question.prompt}” is required.`
-    }
-    if (Array.isArray(value) && value.length === 0) {
-      return `“${question.prompt}” needs at least one selection.`
-    }
-  }
-  return null
+    if (value === null || value === undefined || value === '')
+      return true
+    return Array.isArray(value) && value.length === 0
+  })
+  if (!missingQuestion)
+    return null
+
+  const value = answers[missingQuestion.id]
+  if (Array.isArray(value) && value.length === 0)
+    return `“${missingQuestion.prompt}” needs at least one selection.`
+  return `“${missingQuestion.prompt}” is required.`
 }
 
 function QuestionField({
@@ -132,54 +137,7 @@ function QuestionField({
     case 'messageForward':
     case 'mixed':
       return (
-        <div className="ticket-intake-mixed">
-          {(question.type === 'fileUpload' || question.allowedResponseKinds?.includes('file') || question.type === 'mixed') && (
-            <input
-              type="file"
-              className="sm-input"
-              multiple
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? [])
-                void (async () => {
-                  const { chatApi } = await import('../../api/chatApi')
-                  const uploaded = []
-                  for (const file of files) {
-                    const { data } = await chatApi.uploadAttachment(file)
-                    uploaded.push({ kind: 'file', attachmentId: data.attachmentId, fileName: data.fileName })
-                  }
-                  const existing = Array.isArray(value) ? value : []
-                  onChange([...existing, ...uploaded])
-                })()
-              }}
-            />
-          )}
-          {(question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
-            <input
-              type="url"
-              className="sm-input"
-              placeholder="Add link https://"
-              onBlur={(event) => {
-                const url = event.target.value.trim()
-                if (!url) return
-                const existing = Array.isArray(value) ? value : []
-                onChange([...existing, { kind: 'link', url }])
-                event.target.value = ''
-              }}
-            />
-          )}
-          {(question.type === 'messageForward' || question.allowedResponseKinds?.includes('forward') || question.type === 'mixed') && (
-            <p className="dashboard-hint">
-              Use Report on a chat message to prefill a forwarded proof, or paste a message id below.
-            </p>
-          )}
-          {Array.isArray(value) && value.length > 0 && (
-            <ul className="ticket-intake-parts">
-              {value.map((part, index) => (
-                <li key={index}>{typeof part === 'object' && part && 'kind' in part ? String((part as { kind: string }).kind) : String(part)}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <TicketIntakeFileUploadField question={question} value={value} onChange={onChange} />
       )
     case 'date':
       return (
@@ -234,6 +192,87 @@ function QuestionField({
   }
 }
 
+function TicketIntakeFileUploadField({
+  question,
+  value,
+  onChange,
+}: {
+  question: TicketIntakeQuestion
+  value: TicketAnswers[string]
+  onChange: (next: TicketAnswers[string]) => void
+}) {
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  async function appendUploaded(parts: Array<{ kind: 'file'; attachmentId: string; fileName: string }>) {
+    const existing = Array.isArray(value) ? value : []
+    onChange([...existing, ...parts])
+  }
+
+  async function uploadFiles(files: File[]) {
+    setUploadError(null)
+    const uploaded: Array<{ kind: 'file'; attachmentId: string; fileName: string }> = []
+    for (const file of files) {
+      try {
+        const { data } = await chatApi.uploadAttachment(file)
+        uploaded.push({ kind: 'file', attachmentId: data.attachmentId, fileName: data.fileName })
+      } catch {
+        setUploadError('Could not upload this file. Please try again.')
+        return
+      }
+    }
+    if (uploaded.length > 0)
+      await appendUploaded(uploaded)
+  }
+
+  return (
+    <div className="ticket-intake-mixed">
+      {(question.type === 'fileUpload' || question.allowedResponseKinds?.includes('file') || question.type === 'mixed') && (
+        <input
+          type="file"
+          className="sm-input"
+          multiple
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? [])
+            event.target.value = ''
+            if (files.length === 0)
+              return
+            void (async () => {
+              await uploadFiles(files)
+            })()
+          }}
+        />
+      )}
+      {uploadError && <p className="chat-composer-attach-error">{uploadError}</p>}
+      {(question.allowedResponseKinds?.includes('link') || question.type === 'mixed') && (
+        <input
+          type="url"
+          className="sm-input"
+          placeholder="Add link https://"
+          onBlur={(event) => {
+            const url = event.target.value.trim()
+            if (!url) return
+            const existing = Array.isArray(value) ? value : []
+            onChange([...existing, { kind: 'link', url }])
+            event.target.value = ''
+          }}
+        />
+      )}
+      {(question.type === 'messageForward' || question.allowedResponseKinds?.includes('forward') || question.type === 'mixed') && (
+        <p className="dashboard-hint">
+          Use Report on a chat message to prefill a forwarded proof, or paste a message id below.
+        </p>
+      )}
+      {Array.isArray(value) && value.length > 0 && (
+        <ul className="ticket-intake-parts">
+          {value.map((part, index) => (
+            <li key={index}>{typeof part === 'object' && part && 'kind' in part ? String((part as { kind: string }).kind) : String(part)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export function TicketIntakeWizard({
   portalRoomId,
   questions,
@@ -258,13 +297,24 @@ export function TicketIntakeWizard({
       return
     }
 
+    // Untouched optional checkboxes are absent from state; send explicit false so the API
+    // does not have to invent values for omitted optional answers.
+    const payload: TicketAnswers = { ...answers }
+    for (const question of questions) {
+      if (question.type === 'checkbox' && payload[question.id] === undefined)
+        payload[question.id] = false
+    }
+
     setSubmitting(true)
     setError('')
     try {
-      const { data } = await ticketsApi.open(portalRoomId, answers)
+      const { data } = await ticketsApi.open(portalRoomId, payload)
       onOpened(data)
-    } catch {
-      setError('Could not open the ticket. Check required answers and try again.')
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? 'Could not open the ticket. Check required answers and try again.'
+      setError(msg)
     } finally {
       setSubmitting(false)
     }

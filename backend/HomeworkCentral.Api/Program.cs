@@ -93,7 +93,45 @@ builder.Services.AddScoped<IInfoEntryService, InfoEntryService>();
 builder.Services.AddScoped<IPasswordConfirmationService, PasswordConfirmationService>();
 builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tickets"));
 builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Configuration.GetSection("Llm"));
+builder.Services.Configure<HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions>(
+    builder.Configuration.GetSection("NeuralNetTraining"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
+builder.Services.Configure<HomeworkCentral.Api.Uploads.ClamAvOptions>(builder.Configuration.GetSection("ClamAv"));
+builder.Services.Configure<HomeworkCentral.Api.Uploads.AttachmentAccessOptions>(
+    builder.Configuration.GetSection("AttachmentAccess"));
+
+string? redisConnection = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnection;
+        options.InstanceName = "hc:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+
+builder.Services.AddSingleton<HomeworkCentral.Api.Uploads.HazardDefinitionRegistry>();
+builder.Services.AddSingleton<MimeDetective.IContentInspector>(_ =>
+{
+    MimeDetective.ContentInspectorBuilder inspectorBuilder = new()
+    {
+        Definitions = MimeDetective.Definitions.DefaultDefinitions.All(),
+    };
+    return inspectorBuilder.Build();
+});
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IAttachmentTypeInspector,
+    HomeworkCentral.Api.Uploads.AttachmentTypeInspector>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IMalwareScanner,
+    HomeworkCentral.Api.Uploads.ClamAvMalwareScanner>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IAttachmentAccessTokenService,
+    HomeworkCentral.Api.Uploads.AttachmentAccessTokenService>();
+builder.Services.AddScoped<HomeworkCentral.Api.Uploads.IOrphanAttachmentCleanupService,
+    HomeworkCentral.Api.Uploads.OrphanAttachmentCleanupService>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Uploads.OrphanAttachmentCleanupWorker>();
 builder.Services.AddHttpClient<OllamaTicketTrackingAnalyzer>((sp, client) =>
 {
     TicketOptions ticketOptions = sp.GetRequiredService<IOptions<TicketOptions>>().Value;
@@ -113,12 +151,29 @@ builder.Services.AddScoped<ITicketTrackingAnalyzer>(sp =>
         ? sp.GetRequiredService<OllamaTicketTrackingAnalyzer>()
         : sp.GetRequiredService<NullTicketTrackingAnalyzer>();
 });
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheck>(
+    HomeworkCentral.Api.Tickets.Preface.TutorSubjectPrefaceCheck.Instance);
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheck>(
+    HomeworkCentral.Api.Tickets.Preface.ModerationConceptPrefaceCheck.Instance);
+builder.Services.AddSingleton<HomeworkCentral.Api.Tickets.Preface.ITicketPrefaceCheckResolver,
+    HomeworkCentral.Api.Tickets.Preface.TicketPrefaceCheckResolver>();
 builder.Services.AddScoped<ITicketRecipientResolver, TicketRecipientResolver>();
 builder.Services.AddScoped<ITicketService, TicketService>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, HomeworkCentral.Api.Assessment.AssessmentQueue>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ILlmClient>(sp =>
     sp.GetRequiredService<HomeworkCentral.Api.Assessment.LlmClient>());
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IVectorDocumentStore, HomeworkCentral.Api.Assessment.VectorDocumentStore>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ModerationChatMonitorNeuralNet>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.TutoringChatMonitorNeuralNet>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IChatMonitoringNeuralModelFactory, HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelFactory>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetCheckpointStore>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetTrainingPromoter>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingQueue, HomeworkCentral.Api.Assessment.NeuralNetTrainingQueue>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetTrainingWorker>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
+builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelWarmupService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAssessmentPipelineService, HomeworkCentral.Api.Assessment.AssessmentPipelineService>();
@@ -195,6 +250,7 @@ builder.Services.AddCors(opts =>
 
 bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
 bool skipDevStartupWarmup = DevStartupWarmup.ShouldSkip(builder.Configuration, builder.Environment);
+bool eagerPersonaProvisioning = DevPersonaEagerProvisioning.IsEnabled(builder.Configuration);
 if (devBypassEnabled)
 {
     builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
@@ -248,7 +304,11 @@ app.MapGet("/healthz", ([FromServices] IDevPersonaProvisioner? personaProvisione
         status = "healthy",
         personasProvisioned = personaProvisioner.ProvisionedCount,
         personasTotal = personaProvisioner.TotalPersonaCount,
-        personasReady = personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
+        // "Ready" means no pending background sweep. In on-demand mode (the default) every
+        // persona is usable immediately — each provisions at its first dev login — so there
+        // is nothing to wait for.
+        personasReady = !eagerPersonaProvisioning
+            || personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
     });
 });
 
@@ -313,9 +373,16 @@ if (!skipDevStartupWarmup)
     foreach (Guid userId in customRoleUserIds)
         await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
 
+    // Custom channels / ticket portals live on the master DB and are filtered by
+    // OwnerAccountClass (real vs developer). Seed both classes here — persona tenant DBs
+    // are not consulted by CustomChannelStore or TicketService.
     await TicketPortalSeedData.SeedAsync(
         seedDb,
         AccountClass.RealAccount,
+        startupLogger);
+    await TicketPortalSeedData.SeedAsync(
+        seedDb,
+        AccountClass.DeveloperAccount,
         startupLogger);
     await HomeworkCentral.Api.Assessment.ScoringReferenceSeedData.SeedAsync(seedDb, startupLogger);
 
@@ -331,8 +398,19 @@ if (!skipDevStartupWarmup)
         await personaProvisioner.InitializeFromExistingDatabasesAsync();
 
         startupLogger.LogInformation(
-            "Essential dev seed complete. Persona databases continue provisioning in the background.");
+            eagerPersonaProvisioning
+                ? "Essential dev seed complete. Persona databases continue provisioning in the background."
+                : "Essential dev seed complete. Persona databases provision on demand at dev login.");
     }
+}
+
+if (builder.Configuration.GetValue<bool>("KubernetesTraining:RunOneQueued"))
+{
+    using IServiceScope kubernetesJobScope = app.Services.CreateScope();
+    HomeworkCentral.Api.Assessment.INeuralNetTrainingService training = kubernetesJobScope.ServiceProvider.GetRequiredService<HomeworkCentral.Api.Assessment.INeuralNetTrainingService>();
+    bool claimed = await training.RunNextSyntheticSessionAsync(CancellationToken.None);
+    app.Logger.LogInformation("Kubernetes training worker completed. Claimed queued session: {Claimed}", claimed);
+    return;
 }
 
 app.Run();

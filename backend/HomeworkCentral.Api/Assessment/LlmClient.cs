@@ -8,39 +8,55 @@ namespace HomeworkCentral.Api.Assessment;
 public class LlmOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:11434";
-    public string ChatModel { get; set; } = "qwen3:1.7b";
+    public string ChatModel { get; set; } = "qwen3:0.6b";
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
     public int TimeoutSeconds { get; set; } = 60;
     public bool Enabled { get; set; } = true;
+    /// <summary>Caps concurrent Ollama chat/embed calls to reduce contention and tail latency.</summary>
+    public int MaxConcurrentRequests { get; set; } = 2;
 }
 
+/// <summary>
+/// Optional local LLM boundary (Ollama). Returns null / empty when disabled, offline, or timed out
+/// so assessment can fall back to deterministic scoring without failing the request pipeline.
+/// </summary>
 public interface ILlmClient
 {
+    /// <summary>Requests JSON chat completion; null means unavailable or non-JSON response.</summary>
     Task<string?> ChatJsonAsync(string systemPrompt, string userPrompt, CancellationToken ct = default);
+
+    /// <summary>Embeds text for vector evidence; empty when unavailable.</summary>
     Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default);
 }
 
 public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> options) : ILlmClient
 {
+    private static readonly TimeSpan OfflineBackoff = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+    private readonly SemaphoreSlim concurrency = new(Math.Clamp(options.Value.MaxConcurrentRequests, 1, 16));
+    private readonly object availabilityGate = new();
+    private DateTime? unavailableUntilUtc;
 
     public async Task<string?> ChatJsonAsync(string systemPrompt, string userPrompt, CancellationToken ct = default)
     {
         LlmOptions opts = options.Value;
-        if (!opts.Enabled)
+        if (!opts.Enabled || IsTemporarilyUnavailable())
             return null;
 
+        await concurrency.WaitAsync(ct);
         try
         {
             OllamaChatRequest body = new()
             {
                 Model = opts.ChatModel,
                 Stream = false,
+                Think = false,
                 Format = "json",
+                Options = new OllamaRuntimeOptions(),
                 Messages =
                 [
                     new OllamaChatMessage { Role = "system", Content = systemPrompt },
@@ -67,16 +83,19 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            MarkTemporarilyUnavailable();
             return null;
         }
+        finally { concurrency.Release(); }
     }
 
     public async Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default)
     {
         LlmOptions opts = options.Value;
-        if (!opts.Enabled || string.IsNullOrWhiteSpace(text))
+        if (!opts.Enabled || string.IsNullOrWhiteSpace(text) || IsTemporarilyUnavailable())
             return [];
 
+        await concurrency.WaitAsync(ct);
         try
         {
             OllamaEmbedRequest body = new()
@@ -104,10 +123,24 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            MarkTemporarilyUnavailable();
             // fall through to hash embed
         }
+        finally { concurrency.Release(); }
 
         return HashEmbed(text);
+    }
+
+    private bool IsTemporarilyUnavailable()
+    {
+        lock (availabilityGate)
+            return unavailableUntilUtc is DateTime until && until > DateTime.UtcNow;
+    }
+
+    private void MarkTemporarilyUnavailable()
+    {
+        lock (availabilityGate)
+            unavailableUntilUtc = DateTime.UtcNow.Add(OfflineBackoff);
     }
 
     /// <summary>Deterministic fallback embedding when the LLM service is offline.</summary>
@@ -130,8 +163,22 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
     {
         public string Model { get; set; } = string.Empty;
         public bool Stream { get; set; }
+        public bool Think { get; set; }
         public string Format { get; set; } = "json";
+        public OllamaRuntimeOptions Options { get; set; } = new();
         public List<OllamaChatMessage> Messages { get; set; } = [];
+    }
+
+    private sealed class OllamaRuntimeOptions
+    {
+        [JsonPropertyName("temperature")]
+        public double Temperature { get; set; } = 0;
+
+        [JsonPropertyName("num_ctx")]
+        public int ContextTokens { get; set; } = 2048;
+
+        [JsonPropertyName("num_predict")]
+        public int MaxOutputTokens { get; set; } = 256;
     }
 
     private sealed class OllamaChatMessage

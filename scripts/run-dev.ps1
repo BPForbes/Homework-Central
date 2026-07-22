@@ -55,8 +55,8 @@ development migrations and seeds. Unset it after pulling migrations/catalog chan
 or after resetting the local database.
 
 After startup (each server opens in its own terminal window):
-  Frontend  http://localhost:5173
-  API       http://localhost:5000
+  Frontend  http://localhost:5173   (Vite HMR)
+  API       http://localhost:5000   (dotnet watch by default; set HC_API_WATCH=0 to disable)
   Health    http://localhost:5000/healthz
 
 Stop:
@@ -386,6 +386,19 @@ function Start-FCaptcha {
     Ensure-DevFCaptchaRunning -Port $port
 }
 
+function Start-ClamAv {
+    if (-not (Test-DevClamAvOptedIn)) {
+        Write-Step 'Skipping ClamAV (set HC_ENABLE_CLAMAV=1 to scan uploads; scans fail open without it)'
+        return
+    }
+
+    Write-Step "Starting ClamAV (Docker) on localhost:$($script:DevClamAvHostPort)"
+
+    Assert-DockerRunning
+
+    Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
+}
+
 function Build-PostgresHostCheck {
     dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
@@ -563,6 +576,11 @@ function Start-DevStack([hashtable]$EnvValues) {
             $fcaptchaPort = $script:DevFCaptchaHostPort
         }
         Write-Host "  FCaptcha: localhost:$fcaptchaPort (Docker; stops when both terminals are closed)"
+        if (Test-DevClamAvOptedIn) {
+            Write-Host "  ClamAV:   localhost:$($script:DevClamAvHostPort) (Docker; upload scanning, fail-open while loading)"
+        } else {
+            Write-Host '  ClamAV:   off (uploads scan as NotScanned; set HC_ENABLE_CLAMAV=1 to enable)'
+        }
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'
@@ -579,8 +597,9 @@ function Start-RunPhase([hashtable]$EnvValues) {
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
         Start-FCaptcha -EnvValues $EnvValues
+        Start-ClamAv
     } else {
-        Write-Step 'Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / -SkipDocker)'
+        Write-Step 'Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / -SkipDocker)'
     }
 
     Start-DevStack -EnvValues $EnvValues

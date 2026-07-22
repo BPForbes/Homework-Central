@@ -4,6 +4,7 @@ import type {
   Ticket,
   TicketAnswers,
   TicketAnalyzeResult,
+  TicketMessageScore,
   TicketPortalConfig,
   UpdateTicketPortalConfigRequest,
   UpsertTicketWatchRequest,
@@ -46,4 +47,7 @@ export const ticketsApi = {
 
   approveDecision: (ticketId: string, decision: string, reason?: string) =>
     ticketsApiClient.post<Ticket>(`/${ticketId}/approve-decision`, { decision, reason }),
+
+  approveScoreTraining: (ticketId: string, scoreEventId: string) =>
+    ticketsApiClient.post<TicketMessageScore>(`/${ticketId}/scores/${scoreEventId}/approve-training`),
 }
