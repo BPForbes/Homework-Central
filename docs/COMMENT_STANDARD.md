@@ -38,6 +38,7 @@ constraint, or risk that is not obvious from the code alone.
 |---|---|
 | Explain the project | Document Homework Central behavior, decisions, and invariants; skip language tutorials. |
 | Prefer readable code | Rename, simplify, or decompose before adding comments. |
+| Prefer pattern matching | Prefer `switch` expressions and patterns over large `if` / `else if` chains for closed-set decisions. |
 | Prefer naming over comments | A precise name is stronger than a sentence explaining an imprecise name. |
 | Document why and constraints | Comments should explain policy, risk, invariants, or non-obvious tradeoffs. |
 | Keep comments current | A stale comment is a defect. Update comments with the code they describe. |
@@ -52,17 +53,19 @@ Before approving or merging changes, reviewers must check:
 
 1. **Names first** — confusing names are fixed before comments are added.
 2. **Explicit C# locals** — C# local variables use explicit types; `var` is not allowed.
-3. **Comment value** — comments explain project intent, invariants, trust boundaries,
+3. **Pattern matching** — closed-set decisions use `switch` expressions/patterns
+   instead of large `if` / `else if` chains when branches are pure mappings.
+4. **Comment value** — comments explain project intent, invariants, trust boundaries,
    or operational behavior.
-4. **No process language** — comments and docs do not reference AI, prompts, branch
+5. **No process language** — comments and docs do not reference AI, prompts, branch
    state, personal authorship, or implementation chronology.
-5. **Complexity thresholds** — functions exceeding warning bands are reviewed for
+6. **Complexity thresholds** — functions exceeding warning bands are reviewed for
    simplification; functions exceeding hard limits are refactored.
-6. **Canonical docs** — user-facing or operator-facing knowledge is added to the
+7. **Canonical docs** — user-facing or operator-facing knowledge is added to the
    most relevant existing Markdown file.
-7. **Cross-references** — source comments point to stable docs only when the code
+8. **Cross-references** — source comments point to stable docs only when the code
    cannot carry the full rationale safely.
-8. **Tests as documentation** — behavior encoded in comments or Markdown has
+9. **Tests as documentation** — behavior encoded in comments or Markdown has
    corresponding tests when it is executable behavior.
 
 ## Documentation decision guide
@@ -304,6 +307,74 @@ Numeric types must match domain meaning:
 Do not hide numeric unit conversions in comments. Encode the unit in the type or
 name.
 
+## Prefer pattern matching over large if blocks
+
+Prefer C# pattern matching (`switch` expressions, `switch` statements, property
+patterns, relational patterns, and list patterns) when control flow is driven by
+a discriminated value, type shape, or small set of mutually exclusive cases.
+
+Prefer:
+
+```csharp
+string previewKind = contentType switch
+{
+    { Length: > 0 } when contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+        => "image",
+    "application/pdf" => "pdf",
+    "text/plain" or "text/markdown" => "text",
+    _ => "download",
+};
+```
+
+```csharp
+MalwareScanResult scanStatus = clamResult.Result switch
+{
+    ClamScanResults.VirusDetected => MalwareScanResult.Infected,
+    ClamScanResults.Clean => MalwareScanResult.Clean,
+    ClamScanResults.Error => MalwareScanResult.NotScanned,
+    _ => MalwareScanResult.NotScanned,
+};
+```
+
+Avoid expanding the same decision into nested or chained `if` / `else if` blocks
+when each branch is a pure mapping or a short validation:
+
+```csharp
+string previewKind;
+if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+{
+    previewKind = "image";
+}
+else if (contentType == "application/pdf")
+{
+    previewKind = "pdf";
+}
+else if (contentType == "text/plain" || contentType == "text/markdown")
+{
+    previewKind = "text";
+}
+else
+{
+    previewKind = "download";
+}
+```
+
+Keep ordinary `if` statements when:
+
+- There is a single guard or early return.
+- Branches perform materially different side effects that read better sequentially.
+- Pattern matching would force awkward temporary variables or obscure ordering.
+- The condition is a complex authorization or transaction invariant that needs an
+  intent comment next to the predicate.
+
+Exhaustive `switch` expressions are preferred for intake question types, scan
+statuses, account classes, tracking modes, and similar closed sets. Add a
+default arm only when the domain set is intentionally open, and document why.
+
+TypeScript/React code should follow the same preference: use discriminated
+unions and `switch` on `kind` / `type` fields instead of long `if`/`else if`
+chains when rendering or validating variant payloads.
+
 ## Function readability and complexity
 
 Readable functions have one clear purpose, a small number of inputs, shallow
@@ -317,6 +388,7 @@ Reviewers should evaluate:
 - Are authorization, validation, persistence, network calls, and response mapping
   mixed together?
 - Are there multiple levels of nested branching?
+- Would pattern matching replace a large `if` / `else if` chain?
 - Are boolean expressions readable without a truth table?
 - Do names make comments unnecessary?
 - Does the function expose or hide side effects?
@@ -902,6 +974,8 @@ Required behavior:
 - Update the canonical Markdown file instead of creating duplicate docs.
 - Preserve user changes and unrelated working-tree changes.
 - Use explicit C# local types; do not introduce `var`.
+- Prefer pattern matching over large `if` / `else if` chains for closed-set
+  decisions (intake types, scan statuses, account classes, and similar).
 - Avoid comments or docs that mention AI, prompts, generated status, branch
   comparisons, or personal authorship.
 - Prefer project terms over generic placeholders.
@@ -1050,6 +1124,7 @@ Use this checklist before submitting or approving a change:
 
 - [ ] Names describe Homework Central domain behavior accurately.
 - [ ] C# locals use explicit types; no `var` appears in hand-authored code.
+- [ ] Closed-set decisions use pattern matching instead of large `if` chains.
 - [ ] Functions stay below hard complexity limits or have an approved exception.
 - [ ] Warning-band complexity has been considered for decomposition.
 - [ ] Comments explain project-specific why, constraints, or risks.
