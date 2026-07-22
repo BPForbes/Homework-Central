@@ -123,11 +123,9 @@ public sealed class TicketService(
     }
 
     /// <summary>
-    /// Opens a ticket by validating the portal intake, creating the private chat
-    /// channel, applying staff and opener access, creating optional watches,
-    /// sending inbox notifications, and refreshing chat navigation. See
-    /// docs/tickets-assessment.md for the portal-to-channel-to-watches-to-inbox
-    /// lifecycle.
+    /// Validates portal intake and persists the private ticket channel, watches,
+    /// inbox notifications, and navigation refresh for a new ticket. See
+    /// docs/tickets-assessment.md for the open-ticket lifecycle.
     /// </summary>
     public async Task<TicketDto> OpenTicketAsync(
         string portalRoomId,
