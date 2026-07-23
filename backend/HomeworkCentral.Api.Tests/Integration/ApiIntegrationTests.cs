@@ -218,7 +218,12 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
     SkipReason = "Integration tests require Postgres at TEST_DATABASE_URL.";
   }
 
-  public HttpClient RequireClient() => _client ??= CreateClient();
+  public HttpClient RequireClient()
+  {
+    _client ??= CreateClient();
+    WaitForReady(_client);
+    return _client;
+  }
 
   protected override void ConfigureWebHost(IWebHostBuilder builder)
   {
@@ -235,6 +240,43 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
       services.RemoveAll<IFCaptchaVerifier>();
       services.AddSingleton<IFCaptchaVerifier>(FCaptchaVerifier);
     });
+  }
+
+  /// <summary>
+  /// Migrate/seed now runs in a BackgroundService after listen; wait until /healthz is healthy
+  /// so tests do not race the warmup window.
+  /// </summary>
+  private static void WaitForReady(HttpClient client)
+  {
+    DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+    while (DateTime.UtcNow < deadline)
+    {
+      try
+      {
+        HttpResponseMessage response = client.GetAsync("/healthz").GetAwaiter().GetResult();
+        if (response.IsSuccessStatusCode)
+        {
+          Dictionary<string, object>? body = response.Content
+            .ReadFromJsonAsync<Dictionary<string, object>>()
+            .GetAwaiter()
+            .GetResult();
+          if (body is not null
+              && body.TryGetValue("status", out object? status)
+              && string.Equals(status?.ToString(), "healthy", StringComparison.Ordinal))
+          {
+            return;
+          }
+        }
+      }
+      catch
+      {
+        // Warmup still in progress or host not accepting yet.
+      }
+
+      Thread.Sleep(100);
+    }
+
+    throw new TimeoutException("Timed out waiting for /healthz to report healthy after host start.");
   }
 
   private static bool CanConnectToDatabase(string connectionString)

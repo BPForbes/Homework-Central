@@ -251,6 +251,9 @@ builder.Services.AddCors(opts =>
 bool devBypassEnabled = DevBypass.IsEnabled(builder.Configuration, builder.Environment);
 bool skipDevStartupWarmup = DevStartupWarmup.ShouldSkip(builder.Configuration, builder.Environment);
 bool eagerPersonaProvisioning = DevPersonaEagerProvisioning.IsEnabled(builder.Configuration);
+builder.Services.AddSingleton<IApplicationReadiness, ApplicationReadiness>();
+// Warmup must be a BackgroundService so Kestrel listens before migrate/seed finishes.
+builder.Services.AddHostedService<ApplicationStartupWarmupHostedService>();
 if (devBypassEnabled)
 {
     builder.Services.AddSingleton<IDevPersonaProvisioner, DevPersonaProvisioner>();
@@ -288,28 +291,43 @@ app.UseMiddleware<ScrapingDetectionMiddleware>();
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
 
-// Health probe for Docker / load balancers.
-// [FromServices] is required here: IDevPersonaProvisioner is only registered when the dev
-// bypass is enabled, so without an explicit binding source ASP.NET Core cannot decide
-// whether this optional parameter is a DI service or a request body at endpoint-metadata
-// build time, and throws for every endpoint (not just this one) the first time any request
-// is routed — e.g. in production or any environment where the dev bypass is off.
-app.MapGet("/healthz", ([FromServices] IDevPersonaProvisioner? personaProvisioner) =>
+// Health probe for Docker / load balancers and the Vite BackendGate.
+// [FromServices] is required for IDevPersonaProvisioner: it is only registered when the
+// dev bypass is enabled. Without an explicit binding source, ASP.NET Core cannot decide
+// whether the optional parameter is DI or a request body and fails endpoint metadata build
+// for every route when the bypass is off.
+app.MapGet("/healthz", (
+    [FromServices] IApplicationReadiness readiness,
+    [FromServices] IDevPersonaProvisioner? personaProvisioner) =>
 {
-    if (personaProvisioner is null)
-        return Results.Ok(new { status = "healthy" });
-
-    return Results.Ok(new
+    ApplicationReadyState state = readiness.State;
+    string status = state switch
     {
-        status = "healthy",
-        personasProvisioned = personaProvisioner.ProvisionedCount,
-        personasTotal = personaProvisioner.TotalPersonaCount,
-        // "Ready" means no pending background sweep. In on-demand mode (the default) every
-        // persona is usable immediately — each provisions at its first dev login — so there
-        // is nothing to wait for.
-        personasReady = !eagerPersonaProvisioning
-            || personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
-    });
+        ApplicationReadyState.Ready => "healthy",
+        ApplicationReadyState.Failed => "failed",
+        _ => "starting",
+    };
+
+    object body = personaProvisioner is null
+        ? new { status, ready = state == ApplicationReadyState.Ready, failure = readiness.FailureMessage }
+        : new
+        {
+            status,
+            ready = state == ApplicationReadyState.Ready,
+            failure = readiness.FailureMessage,
+            personasProvisioned = personaProvisioner.ProvisionedCount,
+            personasTotal = personaProvisioner.TotalPersonaCount,
+            // On-demand persona mode has nothing to wait for at boot; eager mode reports
+            // whether the background sweep has finished.
+            personasReady = !eagerPersonaProvisioning
+                || personaProvisioner.ProvisionedCount >= personaProvisioner.TotalPersonaCount,
+        };
+
+    return state switch
+    {
+        ApplicationReadyState.Failed => Results.Json(body, statusCode: StatusCodes.Status503ServiceUnavailable),
+        _ => Results.Ok(body),
+    };
 });
 
 // Localhost-only dev landing routes and linked favicon (see DevAssets.CanonicalFaviconRepoPath).
@@ -319,95 +337,20 @@ if (devBypassEnabled)
     app.MapGet("/favicon.svg", DevRootPage.Favicon);
 }
 
-// Auto-migrate only in Development to avoid blocking production deploys
-// and concurrent startup races. In production, run migrations explicitly.
-if (app.Environment.IsDevelopment())
-{
-    if (skipDevStartupWarmup)
-    {
-        app.Logger.LogWarning(
-            "{Flag}=1: skipping development migrations and seed warmup. "
-            + "Only use this with an already initialized local database.",
-            DevStartupWarmup.SkipEnvVarName);
-    }
-    else
-    {
-        try
-        {
-            await DatabaseStartup.InitializeDevelopmentAsync(app.Services);
-        }
-        catch (Exception ex)
-        {
-            ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
-            ITenantConnectionResolver resolver = app.Services.GetRequiredService<ITenantConnectionResolver>();
-            logger.LogCritical(
-                ex,
-                "Database migration failed for master database '{DatabaseName}'. "
-                + "If you upgraded from the single-database layout, reset the local Docker volume: "
-                + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
-                + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
-                resolver.MasterDatabaseName);
-            throw;
-        }
-    }
-}
-
-if (!skipDevStartupWarmup)
-{
-    using IServiceScope seedScope = app.Services.CreateScope();
-    ITenantConnectionResolver connectionResolver = seedScope.ServiceProvider.GetRequiredService<ITenantConnectionResolver>();
-    AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
-    MasterDbContext masterRegistry = seedScope.ServiceProvider.GetRequiredService<MasterDbContext>();
-    IEffectiveMaskService effectiveMaskService = seedScope.ServiceProvider.GetRequiredService<IEffectiveMaskService>();
-    ILogger<Program> startupLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
-    await AuthorizationSeedData.SeedAsync(seedDb);
-    IRoleMaskService roleMaskService = seedScope.ServiceProvider.GetRequiredService<IRoleMaskService>();
-    await roleMaskService.RebuildAllRoleMasksAsync();
-
-    List<Guid> customRoleUserIds = await seedDb.UserRoles
-        .Where(ur => ur.Role.IsCustom)
-        .Select(ur => ur.UserId)
-        .Distinct()
-        .ToListAsync();
-    foreach (Guid userId in customRoleUserIds)
-        await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
-
-    // Custom channels / ticket portals live on the master DB and are filtered by
-    // OwnerAccountClass (real vs developer). Seed both classes here — persona tenant DBs
-    // are not consulted by CustomChannelStore or TicketService.
-    await TicketPortalSeedData.SeedAsync(
-        seedDb,
-        AccountClass.RealAccount,
-        startupLogger);
-    await TicketPortalSeedData.SeedAsync(
-        seedDb,
-        AccountClass.DeveloperAccount,
-        startupLogger);
-    await HomeworkCentral.Api.Assessment.ScoringReferenceSeedData.SeedAsync(seedDb, startupLogger);
-
-    ICustomChannelStore channelStore = seedScope.ServiceProvider.GetRequiredService<ICustomChannelStore>();
-    await channelStore.RefreshAsync();
-    if (devBypassEnabled)
-    {
-        await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
-        await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
-
-        IDevPersonaProvisioner personaProvisioner =
-            seedScope.ServiceProvider.GetRequiredService<IDevPersonaProvisioner>();
-        await personaProvisioner.InitializeFromExistingDatabasesAsync();
-
-        startupLogger.LogInformation(
-            eagerPersonaProvisioning
-                ? "Essential dev seed complete. Persona databases continue provisioning in the background."
-                : "Essential dev seed complete. Persona databases provision on demand at dev login.");
-    }
-}
-
 if (builder.Configuration.GetValue<bool>("KubernetesTraining:RunOneQueued"))
 {
+    // One-shot worker exits without hosting; warmup must finish inline before training.
+    await ApplicationStartupWarmup.RunAsync(
+        app.Services,
+        app.Environment.IsDevelopment(),
+        skipDevStartupWarmup,
+        devBypassEnabled,
+        eagerPersonaProvisioning);
+    app.Services.GetRequiredService<IApplicationReadiness>().MarkReady();
+
     using IServiceScope kubernetesJobScope = app.Services.CreateScope();
-    HomeworkCentral.Api.Assessment.INeuralNetTrainingService training = kubernetesJobScope.ServiceProvider.GetRequiredService<HomeworkCentral.Api.Assessment.INeuralNetTrainingService>();
+    HomeworkCentral.Api.Assessment.INeuralNetTrainingService training =
+        kubernetesJobScope.ServiceProvider.GetRequiredService<HomeworkCentral.Api.Assessment.INeuralNetTrainingService>();
     bool claimed = await training.RunNextSyntheticSessionAsync(CancellationToken.None);
     app.Logger.LogInformation("Kubernetes training worker completed. Claimed queued session: {Claimed}", claimed);
     return;

@@ -2,15 +2,21 @@ import type { ReactNode } from 'react'
 import { BackendConnectingLoader } from './BackendConnectingLoader'
 import { useBackendConnection } from '../hooks/useBackendConnection'
 
-/** Hides the app until /healthz succeeds (API listening after master DB seed). */
+/** Blocks the shell until /healthz reports ready (migrate/seed finished). */
 export function BackendGate({ children }: { children: ReactNode }) {
-  const { isConnected, error } = useBackendConnection()
+  const { isConnected, phase, error } = useBackendConnection()
 
-  if (error)
+  if (error) {
     return <BackendConnectingLoader errorMessage={error} />
+  }
 
-  if (!isConnected)
-    return <BackendConnectingLoader />
+  if (!isConnected) {
+    const message =
+      phase === 'starting'
+        ? 'Backend is initializing the database…'
+        : 'Waiting for the API to listen…'
+    return <BackendConnectingLoader message={message} />
+  }
 
   return <>{children}</>
 }
