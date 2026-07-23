@@ -13,9 +13,15 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         + "For moderation scenarios, set category to one precise kebab-case concept slug such as payment-solicitation, tip-pressure, staff-impersonation, doxxing, violent-intent, credential-theft, coordinated-brigading, or fabricated-source — not broad labels like spam or harassment. "
         + "Include relevant messages, hard-negative near-misses when useful, unrelated casual distractors, multiple users/roles/channels, and a short thread. Never use real people or data.";
 
-    public async Task<SyntheticThreadScenario?> GenerateAsync(NeuralTrainingMode mode, CancellationToken ct)
+    public Task<SyntheticThreadScenario?> GenerateAsync(NeuralTrainingMode mode, CancellationToken ct) =>
+        GenerateAsync(mode, hints: null, ct);
+
+    public async Task<SyntheticThreadScenario?> GenerateAsync(
+        NeuralTrainingMode mode,
+        IReadOnlyList<string>? hints,
+        CancellationToken ct)
     {
-        string? json = await llm.ChatJsonAsync(ScenarioSystemPrompt, BuildUserPrompt(mode), ct);
+        string? json = await llm.ChatJsonAsync(ScenarioSystemPrompt, BuildUserPrompt(mode, hints), ct);
         if (string.IsNullOrWhiteSpace(json))
             return CreateFallback(mode);
 
@@ -30,12 +36,20 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         }
     }
 
-    private static string BuildUserPrompt(NeuralTrainingMode mode)
+    private static string BuildUserPrompt(NeuralTrainingMode mode, IReadOnlyList<string>? hints)
     {
         string selected = mode == NeuralTrainingMode.Both
             ? "moderation or tutoring"
             : mode.ToString().ToLowerInvariant();
-        return $"Create one {selected} training scenario with 4 to 8 messages.";
+        string prompt = $"Create one {selected} training scenario with 4 to 8 messages.";
+        if (hints is null || hints.Count == 0)
+            return prompt;
+
+        // Balanced prior feedback: short constraints only — do not paste raw scores or over-steer.
+        string joined = string.Join("\n- ", hints.Take(6));
+        return prompt
+            + "\n\nPrior evaluator notes (keep scenario diversity; do not overfit to these):\n- "
+            + joined;
     }
 
     private static SyntheticThreadScenario? ParseScenario(string json)

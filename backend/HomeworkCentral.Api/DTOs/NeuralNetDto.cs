@@ -90,6 +90,25 @@ public sealed class NeuralNetTrainingSessionDto
     public string? FailureReason { get; set; }
     public bool HasReport { get; set; }
     public IReadOnlyList<ChatMonitoringNeuralModelRunDto> ChatMonitoringRuns { get; set; } = [];
+    public NeuralNetTrainingLiveProgressDto? LiveProgress { get; set; }
+}
+
+public sealed class NeuralNetTrainingLiveProgressDto
+{
+    public string Phase { get; set; } = string.Empty;
+    public int TicketsRequested { get; set; }
+    public int TicketsGenerated { get; set; }
+    public int TicketsProcessed { get; set; }
+    public int MessagesProcessed { get; set; }
+    public int ExamplesPersisted { get; set; }
+    public int AuditsCompleted { get; set; }
+    public string? ActiveChatMonitoringKind { get; set; }
+    public string? LatestLlm1Summary { get; set; }
+    public string? LatestLlm2Feedback { get; set; }
+    public string? LatestLossSummary { get; set; }
+    public IReadOnlyList<string> GeneratorHints { get; set; } = [];
+    public IReadOnlyList<string> WeightUpdateFeed { get; set; } = [];
+    public DateTime UpdatedAtUtc { get; set; }
 }
 
 public sealed class ChatMonitoringNeuralModelRunDto

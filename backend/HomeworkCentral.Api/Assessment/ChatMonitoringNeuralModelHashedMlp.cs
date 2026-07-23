@@ -580,8 +580,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 nodeOffset += preActivations[layer].Length;
             }
 
-            int edgeOffset = 0;
-            int biasOffset = 0;
+            // Parameter indices must match BuildTopology: for each target, all weights then bias.
+            int parameterCursor = 0;
             for (int layer = 0; layer < weights.Length; layer++)
             {
                 int sources = layerWidths[layer];
@@ -590,13 +590,15 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 for (int target = 0; target < targets; target++)
                 {
                     for (int sourceIndex = 0; sourceIndex < sources; sourceIndex++)
-                        edgeContributions.Add(new SparseValue(edgeOffset + target * sources + sourceIndex,
+                    {
+                        int parameterIndex = parameterCursor++;
+                        edgeContributions.Add(new SparseValue(
+                            parameterIndex,
                             NeuralNetFinite.OrZero(source[sourceIndex] * weights[layer][target * sources + sourceIndex])));
-                    biasContributions.Add(new SparseValue(biasOffset + target, NeuralNetFinite.OrZero(biases[layer][target])));
-                }
+                    }
 
-                edgeOffset += targets * sources;
-                biasOffset += targets;
+                    biasContributions.Add(new SparseValue(parameterCursor++, NeuralNetFinite.OrZero(biases[layer][target])));
+                }
             }
 
             float confidence = Math.Clamp(MathF.Abs(activations[^1][0] - .5f) * 2f, .05f, .99f);

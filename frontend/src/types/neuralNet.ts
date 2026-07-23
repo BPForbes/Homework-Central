@@ -48,6 +48,23 @@ export interface NeuralNetVisualizer {
   modelVersion: string
 }
 
+export interface NeuralNetTrainingLiveProgress {
+  phase: string
+  ticketsRequested: number
+  ticketsGenerated: number
+  ticketsProcessed: number
+  messagesProcessed: number
+  examplesPersisted: number
+  auditsCompleted: number
+  activeChatMonitoringKind?: string | null
+  latestLlm1Summary?: string | null
+  latestLlm2Feedback?: string | null
+  latestLossSummary?: string | null
+  generatorHints: string[]
+  weightUpdateFeed: string[]
+  updatedAtUtc: string
+}
+
 export interface NeuralNetTrainingSession {
   sessionId: string
   requestedTicketCount: number
@@ -60,6 +77,7 @@ export interface NeuralNetTrainingSession {
   failureReason?: string
   hasReport: boolean
   chatMonitoringRuns: ChatMonitoringNeuralModelRun[]
+  liveProgress?: NeuralNetTrainingLiveProgress | null
 }
 
 export type NeuralTrainingMode = 'Both' | 'Moderation' | 'Tutoring'
