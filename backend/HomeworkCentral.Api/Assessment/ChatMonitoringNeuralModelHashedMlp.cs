@@ -175,9 +175,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 ClearGradients(weightGrads, biasGrads);
                 float evidenceLossSum = 0, relevanceLossSum = 0, categoryLossSum = 0;
                 float evidenceProbSum = 0, relevanceProbSum = 0, evidenceLogitSum = 0, relevanceLogitSum = 0;
-                float maxAbsGradient = 0;
-                float minNonZeroAbsGradient = float.MaxValue;
-                double gradSqSum = 0;
+                GradientMagnitudeTracker gradientMagnitudes = new();
                 float[][] inputGradients = new float[n][];
 
                 for (int i = 0; i < n; i++)
@@ -193,8 +191,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     relevanceLossSum += BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
                     categoryLossSum += CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
                     ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
-                    inputGradients[i] = AccumulateGradientsUnlocked(cache, targets, weightGrads, biasGrads,
-                        ref maxAbsGradient, ref minNonZeroAbsGradient, ref gradSqSum);
+                    inputGradients[i] = AccumulateGradientsUnlocked(
+                        cache, targets, weightGrads, biasGrads, gradientMagnitudes);
                 }
 
                 // Chain rule into stage-1 before stage-2 θ update (same forward activations).
@@ -215,12 +213,11 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 ApplyMomentumUpdateUnlocked(weightGrads, biasGrads, n);
                 float[]? parameterAfter = captureFull ? ReadParameters() : null;
                 float avgGradScale = 1f / n;
-                float gradientL2 = NeuralNetFinite.OrZero(MathF.Sqrt((float)(gradSqSum * avgGradScale * avgGradScale)));
-                // Sentinel was float.MaxValue when no non-zero gradient was tracked.
-                if (minNonZeroAbsGradient >= float.MaxValue)
-                    minNonZeroAbsGradient = 0;
-                maxAbsGradient = NeuralNetFinite.OrZero(maxAbsGradient * avgGradScale);
-                minNonZeroAbsGradient = NeuralNetFinite.OrZero(minNonZeroAbsGradient * avgGradScale);
+                float gradientL2 = NeuralNetFinite.OrZero(
+                    MathF.Sqrt((float)(gradientMagnitudes.GradSqSum * avgGradScale * avgGradScale)));
+                float maxAbsGradient = NeuralNetFinite.OrZero(gradientMagnitudes.MaxAbs * avgGradScale);
+                float minNonZeroAbsGradient = NeuralNetFinite.OrZero(
+                    gradientMagnitudes.ResolveMinNonZero() * avgGradScale);
 
                 IReadOnlyList<ParameterDelta> deltas = captureFull
                     ? BuildParameterDeltas(parameterBefore!, parameterAfter!)
@@ -423,9 +420,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         ChatMonitoringNeuralModelTargets targets,
         float[][] weightGrads,
         float[][] biasGrads,
-        ref float maxAbsGradient,
-        ref float minNonZeroAbsGradient,
-        ref double gradSqSum)
+        GradientMagnitudeTracker gradientMagnitudes)
     {
         float[] output = cache.Activations[^1];
         float[][] activationGradients = new float[cache.Activations.Length][];
@@ -453,13 +448,13 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 if (hiddenLayer)
                     gradient *= LeakyReluDerivative(cache.PreActivations[layer][target]);
 
-                TrackGradientMagnitude(gradient, ref maxAbsGradient, ref minNonZeroAbsGradient, ref gradSqSum);
+                gradientMagnitudes.Track(gradient);
                 biasGrads[layer][target] += gradient;
                 for (int sourceIndex = 0; sourceIndex < sources; sourceIndex++)
                 {
                     int weightIndex = target * sources + sourceIndex;
                     float weightGradient = gradient * source[sourceIndex];
-                    TrackGradientMagnitude(weightGradient, ref maxAbsGradient, ref minNonZeroAbsGradient, ref gradSqSum);
+                    gradientMagnitudes.Track(weightGradient);
                     weightGrads[layer][weightIndex] += weightGradient;
                     nextGradient[sourceIndex] += gradient * weights[layer][weightIndex];
                 }
@@ -495,14 +490,27 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         }
     }
 
-    private static void TrackGradientMagnitude(float gradient, ref float maxAbs, ref float minNonZero, ref double gradSqSum)
+    /// <summary>Tracks max/min non-zero gradient magnitudes and squared sum for replay health.</summary>
+    private sealed class GradientMagnitudeTracker
     {
-        if (!float.IsFinite(gradient))
-            return;
-        float abs = MathF.Abs(gradient);
-        if (abs > maxAbs) maxAbs = abs;
-        if (abs > 0f && abs < minNonZero) minNonZero = abs;
-        gradSqSum += gradient * gradient;
+        public float MaxAbs { get; private set; }
+        public double GradSqSum { get; private set; }
+        private float _minNonZero = float.MaxValue;
+
+        public void Track(float gradient)
+        {
+            if (!float.IsFinite(gradient))
+                return;
+
+            float abs = MathF.Abs(gradient);
+            if (abs > MaxAbs)
+                MaxAbs = abs;
+            if (abs > 0f && abs < _minNonZero)
+                _minNonZero = abs;
+            GradSqSum += gradient * gradient;
+        }
+
+        public float ResolveMinNonZero() => _minNonZero >= float.MaxValue ? 0f : _minNonZero;
     }
 
     private static ForwardPropagationTrace AverageOutputForward(float evidenceLogit, float relevanceLogit, float evidenceProbability, float relevanceProbability)
