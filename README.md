@@ -80,7 +80,7 @@ After a successful run, these services are available:
 |---------|-----|-------------|
 | **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
 | **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
-| **Health check** | http://localhost:5000/healthz | API readiness probe |
+| **Health check** | http://localhost:5000/healthz | Listen probe (`starting` while migrate/seed runs, then `healthy`) |
 | **Postgres** | `localhost:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |
 
@@ -193,8 +193,9 @@ Architecture, trust boundaries, and engineering standards live under
 ### Fast repeat starts
 
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
-can bind without a duplicate build. It also starts the frontend before the API, allowing Vite to
-bind to port 5173 while the API completes its startup work.
+can bind without a duplicate build. It also starts the frontend before the API. The API exposes
+`/healthz` as soon as Kestrel listens (`status: starting` during migrate/seed, then `healthy`),
+so the Vite BackendGate can wait without flooding the proxy with connection-refused errors.
 
 After one successful initialization of the local database, you can skip development migrations
 and seed warmup on repeat starts:
