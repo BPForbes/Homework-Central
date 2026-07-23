@@ -914,26 +914,18 @@ public IReadOnlyList<IChatMonitoringNeuralModel> Resolve(NeuralTrainingMode mode
 
 `backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs`
 builds the stage-2 scorer from the shared 86-feature encoder and per-monitor
-hidden widths:
+hidden widths. Dense linear algebra lives in `NeuralNetwork` / `Node`
+(Math.NET Numerics matrices for `Wx+b`, outer-product `∂C/∂W`, and `Wᵀδ`):
 
 ```csharp
-protected ChatMonitoringNeuralModelHashedMlp(
-    NeuralModelKindChatMonitoring kind,
-    string modelVersion,
-    int firstHidden,
-    int secondHidden,
-    int thirdHidden,
-    int fourthHidden,
-    IReadOnlyList<string> layerLabels,
-    IReadOnlyList<string> categoryLabels,
-    int seed)
-{
-    Kind = kind;
-    ModelVersion = modelVersion;
-    this.layerLabels = layerLabels.ToArray();
-    this.categoryLabels = categoryLabels.ToArray();
-    int outputCount = 2 + this.categoryLabels.Length;
-    layerWidths = [ChatMonitoringFeatureEncoder.FeatureCount, firstHidden, secondHidden, thirdHidden, fourthHidden, outputCount];
+network = new NeuralNetwork(
+    widths,
+    layerLabels,
+    activations,
+    categoryLabels,
+    seed,
+    InputFeatureLabel);
+topology = network.BuildTopologySnapshot(ModelVersion);
 ```
 
 `backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs` selects
@@ -1143,7 +1135,9 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/TicketReviewerEvaluation.cs](../backend/HomeworkCentral.Api/Assessment/TicketReviewerEvaluation.cs) | Reviewer parse and policy types. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs) | Chat-monitor model inputs, targets, predictions, traces, telemetry, and factory contracts. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs) | Moderation/tutoring model selection and training-mode resolution. |
-| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs) | CPU hashed-MLP scorer, cascade wrappers, SGD, telemetry, topology, and parameter snapshots. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs) | Math.NET Numerics dense network engine (`DenseLayer`, forward/backprop, momentum SGD, parameter flatten). |
+| [backend/HomeworkCentral.Api/Assessment/Node.cs](../backend/HomeworkCentral.Api/Assessment/Node.cs) | Topology node identity/labels for replay and visualizer mapping. |
+| [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs) | CPU hashed-MLP scorer + cascade wrappers over `NeuralNetwork`; telemetry, topology, and parameter snapshots. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs) | Shared 86-float feature encoder and vector embedding helper. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringTicketContext.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringTicketContext.cs) | Requirement construction, moderation/tutoring routing, and category index mapping. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringCategoryTaxonomy.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringCategoryTaxonomy.cs) | Moderation and tutoring category vocabularies. |
