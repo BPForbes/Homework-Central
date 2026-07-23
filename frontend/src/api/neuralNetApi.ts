@@ -14,5 +14,6 @@ export const neuralNetApi = {
   startTraining: (request: StartNeuralNetTrainingRequest) => api.post<NeuralNetTrainingSession>('/training', request),
   listTrainingSessions: () => api.get<NeuralNetTrainingSession[]>('/training'),
   removeTrainingSession: (sessionId: string) => api.delete(`/training/${sessionId}`),
+  cancelTrainingSession: (sessionId: string) => api.post(`/training/${sessionId}/cancel`),
   downloadTrainingReport: (sessionId: string, chatMonitoringKind?: NeuralModelKindChatMonitoring) => api.get(`/training/${sessionId}/report`, { params: chatMonitoringKind ? { chatMonitoringKind } : undefined, responseType: 'blob' }),
 }

@@ -74,6 +74,7 @@ export interface NeuralNetTrainingSession {
   sessionId: string
   requestedTicketCount: number
   maxPassesPerTicket: number
+  continuous?: boolean
   mode: NeuralTrainingMode
   status: string
   createdAtUtc: string
@@ -95,4 +96,9 @@ export interface ChatMonitoringNeuralModelRun {
   hasPromotionReplay: boolean
   failureReason?: string
 }
-export interface StartNeuralNetTrainingRequest { ticketCount: number; maxPassesPerTicket: number; mode: NeuralTrainingMode }
+export interface StartNeuralNetTrainingRequest {
+  ticketCount: number
+  maxPassesPerTicket: number
+  mode: NeuralTrainingMode
+  continuous?: boolean
+}

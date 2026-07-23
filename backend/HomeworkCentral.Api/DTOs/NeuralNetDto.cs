@@ -75,6 +75,12 @@ public sealed class StartNeuralNetTrainingRequest
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public NeuralTrainingMode Mode { get; set; } = NeuralTrainingMode.Both;
+
+    /// <summary>
+    /// When true, train one ticket / one message at a time until the session is cancelled.
+    /// <see cref="TicketCount"/> is ignored; stored as RequestedTicketCount = 0.
+    /// </summary>
+    public bool Continuous { get; set; }
 }
 
 public sealed class NeuralNetTrainingSessionDto
@@ -82,6 +88,8 @@ public sealed class NeuralNetTrainingSessionDto
     public Guid SessionId { get; set; }
     public int RequestedTicketCount { get; set; }
     public int MaxPassesPerTicket { get; set; }
+    /// <summary>True when RequestedTicketCount is 0 (train-until-cancelled mode).</summary>
+    public bool Continuous { get; set; }
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public NeuralTrainingMode Mode { get; set; }
     public string Status { get; set; } = string.Empty;
