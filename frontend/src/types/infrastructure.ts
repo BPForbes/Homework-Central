@@ -47,6 +47,7 @@ export interface CustomChannel {
   updatedAtUtc: string
   accessRules: CustomChannelAccessRule[]
   canEditInfo: boolean
+  isPreconfigured: boolean
 }
 
 export interface ClaimableCustomRole {
