@@ -62,6 +62,11 @@ export interface NeuralNetTrainingLiveProgress {
   latestLossSummary?: string | null
   generatorHints: string[]
   weightUpdateFeed: string[]
+  pathTone?: string | null
+  layerWidths?: number[]
+  layerLabels?: string[]
+  activeNodeIndexes?: number[]
+  activeEdgeParameterIndexes?: number[]
   updatedAtUtc: string
 }
 

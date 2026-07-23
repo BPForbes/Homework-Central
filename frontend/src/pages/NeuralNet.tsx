@@ -5,6 +5,7 @@ import { faBrain, faCheck, faDatabase, faDiagramProject, faFileImport, faPlay, f
 import { neuralNetApi } from '../api/neuralNetApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { LoadingBars } from '../components/LoadingBars'
+import { NeuralNetMesh3D, edgeKeysFromDenseParameterIndexes, type MeshPathTone, type NeuralMeshFrame } from '../components/neuralNet/NeuralNetMesh3D'
 import { ReplayViewer } from '../components/neuralNet/ReplayViewer'
 import type { NeuralNetReplay } from '../types/neuralNetReplay'
 import { parseReplayImport } from '../utils/neuralNetReplay'
@@ -109,25 +110,12 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
     nodeCount: visualizer.inputNodes + visualizer.hiddenNodes + 2,
   }]
   const [selectedKind, setSelectedKind] = useState<NeuralModelKindChatMonitoring>(models[0].chatMonitoringKind)
-  const [selected, setSelected] = useState('Evidence')
   const model = models.find(item => item.chatMonitoringKind === selectedKind) ?? models[0]
   const meta = cascadeMeta(model)
   const layerWidths = meta.stage2
   const layerLabels = model.layerLabels.length === layerWidths.length
     ? model.layerLabels
     : layerWidths.map((_, index) => (index === 0 ? 'input' : index === layerWidths.length - 1 ? 'output' : `hidden-${index}`))
-  // Full stage-2 map: every node, fixed open spacing, curve-fit edges.
-  const shownPerLayer = layerWidths.map((width) => width)
-  const maxShown = Math.max(1, ...shownPerLayer)
-  const layerGap = Math.max(190, Math.min(280, 1260 / Math.max(1, layerWidths.length - 1)))
-  const nodeGap = 36
-  const viewWidth = Math.max(1100, 140 + (layerWidths.length - 1) * layerGap + 140)
-  const viewHeight = Math.max(520, 80 + (maxShown - 1) * nodeGap + 100)
-  const layerX = (index: number) => 90 + index * layerGap
-  const nodeY = (_layerSize: number, nodeIndex: number) => 70 + nodeIndex * nodeGap
-  const outputLabels = layerWidths.length
-    ? ['Evidence', 'Relevance', ...Array.from({ length: Math.max(0, layerWidths[layerWidths.length - 1] - 2) }, (_, i) => `cat ${i + 1}`)]
-    : visualizer.outputNodes
 
   return (
     <section className="sm-panel neural-graph-panel">
@@ -148,7 +136,7 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
               key={item.chatMonitoringKind}
               type="button"
               className={item.chatMonitoringKind === model.chatMonitoringKind ? 'btn-primary' : 'btn-secondary'}
-              onClick={() => { setSelectedKind(item.chatMonitoringKind); setSelected('Evidence') }}
+              onClick={() => setSelectedKind(item.chatMonitoringKind)}
             >
               {item.chatMonitoringKind} cascade · {itemMeta.categories} classes
             </button>
@@ -183,83 +171,23 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
       </dl>
 
       <p className="dashboard-hint neural-cascade-detail-label">
-        Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Every node is drawn with open spacing
-        and cubic curve-fit edges; labels stay off until a node is selected.
+        Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Explore the full architecture in the
+        scaled 3D mesh (drag to orbit, scroll to zoom).
       </p>
-      <div className="neural-graph-scroll">
-        <svg
-          className="neural-graph neural-graph--replay neural-graph--cascade-detail"
-          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
-          width={viewWidth}
-          height={viewHeight}
-          role="group"
-          aria-label={`${model.chatMonitoringKind} stage-2 scorer`}
-        >
-          {layerLabels.map((label, layerIndex) => (
-            <text key={`label-${layerIndex}-${label}`} x={layerX(layerIndex)} y="28" textAnchor="middle" className="neural-layer-label">
-              {label.replace(/-/g, ' ')}
-            </text>
-          ))}
-          {layerWidths.slice(0, -1).flatMap((_, layerIndex) =>
-            Array.from({ length: shownPerLayer[layerIndex] }, (_, source) =>
-              Array.from({ length: shownPerLayer[layerIndex + 1] }, (_, target) => (
-                <path
-                  key={`e-${layerIndex}-${source}-${target}`}
-                  d={curvedCascadeEdge(
-                    layerX(layerIndex),
-                    nodeY(shownPerLayer[layerIndex], source),
-                    layerX(layerIndex + 1),
-                    nodeY(shownPerLayer[layerIndex + 1], target),
-                    source * shownPerLayer[layerIndex + 1] + target + layerIndex * 17,
-                  )}
-                  fill="none"
-                  className="neural-edge"
-                  style={{ opacity: 0.08 }}
-                />
-              )),
-            ),
-          )}
-          {layerWidths.flatMap((width, layerIndex) => {
-            const shown = shownPerLayer[layerIndex]
-            return Array.from({ length: shown }, (_, nodeIndex) => {
-              const isOutput = layerIndex === layerWidths.length - 1
-              const label = isOutput
-                ? (outputLabels[nodeIndex] ?? `out ${nodeIndex}`)
-                : `${layerLabels[layerIndex]} ${nodeIndex + 1}`
-              const x = layerX(layerIndex)
-              const y = nodeY(shown, nodeIndex)
-              const isSelected = selected === label
-              return (
-                <g
-                  key={`${layerIndex}-${nodeIndex}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={label}
-                  onClick={() => setSelected(label)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setSelected(label)
-                    }
-                  }}
-                  className="neural-node-group"
-                >
-                  {isOutput
-                    ? <rect x={x - 18} y={y - 12} width="36" height="24" rx="8" className={`neural-node ${isSelected ? 'neural-node--selected' : ''}`} />
-                    : <circle cx={x} cy={y} r={layerIndex === 0 ? 8 : 11} className={`neural-node ${isSelected ? 'neural-node--selected' : ''}`} />}
-                  {isSelected && (
-                    <text x={x} y={y + 28} textAnchor="middle" className="neural-node-text">{label}</text>
-                  )}
-                  <title>{label}</title>
-                </g>
-              )
-            })
-          })}
-        </svg>
-      </div>
+      <NeuralNetMesh3D
+        className="neural-mesh3d--replay"
+        title={`${model.chatMonitoringKind} stage-2 · 3D mesh`}
+        layerWidths={layerWidths}
+        layerLabels={layerLabels}
+        frame={{
+          pathTone: 'idle',
+          activeNodeIndexes: [],
+          activeEdgeKeys: [],
+        }}
+      />
       <p className="dashboard-hint">
-        <strong>Selected:</strong> {selected}. {model.chatMonitoringKind} stage-2 · {model.nodeCount} nodes ·
-        cascade {meta.composition} with chain-rule updates into {meta.role}.
+        {model.chatMonitoringKind} stage-2 · {model.nodeCount} nodes · cascade {meta.composition} with chain-rule
+        updates into {meta.role}.
         {replay ? ' A local replay import is also loaded below when schema V2 is present.' : ''}
       </p>
     </section>
@@ -270,8 +198,36 @@ function liveToneClass(phase: string): string {
   const lower = phase.toLowerCase()
   if (lower.includes('backprop') || lower.includes('loss') || lower.includes('ccel')) return 'neural-live-tone--backprop'
   if (lower.includes('llm2') || lower.includes('audit') || lower.includes('feedback')) return 'neural-live-tone--reeval'
-  if (lower.includes('forward') || lower.includes('llm1') || lower.includes('generat')) return 'neural-live-tone--forward'
+  if (lower.includes('forward') || lower.includes('llm1') || lower.includes('generat') || lower.includes('accepted')) {
+    return 'neural-live-tone--forward'
+  }
   return 'neural-live-tone--idle'
+}
+
+function meshToneFromProgress(progress: NeuralNetTrainingLiveProgress): MeshPathTone {
+  const tone = (progress.pathTone ?? '').toLowerCase()
+  if (tone === 'forward' || tone === 'reeval' || tone === 'backprop' || tone === 'accepted' || tone === 'revision' || tone === 'idle') {
+    return tone
+  }
+  const phaseClass = liveToneClass(progress.phase)
+  if (phaseClass.endsWith('backprop')) return 'backprop'
+  if (phaseClass.endsWith('reeval')) return 'reeval'
+  if (phaseClass.endsWith('forward')) return 'forward'
+  return 'idle'
+}
+
+function liveMeshFrame(progress: NeuralNetTrainingLiveProgress, layerWidths: number[]): NeuralMeshFrame {
+  const pathTone = meshToneFromProgress(progress)
+  const activeNodes = progress.activeNodeIndexes ?? []
+  const edgeKeys = edgeKeysFromDenseParameterIndexes(
+    layerWidths,
+    progress.activeEdgeParameterIndexes ?? [],
+  )
+  return {
+    pathTone,
+    activeNodeIndexes: activeNodes,
+    activeEdgeKeys: edgeKeys,
+  }
 }
 
 function LiveTrainingProgress({
@@ -282,6 +238,15 @@ function LiveTrainingProgress({
   status: string
 }) {
   const tone = liveToneClass(progress.phase)
+  const layerWidths = progress.layerWidths?.length
+    ? progress.layerWidths
+    : progress.activeChatMonitoringKind === 'Tutoring'
+      ? [86, 40, 56, 48, 40, 16]
+      : [86, 48, 72, 64, 56, 103]
+  const layerLabels = progress.layerLabels?.length
+    ? progress.layerLabels
+    : layerWidths.map((_, index) => (index === 0 ? 'input' : index === layerWidths.length - 1 ? 'output' : `hidden-${index}`))
+  const frame = liveMeshFrame(progress, layerWidths)
   return (
     <div className={`neural-live-progress ${tone}`} aria-live="polite">
       <div className="neural-live-progress-header">
@@ -295,6 +260,13 @@ function LiveTrainingProgress({
         Ops · Leaky ReLU · BCE + categorical CE (CCEL) · backprop · momentum SGD
         {progress.latestLossSummary ? ` · ${progress.latestLossSummary}` : ''}
       </p>
+      <NeuralNetMesh3D
+        className="neural-mesh3d--live"
+        title="Live training · 3D neural mesh"
+        layerWidths={layerWidths}
+        layerLabels={layerLabels}
+        frame={frame}
+      />
       <div className="neural-replay-panels neural-replay-panels--live">
         <section className="neural-replay-panel">
           <h4>LLM 1 training data</h4>
@@ -329,48 +301,7 @@ function LiveTrainingProgress({
           )}
         </section>
       </div>
-      <LiveTrainingMiniViz phase={progress.phase} />
     </div>
-  )
-}
-
-function LiveTrainingMiniViz({ phase }: { phase: string }) {
-  const tone = liveToneClass(phase)
-  const widths = [6, 6, 6]
-  const layerX = (index: number) => 36 + index * 140
-  const nodeY = (nodeIndex: number) => 28 + nodeIndex * 28
-  return (
-    <svg className={`neural-live-mini ${tone}`} viewBox="0 0 320 200" role="img" aria-label="Live training network">
-      {widths.slice(0, -1).flatMap((width, layerIndex) =>
-        Array.from({ length: width }, (_, source) =>
-          Array.from({ length: widths[layerIndex + 1] }, (_, target) => (
-            <path
-              key={`e-${layerIndex}-${source}-${target}`}
-              d={curvedCascadeEdge(
-                layerX(layerIndex),
-                nodeY(source),
-                layerX(layerIndex + 1),
-                nodeY(target),
-                source * widths[layerIndex + 1] + target,
-              )}
-              fill="none"
-              className="neural-edge neural-edge--live"
-            />
-          )),
-        ),
-      )}
-      {widths.flatMap((width, layerIndex) =>
-        Array.from({ length: width }, (_, nodeIndex) => (
-          <circle
-            key={`n-${layerIndex}-${nodeIndex}`}
-            cx={layerX(layerIndex)}
-            cy={nodeY(nodeIndex)}
-            r={layerIndex === 0 ? 7 : 9}
-            className="neural-node neural-node--live"
-          />
-        )),
-      )}
-    </svg>
   )
 }
 

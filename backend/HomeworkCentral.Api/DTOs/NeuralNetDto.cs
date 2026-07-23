@@ -109,6 +109,12 @@ public sealed class NeuralNetTrainingLiveProgressDto
     public string? LatestLossSummary { get; set; }
     public IReadOnlyList<string> GeneratorHints { get; set; } = [];
     public IReadOnlyList<string> WeightUpdateFeed { get; set; } = [];
+    /// <summary>forward | reeval | backprop | accepted | revision | idle</summary>
+    public string PathTone { get; set; } = "idle";
+    public IReadOnlyList<int> LayerWidths { get; set; } = [];
+    public IReadOnlyList<string> LayerLabels { get; set; } = [];
+    public IReadOnlyList<int> ActiveNodeIndexes { get; set; } = [];
+    public IReadOnlyList<int> ActiveEdgeParameterIndexes { get; set; } = [];
     public DateTime UpdatedAtUtc { get; set; }
 }
 

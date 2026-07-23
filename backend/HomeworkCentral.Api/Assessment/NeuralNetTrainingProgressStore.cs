@@ -18,6 +18,12 @@ public sealed record NeuralNetTrainingLiveProgress(
     string? LatestLossSummary,
     IReadOnlyList<string> GeneratorHints,
     IReadOnlyList<string> WeightUpdateFeed,
+    /// <summary>forward | reeval | backprop | accepted | revision | idle</summary>
+    string PathTone,
+    IReadOnlyList<int> LayerWidths,
+    IReadOnlyList<string> LayerLabels,
+    IReadOnlyList<int> ActiveNodeIndexes,
+    IReadOnlyList<int> ActiveEdgeParameterIndexes,
     DateTime UpdatedAtUtc);
 
 public interface INeuralNetTrainingProgressStore
