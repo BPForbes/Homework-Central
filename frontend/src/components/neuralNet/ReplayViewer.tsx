@@ -3,6 +3,12 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 import type { NeuralNetReplay, ReplayEdge, ReplayNode } from '../../types/neuralNetReplay'
 import { normalizeReplayPhase, payloadCollectionForPhase } from '../../utils/neuralNetReplay'
+import {
+  NeuralNetMesh3D,
+  edgeKeysFromDenseParameterIndexes,
+  type MeshPathTone,
+  type NeuralMeshFrame,
+} from './NeuralNetMesh3D'
 
 type SparseValue = { index: number; value: number }
 type ForwardPayload = {
@@ -391,6 +397,19 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
   const totalNodeCount = replay.topology.nodes.length
   const totalInputCount = replay.topology.nodes.filter((node) => node.layerId === 'input').length
 
+  const meshLayerWidths = useMemo(
+    () => layerIds.map((layerId) => replay.topology.nodes.filter((node) => node.layerId === layerId).length),
+    [layerIds, replay.topology.nodes],
+  )
+  const meshFrame: NeuralMeshFrame = useMemo(() => {
+    const tone: MeshPathTone = pathTone ?? 'idle'
+    return {
+      pathTone: tone,
+      activeNodeIndexes: [...activeNodeIds],
+      activeEdgeKeys: edgeKeysFromDenseParameterIndexes(meshLayerWidths, activeEdgeParams),
+    }
+  }, [pathTone, activeNodeIds, activeEdgeParams, meshLayerWidths])
+
   return (
     <section className="sm-panel neural-graph-panel">
       <div className="sm-panel-header">
@@ -473,6 +492,13 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
           {lossPayload.totalLoss?.toFixed?.(4) ?? '—'}
         </p>
       )}
+      <NeuralNetMesh3D
+        className="neural-mesh3d--replay"
+        title="Replay · 3D neural mesh"
+        layerWidths={meshLayerWidths}
+        layerLabels={layerIds}
+        frame={meshFrame}
+      />
       <div className="neural-graph-scroll">
         <svg
           className="neural-graph neural-graph--replay"

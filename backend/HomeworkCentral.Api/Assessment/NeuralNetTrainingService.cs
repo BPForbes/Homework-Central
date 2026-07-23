@@ -412,6 +412,7 @@ public sealed class NeuralNetTrainingService(
             AuditsCompleted = progress.AuditsCompleted + 1,
             LatestLlm2Feedback = Truncate($"{audit.Verdict}: {audit.Feedback}", 280),
             GeneratorHints = feedback.Hints.ToList(),
+            PathTone = "reeval",
         });
     }
 
@@ -520,10 +521,14 @@ public sealed class NeuralNetTrainingService(
         run.Status = "Running";
         run.StartedAtUtc = DateTime.UtcNow;
         await PersistAsync(persistenceGate, timings, ct);
+        ChatMonitoringNeuralModelStateSnapshot topologyState = telemetry.GetStateSnapshot();
         PublishProgress(session, progress => progress with
         {
             Phase = $"Training {run.ChatMonitoringKind}",
             ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
+            PathTone = "forward",
+            LayerWidths = topologyState.LayerWidths,
+            LayerLabels = topologyState.LayerLabels,
         });
 
         PersistenceBatch batch = new(db, vectors, persistenceGate, Options.PersistenceBatchSize, timings);
@@ -740,6 +745,16 @@ public sealed class NeuralNetTrainingService(
             messageContext.ResolvedEvaluation.Community,
             null,
             true);
+        PublishProgress(runContext.Session, progress => WithMeshFrame(
+            progress with
+            {
+                Phase = "Forward · accepted",
+                ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
+            },
+            "accepted",
+            runContext.Telemetry,
+            messageContext.InitialInference.Forward,
+            null));
     }
 
     private void QueueSyntheticTrainingExample(
@@ -898,13 +913,23 @@ public sealed class NeuralNetTrainingService(
                     : $"epoch {iteration.Epoch}: loss {totalLoss:F4} · catCE {categoryLoss:F4} · ‖∇‖ {gradNorm:F4} · ReLU/backprop (compact)";
             })
             .ToList();
-        PublishProgress(session, progress => progress with
+        TrainingIterationReplay? lastIteration = trainingTrace.Iterations.LastOrDefault();
+        PublishProgress(session, progress =>
         {
-            Phase = $"Backprop · {run.ChatMonitoringKind}",
-            ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
-            ExamplesPersisted = progress.ExamplesPersisted + items.Count,
-            LatestLossSummary = lossSummary,
-            WeightUpdateFeed = weightFeed,
+            NeuralNetTrainingLiveProgress updated = progress with
+            {
+                Phase = $"Backprop · {run.ChatMonitoringKind}",
+                ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
+                ExamplesPersisted = progress.ExamplesPersisted + items.Count,
+                LatestLossSummary = lossSummary,
+                WeightUpdateFeed = weightFeed,
+            };
+            return WithMeshFrame(
+                updated,
+                "backprop",
+                telemetry,
+                lastIteration?.AfterUpdate ?? lastIteration?.BeforeUpdate,
+                lastIteration?.Backward);
         });
 
         foreach (PendingTrainItem item in items)
@@ -1023,8 +1048,62 @@ public sealed class NeuralNetTrainingService(
                 null,
                 [],
                 [],
+                "idle",
+                [],
+                [],
+                [],
+                [],
                 DateTime.UtcNow);
         progressStore.Upsert(update(current));
+    }
+
+    private static NeuralNetTrainingLiveProgress WithMeshFrame(
+        NeuralNetTrainingLiveProgress progress,
+        string pathTone,
+        IChatMonitoringNeuralModelTelemetry telemetry,
+        ForwardPropagationTrace? forward,
+        BackpropagationTrace? backward)
+    {
+        ChatMonitoringNeuralModelStateSnapshot state = telemetry.GetStateSnapshot();
+        List<int> activeNodes = [];
+        if (forward is not null)
+        {
+            activeNodes = forward.NodeActivations
+                .Where(item => Math.Abs(item.Value) > 1e-6f)
+                .Select(item => item.Index)
+                .Distinct()
+                .Take(480)
+                .ToList();
+        }
+
+        List<int> activeEdges = [];
+        if (backward is not null && backward.WeightGradients.Count > 0)
+        {
+            activeEdges = backward.WeightGradients
+                .Where(item => item.Value != 0f)
+                .OrderByDescending(item => Math.Abs(item.Value))
+                .Select(item => item.Index)
+                .Take(1200)
+                .ToList();
+        }
+        else if (forward is not null)
+        {
+            activeEdges = forward.EdgeContributions
+                .Where(item => Math.Abs(item.Value) > 1e-6f)
+                .OrderByDescending(item => Math.Abs(item.Value))
+                .Select(item => item.Index)
+                .Take(1200)
+                .ToList();
+        }
+
+        return progress with
+        {
+            PathTone = pathTone,
+            LayerWidths = state.LayerWidths,
+            LayerLabels = state.LayerLabels,
+            ActiveNodeIndexes = activeNodes,
+            ActiveEdgeParameterIndexes = activeEdges,
+        };
     }
 
     private sealed record ChatMonitoringRunContext(
@@ -1424,6 +1503,11 @@ public sealed class NeuralNetTrainingService(
                     LatestLossSummary = live.LatestLossSummary,
                     GeneratorHints = live.GeneratorHints,
                     WeightUpdateFeed = live.WeightUpdateFeed,
+                    PathTone = live.PathTone,
+                    LayerWidths = live.LayerWidths,
+                    LayerLabels = live.LayerLabels,
+                    ActiveNodeIndexes = live.ActiveNodeIndexes,
+                    ActiveEdgeParameterIndexes = live.ActiveEdgeParameterIndexes,
                     UpdatedAtUtc = live.UpdatedAtUtc,
                 },
         };
