@@ -14,6 +14,15 @@ public class LlmOptions
     public bool Enabled { get; set; } = true;
     /// <summary>Caps concurrent Ollama chat/embed calls to reduce contention and tail latency.</summary>
     public int MaxConcurrentRequests { get; set; } = 2;
+
+    /// <summary>Ollama <c>num_ctx</c> for chat completions.</summary>
+    public int ContextTokens { get; set; } = 4096;
+
+    /// <summary>
+    /// Ollama <c>num_predict</c> for chat completions. Scenario JSON needs well above 256
+    /// tokens; a low cap truncates output and causes parse failures / extra retries.
+    /// </summary>
+    public int MaxOutputTokens { get; set; } = 1536;
 }
 
 /// <summary>
@@ -56,7 +65,11 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
                 Stream = false,
                 Think = false,
                 Format = "json",
-                Options = new OllamaRuntimeOptions(),
+                Options = new OllamaRuntimeOptions
+                {
+                    ContextTokens = Math.Clamp(opts.ContextTokens, 512, 32768),
+                    MaxOutputTokens = Math.Clamp(opts.MaxOutputTokens, 64, 8192),
+                },
                 Messages =
                 [
                     new OllamaChatMessage { Role = "system", Content = systemPrompt },
