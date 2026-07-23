@@ -367,7 +367,11 @@ Training is example-driven:
   mirrors the approved example to the `ticket_training_example` vector namespace;
 - synthetic administrator sessions create fictional ticket threads, train
   `Moderation`, `Tutoring`, or both cascades, persist approved synthetic examples,
-  record replay JSON, and queue canonical promotion.
+  record replay JSON, and queue canonical promotion;
+- each synthetic ticket is assigned a least-covered filterable taxonomy slug
+  (`ChatMonitoringCategoryTaxonomy` moderation concepts or tutoring subjects)
+  before LLM-1 generation so sessions cannot collapse onto prompt-primed labels
+  such as `payment-solicitation`.
 
 `TicketMessageScores` is the authoritative append-only score-event ledger. Each
 row contains score-event, ticket, message, tracked-user ids, previous score,
@@ -1159,7 +1163,8 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs) | Finite numeric guards for traces and parameters. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs) | Vector lineage position ids. |
 | [backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs](../backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs) | Retrieval mirror storage and similarity lookup. |
-| [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs) | Synthetic ticket/thread scenario generation and fallback fixtures. |
+| [backend/HomeworkCentral.Api/Assessment/SyntheticConceptCoverageSampler.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticConceptCoverageSampler.cs) | Least-covered picker over the full moderation/tutoring filterable taxonomies for synthetic tickets. |
+| [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs) | Synthetic ticket/thread scenario generation with forced target concepts and taxonomy-aware fallbacks. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs) | Synthetic scenario, message, and training report models. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticCommunitySignalResolver.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticCommunitySignalResolver.cs) | Synthetic community vote and confidence sampling. |
 | [backend/HomeworkCentral.Api/Assessment/CommunityScoreAggregator.cs](../backend/HomeworkCentral.Api/Assessment/CommunityScoreAggregator.cs) | Community signal aggregation contract implementation. |
