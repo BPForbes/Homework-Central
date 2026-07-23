@@ -331,8 +331,10 @@ public sealed class NeuralNetTrainingService(
         CancellationToken ct)
     {
         // Sequential generation so balanced LLM-2 notes can steer later LLM-1 scenarios
-        // without concurrent prompt races.
+        // without concurrent prompt races. Forced taxonomy targets keep every filterable
+        // moderation/tutoring concept in the session mix (not just payment-solicitation).
         List<(int TicketIndex, SyntheticTicket? Ticket)> tickets = [];
+        SyntheticConceptCoverageSampler coverage = new(HashCode.Combine(session.SessionId, 0x434F5645));
         PublishProgress(session, progress => progress with
         {
             Phase = "LLM1 scenario generation",
@@ -344,8 +346,9 @@ public sealed class NeuralNetTrainingService(
         System.Diagnostics.Stopwatch llm1Watch = System.Diagnostics.Stopwatch.StartNew();
         for (int ticketIndex = 1; ticketIndex <= session.RequestedTicketCount; ticketIndex++)
         {
+            string targetCategory = coverage.NextTarget(session.Mode, ticketIndex);
             SyntheticTicket? ticket = await GenerateSyntheticTicketAsync(
-                session.Mode, timings, feedback.Hints, ct);
+                session.Mode, timings, feedback.Hints, targetCategory, ct);
             tickets.Add((ticketIndex, ticket));
             if (ticket is null)
             {
@@ -353,18 +356,19 @@ public sealed class NeuralNetTrainingService(
                 {
                     Phase = "LLM1 scenario generation",
                     TicketsGenerated = ticketIndex,
-                    LatestLlm1Summary = $"Ticket {ticketIndex}: generation failed",
+                    LatestLlm1Summary = $"Ticket {ticketIndex}: generation failed (target {targetCategory})",
                     GeneratorHints = feedback.Hints.ToList(),
                 });
                 continue;
             }
 
-            await CollectBalancedGeneratorAuditAsync(session, ticket, feedback, timings, ct);
+            await CollectBalancedGeneratorAuditAsync(session, ticket, feedback, timings, coverage, ct);
             PublishProgress(session, progress => progress with
             {
                 Phase = "LLM1 scenario generation",
                 TicketsGenerated = ticketIndex,
-                LatestLlm1Summary = $"Ticket {ticketIndex}: {ticket.Category} · {ticket.Messages.Count} messages",
+                LatestLlm1Summary =
+                    $"Ticket {ticketIndex}: {ticket.Category} · {ticket.Messages.Count} messages",
                 GeneratorHints = feedback.Hints.ToList(),
             });
         }
@@ -383,15 +387,20 @@ public sealed class NeuralNetTrainingService(
         SyntheticTicket ticket,
         SyntheticGeneratorFeedbackBuffer feedback,
         TrainingSessionTimings timings,
+        SyntheticConceptCoverageSampler coverage,
         CancellationToken ct)
     {
         SyntheticThreadMessage primary = ticket.Messages.FirstOrDefault(message => !message.IsDistractor)
             ?? ticket.Messages.First();
+        NeuralModelKindChatMonitoring auditKind = IsModelDomainMatch(
+            NeuralModelKindChatMonitoring.Tutoring, ticket.Category)
+            ? NeuralModelKindChatMonitoring.Tutoring
+            : NeuralModelKindChatMonitoring.Moderation;
         ChatMonitoringNeuralModelPrediction seedPrediction = new(
             (float)ticket.ExpectedScore,
             (float)ticket.ExpectedRelevance,
             0.55f,
-            NeuralModelKindChatMonitoring.Moderation,
+            auditKind,
             "generator-audit",
             ticket.Category,
             "pre-train");
@@ -406,6 +415,7 @@ public sealed class NeuralNetTrainingService(
             return;
 
         feedback.RecordAudit(audit.Verdict, audit.Feedback, ticket.Category);
+        feedback.RecordCoverageGaps(coverage.Underrepresented(auditKind));
         PublishProgress(session, progress => progress with
         {
             Phase = "LLM2 → LLM1 feedback",
@@ -1212,9 +1222,11 @@ public sealed class NeuralNetTrainingService(
         NeuralTrainingMode mode,
         TrainingSessionTimings timings,
         IReadOnlyList<string>? generatorHints,
+        string targetCategory,
         CancellationToken ct)
     {
-        SyntheticThreadScenario? scenario = await scenarioGenerator.GenerateAsync(mode, generatorHints, ct);
+        SyntheticThreadScenario? scenario = await scenarioGenerator.GenerateAsync(
+            mode, generatorHints, targetCategory, ct);
         SyntheticThreadMessage? primaryMessage = scenario?.Messages.FirstOrDefault(x => !x.IsDistractor)
             ?? scenario?.Messages.FirstOrDefault();
         if (scenario is not null && primaryMessage is not null)
@@ -1231,31 +1243,43 @@ public sealed class NeuralNetTrainingService(
                 labeled);
         }
 
-        return await GenerateFallbackSyntheticTicketAsync(mode, ct);
+        return await GenerateFallbackSyntheticTicketAsync(mode, targetCategory, ct);
     }
 
     private async Task<SyntheticTicket?> GenerateFallbackSyntheticTicketAsync(
         NeuralTrainingMode mode,
+        string targetCategory,
         CancellationToken ct)
     {
+        NeuralModelKindChatMonitoring kind =
+            targetCategory.Contains("tutor", StringComparison.OrdinalIgnoreCase)
+            || mode == NeuralTrainingMode.Tutoring
+                ? NeuralModelKindChatMonitoring.Tutoring
+                : NeuralModelKindChatMonitoring.Moderation;
+        string normalizedTarget = ChatMonitoringCategoryTaxonomy.NormalizeCategory(kind, targetCategory);
         const string moderationFallbackPrompt =
-            "Generate short fictional moderation-ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Scores are 0 to 1. Never include real personal data.";
+            "Generate short fictional moderation-ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Scores are 0 to 1. Never include real personal data. Set category exactly to the requested concept slug.";
         const string tutoringFallbackPrompt =
-            "Generate short fictional tutor-application ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Use tutoring categories such as tutoring-mathematics or tutoring-science. Scores are 0 to 1. Never include real personal data.";
-        // Both: randomly pick a domain so fallback tickets stay usable by either lineage.
-        bool preferTutoring = mode switch
-        {
-            NeuralTrainingMode.Tutoring => true,
-            NeuralTrainingMode.Moderation => false,
-            _ => Random.Shared.Next(2) == 1,
-        };
+            "Generate short fictional tutor-application ticket examples only. Return JSON: category, requirement, message, contextSnapshot, expectedScore, expectedRelevance. Scores are 0 to 1. Never include real personal data. Set category exactly to the requested tutoring slug.";
+        bool preferTutoring = kind == NeuralModelKindChatMonitoring.Tutoring;
         string systemPrompt = preferTutoring ? tutoringFallbackPrompt : moderationFallbackPrompt;
         string userPrompt = preferTutoring
-            ? "Create one varied school-chat tutor-application example."
-            : "Create one varied school-chat moderation example.";
+            ? $"Create one school-chat tutor-application example. You MUST set category exactly to \"{normalizedTarget}\"."
+            : $"Create one school-chat moderation example. You MUST set category exactly to \"{normalizedTarget}\" and mention reportedConcept={normalizedTarget} in requirement.";
         string? response = await llm.ChatJsonAsync(systemPrompt, userPrompt, ct);
         if (string.IsNullOrWhiteSpace(response))
-            return null;
+        {
+            SyntheticThreadScenario fixture = SyntheticThreadScenarioGenerator.CreateFallback(mode, normalizedTarget);
+            SyntheticThreadMessage primary = fixture.Messages.First(message => !message.IsDistractor);
+            return new SyntheticTicket(
+                fixture.Category,
+                fixture.Requirement,
+                primary.Content,
+                fixture.InitialContext,
+                primary.TeacherEvidence ?? .5,
+                primary.TeacherRelevance ?? primary.ChannelRelevance,
+                fixture.Messages);
+        }
 
         try
         {
@@ -1272,6 +1296,17 @@ public sealed class NeuralNetTrainingService(
                 || string.IsNullOrWhiteSpace(message))
             {
                 return null;
+            }
+
+            category = ChatMonitoringCategoryTaxonomy.NormalizeCategory(kind, category);
+            if (!string.Equals(category, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                category = normalizedTarget;
+                if (kind == NeuralModelKindChatMonitoring.Moderation
+                    && !requirement.Contains($"reportedConcept={normalizedTarget}", StringComparison.OrdinalIgnoreCase))
+                {
+                    requirement = $"Monitor reportedConcept={normalizedTarget}. {requirement}";
+                }
             }
 
             float evidence = (float)GetUnit(root, "expectedScore", .5);
