@@ -199,15 +199,17 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 onSampleInputGradients?.Invoke(inputGradients);
 
                 LossTrace lossBefore = new(
-                    "bce+softmax-ce-avg-v1",
+                    "bce+categorical-cross-entropy-avg-v1",
                     NeuralNetFinite.OrZero(evidenceLossSum / n),
                     NeuralNetFinite.OrZero(relevanceLossSum / n),
                     0,
                     NeuralNetFinite.OrZero((evidenceLossSum + relevanceLossSum + categoryLossSum) / n),
                     n,
                     NeuralNetFinite.OrZero(categoryLossSum / n));
-                ForwardPropagationTrace beforeForward = AverageOutputForward(
-                    evidenceLogitSum / n, relevanceLogitSum / n, evidenceProbSum / n, relevanceProbSum / n);
+                // Representative thought-path sample so replay can color active nodes/edges.
+                ForwardPropagationTrace beforeForward = Forward(encoded[0], captureTrace: true).Trace
+                    ?? AverageOutputForward(
+                        evidenceLogitSum / n, relevanceLogitSum / n, evidenceProbSum / n, relevanceProbSum / n);
 
                 float[]? parameterBefore = captureFull ? ReadParameters() : null;
                 ApplyMomentumUpdateUnlocked(weightGrads, biasGrads, n);
@@ -265,15 +267,16 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 }
 
                 LossTrace lossAfter = new(
-                    "bce+softmax-ce-avg-v1",
+                    "bce+categorical-cross-entropy-avg-v1",
                     NeuralNetFinite.OrZero(afterEvidenceLoss / n),
                     NeuralNetFinite.OrZero(afterRelevanceLoss / n),
                     0,
                     NeuralNetFinite.OrZero((afterEvidenceLoss + afterRelevanceLoss + afterCategoryLoss) / n),
                     n,
                     NeuralNetFinite.OrZero(afterCategoryLoss / n));
-                ForwardPropagationTrace afterForward = AverageOutputForward(
-                    afterEvidenceLogit / n, afterRelevanceLogit / n, afterEvidenceProb / n, afterRelevanceProb / n);
+                ForwardPropagationTrace afterForward = Forward(encoded[0], captureTrace: true).Trace
+                    ?? AverageOutputForward(
+                        afterEvidenceLogit / n, afterRelevanceLogit / n, afterEvidenceProb / n, afterRelevanceProb / n);
 
                 iterations.Add(new TrainingIterationReplay(epoch, beforeForward, lossBefore, backward,
                     new ParameterUpdateTrace(LearningRate, optimizer, deltas), afterForward, lossAfter));

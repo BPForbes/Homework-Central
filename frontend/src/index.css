@@ -72,6 +72,9 @@
   --color-success: #2f8f5b;
   --color-success-soft: #ddf0e3;
 
+  --color-warning: #b8860b;
+  --color-warning-soft: #f5ecd0;
+
   --color-focus-ring: rgba(46, 143, 184, 0.34);
 
   /* Subject/category hues — rotate across rooms so the palette earns its keep semantically */
@@ -172,6 +175,9 @@
 
   --color-success: #3d9c68;
   --color-success-soft: rgba(95, 189, 133, 0.18);
+
+  --color-warning: #d4a017;
+  --color-warning-soft: rgba(212, 160, 23, 0.2);
 
   --color-focus-ring: rgba(73, 197, 255, 0.42);
 
@@ -3807,7 +3813,7 @@ a {
 .sm-room-grid {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18.5rem), 1fr));
   gap: 0.85rem;
 }
 
@@ -3819,6 +3825,8 @@ a {
   flex-direction: column;
   gap: 0.65rem;
   background: var(--color-surface);
+  min-width: 0;
+  height: auto;
   transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out);
 }
@@ -3863,18 +3871,21 @@ a {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 0.15rem;
 }
 
 .sm-room-card-title strong {
   font-size: 0.92rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .sm-room-card-category {
   font-size: 0.75rem;
   color: var(--color-ink-tertiary);
+  overflow-wrap: anywhere;
 }
 
 .sm-room-card-badges {
@@ -3920,7 +3931,7 @@ a {
 
 .sm-room-card-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
   font-size: 0.75rem;
@@ -3932,15 +3943,16 @@ a {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   font-size: 0.68rem;
+  flex-shrink: 0;
 }
 
 .sm-room-card-id {
   color: var(--color-ink-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: normal;
+  text-align: right;
+  line-height: 1.35;
 }
 
 .sm-room-card-actions {
@@ -5091,19 +5103,70 @@ a {
 }
 
 
-.neural-graph-panel { overflow: hidden; }
+.neural-graph-panel {
+  overflow: auto;
+  max-width: 100%;
+}
+.neural-graph-scroll {
+  width: 100%;
+  overflow: auto;
+  max-height: min(78vh, 56rem);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-sunken);
+  margin-top: 1rem;
+}
 .neural-zoom { width: min(100%, 22rem); accent-color: var(--color-primary); }
-.neural-graph { display: block; width: 100%; min-height: 18rem; margin-top: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-sunken); }
-.neural-edge { stroke: var(--color-accent); stroke-width: 2; transition: opacity var(--duration-fast) var(--ease-out); }
-.neural-node { fill: var(--color-surface-alt); stroke: var(--color-border-strong); stroke-width: 2; transition: transform var(--duration-fast) var(--ease-out), fill var(--duration-fast) var(--ease-out); transform-box: fill-box; transform-origin: center; }
+.neural-graph {
+  display: block;
+  width: 100%;
+  min-height: 18rem;
+  height: auto;
+  background: transparent;
+  border: 0;
+}
+.neural-graph--replay { min-height: 22rem; }
+.neural-edge { stroke: var(--color-accent); stroke-width: 2; transition: opacity var(--duration-fast) var(--ease-out), stroke var(--duration-fast) var(--ease-out); }
+.neural-node { fill: var(--color-surface-alt); stroke: var(--color-border-strong); stroke-width: 2; transition: transform var(--duration-fast) var(--ease-out), fill var(--duration-fast) var(--ease-out), stroke var(--duration-fast) var(--ease-out); transform-box: fill-box; transform-origin: center; }
 .neural-node-group { cursor: pointer; }
 .neural-node-group:hover .neural-node, .neural-node--selected { fill: var(--color-primary-soft-strong); stroke: var(--color-primary); transform: scale(1.06); }
 .neural-node-text, .neural-layer-label { fill: var(--color-ink); font-family: var(--font-sans); font-size: 14px; font-weight: 600; pointer-events: none; }
-.neural-edge--recorded { stroke: var(--color-primary); stroke-width: 1.25; opacity: .42; }
-.neural-edge--active { stroke: var(--color-on-accent); stroke-width: 2.25; opacity: 1; }
-.neural-edge--accepted { stroke: var(--color-success); }
-.neural-edge--revision { stroke: var(--color-danger); }
+.neural-edge--recorded { stroke: var(--color-primary); stroke-width: 1.1; opacity: .18; }
+.neural-edge--idle { opacity: .1; }
+.neural-edge--path-forward { stroke: var(--color-success); stroke-width: 2.4; opacity: 1; }
+.neural-edge--path-reeval { stroke: var(--color-warning); stroke-width: 2.4; opacity: 1; }
+.neural-edge--path-backprop { stroke: var(--color-danger); stroke-width: 2.35; stroke-dasharray: 5 4; opacity: .92; }
+.neural-edge--accepted { stroke: var(--color-success); stroke-width: 2.4; opacity: 1; }
+.neural-edge--revision { stroke: var(--color-danger); stroke-width: 2.4; opacity: 1; }
 .neural-edge--backward { stroke: var(--color-danger); stroke-dasharray: 5 4; opacity: .7; }
+.neural-node--path-forward { fill: var(--color-success-soft); stroke: var(--color-success); }
+.neural-node--path-reeval { fill: var(--color-warning-soft); stroke: var(--color-warning); }
+.neural-node--path-backprop { fill: var(--color-danger-soft); stroke: var(--color-danger); }
+.neural-node--accepted { fill: var(--color-success-soft); stroke: var(--color-success); }
+.neural-node--revision { fill: var(--color-danger-soft); stroke: var(--color-danger); }
+.neural-node--dim { opacity: 0.35; }
+.neural-path-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.1rem;
+  margin: 0.65rem 0 0;
+  font-size: 0.78rem;
+  color: var(--color-ink-secondary);
+}
+.neural-path-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.neural-path-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1.5px solid currentColor;
+}
+.neural-path-swatch--forward { background: var(--color-success-soft); color: var(--color-success); }
+.neural-path-swatch--reeval { background: var(--color-warning-soft); color: var(--color-warning); }
+.neural-path-swatch--backprop { background: var(--color-danger-soft); color: var(--color-danger); }
 .neural-layer-label { fill: var(--color-ink-secondary); font-size: 13px; }
 
 .neural-cascade-tabs { flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0 1rem; }

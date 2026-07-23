@@ -181,7 +181,7 @@ public class ChatMonitoringNeuralModelHashedMlpTests
             ReplayCompletionStatus.Completed,
             topology,
             new ReplayStringTable([]),
-            new TrainingProvenance(topology.ModelVersion, "hashed-text-48-v1", "bce+softmax-ce-avg-v1", "momentum-mini-batch-SGD", .035f, 1, "hc-xoshiro256ss-v1", 0, "replay-v2-worker-v1"),
+            new TrainingProvenance(topology.ModelVersion, "hashed-text-48-v1", "bce+categorical-cross-entropy-avg-v1", "momentum-mini-batch-SGD", .035f, 1, "hc-xoshiro256ss-v1", 0, "replay-v2-worker-v1"),
             parameters,
             [],
             [],
