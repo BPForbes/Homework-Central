@@ -40,6 +40,19 @@ function cascadeMeta(model: NeuralNetVisualizerModel) {
   }
 }
 
+function curvedCascadeEdge(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  edgeIndex: number,
+): string {
+  const dx = Math.abs(x2 - x1)
+  const control = Math.max(24, dx * 0.42)
+  const bend = (y2 - y1) * 0.12 + ((edgeIndex % 7) - 3) * 2.2
+  return `M ${x1} ${y1} C ${x1 + control} ${y1 + bend}, ${x2 - control} ${y2 - bend}, ${x2} ${y2}`
+}
+
 function StageMiniGraph({ widths, title, accentClass }: { widths: number[]; title: string; accentClass: string }) {
   const layerX = (index: number) => 36 + index * (320 / Math.max(1, widths.length - 1))
   const nodeY = (layerSize: number, nodeIndex: number) => 36 + nodeIndex * (120 / Math.max(1, Math.min(layerSize, 6) - 1))
@@ -53,12 +66,16 @@ function StageMiniGraph({ widths, title, accentClass }: { widths: number[]; titl
           const shownTarget = Math.min(widths[layerIndex + 1], 6)
           return Array.from({ length: shownSource }, (_, source) =>
             Array.from({ length: shownTarget }, (_, target) => (
-              <line
+              <path
                 key={`e-${layerIndex}-${source}-${target}`}
-                x1={layerX(layerIndex)}
-                y1={nodeY(shownSource, source)}
-                x2={layerX(layerIndex + 1)}
-                y2={nodeY(shownTarget, target)}
+                d={curvedCascadeEdge(
+                  layerX(layerIndex),
+                  nodeY(shownSource, source),
+                  layerX(layerIndex + 1),
+                  nodeY(shownTarget, target),
+                  source * shownTarget + target,
+                )}
+                fill="none"
                 className="neural-edge neural-edge--cascade"
               />
             )),
@@ -99,14 +116,15 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
   const layerLabels = model.layerLabels.length === layerWidths.length
     ? model.layerLabels
     : layerWidths.map((_, index) => (index === 0 ? 'input' : index === layerWidths.length - 1 ? 'output' : `hidden-${index}`))
-  const detailCap = 16
-  const shownPerLayer = layerWidths.map((width) => Math.min(width, detailCap))
+  // Full stage-2 map: every node, fixed open spacing, curve-fit edges.
+  const shownPerLayer = layerWidths.map((width) => width)
   const maxShown = Math.max(1, ...shownPerLayer)
-  const layerGap = Math.max(180, Math.min(280, 1260 / Math.max(1, layerWidths.length - 1)))
+  const layerGap = Math.max(190, Math.min(280, 1260 / Math.max(1, layerWidths.length - 1)))
+  const nodeGap = 36
   const viewWidth = Math.max(1100, 140 + (layerWidths.length - 1) * layerGap + 140)
-  const viewHeight = Math.max(520, 80 + (maxShown - 1) * Math.max(28, Math.min(44, 900 / Math.max(1, maxShown - 1))) + 100)
+  const viewHeight = Math.max(520, 80 + (maxShown - 1) * nodeGap + 100)
   const layerX = (index: number) => 90 + index * layerGap
-  const nodeY = (layerSize: number, nodeIndex: number) => 70 + nodeIndex * ((viewHeight - 130) / Math.max(1, layerSize - 1))
+  const nodeY = (_layerSize: number, nodeIndex: number) => 70 + nodeIndex * nodeGap
   const outputLabels = layerWidths.length
     ? ['Evidence', 'Relevance', ...Array.from({ length: Math.max(0, layerWidths[layerWidths.length - 1] - 2) }, (_, i) => `cat ${i + 1}`)]
     : visualizer.outputNodes
@@ -165,8 +183,8 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
       </dl>
 
       <p className="dashboard-hint neural-cascade-detail-label">
-        Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Preview pane scales with depth; labels
-        stay off until a node is selected.
+        Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Every node is drawn with open spacing
+        and cubic curve-fit edges; labels stay off until a node is selected.
       </p>
       <div className="neural-graph-scroll">
         <svg
@@ -185,14 +203,18 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
           {layerWidths.slice(0, -1).flatMap((_, layerIndex) =>
             Array.from({ length: shownPerLayer[layerIndex] }, (_, source) =>
               Array.from({ length: shownPerLayer[layerIndex + 1] }, (_, target) => (
-                <line
+                <path
                   key={`e-${layerIndex}-${source}-${target}`}
-                  x1={layerX(layerIndex)}
-                  y1={nodeY(shownPerLayer[layerIndex], source)}
-                  x2={layerX(layerIndex + 1)}
-                  y2={nodeY(shownPerLayer[layerIndex + 1], target)}
+                  d={curvedCascadeEdge(
+                    layerX(layerIndex),
+                    nodeY(shownPerLayer[layerIndex], source),
+                    layerX(layerIndex + 1),
+                    nodeY(shownPerLayer[layerIndex + 1], target),
+                    source * shownPerLayer[layerIndex + 1] + target + layerIndex * 17,
+                  )}
+                  fill="none"
                   className="neural-edge"
-                  style={{ opacity: 0.1 }}
+                  style={{ opacity: 0.08 }}
                 />
               )),
             ),
@@ -229,9 +251,6 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
                     <text x={x} y={y + 28} textAnchor="middle" className="neural-node-text">{label}</text>
                   )}
                   <title>{label}</title>
-                  {shown < width && nodeIndex === shown - 1 && (
-                    <text x={x} y={y + 44} textAnchor="middle" className="neural-layer-label">+{width - shown}</text>
-                  )}
                 </g>
               )
             })
@@ -325,12 +344,16 @@ function LiveTrainingMiniViz({ phase }: { phase: string }) {
       {widths.slice(0, -1).flatMap((width, layerIndex) =>
         Array.from({ length: width }, (_, source) =>
           Array.from({ length: widths[layerIndex + 1] }, (_, target) => (
-            <line
+            <path
               key={`e-${layerIndex}-${source}-${target}`}
-              x1={layerX(layerIndex)}
-              y1={nodeY(source)}
-              x2={layerX(layerIndex + 1)}
-              y2={nodeY(target)}
+              d={curvedCascadeEdge(
+                layerX(layerIndex),
+                nodeY(source),
+                layerX(layerIndex + 1),
+                nodeY(target),
+                source * widths[layerIndex + 1] + target,
+              )}
+              fill="none"
               className="neural-edge neural-edge--live"
             />
           )),
