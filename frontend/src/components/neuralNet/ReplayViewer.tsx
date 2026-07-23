@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 import type { NeuralNetReplay, ReplayEdge, ReplayNode } from '../../types/neuralNetReplay'
+import { normalizeReplayPhase, payloadCollectionForPhase } from '../../utils/neuralNetReplay'
 
 type SparseValue = { index: number; value: number }
 type ForwardPayload = {
@@ -11,6 +12,7 @@ type ForwardPayload = {
 type BackpropPayload = {
   weightGradients?: SparseValue[]
   biasGradients?: SparseValue[]
+  gradientL2Norm?: number
 }
 type LossPayload = {
   function?: string
@@ -19,20 +21,26 @@ type LossPayload = {
   categoryLoss?: number
   totalLoss?: number
 }
-type PathTone = 'forward' | 'reeval' | 'backprop' | 'accepted' | 'revision' | null
-
-const PAYLOAD_COLLECTION: Record<string, string> = {
-  Llm1Input: 'inputs',
-  InitialForward: 'forwardPasses',
-  Llm2Evaluation: 'evaluations',
-  VoteResolution: 'voteSampling',
-  EpochForward: 'forwardPasses',
-  LossCalculation: 'losses',
-  BackwardPropagation: 'backpropagations',
-  ParameterUpdate: 'parameterUpdates',
-  PostUpdateForward: 'forwardPasses',
-  FinalVerdict: 'finalVerdicts',
+type Llm1Payload = {
+  requirement?: string | number
+  contextSnapshot?: string | number
+  message?: string | number
+  channel?: string | number
+  authorRole?: string | number
 }
+type Llm2Payload = {
+  feedback?: string | number
+  accepted?: boolean
+  targetScore?: number
+  targetRelevance?: number
+  evaluatorConfidence?: number
+}
+type ParameterUpdatePayload = {
+  learningRate?: number
+  optimizer?: string
+  parameters?: { parameterIndex?: number; delta?: number; gradient?: number; valueAfter?: number }[]
+}
+type PathTone = 'forward' | 'reeval' | 'backprop' | 'accepted' | 'revision' | null
 
 function isForwardPhase(phase: string | undefined): boolean {
   return phase === 'InitialForward' || phase === 'EpochForward' || phase === 'PostUpdateForward'
@@ -48,6 +56,7 @@ function pathToneForPhase(phase: string | undefined, accepted?: boolean): PathTo
   if (isReevalPhase(phase)) return 'reeval'
   if (phase === 'FinalVerdict') return accepted ? 'accepted' : 'revision'
   if (isForwardPhase(phase)) return 'forward'
+  if (phase === 'ParameterUpdate' || phase === 'LossCalculation') return 'backprop'
   return null
 }
 
@@ -67,12 +76,66 @@ function nodeClassForTone(tone: PathTone, onPath: boolean, selected: boolean): s
     classes.push('neural-node--dim')
     return classes.join(' ')
   }
-  if (tone === 'forward') classes.push('neural-node--path-forward')
-  else if (tone === 'reeval') classes.push('neural-node--path-reeval')
-  else if (tone === 'backprop') classes.push('neural-node--path-backprop')
-  else if (tone === 'accepted') classes.push('neural-node--accepted')
-  else classes.push('neural-node--revision')
+  switch (tone) {
+    case 'forward':
+      classes.push('neural-node--path-forward')
+      break
+    case 'reeval':
+      classes.push('neural-node--path-reeval')
+      break
+    case 'backprop':
+      classes.push('neural-node--path-backprop')
+      break
+    case 'accepted':
+      classes.push('neural-node--accepted')
+      break
+    default:
+      classes.push('neural-node--revision')
+      break
+  }
   return classes.join(' ')
+}
+
+/** Even sample so dense layers keep Stage-1-like proportions instead of packing every node. */
+function takeEvenly<T>(items: T[], cap: number): T[] {
+  if (cap <= 0 || items.length === 0) return []
+  if (items.length <= cap) return items
+  if (cap === 1) return [items[0]]
+  return Array.from({ length: cap }, (_, index) => {
+    const sourceIndex = Math.round((index * (items.length - 1)) / (cap - 1))
+    return items[sourceIndex]
+  })
+}
+
+function resolveString(value: string | number | undefined, strings: string[] | undefined): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === 'number' && strings && strings[value] !== undefined) return strings[value]
+  return String(value)
+}
+
+function phaseOpsLabel(phase: string | undefined): string {
+  switch (phase) {
+    case 'InitialForward':
+    case 'EpochForward':
+    case 'PostUpdateForward':
+      return 'Forward · Leaky ReLU hidden · sigmoid evidence/relevance · softmax categories'
+    case 'LossCalculation':
+      return 'Loss · BCE (evidence/relevance) + categorical CE (CCEL)'
+    case 'BackwardPropagation':
+      return 'Backprop · ∂C/∂w via chain rule through ReLU gates'
+    case 'ParameterUpdate':
+      return 'Parameter update · momentum mini-batch SGD'
+    case 'Llm1Input':
+      return 'LLM 1 · synthetic ticket / message payload into the cascade'
+    case 'Llm2Evaluation':
+      return 'LLM 2 · teacher / audit feedback (balanced; not over-steering)'
+    case 'VoteResolution':
+      return 'Community vote resolution · blocking / reevaluation'
+    case 'FinalVerdict':
+      return 'Final verdict · accept within tolerance or revise'
+    default:
+      return 'Recorded training step'
+  }
 }
 
 export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
@@ -85,11 +148,15 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
 
-  const frames = useMemo(
-    () => (ticket === 'all' ? replay.frames : replay.frames.filter((frame) => frame.ticketIndex === ticket)),
-    [replay, ticket],
-  )
+  const frames = useMemo(() => {
+    const normalized = replay.frames.map((frame) => ({
+      ...frame,
+      phase: normalizeReplayPhase(frame.phase as string | number),
+    }))
+    return ticket === 'all' ? normalized : normalized.filter((frame) => frame.ticketIndex === ticket)
+  }, [replay, ticket])
   const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))]
+  const phase = frame?.phase
 
   useEffect(() => {
     setFrameIndex(0)
@@ -111,15 +178,19 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     return () => window.clearInterval(timer)
   }, [playing, frames.length, reducedMotion])
 
-  const inputs = replay.topology.nodes.filter((node) => node.layerId === 'input')
-  const output = replay.topology.nodes.filter((node) => node.layerId === 'output')
   const layerIds = Array.from(new Set(replay.topology.nodes.map((node) => node.layerId)))
-  const intermediateLayerIds = layerIds.filter((layerId) => layerId !== 'input' && layerId !== 'output')
-  const visibleInputs = detail === 2 ? inputs : detail === 1 ? inputs.slice(0, 24) : []
-  const intermediate = intermediateLayerIds.flatMap((layerId) =>
-    replay.topology.nodes.filter((node) => node.layerId === layerId),
-  )
-  const nodes: ReplayNode[] = [...visibleInputs, ...intermediate, ...output]
+  // Stage-1 mini graph shows ~6 nodes/layer; detail 2 opens up without returning to a solid bar.
+  const shownCap = detail === 0 ? 0 : detail === 1 ? 6 : 12
+  const nodesByLayer = useMemo(() => {
+    const map = new Map<string, ReplayNode[]>()
+    for (const layerId of layerIds) {
+      const layerNodes = replay.topology.nodes.filter((node) => node.layerId === layerId)
+      map.set(layerId, takeEvenly(layerNodes, shownCap || layerNodes.length))
+    }
+    return map
+  }, [replay.topology.nodes, layerIds, shownCap])
+
+  const nodes: ReplayNode[] = layerIds.flatMap((layerId) => nodesByLayer.get(layerId) ?? [])
   const visibleIds = new Set(nodes.map((node) => node.index))
   const edges: ReplayEdge[] =
     detail === 0
@@ -130,40 +201,47 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
 
   const layerLabel = (layerId: string): string => layerId.replace(/-/g, ' ')
   const layerIndex = (layerId: string): number => layerIds.indexOf(layerId)
-  const nodesInLayer = (layerId: string): ReplayNode[] =>
-    layerId === 'input' ? visibleInputs : replay.topology.nodes.filter((node) => node.layerId === layerId)
+  const nodesInLayer = (layerId: string): ReplayNode[] => nodesByLayer.get(layerId) ?? []
 
   const maxLayerCount = Math.max(1, ...layerIds.map((layerId) => Math.max(1, nodesInLayer(layerId).length)))
-  const layerGap = Math.max(160, Math.min(280, 1400 / Math.max(1, layerIds.length - 1)))
-  const nodeGap = Math.max(22, Math.min(42, 920 / Math.max(1, maxLayerCount - 1)))
-  const viewWidth = Math.max(960, 140 + (layerIds.length - 1) * layerGap + 140)
-  const viewHeight = Math.max(420, 70 + (maxLayerCount - 1) * nodeGap + 90)
+  // Match Stage-1 mini proportions: generous vertical gap (~24–36 for 6 nodes) and wide layer span.
+  const layerGap = Math.max(150, Math.min(210, 960 / Math.max(1, layerIds.length - 1)))
+  const nodeGap = Math.max(34, Math.min(52, 280 / Math.max(1, maxLayerCount - 1)))
+  const viewWidth = Math.max(720, 100 + (layerIds.length - 1) * layerGap + 100)
+  const viewHeight = Math.max(260, 56 + (maxLayerCount - 1) * nodeGap + 72)
 
-  const layerX = (layerId: string): number => 120 + layerIndex(layerId) * layerGap
+  const layerX = (layerId: string): number => 90 + layerIndex(layerId) * layerGap
   const nodeAt = (node: ReplayNode): { x: number; y: number } => {
     const layerNodes = nodesInLayer(node.layerId)
     const index = layerNodes.findIndex((item) => item.index === node.index)
     const span = Math.max(1, layerNodes.length - 1)
-    return { x: layerX(node.layerId), y: 58 + index * ((viewHeight - 110) / span) }
+    return { x: layerX(node.layerId), y: 48 + index * ((viewHeight - 96) / span) }
   }
 
   const nodeByIndex = new Map(replay.topology.nodes.map((node) => [node.index, node]))
+  const stringTable = (replay as { strings?: { values?: string[] } | string[] }).strings
+  const strings = Array.isArray(stringTable)
+    ? stringTable
+    : Array.isArray(stringTable?.values)
+      ? stringTable.values
+      : undefined
+
+  const collectionKey = payloadCollectionForPhase(phase)
+  const payload =
+    frame && collectionKey ? replay.payloads?.[collectionKey]?.[frame.payloadIndex] : null
 
   const forwardPayload =
-    frame && isForwardPhase(frame.phase)
-      ? (replay.payloads?.forwardPasses?.[frame.payloadIndex] as ForwardPayload | undefined)
-      : undefined
+    frame && isForwardPhase(phase) ? (payload as ForwardPayload | undefined) : undefined
   const backpropPayload =
-    frame?.phase === 'BackwardPropagation'
-      ? (replay.payloads?.backpropagations?.[frame.payloadIndex] as BackpropPayload | undefined)
-      : undefined
-  const lossPayload =
-    frame?.phase === 'LossCalculation'
-      ? (replay.payloads?.losses?.[frame.payloadIndex] as LossPayload | undefined)
-      : undefined
+    phase === 'BackwardPropagation' ? (payload as BackpropPayload | undefined) : undefined
+  const lossPayload = phase === 'LossCalculation' ? (payload as LossPayload | undefined) : undefined
+  const llm1Payload = phase === 'Llm1Input' ? (payload as Llm1Payload | undefined) : undefined
+  const llm2Payload = phase === 'Llm2Evaluation' ? (payload as Llm2Payload | undefined) : undefined
+  const updatePayload =
+    phase === 'ParameterUpdate' ? (payload as ParameterUpdatePayload | undefined) : undefined
   const finalVerdict =
-    frame?.phase === 'FinalVerdict'
-      ? (replay.payloads?.finalVerdicts?.[frame.payloadIndex] as { accepted?: boolean } | undefined)
+    phase === 'FinalVerdict'
+      ? (payload as { accepted?: boolean; reason?: string | number } | undefined)
       : undefined
 
   const lastForwardPayload = useMemo(() => {
@@ -176,15 +254,53 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     return undefined
   }, [frame, frameIndex, frames, replay.payloads])
 
-  const pathTone = pathToneForPhase(frame?.phase, finalVerdict?.accepted)
+  const recentWeightFeed = useMemo(() => {
+    const lines: string[] = []
+    for (let i = Math.max(0, frameIndex - 24); i <= frameIndex; i += 1) {
+      const item = frames[i]
+      if (!item) continue
+
+      if (item.phase === 'ParameterUpdate') {
+        const update = replay.payloads?.parameterUpdates?.[item.payloadIndex] as
+          | ParameterUpdatePayload
+          | undefined
+        const deltaCount = update?.parameters?.length ?? 0
+        lines.push(
+          deltaCount > 0
+            ? `epoch ${item.epoch ?? '—'} · SGD Δw ×${deltaCount} · lr ${update?.learningRate ?? '—'}`
+            : `epoch ${item.epoch ?? '—'} · compact SGD step (ReLU/backprop)`,
+        )
+        continue
+      }
+
+      if (item.phase === 'LossCalculation') {
+        const loss = replay.payloads?.losses?.[item.payloadIndex] as LossPayload | undefined
+        if (!loss) continue
+        lines.push(
+          `epoch ${item.epoch ?? '—'} · BCE+CCEL total ${loss.totalLoss?.toFixed?.(4) ?? '—'} · catCE ${loss.categoryLoss?.toFixed?.(4) ?? '—'}`,
+        )
+        continue
+      }
+
+      if (item.phase !== 'BackwardPropagation') continue
+      const back = replay.payloads?.backpropagations?.[item.payloadIndex] as BackpropPayload | undefined
+      lines.push(
+        `epoch ${item.epoch ?? '—'} · backprop ‖∇‖ ${back?.gradientL2Norm?.toFixed?.(4) ?? 'compact'}`,
+      )
+    }
+    return lines.slice(-8)
+  }, [frameIndex, frames, replay.payloads])
+
+  const pathTone = pathToneForPhase(phase, finalVerdict?.accepted)
 
   const activeEdgeParams = useMemo(() => {
     if (pathTone === 'backprop') {
-      return new Set(
-        (backpropPayload?.weightGradients ?? [])
-          .filter((item) => item.value !== 0)
-          .map((item) => item.index),
-      )
+      const gradients = backpropPayload?.weightGradients ?? []
+      if (gradients.length > 0) {
+        return new Set(gradients.filter((item) => item.value !== 0).map((item) => item.index))
+      }
+      // Compact traces omit per-weight grads — light the visible edges so the phase still colorizes.
+      return new Set(edges.map((edge) => edge.parameterIndex))
     }
     const source =
       pathTone === 'forward'
@@ -192,12 +308,12 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
         : pathTone === 'reeval' || pathTone === 'accepted' || pathTone === 'revision'
           ? lastForwardPayload
           : undefined
-    return new Set(
-      (source?.edgeContributions ?? [])
-        .filter((item) => Math.abs(item.value) > 1e-6)
-        .map((item) => item.index),
-    )
-  }, [pathTone, backpropPayload, forwardPayload, lastForwardPayload])
+    const contributions = source?.edgeContributions ?? []
+    if (contributions.length === 0 && (pathTone === 'forward' || pathTone === 'reeval')) {
+      return new Set(edges.map((edge) => edge.parameterIndex))
+    }
+    return new Set(contributions.filter((item) => Math.abs(item.value) > 1e-6).map((item) => item.index))
+  }, [pathTone, backpropPayload, forwardPayload, lastForwardPayload, edges])
 
   const activeNodeIds = useMemo(() => {
     const ids = new Set<number>()
@@ -223,11 +339,14 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       ids.add(edge.sourceNodeIndex)
       ids.add(edge.targetNodeIndex)
     }
+    if (ids.size === 0 && pathTone) {
+      for (const node of nodes) ids.add(node.index)
+    }
     return ids
-  }, [pathTone, edges, activeEdgeParams, forwardPayload, lastForwardPayload])
+  }, [pathTone, edges, activeEdgeParams, forwardPayload, lastForwardPayload, nodes])
 
-  const payload = frame ? replay.payloads?.[PAYLOAD_COLLECTION[frame.phase]]?.[frame.payloadIndex] : null
   const hasThoughtPath = activeEdgeParams.size > 0 || activeNodeIds.size > 0
+  const totalInputCount = replay.topology.nodes.filter((node) => node.layerId === 'input').length
 
   return (
     <section className="sm-panel neural-graph-panel">
@@ -283,25 +402,26 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
         </button>
       </div>
       <p className="dashboard-hint">
-        Frame {frames.length ? frameIndex + 1 : 0} of {frames.length} · {frame?.phase ?? 'No recorded frames'} ·{' '}
+        Frame {frames.length ? frameIndex + 1 : 0} of {frames.length} · {phase || 'No recorded frames'} ·{' '}
         {detail === 0
-          ? `Clustered: ${inputs.length} input nodes, ${replay.topology.edges.length} edges`
+          ? `Clustered: ${totalInputCount} input nodes, ${replay.topology.edges.length} edges`
           : detail === 1
-            ? 'Layer detail · color-only thought path'
-            : 'Full detail · color-only thought path'}
+            ? `Stage-1 proportions · ≤${shownCap} nodes/layer · color thought path`
+            : `Expanded detail · ≤${shownCap} nodes/layer · color thought path`}
         {reducedMotion ? ' · Playback disabled by reduced-motion preference' : ''}
       </p>
       <p className="neural-path-legend" aria-label="Thought path color legend">
         <span>
-          <i className="neural-path-swatch neural-path-swatch--forward" aria-hidden /> Forward progression
+          <i className="neural-path-swatch neural-path-swatch--forward" aria-hidden /> Forward / ReLU
         </span>
         <span>
-          <i className="neural-path-swatch neural-path-swatch--reeval" aria-hidden /> Blocking / reevaluation
+          <i className="neural-path-swatch neural-path-swatch--reeval" aria-hidden /> LLM2 / blocking
         </span>
         <span>
-          <i className="neural-path-swatch neural-path-swatch--backprop" aria-hidden /> Backpropagation
+          <i className="neural-path-swatch neural-path-swatch--backprop" aria-hidden /> CCEL / backprop
         </span>
       </p>
+      <p className="dashboard-hint neural-ops-strip">{phaseOpsLabel(phase)}</p>
       {lossPayload && (
         <p className="dashboard-hint">
           Loss · {lossPayload.function ?? 'bce+categorical-cross-entropy'} · evidence{' '}
@@ -323,7 +443,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
             <text
               key={`label-${layerId}`}
               x={layerX(layerId)}
-              y="28"
+              y="24"
               textAnchor="middle"
               className="neural-layer-label"
             >
@@ -337,7 +457,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
             const from = nodeAt(source)
             const to = nodeAt(target)
             const onPath = !hasThoughtPath
-              ? pathTone === 'backprop' || pathTone === 'reeval'
+              ? Boolean(pathTone)
               : activeEdgeParams.has(edge.parameterIndex)
             return (
               <line
@@ -358,108 +478,147 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
                     <circle
                       cx={layerX(layerId)}
                       cy={viewHeight / 2}
-                      r="58"
+                      r="42"
                       className={nodeClassForTone(pathTone, Boolean(pathTone), false)}
                     />
                     <title>{`${layerLabel(layerId)} · ${layerNodes.length} nodes`}</title>
                   </g>
                 )
               })
-            : nodes
-                .filter((node) => node.layerId === 'input')
-                .map((node) => {
-                  const point = nodeAt(node)
-                  const onPath = !hasThoughtPath ? Boolean(pathTone) : activeNodeIds.has(node.index)
+            : nodes.map((node) => {
+                const point = nodeAt(node)
+                const onPath = !hasThoughtPath ? Boolean(pathTone) : activeNodeIds.has(node.index)
+                const isOutput = node.layerId === 'output'
+                const isInput = node.layerId === 'input'
+                if (isOutput) {
                   return (
-                    <circle
+                    <g
                       key={node.nodeId}
+                      className="neural-node-group"
+                      onClick={() => setSelected(node)}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={node.label}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setSelected(node)
+                        }
+                      }}
+                    >
+                      <rect
+                        x={point.x - 16}
+                        y={point.y - 11}
+                        width="32"
+                        height="22"
+                        rx="8"
+                        className={nodeClassForTone(pathTone, onPath, selected?.index === node.index)}
+                      />
+                      <title>{node.label}</title>
+                    </g>
+                  )
+                }
+                return (
+                  <g
+                    key={node.nodeId}
+                    className={isInput ? undefined : 'neural-node-group'}
+                    onClick={isInput ? undefined : () => setSelected(node)}
+                    role={isInput ? undefined : 'button'}
+                    tabIndex={isInput ? undefined : 0}
+                    aria-label={isInput ? undefined : node.label}
+                    onKeyDown={
+                      isInput
+                        ? undefined
+                        : (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              setSelected(node)
+                            }
+                          }
+                    }
+                  >
+                    <circle
                       cx={point.x}
                       cy={point.y}
-                      r="6"
-                      className={nodeClassForTone(pathTone, onPath, false)}
+                      r={isInput ? 7 : 10}
+                      className={nodeClassForTone(pathTone, onPath, selected?.index === node.index)}
                     >
                       <title>{node.label}</title>
                     </circle>
-                  )
-                })}
-          {detail > 0 &&
-            intermediate.map((node) => {
-              const point = nodeAt(node)
-              const onPath = !hasThoughtPath ? Boolean(pathTone) : activeNodeIds.has(node.index)
-              return (
-                <g
-                  key={node.nodeId}
-                  className="neural-node-group"
-                  onClick={() => setSelected(node)}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={node.label}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setSelected(node)
-                    }
-                  }}
-                >
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r="11"
-                    className={nodeClassForTone(pathTone, onPath, selected?.index === node.index)}
-                  />
-                  <title>{node.label}</title>
-                </g>
-              )
-            })}
-          {detail > 0 &&
-            output.map((node) => {
-              const point = nodeAt(node)
-              const onPath = !hasThoughtPath ? Boolean(pathTone) : activeNodeIds.has(node.index)
-              return (
-                <g
-                  key={node.nodeId}
-                  className="neural-node-group"
-                  onClick={() => setSelected(node)}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={node.label}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setSelected(node)
-                    }
-                  }}
-                >
-                  <rect
-                    x={point.x - 18}
-                    y={point.y - 12}
-                    width="36"
-                    height="24"
-                    rx="8"
-                    className={nodeClassForTone(pathTone, onPath, selected?.index === node.index)}
-                  />
-                  <title>{node.label}</title>
-                </g>
-              )
-            })}
+                  </g>
+                )
+              })}
         </svg>
       </div>
+
+      <div className="neural-replay-panels" aria-live="polite">
+        <section className="neural-replay-panel">
+          <h4>LLM 1 → cascade</h4>
+          {llm1Payload ? (
+            <ul className="neural-feed-list">
+              <li>Channel: {resolveString(llm1Payload.channel, strings) ?? '—'}</li>
+              <li>Role: {resolveString(llm1Payload.authorRole, strings) ?? '—'}</li>
+              <li>{resolveString(llm1Payload.message, strings) ?? 'Message payload recorded'}</li>
+            </ul>
+          ) : (
+            <p className="dashboard-hint">Step to an Llm1Input frame for the synthetic ticket feed.</p>
+          )}
+        </section>
+        <section className="neural-replay-panel">
+          <h4>LLM 2 feedback</h4>
+          {llm2Payload ? (
+            <ul className="neural-feed-list">
+              <li>
+                {llm2Payload.accepted ? 'LGTM / within tolerance' : 'REVISE'} · evidence{' '}
+                {llm2Payload.targetScore?.toFixed?.(3) ?? '—'} · relevance{' '}
+                {llm2Payload.targetRelevance?.toFixed?.(3) ?? '—'}
+              </li>
+              <li>{resolveString(llm2Payload.feedback, strings) ?? 'No written feedback'}</li>
+            </ul>
+          ) : (
+            <p className="dashboard-hint">Step to Llm2Evaluation for teacher / audit notes.</p>
+          )}
+        </section>
+        <section className="neural-replay-panel neural-replay-panel--wide">
+          <h4>Weight update feed</h4>
+          {recentWeightFeed.length > 0 ? (
+            <ul className="neural-feed-list neural-feed-list--mono">
+              {recentWeightFeed.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="dashboard-hint">
+              Loss / backprop / SGD lines appear as the playhead reaches training epochs.
+            </p>
+          )}
+          {updatePayload && (
+            <p className="dashboard-hint">
+              Current update · {updatePayload.optimizer ?? 'momentum-SGD'} · lr{' '}
+              {updatePayload.learningRate ?? '—'} · Δ params {updatePayload.parameters?.length ?? 0}
+            </p>
+          )}
+        </section>
+      </div>
+
       <p className="dashboard-hint">
         Selected: {selected ? `${selected.label} (${selected.layerId})` : 'none'} · Integrity:{' '}
         {replay.integrity?.reportChecksum ? 'recorded checksum' : 'not supplied'} · Completion:{' '}
-        {replay.completionStatus}. Node labels stay off during replay — hover or select a node for its name. Canvas
-        size grows with layer depth so connections stay readable.
+        {replay.completionStatus}. Spacing mirrors the Stage 1 mini-graph (few nodes, open gaps). Hover or select a
+        node for its name.
       </p>
       <section className="sm-panel">
         <div className="sm-panel-header">
           <h3>Recorded frame inspector</h3>
         </div>
         <p className="dashboard-hint">
-          Phase: {frame?.phase ?? 'none'} · ticket {frame?.ticketIndex ?? '—'} · pass {frame?.passIndex ?? '—'} · epoch{' '}
+          Phase: {phase || 'none'} · ticket {frame?.ticketIndex ?? '—'} · pass {frame?.passIndex ?? '—'} · epoch{' '}
           {frame?.epoch ?? '—'}. Loss frames use binary CE on evidence/relevance and categorical cross-entropy on the
           prediction classes.
         </p>
-        <pre className="dashboard-hint">{payload ? JSON.stringify(payload, null, 2) : 'No payload for this frame.'}</pre>
+        <pre className="dashboard-hint">
+          {payload ? JSON.stringify(payload, null, 2) : 'No payload for this frame.'}
+        </pre>
       </section>
     </section>
   )

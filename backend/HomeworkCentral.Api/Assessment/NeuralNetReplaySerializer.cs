@@ -21,6 +21,8 @@ public static class NeuralNetReplaySerializer
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
+        // Replay frames look up payloads by phase name; numeric enums break the viewer.
+        Converters = { new JsonStringEnumConverter() },
         // Training traces can still surface extreme floats; never fail the whole session on JSON.
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
     };

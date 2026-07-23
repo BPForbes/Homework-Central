@@ -5169,6 +5169,82 @@ a {
 .neural-path-swatch--backprop { background: var(--color-danger-soft); color: var(--color-danger); }
 .neural-layer-label { fill: var(--color-ink-secondary); font-size: 13px; }
 
+.neural-ops-strip {
+  margin: 0.35rem 0 0.15rem;
+  font-size: 0.78rem;
+  color: var(--color-ink-secondary);
+}
+
+.neural-replay-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.85rem 0 0.5rem;
+}
+.neural-replay-panels--live { margin-top: 0.55rem; }
+.neural-replay-panel {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+.neural-replay-panel--wide { grid-column: 1 / -1; }
+.neural-replay-panel h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+.neural-feed-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  color: var(--color-ink-secondary);
+}
+.neural-feed-list--mono { font-family: var(--font-mono, ui-monospace, monospace); }
+.neural-feed-list li + li { margin-top: 0.2rem; }
+
+.neural-live-progress {
+  margin: 0.65rem 0 0.35rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+.neural-live-progress-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+}
+.neural-live-mini {
+  display: block;
+  width: min(100%, 22rem);
+  height: auto;
+  margin-top: 0.55rem;
+}
+.neural-edge--live { stroke: var(--color-primary); stroke-width: 1.15; opacity: 0.22; transition: stroke var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out); }
+.neural-node--live { fill: var(--color-surface-alt); stroke: var(--color-border-strong); stroke-width: 1.8; transition: fill var(--duration-fast) var(--ease-out), stroke var(--duration-fast) var(--ease-out); }
+.neural-live-tone--forward .neural-edge--live,
+.neural-live-tone--forward.neural-live-mini .neural-edge--live { stroke: var(--color-success); opacity: 0.55; }
+.neural-live-tone--forward .neural-node--live,
+.neural-live-tone--forward.neural-live-mini .neural-node--live { fill: var(--color-success-soft); stroke: var(--color-success); }
+.neural-live-tone--reeval .neural-edge--live,
+.neural-live-tone--reeval.neural-live-mini .neural-edge--live { stroke: var(--color-warning); opacity: 0.6; }
+.neural-live-tone--reeval .neural-node--live,
+.neural-live-tone--reeval.neural-live-mini .neural-node--live { fill: var(--color-warning-soft); stroke: var(--color-warning); }
+.neural-live-tone--backprop .neural-edge--live,
+.neural-live-tone--backprop.neural-live-mini .neural-edge--live { stroke: var(--color-danger); opacity: 0.65; stroke-dasharray: 4 3; }
+.neural-live-tone--backprop .neural-node--live,
+.neural-live-tone--backprop.neural-live-mini .neural-node--live { fill: var(--color-danger-soft); stroke: var(--color-danger); }
+
+@media (max-width: 720px) {
+  .neural-replay-panels { grid-template-columns: 1fr; }
+  .neural-replay-panel--wide { grid-column: auto; }
+}
+
 .neural-cascade-tabs { flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0 1rem; }
 .neural-cascade-overview {
   display: grid;

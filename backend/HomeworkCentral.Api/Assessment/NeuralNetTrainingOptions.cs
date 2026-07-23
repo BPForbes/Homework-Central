@@ -33,5 +33,5 @@ public sealed class NeuralNetTrainingOptions
     public bool CompactReplay { get; set; } = true;
 
     /// <summary>Fraction of messages that still capture full parameter-level traces when CompactReplay is on.</summary>
-    public double FullTraceSampleRate { get; set; } = 0.02;
+    public double FullTraceSampleRate { get; set; } = 0.12;
 }
