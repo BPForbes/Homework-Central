@@ -3694,6 +3694,46 @@ a {
   margin: 0;
 }
 
+.sm-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.sm-filter {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 8.5rem;
+}
+
+.sm-filter-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-ink-tertiary);
+}
+
+.sm-filter select {
+  padding: 0.45rem 0.7rem;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--color-surface-alt);
+  color: var(--color-ink);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.sm-filter select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background: var(--color-surface);
+}
+
 .sm-search {
   position: relative;
   min-width: 12rem;
@@ -3731,6 +3771,39 @@ a {
   padding: 2rem 1rem;
 }
 
+.sm-empty-state--compact {
+  padding: 1rem 0.5rem;
+}
+
+.sm-room-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.sm-room-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+  color: var(--color-ink-secondary);
+}
+
+.sm-room-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.4rem;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-alt);
+  color: var(--color-ink-tertiary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .sm-room-grid {
   list-style: none;
   display: grid;
@@ -3759,6 +3832,11 @@ a {
 .sm-room-card--editing {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+
+.sm-room-card--preconfigured {
+  border-color: var(--color-primary-soft-strong);
+  background: color-mix(in srgb, var(--color-primary-soft) 55%, var(--color-surface));
 }
 
 .sm-room-card-top {
@@ -3799,6 +3877,14 @@ a {
   color: var(--color-ink-tertiary);
 }
 
+.sm-room-card-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
 .sm-badge {
   display: inline-flex;
   align-items: center;
@@ -3820,6 +3906,16 @@ a {
 .sm-badge--private {
   background: var(--color-accent-soft);
   color: var(--color-on-accent);
+}
+
+.sm-badge--preconfigured {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.sm-badge--custom {
+  background: var(--hue-sky-soft);
+  color: var(--color-ink-secondary);
 }
 
 .sm-room-card-meta {

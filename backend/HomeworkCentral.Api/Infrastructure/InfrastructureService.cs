@@ -1567,6 +1567,7 @@ public sealed class InfrastructureService(
             CreatedAtUtc = channel.CreatedAtUtc,
             UpdatedAtUtc = channel.UpdatedAtUtc,
             CanEditInfo = InfoRoomEditPolicy.CanEditInfoRoom(mask, channel),
+            IsPreconfigured = channel.CreatedByUserId == Guid.Empty,
             AccessRules = channel.AccessRules.Select(rule => new CustomChannelAccessRuleDto
             {
                 CustomRoleId = rule.CustomRoleId,

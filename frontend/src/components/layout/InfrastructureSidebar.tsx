@@ -110,7 +110,7 @@ function ConfigurationSidebar<T extends string>({
 }
 
 function ServerSidebar({ loading }: { loading: boolean }) {
-  const [serverSection, setServerSection] = useServerNavSection()
+  const [serverSection] = useServerNavSection()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   type ServerConfigurationSection = ServerNavSection | 'neuralTraining' | 'neuralFeedback' | 'neuralData' | 'neuralVisualizer'
@@ -134,7 +134,7 @@ function ServerSidebar({ loading }: { loading: boolean }) {
     : serverSection
   return <ConfigurationSidebar ariaLabel="Server configuration" title="Server" titleIcon={faServer} items={items} section={active} setSection={(next) => {
     if (next in routes) navigate(routes[next as keyof typeof routes])
-    else setServerSection(next as ServerNavSection)
+    else navigate(`/server?section=${next}`)
   }} loading={loading} />
 }
 function UserConfigSidebar({ loading }: { loading: boolean }) {
