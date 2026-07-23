@@ -3,6 +3,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// <summary>
 /// Balanced hints from LLM-2 audits / teacher labels for the next LLM-1 scenario.
 /// Caps revise pressure so generator feedback does not collapse diversity.
+/// Coverage hints steer toward underrepresented taxonomy labels without replacing forced targets.
 /// </summary>
 public sealed class SyntheticGeneratorFeedbackBuffer
 {
@@ -41,6 +42,15 @@ public sealed class SyntheticGeneratorFeedbackBuffer
         if (string.IsNullOrWhiteSpace(note))
             return;
         AddHint($"Cover '{Truncate(category, 40)}' with: {Truncate(note, 140)}");
+    }
+
+    public void RecordCoverageGaps(IReadOnlyList<string> underrepresented)
+    {
+        if (underrepresented is null || underrepresented.Count == 0)
+            return;
+
+        string joined = string.Join(", ", underrepresented.Take(5).Select(slug => Truncate(slug, 40)));
+        AddHint($"Still underrepresented filterable concepts: {joined}");
     }
 
     private void AddHint(string hint)
