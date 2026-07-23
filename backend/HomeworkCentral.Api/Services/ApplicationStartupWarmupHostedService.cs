@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Dev;
+using Microsoft.AspNetCore.Hosting;
 
 namespace HomeworkCentral.Api.Services;
 
@@ -10,7 +11,7 @@ public sealed class ApplicationStartupWarmupHostedService(
     IServiceProvider services,
     IApplicationReadiness readiness,
     IHostApplicationLifetime lifetime,
-    IHostEnvironment environment,
+    IWebHostEnvironment environment,
     IConfiguration configuration,
     ILogger<ApplicationStartupWarmupHostedService> logger) : BackgroundService
 {
