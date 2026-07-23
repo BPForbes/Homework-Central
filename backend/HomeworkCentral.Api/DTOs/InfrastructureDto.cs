@@ -118,6 +118,8 @@ public class CustomChannelDto
     public DateTime UpdatedAtUtc { get; set; }
     public List<CustomChannelAccessRuleDto> AccessRules { get; set; } = [];
     public bool CanEditInfo { get; set; }
+    /// <summary>True for system-seeded channels (e.g. default ticket portals).</summary>
+    public bool IsPreconfigured { get; set; }
 }
 
 public class CreateCustomChannelRequest

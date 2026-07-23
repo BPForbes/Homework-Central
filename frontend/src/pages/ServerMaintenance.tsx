@@ -44,7 +44,6 @@ export function ServerMaintenance() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
 
   const [displayName, setDisplayName] = useState('')
   const [iconName, setIconName] = useState(defaultCustomRoomIcon('Chat'))
@@ -106,17 +105,6 @@ export function ServerMaintenance() {
     }),
     [channels],
   )
-
-  const filteredChannels = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return channels
-    return channels.filter(
-      (c) =>
-        c.displayName.toLowerCase().includes(q) ||
-        c.categoryDisplayName.toLowerCase().includes(q) ||
-        c.roomId.toLowerCase().includes(q),
-    )
-  }, [channels, search])
 
   function resetForm() {
     setEditingId(null)
@@ -384,11 +372,8 @@ export function ServerMaintenance() {
 
         {serverSection === 'rooms' && (
           <CustomRoomList
-            channels={filteredChannels}
-            totalChannelCount={channels.length}
+            channels={channels}
             editingId={editingId}
-            search={search}
-            onSearchChange={setSearch}
             onEdit={startEdit}
             onArchive={(channelId) => void handleArchive(channelId)}
           />
