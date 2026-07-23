@@ -362,7 +362,15 @@ public sealed class NeuralNetTrainingService(
                 continue;
             }
 
-            await CollectBalancedGeneratorAuditAsync(session, ticket, feedback, timings, coverage, ct);
+            if (ShouldSampleGeneratorAudit(session.SessionId, ticketIndex))
+                await CollectBalancedGeneratorAuditAsync(session, ticket, feedback, timings, coverage, ct);
+            else
+                feedback.RecordCoverageGaps(
+                    coverage.Underrepresented(
+                        IsModelDomainMatch(NeuralModelKindChatMonitoring.Tutoring, ticket.Category)
+                            ? NeuralModelKindChatMonitoring.Tutoring
+                            : NeuralModelKindChatMonitoring.Moderation));
+
             PublishProgress(session, progress => progress with
             {
                 Phase = "LLM1 scenario generation",
@@ -986,7 +994,8 @@ public sealed class NeuralNetTrainingService(
     {
         System.Diagnostics.Stopwatch auditWatch = System.Diagnostics.Stopwatch.StartNew();
         SyntheticEvaluatorResult? audit = null;
-        for (int attempt = 0; attempt < 3 && audit is null; attempt++)
+        int maxAttempts = Math.Clamp(Options.AuditMaxAttempts, 1, 3);
+        for (int attempt = 0; attempt < maxAttempts && audit is null; attempt++)
         {
             if (attempt > 0) timings.AddLlm2Retry();
             audit = await EvaluateSyntheticTicketAsync(generated with { Message = message.Content, Requirement = requirement }, prediction, ct);
@@ -1344,39 +1353,94 @@ public sealed class NeuralNetTrainingService(
         TrainingSessionTimings timings,
         CancellationToken ct)
     {
-        List<SyntheticThreadMessage> labeled = [];
-        foreach (SyntheticThreadMessage message in scenario.Messages)
+        List<SyntheticThreadMessage> alreadyLabeled = scenario.Messages
+            .Where(message => message.TeacherEvidence is not null && message.TeacherRelevance is not null)
+            .ToList();
+        List<SyntheticThreadMessage> needsLabel = scenario.Messages
+            .Where(message => message.TeacherEvidence is null || message.TeacherRelevance is null)
+            .ToList();
+
+        if (needsLabel.Count == 0)
+            return scenario.Messages;
+
+        if (Options.PreferDeterministicTeacherLabels)
         {
-            if (message.TeacherEvidence is not null && message.TeacherRelevance is not null)
-            {
-                labeled.Add(message);
-                continue;
-            }
-
-            System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-            SyntheticThreadMessage? fromLlm = await LabelMessageTeacherAsync(scenario, message, ct);
-            watch.Stop();
-            timings.AddTeacherLabel(watch.ElapsedMilliseconds);
-            if (fromLlm is not null)
-            {
-                labeled.Add(fromLlm);
-                continue;
-            }
-
-            SyntheticEvaluatorResult fallback = CreateFallbackEvaluation(
-                new SyntheticTicket(scenario.Category, scenario.Requirement, message.Content, scenario.InitialContext, .5, message.ChannelRelevance, scenario.Messages),
-                message,
-                new ChatMonitoringNeuralModelPrediction(.5f, message.ChannelRelevance, .5f, NeuralModelKindChatMonitoring.Moderation, "label", "general", "fallback"));
-            labeled.Add(message with
-            {
-                TeacherEvidence = (float)fallback.TargetScore,
-                TeacherRelevance = (float)fallback.TargetRelevance,
-                TeacherApprovalEstimate = (float)fallback.ApprovalEstimate,
-                TeacherConfidence = (float)fallback.EvaluatorConfidence,
-            });
+            List<SyntheticThreadMessage> deterministic = needsLabel
+                .Select(message => ApplyDeterministicTeacherLabel(scenario, message))
+                .ToList();
+            return MergeTeacherLabels(scenario.Messages, alreadyLabeled.Concat(deterministic));
         }
 
-        return labeled;
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        SyntheticThreadMessage?[] fromLlm = await Task.WhenAll(
+            needsLabel.Select(message => LabelMessageTeacherAsync(scenario, message, ct)));
+        watch.Stop();
+        timings.AddTeacherLabel(watch.ElapsedMilliseconds);
+
+        List<SyntheticThreadMessage> resolved = [];
+        for (int index = 0; index < needsLabel.Count; index++)
+        {
+            resolved.Add(fromLlm[index] ?? ApplyDeterministicTeacherLabel(scenario, needsLabel[index]));
+        }
+
+        return MergeTeacherLabels(scenario.Messages, alreadyLabeled.Concat(resolved));
+    }
+
+    private static SyntheticThreadMessage ApplyDeterministicTeacherLabel(
+        SyntheticThreadScenario scenario,
+        SyntheticThreadMessage message)
+    {
+        SyntheticEvaluatorResult fallback = CreateFallbackEvaluation(
+            new SyntheticTicket(
+                scenario.Category,
+                scenario.Requirement,
+                message.Content,
+                scenario.InitialContext,
+                .5,
+                message.ChannelRelevance,
+                scenario.Messages),
+            message,
+            new ChatMonitoringNeuralModelPrediction(
+                .5f,
+                message.ChannelRelevance,
+                .5f,
+                NeuralModelKindChatMonitoring.Moderation,
+                "label",
+                "general",
+                "fallback"));
+        return message with
+        {
+            TeacherEvidence = (float)fallback.TargetScore,
+            TeacherRelevance = (float)fallback.TargetRelevance,
+            TeacherApprovalEstimate = (float)fallback.ApprovalEstimate,
+            TeacherConfidence = (float)fallback.EvaluatorConfidence,
+        };
+    }
+
+    private static IReadOnlyList<SyntheticThreadMessage> MergeTeacherLabels(
+        IReadOnlyList<SyntheticThreadMessage> originalOrder,
+        IEnumerable<SyntheticThreadMessage> labeled)
+    {
+        Dictionary<int, SyntheticThreadMessage> byIndex = labeled.ToDictionary(message => message.MessageIndex);
+        return originalOrder
+            .Select(message => byIndex.TryGetValue(message.MessageIndex, out SyntheticThreadMessage? labeledMessage)
+                ? labeledMessage
+                : message)
+            .ToList();
+    }
+
+    private bool ShouldSampleGeneratorAudit(Guid sessionId, int ticketIndex)
+    {
+        double rate = Math.Clamp(Options.GeneratorAuditSampleRate, 0, 1);
+        if (rate <= 0)
+            return false;
+        if (rate >= 1)
+            return true;
+        // Always audit the first ticket so LLM-2 steering has at least one signal.
+        if (ticketIndex == 1)
+            return true;
+        int bucket = HashCode.Combine(sessionId, ticketIndex, 0x47415544);
+        return (bucket & int.MaxValue) / (double)int.MaxValue < rate;
     }
 
     private async Task<SyntheticThreadMessage?> LabelMessageTeacherAsync(

@@ -83,3 +83,17 @@ Key implementation entry points:
   most visual work in this app can be done at the CSS-token level without touching JSX.
 - CI rejects unparameterized EF raw SQL (`FromSqlRaw` / `ExecuteSqlRaw` / `SqlQueryRaw`)
   in `backend/HomeworkCentral.Api`.
+
+## Git branches and pull requests
+
+Minimize branches and PRs. Do not open extra workstreams unless a human asks.
+
+- **On `main` only:** create a feature branch when starting work that needs one.
+- **Already on a non-`main` branch:** stay on that branch. Do **not** create a new
+  branch unless a human explicitly asks for a separate branch.
+- **Opening or updating a PR while on a non-`main` branch:** first check whether an
+  open PR already exists for the current branch (or for the integration branch the
+  active work is targeting). If one exists, push commits there and update that PR.
+  Do **not** open a new PR unless a human explicitly asks for a separate PR.
+- Prefer landing related follow-up work on the existing integration PR (for example
+  `feature/ticket-rooms` / PR #58) instead of stacking new `cursor/*` PRs.
