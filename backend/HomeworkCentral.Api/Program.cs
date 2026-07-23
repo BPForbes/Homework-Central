@@ -172,6 +172,7 @@ builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenari
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetCheckpointStore>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetTrainingPromoter>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingQueue, HomeworkCentral.Api.Assessment.NeuralNetTrainingQueue>();
+builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingCancellationRegistry, HomeworkCentral.Api.Assessment.NeuralNetTrainingCancellationRegistry>();
 // API pods can host visualization/polling while KEDA ScaledJobs own training execution.
 bool disableInProcessTrainingWorker =
     builder.Configuration.GetValue<bool>("KubernetesTraining:DisableInProcessWorker");

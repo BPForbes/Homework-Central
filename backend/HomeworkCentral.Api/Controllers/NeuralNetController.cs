@@ -60,9 +60,22 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         return result switch
         {
             NeuralNetTrainingSessionRemovalResult.Removed => NoContent(),
-            NeuralNetTrainingSessionRemovalResult.Running => Conflict(new { message = "A running training session cannot be removed." }),
+            NeuralNetTrainingSessionRemovalResult.Running => Conflict(new { message = "A running training session cannot be removed. Cancel it first." }),
             _ => NotFound(),
         };
+    }
+
+    /// <summary>
+    /// Cancels a queued or running synthetic training session. Running sessions stop after the
+    /// current ticket/message step finishes flushing (including continuous mode).
+    /// </summary>
+    [HttpPost("training/{sessionId:guid}/cancel")]
+    public async Task<IActionResult> CancelTrainingSession(Guid sessionId, CancellationToken ct)
+    {
+        bool cancelled = await training.CancelTrainingSessionAsync(sessionId, ct);
+        return cancelled
+            ? Accepted(new { message = "Cancellation requested." })
+            : NotFound(new { message = "No queued or running training session found to cancel." });
     }
 
     /// <summary>

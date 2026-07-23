@@ -39,6 +39,12 @@ public interface INeuralNetTrainingService
     Task RunSyntheticSessionAsync(Guid sessionId, CancellationToken ct = default);
     Task<bool> RunNextSyntheticSessionAsync(CancellationToken ct = default);
     Task<NeuralNetTrainingSessionRemovalResult> RemoveSessionAsync(Guid sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cancels a queued or running session. Continuous sessions stop after the current
+    /// ticket/message step finishes flushing.
+    /// </summary>
+    Task<bool> CancelTrainingSessionAsync(Guid sessionId, CancellationToken ct = default);
 }
 
 public sealed class NeuralNetTrainingService(
@@ -47,6 +53,7 @@ public sealed class NeuralNetTrainingService(
     IVectorDocumentStore vectors,
     ILlmClient llm,
     INeuralNetTrainingQueue queue,
+    INeuralNetTrainingCancellationRegistry cancellationRegistry,
     SyntheticThreadScenarioGenerator scenarioGenerator,
     NeuralNetTrainingPromoter promoter,
     INeuralNetTrainingProgressStore progressStore,
@@ -180,11 +187,13 @@ public sealed class NeuralNetTrainingService(
     public async Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(
         StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default)
     {
+        // Continuous mode stores RequestedTicketCount=0 (no fixed budget); one ticket/message per step.
+        bool continuous = request.Continuous;
         NeuralNetTrainingSession session = new()
         {
             SessionId = Guid.NewGuid(), StartedByUserId = actorUserId,
-            RequestedTicketCount = Math.Clamp(request.TicketCount, 1, 10),
-            MaxPassesPerTicket = Math.Clamp(request.MaxPassesPerTicket, 1, 6),
+            RequestedTicketCount = continuous ? 0 : Math.Clamp(request.TicketCount, 1, 10),
+            MaxPassesPerTicket = continuous ? 1 : Math.Clamp(request.MaxPassesPerTicket, 1, 6),
             Mode = request.Mode,
             Status = "Queued", CreatedAtUtc = DateTime.UtcNow,
         };
@@ -281,6 +290,7 @@ public sealed class NeuralNetTrainingService(
         NeuralNetTrainingSession? session = await TryClaimSyntheticSessionAsync(sessionId, ct);
         if (session is null) return;
 
+        CancellationToken sessionToken = cancellationRegistry.Link(sessionId, ct);
         TrainingSessionTimings timings = new();
         try
         {
@@ -288,24 +298,267 @@ public sealed class NeuralNetTrainingService(
                 async () =>
                 {
                     SyntheticGeneratorFeedbackBuffer feedback = new();
+                    if (session.RequestedTicketCount == 0)
+                    {
+                        await RunContinuousSyntheticSessionAsync(session, timings, feedback, sessionToken);
+                        return;
+                    }
+
                     List<(int TicketIndex, SyntheticTicket? Ticket)> tickets =
-                        await GenerateSyntheticTicketsAsync(session, timings, feedback, ct);
-                    await RunChatMonitoringRunsAsync(session, tickets, timings, feedback, ct);
-                    await CompleteSyntheticSessionAsync(session, timings, ct);
+                        await GenerateSyntheticTicketsAsync(session, timings, feedback, sessionToken);
+                    await RunChatMonitoringRunsAsync(session, tickets, timings, feedback, sessionToken);
+                    await CompleteSyntheticSessionAsync(session, timings, sessionToken);
                     PublishProgress(session, progress => progress with
                     {
                         Phase = "Completed",
                         TicketsProcessed = progress.TicketsProcessed,
                     });
-                    await promoter.QueueSessionAsync(session.SessionId, ct);
+                    await promoter.QueueSessionAsync(session.SessionId, sessionToken);
                 },
                 ex => FailSyntheticSessionAsync(session, timings, ex));
         }
         catch (OperationCanceledException)
         {
             await CancelSyntheticSessionAsync(session, timings);
+            // Host shutdown cancels the linked token via `ct`; session-only cancel must not stop the worker.
+            if (ct.IsCancellationRequested)
+                throw;
+        }
+        finally
+        {
+            cancellationRegistry.Unregister(sessionId);
+        }
+    }
+
+    public async Task<bool> CancelTrainingSessionAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        NeuralNetTrainingSession? session = await db.NeuralNetTrainingSessions
+            .FirstOrDefaultAsync(x => x.SessionId == sessionId, ct);
+        if (session is null)
+            return false;
+
+        if (string.Equals(session.Status, "Queued", StringComparison.OrdinalIgnoreCase))
+        {
+            queue.TryRemove(sessionId);
+            session.Status = "Cancelled";
+            session.CompletedAtUtc = DateTime.UtcNow;
+            session.FailureReason = "Training cancelled before start.";
+            await db.ChatMonitoringNeuralModelRuns
+                .Where(x => x.SessionId == sessionId && x.Status == "Queued")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(x => x.Status, "Cancelled")
+                        .SetProperty(x => x.CompletedAtUtc, DateTime.UtcNow)
+                        .SetProperty(x => x.FailureReason, "Training cancelled before start."),
+                    ct);
+            await db.SaveChangesAsync(ct);
+            progressStore.Clear(sessionId);
+            return true;
+        }
+
+        if (!string.Equals(session.Status, "Running", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return cancellationRegistry.TryCancel(sessionId);
+    }
+
+    /// <summary>
+    /// Trains one synthetic ticket (single message) at a time until cancelled.
+    /// Snapshots worker replay JSON after each step so downloads work mid-session.
+    /// </summary>
+    private async Task RunContinuousSyntheticSessionAsync(
+        NeuralNetTrainingSession session,
+        TrainingSessionTimings timings,
+        SyntheticGeneratorFeedbackBuffer feedback,
+        CancellationToken ct)
+    {
+        List<ChatMonitoringNeuralModelRun> runs = await db.ChatMonitoringNeuralModelRuns
+            .Where(x => x.SessionId == session.SessionId)
+            .OrderBy(x => x.ChatMonitoringKind)
+            .ToListAsync(ct);
+        using SemaphoreSlim persistenceGate = new(1, 1);
+        SyntheticConceptCoverageSampler coverage = new(HashCode.Combine(session.SessionId, 0x434F5645));
+        List<ChatMonitoringRunContext> contexts = [];
+
+        foreach (ChatMonitoringNeuralModelRun run in runs)
+        {
+            IChatMonitoringNeuralModelTelemetry telemetry = ResolveChatMonitoringTelemetry(run);
+            run.Status = "Running";
+            run.StartedAtUtc = DateTime.UtcNow;
+            contexts.Add(new ChatMonitoringRunContext(
+                session,
+                run,
+                telemetry,
+                new ReplayBuilder(session, telemetry),
+                new PersistenceBatch(db, vectors, persistenceGate, Options.PersistenceBatchSize, timings),
+                [],
+                timings,
+                feedback));
+        }
+
+        await PersistAsync(persistenceGate, timings, ct);
+        PublishProgress(session, progress => progress with
+        {
+            Phase = "Continuous training",
+            TicketsRequested = 0,
+            TicketsGenerated = 0,
+            TicketsProcessed = 0,
+            MessagesProcessed = 0,
+            GeneratorHints = feedback.Hints.ToList(),
+        });
+
+        int ticketIndex = 0;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                ct.ThrowIfCancellationRequested();
+                ticketIndex++;
+                string targetCategory = coverage.NextTarget(session.Mode, ticketIndex);
+
+                System.Diagnostics.Stopwatch llm1Watch = System.Diagnostics.Stopwatch.StartNew();
+                SyntheticTicket? generated = await GenerateSyntheticTicketAsync(
+                    session.Mode, timings, feedback.Hints, targetCategory, ct);
+                llm1Watch.Stop();
+                timings.Llm1ScenarioMs += llm1Watch.ElapsedMilliseconds;
+
+                if (generated is null)
+                {
+                    PublishProgress(session, progress => progress with
+                    {
+                        Phase = "Continuous training",
+                        TicketsRequested = ticketIndex,
+                        TicketsGenerated = ticketIndex,
+                        LatestLlm1Summary = $"Ticket {ticketIndex}: generation failed (target {targetCategory})",
+                        GeneratorHints = feedback.Hints.ToList(),
+                    });
+                    continue;
+                }
+
+                SyntheticTicket singleMessageTicket = ToSingleMessageTicket(generated);
+                if (ShouldSampleGeneratorAudit(session.SessionId, ticketIndex))
+                    await CollectBalancedGeneratorAuditAsync(session, singleMessageTicket, feedback, timings, coverage, ct);
+                else
+                {
+                    feedback.RecordCoverageGaps(
+                        coverage.Underrepresented(
+                            IsModelDomainMatch(NeuralModelKindChatMonitoring.Tutoring, singleMessageTicket.Category)
+                                ? NeuralModelKindChatMonitoring.Tutoring
+                                : NeuralModelKindChatMonitoring.Moderation));
+                }
+
+                PublishProgress(session, progress => progress with
+                {
+                    Phase = "Continuous training",
+                    TicketsRequested = ticketIndex,
+                    TicketsGenerated = ticketIndex,
+                    LatestLlm1Summary =
+                        $"Ticket {ticketIndex}: {singleMessageTicket.Category} · 1 message",
+                    GeneratorHints = feedback.Hints.ToList(),
+                });
+
+                List<Task> trainTasks = contexts
+                    .Where(runContext => ShouldTrainContinuousTicket(
+                        session.SessionId,
+                        ticketIndex,
+                        runContext.Run.ChatMonitoringKind,
+                        singleMessageTicket.Category))
+                    .Select(async runContext =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        ChatMonitoringNeuralModelStateSnapshot topologyState =
+                            runContext.Telemetry.GetStateSnapshot();
+                        PublishProgress(session, progress => progress with
+                        {
+                            Phase = $"Continuous · {runContext.Run.ChatMonitoringKind}",
+                            ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
+                            PathTone = "forward",
+                            LayerWidths = topologyState.LayerWidths,
+                            LayerLabels = topologyState.LayerLabels,
+                        });
+
+                        await ProcessSyntheticTicketAsync(
+                            runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
+                        await FlushPendingTrainingAsync(runContext, ct);
+                        await runContext.Batch.FlushAsync(ct);
+                        runContext.Run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(
+                            runContext.Replay.Build(ReplayCompletionStatus.Partial, epochs: Options.LocalEpochs));
+                    })
+                    .ToList();
+
+                await Task.WhenAll(trainTasks);
+                await PersistAsync(persistenceGate, timings, ct);
+
+                PublishProgress(session, progress => progress with
+                {
+                    Phase = "Continuous training",
+                    TicketsRequested = ticketIndex,
+                    TicketsGenerated = ticketIndex,
+                    TicketsProcessed = ticketIndex,
+                    MessagesProcessed = progress.MessagesProcessed + 1,
+                    ExamplesPersisted = timings.ExamplesPersisted,
+                    GeneratorHints = feedback.Hints.ToList(),
+                });
+            }
+
+            ct.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            foreach (ChatMonitoringRunContext runContext in contexts)
+            {
+                await OperationalExceptionGuard.RunAsync(
+                    async () =>
+                    {
+                        await FlushPendingTrainingAsync(runContext, CancellationToken.None);
+                        await runContext.Batch.FlushAsync(CancellationToken.None);
+                        runContext.Run.Status = "Cancelled";
+                        runContext.Run.CompletedAtUtc = DateTime.UtcNow;
+                        runContext.Run.FailureReason ??= "Training cancelled.";
+                        runContext.Run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(
+                            runContext.Replay.Build(ReplayCompletionStatus.Cancelled, epochs: Options.LocalEpochs));
+                    },
+                    ex =>
+                    {
+                        logger.LogWarning(ex, "Failed to finalize cancelled continuous run {Kind}.", runContext.Run.ChatMonitoringKind);
+                        return Task.CompletedTask;
+                    });
+            }
+
+            await PersistAsync(persistenceGate, timings, CancellationToken.None);
             throw;
         }
+    }
+
+    private bool ShouldTrainContinuousTicket(
+        Guid sessionId,
+        int ticketIndex,
+        NeuralModelKindChatMonitoring kind,
+        string category)
+    {
+        if (IsModelDomainMatch(kind, category))
+            return true;
+
+        double rate = Math.Clamp(Options.CrossDomainSampleRate, 0, 1);
+        if (rate <= 0)
+            return false;
+
+        int bucket = HashCode.Combine(sessionId, ticketIndex, (int)kind, 0x4354524E);
+        return (bucket & int.MaxValue) / (double)int.MaxValue < rate;
+    }
+
+    private static SyntheticTicket ToSingleMessageTicket(SyntheticTicket ticket)
+    {
+        SyntheticThreadMessage primary = ticket.Messages.FirstOrDefault(message => !message.IsDistractor)
+            ?? ticket.Messages.First();
+        SyntheticThreadMessage normalized = primary with { MessageIndex = 0 };
+        return ticket with
+        {
+            Message = normalized.Content,
+            ExpectedScore = normalized.TeacherEvidence ?? ticket.ExpectedScore,
+            ExpectedRelevance = normalized.TeacherRelevance ?? ticket.ExpectedRelevance,
+            Messages = [normalized],
+        };
     }
 
     private async Task<NeuralNetTrainingSession?> TryClaimSyntheticSessionAsync(
@@ -346,6 +599,7 @@ public sealed class NeuralNetTrainingService(
         System.Diagnostics.Stopwatch llm1Watch = System.Diagnostics.Stopwatch.StartNew();
         for (int ticketIndex = 1; ticketIndex <= session.RequestedTicketCount; ticketIndex++)
         {
+            ct.ThrowIfCancellationRequested();
             string targetCategory = coverage.NextTarget(session.Mode, ticketIndex);
             SyntheticTicket? ticket = await GenerateSyntheticTicketAsync(
                 session.Mode, timings, feedback.Hints, targetCategory, ct);
@@ -567,6 +821,7 @@ public sealed class NeuralNetTrainingService(
                     int miniBatchSize = Math.Clamp(Options.MiniBatchSize, 1, 64);
                     foreach ((int ticketIndex, SyntheticTicket generated) in selected)
                     {
+                        ct.ThrowIfCancellationRequested();
                         await ProcessSyntheticTicketAsync(
                             runContext, ticketIndex, generated, miniBatchSize, ct);
                         PublishProgress(session, progress => progress with
@@ -603,6 +858,7 @@ public sealed class NeuralNetTrainingService(
         runContext.Replay.BeginTicket(ticketIndex, generated);
         foreach (SyntheticThreadMessage message in generated.Messages)
         {
+            ct.ThrowIfCancellationRequested();
             await ProcessSyntheticMessageAsync(runContext, ticketIndex, generated, message, miniBatchSize, ct);
         }
     }
@@ -1541,6 +1797,7 @@ public sealed class NeuralNetTrainingService(
             SessionId = session.SessionId,
             RequestedTicketCount = session.RequestedTicketCount,
             MaxPassesPerTicket = session.MaxPassesPerTicket,
+            Continuous = session.RequestedTicketCount == 0,
             Mode = session.Mode,
             Status = session.Status,
             CreatedAtUtc = session.CreatedAtUtc,
