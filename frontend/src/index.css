@@ -4986,6 +4986,22 @@ a {
   gap: 0.5rem;
 }
 
+.neural-download-ready {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.neural-download-ready strong {
+  color: var(--color-ink);
+  font-size: 0.9rem;
+}
+
 .ticket-watch-chip-remove {
   width: 1.15rem;
   height: 1.15rem;
