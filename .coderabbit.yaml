@@ -1,0 +1,209 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review configuration for Homework Central.
+# Project context mirrors AGENTS.md. System architecture lives under docs/*.
+# Comment/documentation rules: docs/COMMENT_DOCUMENTATION_GUIDE.md (Comment Documentation Guide).
+
+language: en-US
+reviews:
+  profile: chill
+  high_level_summary: true
+  review_details: true
+  sequence_diagrams: true
+  estimated_code_review_effort: true
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        ## Repository context (same as AGENTS.md)
+
+        Homework Central is a self-hosted, school-focused chat/communication app:
+        subject-based chat rooms, staff rooms, an inbox for mentions/replies,
+        role-based permissions, a captcha gate for account verification, and an
+        admin "Server Maintenance" panel.
+
+        Layout:
+        - `backend/` — .NET API (`HomeworkCentral.Api`), EF Core migrations, SignalR chat hubs.
+        - `frontend/` — React + TypeScript + Vite SPA, plain CSS (no Tailwind/component library).
+        - `scripts/` — local dev stack helpers (`run-dev.sh` / `run-dev.ps1`, etc.); see `README.md`
+          for application setup and `SETUP.md` for optional local contributor tooling.
+        - `docs/` — architecture and engineering standards; start at `docs/README.md`.
+
+        ## Comments, documentation, naming, and readability
+
+        Before approving comments, XML docs, Markdown, naming, or function structure
+        changes, enforce the Comment Documentation Guide at `docs/COMMENT_DOCUMENTATION_GUIDE.md`.
+
+        Prefer improving structure, names, and explicit type declarations before adding comments.
+
+        Hard rules (from AGENTS.md / Comment Documentation Guide):
+        - Do not use C# `var`; use explicit local and iteration types.
+        - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
+        - Prefer fail-first control flow (early return/throw; happy path last).
+        - Prefer speakable names; rename abbreviations that cannot be spoken clearly
+          (conventional `ct` / small loop indices are fine).
+        - Prefer collection transforms when clearer than a hand-written for-loop:
+          TypeScript `map`/`filter`/`reduce`; C# LINQ `Select()`/`Where()`/`Aggregate()`
+          (also `Sum()`/`ToDictionary()`/`ToHashSet()`). Use explicit loops for multi-step
+          side effects or tight kernels.
+        - Comments must explain project-specific intent, constraints, trust boundaries, state
+          ownership, lifecycle behavior, or non-obvious implementation decisions.
+        - Comments must not be self-referential and must not mention an AI agent, prompt,
+          conversation, authoring process, or temporary branch state.
+        - Prefer updating an authoritative existing Markdown document over creating a duplicate.
+        - Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
+          structural readability score below the accepted threshold must be split into cohesive,
+          precisely named subfunctions unless an approved exception applies.
+        - Do not require or add asymptotic time/space (Big-O) notes in comments or docs.
+
+        ## System documentation (docs/*)
+
+        When questions arise about architecture, trust boundaries, auth, chat, tickets,
+        uploads, AI scoring, or runtime behavior, consult the matching file under `docs/`:
+        - `docs/README.md` — index and ownership map
+        - `docs/identity.md` — auth, sessions, captcha, account classes, tenancy
+        - `docs/chat.md` — rooms, messages, SignalR, uploads, ClamAV, downloads
+        - `docs/tickets.md` — portals, preface checks, votes, neural scoring
+        - `README.md` — Docker Compose profiles, WSL caps, ClamAV resource notes
+        - `docs/COMMENT_DOCUMENTATION_GUIDE.md` — Comment Documentation Guide (comments, naming, readability)
+        - `design.md` — UI design tokens and motion (frontend styling)
+
+        Cite the relevant `docs/*` file in review comments when behavior or policy is unclear.
+
+        ## UI and styling (from AGENTS.md)
+
+        Before approving color, animation, spacing, or component style changes in `frontend/`,
+        require alignment with `design.md`. Do not hardcode hex colors, shadows, or transition
+        timings; reuse or extend tokens in `frontend/src/index.css` (`:root` /
+        `:root[data-theme='dark']`) and update `design.md` for genuinely new tokens.
+
+        Entry points:
+        - `frontend/src/index.css` — design tokens and component styles
+        - `frontend/src/context/ThemeContext.tsx` — light/dark theme state
+        - `index.html` — anti-flash theme script
+
+        ## Conventions (from AGENTS.md)
+
+        - No Tailwind, no CSS-in-JS — plain CSS with custom properties, styled by class name.
+        - FontAwesome (`@fortawesome/*`) for icons.
+        - Keep component structure changes and pure styling changes separate where possible.
+        - CI rejects unparameterized EF raw SQL (`FromSqlRaw` / `ExecuteSqlRaw` / `SqlQueryRaw`)
+          in `backend/HomeworkCentral.Api`.
+
+    - path: "docs/COMMENT_DOCUMENTATION_GUIDE.md"
+      instructions: |
+        This file is the Comment Documentation Guide (canonical path
+        `docs/COMMENT_DOCUMENTATION_GUIDE.md`). Review changes for clarity, accuracy, and
+        consistency with its own naming convention section. Flag renamed titles or
+        alternate informal names that diverge from the guide's naming convention.
+
+    - path: "docs/**"
+      instructions: |
+        Treat `docs/*` as the system reference for architecture and engineering
+        standards. Check that feature docs stay module-level (one file per module),
+        link to the Comment Documentation Guide when stating comment/naming rules,
+        and do not invent parallel standards. Prefer updating the owning module doc
+        (`identity.md`, `chat.md`, `tickets.md`) over adding one-off files. Local
+        Docker/WSL/ClamAV resource notes belong in `README.md`.
+
+    - path: "backend/**/*.cs"
+      instructions: |
+        Enforce the Comment Documentation Guide (`docs/COMMENT_DOCUMENTATION_GUIDE.md`) on all
+        new and changed C# code: no `var`, prefer pattern matching for closed sets,
+        project-intent comments only, and canonical doc updates under `docs/`.
+
+        ## Cognitive / structural readability (required)
+
+        Report findings when thresholds are approached or exceeded:
+
+        Hard complexity gates apply to C# under `backend/` (`*.cs`).
+
+        | Metric | Warning band | Hard limit |
+        |---|---:|---:|
+        | Cognitive complexity | 11-15 | >15 |
+        | Cyclomatic complexity | 8-10 | >10 |
+        | Nesting depth | 3-4 | >4 |
+        | Physical lines | 61-80 | >80 |
+        | Parameters | 5-6 | >6 |
+        | Boolean terms in one condition | 5-7 | >7 |
+        | Side-effect categories | 3 | >3 |
+        | Structural readability score | 60-74 | <60 |
+
+        Structural readability starts at 100 and subtracts weighted complexity,
+        nesting, lines, parameters, boolean terms, side effects, `var` usage, and
+        weak naming (full formula in `docs/COMMENT_DOCUMENTATION_GUIDE.md`).
+
+        Flag hard-limit breaches as must-fix before merge unless an approved
+        readability exception is documented near the function and in the owning
+        module doc under `docs/`. Prefer decomposition around authorization,
+        validation, persistence, DTO mapping, and similar seams.
+
+        Do not require asymptotic time/space (Big-O) analysis in comments or docs.
+
+        For system questions (tenancy, chat access, tickets, uploads), consult
+        `docs/identity.md`, `docs/chat.md`, or `docs/tickets.md`. Docker/WSL/ClamAV
+        resource notes are in `README.md`.
+
+    - path: "frontend/**/*.{ts,tsx}"
+      instructions: |
+        Enforce the Comment Documentation Guide (`docs/COMMENT_DOCUMENTATION_GUIDE.md`) on new
+        and changed TypeScript. Prefer precise names and project-intent comments.
+        Keep styling token-driven per `design.md` / `frontend/src/index.css`.
+
+        ## Cognitive / structural readability (required)
+
+        Hard complexity gates apply to non-UI TypeScript modules (`*.ts`) such as
+        API clients, protocol/state-machine hooks, and pure utilities — same metric
+        table as backend (see `docs/COMMENT_DOCUMENTATION_GUIDE.md`).
+
+        Hard complexity gates do **not** apply to React component files (`*.tsx`);
+        still note clearly excessive nesting or mixed protocol logic that should
+        move into `*.ts` helpers/hooks.
+
+        Do not require asymptotic time/space (Big-O) analysis in comments or docs.
+
+        For system questions, consult the matching file under `docs/*`. Docker/WSL/ClamAV
+        resource notes are in `README.md`.
+
+    - path: "frontend/**/*.{css,scss}"
+      instructions: |
+        Require design tokens from `frontend/src/index.css` and rationale in
+        `design.md`. Flag hardcoded colors, shadows, and transition timings.
+        Context matches AGENTS.md UI and styling rules.
+
+    - path: "{AGENTS.md,CLAUDE.md}"
+      instructions: |
+        Keep AGENTS.md and CLAUDE.md aligned with each other and with the
+        Comment Documentation Guide (`docs/COMMENT_DOCUMENTATION_GUIDE.md`). They must continue
+        to point agents at `docs/` for system understanding and at the Comment
+        Documentation Guide for comment/naming/readability rules.
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    # Schema requires each entry to be a string glob, or { files, applyTo } where both
+    # fields are comma-separated strings (not YAML arrays). See schema.v2.json.
+    filePatterns:
+      # Comment Documentation Guide — enforce on all source under review
+      - files: "docs/COMMENT_DOCUMENTATION_GUIDE.md"
+        applyTo: "backend/**/*.{cs,csproj},frontend/**/*.{ts,tsx,css,html},scripts/**/*,docs/**/*.md,*.md,.coderabbit.yaml,AGENTS.md,CLAUDE.md"
+      # System architecture docs — use when reviewing related code
+      - files: "docs/README.md"
+        applyTo: "backend/**,frontend/**,docs/**,scripts/**"
+      - files: "docs/identity.md"
+        applyTo: "backend/**/*Auth*,backend/**/*Session*,backend/**/*Tenant*,backend/**/*Captcha*,backend/**/*Permission*,frontend/**/*Auth*,frontend/**/*Login*,frontend/**/*Session*"
+      - files: "docs/chat.md"
+        applyTo: "backend/**/*Chat*,backend/**/*Message*,backend/**/*Upload*,backend/**/*Clam*,frontend/**/*Chat*,frontend/**/*Message*,frontend/**/*Upload*"
+      - files: "docs/tickets.md"
+        applyTo: "backend/**/*Ticket*,backend/**/*Assessment*,backend/**/*Neural*,backend/**/*Preface*,frontend/**/*Ticket*,frontend/**/*Assessment*,frontend/**/*Neural*"
+      - files: "README.md"
+        applyTo: "scripts/**,**/docker-compose*.yml,**/Dockerfile*,deploy/windows/**,deploy/clamav/**"
+      - files: "design.md"
+        applyTo: "frontend/**/*.{css,tsx,html},index.html"
+      # Same agent context as AGENTS.md (auto-detected; explicit apply keeps scope clear)
+      - files: "AGENTS.md"
+        applyTo: "backend/**,frontend/**,scripts/**,docs/**,*.md"
+      - files: "CLAUDE.md"
+        applyTo: "backend/**,frontend/**,scripts/**,docs/**,*.md"
+
+chat:
+  auto_reply: true

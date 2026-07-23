@@ -9,6 +9,7 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+#   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
 #   HC_DEV_BYPASS=1         Set for the API child process (enables /devlogin backend)
 #   VITE_HC_DEV_BYPASS=true Set for the frontend (enables /devlogin route)
 set -euo pipefail
@@ -49,9 +50,13 @@ Options:
   --skip-docker  Do not start Postgres via Docker (expects DB on localhost)
   --help         Show this help
 
+For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
+development migrations and seeds. Unset it after pulling migrations/catalog changes
+or after resetting the local database.
+
 After startup:
-  Frontend  http://localhost:5173
-  API       http://localhost:5000
+  Frontend  http://localhost:5173   (Vite HMR)
+  API       http://localhost:5000   (dotnet watch by default; set HC_API_WATCH=0 to disable)
   Health    http://localhost:5000/healthz
 
 Stop:
@@ -364,6 +369,22 @@ start_fcaptcha() {
     || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
 }
 
+start_clamav() {
+  if ! dev_clamav_opted_in; then
+    log "Skipping ClamAV (set HC_ENABLE_CLAMAV=1 to scan uploads; scans fail open without it)"
+    return 0
+  fi
+
+  require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
+  fi
+
+  log "Starting ClamAV (Docker) on localhost:${DEV_STACK_CLAMAV_HOST_PORT}"
+  ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" \
+    || fail "Failed to start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Check: docker compose logs clamav"
+}
+
 build_postgres_host_check() {
   dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
 }
@@ -504,28 +525,25 @@ run_stack() {
   local api_ready=0
   BACKEND_PID=""
 
+  # Vite has no API dependency, so bind the frontend immediately rather than waiting for
+  # migrations and seed data to finish on port 5000.
+  log "Starting frontend on http://localhost:5173"
+  NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=384}" \
+    VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
+  FRONTEND_PID=$!
+
   if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
     log "Starting API on http://localhost:5000"
     if [[ "$SKIP_DOCKER" == true ]]; then
-      HC_SKIP_DOCKER=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
     else
-      HC_SKIP_DOCKER=0 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
     fi
     BACKEND_PID=$!
-
-    log "Waiting for API to become ready before starting frontend"
-    if "$REPO_ROOT/scripts/wait-for-dev-server.sh" "http://localhost:5000/healthz" "API" 300; then
-      api_ready=1
-    else
-      log "API is not ready; starting frontend with unable to connect to API"
-    fi
+    api_ready=1
   else
     log "Skipping API start because the build failed (see API Build Errors browser tab)"
   fi
-
-  log "Starting frontend on http://localhost:5173"
-  VITE_HC_DEV_BYPASS=true npm run dev --prefix "$FRONTEND_DIR" &
-  FRONTEND_PID=$!
 
   if [[ "$api_ready" -eq 1 ]]; then
     "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
@@ -594,8 +612,9 @@ main() {
   if [[ "$SKIP_DOCKER" == false ]]; then
     start_postgres
     start_fcaptcha
+    start_clamav
   else
-    log "Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / --skip-docker)"
+    log "Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / --skip-docker)"
   fi
 
   run_stack

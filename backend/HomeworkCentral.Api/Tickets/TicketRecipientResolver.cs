@@ -1,0 +1,256 @@
+using System.Collections;
+using HomeworkCentral.Api.Authorization;
+using HomeworkCentral.Api.Chat;
+using HomeworkCentral.Api.Data;
+using HomeworkCentral.Api.Dev;
+using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Utilities;
+using Microsoft.EntityFrameworkCore;
+
+namespace HomeworkCentral.Api.Tickets;
+
+public interface ITicketRecipientResolver
+{
+    Task<HashSet<Guid>> ResolveRecipientsAsync(
+        IReadOnlyList<CustomChannelAccessRuleInput> rules,
+        string roomId,
+        AccountClass ownerAccountClass,
+        string? tenantDatabaseName,
+        CancellationToken ct = default);
+}
+
+/// <summary>
+/// Resolves inbox recipients from portal mention/staff access rules, limited to users who can
+/// access the ticket room within the same account-class scope as the portal channel.
+/// </summary>
+public sealed class TicketRecipientResolver(
+    AppDbContext masterDb,
+    MasterDbContext masterRegistry,
+    ITenantDbContextFactory tenantFactory,
+    IChatRoomAccessService chatRoomAccess) : ITicketRecipientResolver
+{
+    public async Task<HashSet<Guid>> ResolveRecipientsAsync(
+        IReadOnlyList<CustomChannelAccessRuleInput> rules,
+        string roomId,
+        AccountClass ownerAccountClass,
+        string? tenantDatabaseName,
+        CancellationToken ct = default)
+    {
+        HashSet<Guid> recipients = [];
+        List<UserMaskSnapshot> eligibleUsers = await LoadEligibleUsersAsync(ownerAccountClass, tenantDatabaseName, ct);
+        // Portal mention/staff rules often target AllowedUserId; index once so each
+        // rule does not rescan the eligible set.
+        Dictionary<Guid, UserMaskSnapshot> eligibleUsersById = eligibleUsers
+            .ToDictionary(user => user.UserId);
+
+        foreach (CustomChannelAccessRuleInput rule in rules)
+        {
+            switch (rule)
+            {
+                case { AllowedUserId: Guid allowedUserId }:
+                    if (!eligibleUsersById.TryGetValue(allowedUserId, out UserMaskSnapshot? allowed))
+                        break;
+                    if (!chatRoomAccess.CanAccessRoom(allowed.Masks, allowedUserId, roomId))
+                        break;
+                    recipients.Add(allowedUserId);
+                    break;
+
+                case { PlatformRoleBit: short platformBit }:
+                    recipients.UnionWith(eligibleUsers
+                        .Where(snapshot => BitMask.HasBit(snapshot.RoleMask, platformBit))
+                        .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
+                        .Select(snapshot => snapshot.UserId));
+                    break;
+
+                case { CustomRoleId: Guid customRoleId }:
+                    recipients.UnionWith(eligibleUsers
+                        .Where(snapshot => snapshot.Masks.CustomRoleIds.Contains(customRoleId))
+                        .Where(snapshot => chatRoomAccess.CanAccessRoom(snapshot.Masks, snapshot.UserId, roomId))
+                        .Select(snapshot => snapshot.UserId));
+                    break;
+            }
+        }
+
+        return recipients;
+    }
+
+    private async Task<List<UserMaskSnapshot>> LoadEligibleUsersAsync(
+        AccountClass ownerAccountClass,
+        string? tenantDatabaseName,
+        CancellationToken ct)
+    {
+        if (ownerAccountClass == AccountClass.RealAccount)
+            return await LoadMasksFromMasterAsync(realUsersOnly: true, ct);
+
+        if (ownerAccountClass == AccountClass.DeveloperAccount
+            && !string.IsNullOrEmpty(tenantDatabaseName))
+        {
+            await using AppDbContext tenantDb =
+                await tenantFactory.CreateForRegisteredTenantAsync(tenantDatabaseName, ct);
+            return await LoadMasksFromContextAsync(
+                tenantDb,
+                AccountClass.DeveloperAccount,
+                tenantDatabaseName,
+                ct);
+        }
+
+        if (ownerAccountClass == AccountClass.DevAdmin)
+        {
+            List<UserMaskSnapshot> snapshots = [];
+            List<string> tenantDatabases = await masterRegistry.Tenants
+                .AsNoTracking()
+                .Select(tenant => tenant.DatabaseName)
+                .ToListAsync(ct);
+
+            foreach (string databaseName in tenantDatabases)
+            {
+                await using AppDbContext tenantDb =
+                    await tenantFactory.CreateForRegisteredTenantAsync(databaseName, ct);
+                snapshots.AddRange(await LoadMasksFromContextAsync(
+                    tenantDb,
+                    AccountClass.DeveloperAccount,
+                    databaseName,
+                    ct));
+            }
+
+            UserMaskSnapshot? devAdmin = await LoadDevAdminSnapshotAsync(ct);
+            if (devAdmin is not null)
+                snapshots.Add(devAdmin);
+
+            return snapshots;
+        }
+
+        return [];
+    }
+
+    private async Task<UserMaskSnapshot?> LoadDevAdminSnapshotAsync(CancellationToken ct)
+    {
+        User? devAdmin = await masterDb.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Username == DevBypass.DevAdminUsername, ct);
+
+        if (devAdmin is null)
+            return null;
+
+        UserEffectiveMask? mask = await masterDb.UserEffectiveMasks
+            .AsNoTracking()
+            .Include(m => m.SubjectExpertiseMasks)
+            .FirstOrDefaultAsync(m => m.UserId == devAdmin.UserId, ct);
+
+        if (mask is null)
+            return null;
+
+        return new UserMaskSnapshot(
+            devAdmin.UserId,
+            await BuildMaskDtoWithCustomRolesAsync(masterDb, devAdmin.UserId, mask, ct),
+            mask.EffectiveRoleMask);
+    }
+
+    /// <summary>
+    /// Loads master masks with one username dictionary for the batch — avoids a Users
+    /// query per mask row when filtering DevAdmin. See docs/tickets.md.
+    /// </summary>
+    private async Task<List<UserMaskSnapshot>> LoadMasksFromMasterAsync(bool realUsersOnly, CancellationToken ct)
+    {
+        List<UserEffectiveMask> masks = await masterDb.UserEffectiveMasks
+            .AsNoTracking()
+            .Include(mask => mask.SubjectExpertiseMasks)
+            .ToListAsync(ct);
+
+        // One username map for the whole mask set (DevAdmin filter + snapshot build).
+        Dictionary<Guid, string> usernames = await masterDb.Users
+            .AsNoTracking()
+            .Where(user => masks.Select(mask => mask.UserId).Contains(user.UserId))
+            .ToDictionaryAsync(user => user.UserId, user => user.Username, ct);
+
+        HashSet<Guid> userIds = masks
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Select(mask => mask.UserId)
+            .ToHashSet();
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
+            await LoadCustomRoleIdsByUserAsync(masterDb, userIds, ct);
+
+        return masks
+            .Where(mask => usernames.ContainsKey(mask.UserId))
+            .Where(mask => !(realUsersOnly
+                && string.Equals(usernames[mask.UserId], DevBypass.DevAdminUsername, StringComparison.Ordinal)))
+            .Select(mask => CreateSnapshot(mask, customRoleIdsByUser))
+            .ToList();
+    }
+
+    private static async Task<List<UserMaskSnapshot>> LoadMasksFromContextAsync(
+        AppDbContext db,
+        AccountClass accountClass,
+        string tenantDatabaseName,
+        CancellationToken ct)
+    {
+        List<UserEffectiveMask> masks = await db.UserEffectiveMasks
+            .AsNoTracking()
+            .Include(mask => mask.SubjectExpertiseMasks)
+            .ToListAsync(ct);
+
+        HashSet<Guid> userIds = masks.Select(mask => mask.UserId).ToHashSet();
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
+            await LoadCustomRoleIdsByUserAsync(db, userIds, ct);
+
+        return masks.Select(mask => CreateSnapshot(mask, customRoleIdsByUser)).ToList();
+    }
+
+    private static async Task<Dictionary<Guid, HashSet<Guid>>> LoadCustomRoleIdsByUserAsync(
+        AppDbContext db,
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken ct)
+    {
+        if (userIds.Count == 0)
+            return [];
+
+        List<(Guid UserId, Guid RoleId)> assignments = await db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userIds.Contains(userRole.UserId))
+            .Join(
+                db.Roles.AsNoTracking().Where(role => role.IsCustom),
+                userRole => userRole.RoleId,
+                role => role.RoleId,
+                (userRole, role) => new ValueTuple<Guid, Guid>(userRole.UserId, role.RoleId))
+            .ToListAsync(ct);
+
+        return assignments
+            .GroupBy(assignment => assignment.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(assignment => assignment.RoleId).ToHashSet());
+    }
+
+    private static async Task<EffectiveMaskDto> BuildMaskDtoWithCustomRolesAsync(
+        AppDbContext db,
+        Guid userId,
+        UserEffectiveMask mask,
+        CancellationToken ct)
+    {
+        EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser =
+            await LoadCustomRoleIdsByUserAsync(db, [userId], ct);
+        if (customRoleIdsByUser.TryGetValue(userId, out HashSet<Guid>? customRoleIds))
+            dto.CustomRoleIds = customRoleIds;
+
+        return dto;
+    }
+
+    private static UserMaskSnapshot CreateSnapshot(
+        UserEffectiveMask mask,
+        Dictionary<Guid, HashSet<Guid>> customRoleIdsByUser)
+    {
+        EffectiveMaskDto dto = mask.ToEffectiveMaskDto();
+        if (customRoleIdsByUser.TryGetValue(mask.UserId, out HashSet<Guid>? customRoleIds))
+            dto.CustomRoleIds = customRoleIds;
+
+        return new UserMaskSnapshot(mask.UserId, dto, mask.EffectiveRoleMask);
+    }
+
+    private sealed record UserMaskSnapshot(
+        Guid UserId,
+        EffectiveMaskDto Masks,
+        BitArray RoleMask);
+}

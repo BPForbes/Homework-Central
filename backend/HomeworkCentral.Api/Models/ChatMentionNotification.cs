@@ -20,6 +20,8 @@ public class ChatMentionNotification : IShareableScopedResource
     public string CategoryDisplayName { get; set; } = null!;
     public string MessageContent { get; set; } = null!;
     public string MentionKind { get; set; } = null!;
+    public Guid? TicketId { get; set; }
+    public string? TicketPayloadJson { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? ReadAtUtc { get; set; }
     public AccountClass OwnerAccountClass { get; set; }

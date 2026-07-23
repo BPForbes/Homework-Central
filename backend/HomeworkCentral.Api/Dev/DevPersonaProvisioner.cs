@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace HomeworkCentral.Api.Dev;
@@ -9,7 +10,10 @@ public sealed class DevPersonaProvisioner(
     ITenantConnectionResolver connectionResolver,
     ILogger<DevPersonaProvisioner> logger) : IDevPersonaProvisioner
 {
-    private const int MaxParallel = 6;
+    // Each persona creates a database and applies the full EF migration set. Concurrent
+    // CREATE DATABASE / migration work contends heavily for Postgres system catalogs on the
+    // small local Docker instance, so serial provisioning avoids connection timeouts.
+    private const int MaxParallel = 1;
 
     private readonly ConcurrentDictionary<string, byte> _provisioned = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task>> _inFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -56,10 +60,12 @@ public sealed class DevPersonaProvisioner(
     /// as provisioned: a database existing tells us nothing about whether its schema/seed data
     /// are actually up to date (e.g. after pulling new migrations or catalog changes), so every
     /// persona — new or pre-existing — still goes through the real migrate/seed verification in
-    /// <see cref="ProvisionAllRemainingAsync"/>. That verification is fast when there's nothing
-    /// to do (EF's MigrateAsync and this app's own AuthorizationSeedData caching both no-op
-    /// quickly against an up-to-date database) and runs in the background, so this doesn't
-    /// reintroduce a blocking startup cost — it only fixes silently trusting a stale database.
+    /// <see cref="EnsureProvisionedAsync"/> (on demand at dev login, or via
+    /// <see cref="ProvisionAllRemainingAsync"/> when eager provisioning is opted in). That
+    /// verification is fast when there's nothing to do (EF's MigrateAsync and this app's own
+    /// AuthorizationSeedData caching both no-op quickly against an up-to-date database), so this
+    /// doesn't reintroduce a blocking startup cost — it only fixes silently trusting a stale
+    /// database.
     /// </summary>
     public async Task InitializeFromExistingDatabasesAsync(CancellationToken ct = default)
     {
@@ -77,7 +83,7 @@ public sealed class DevPersonaProvisioner(
         if (existingDatabases.Count > 0)
         {
             logger.LogInformation(
-                "Detected {ExistingCount}/{TotalCount} existing persona databases; verifying migrations/seed data in the background.",
+                "Detected {ExistingCount}/{TotalCount} existing persona databases; each is re-verified (migrations/seed) before first use.",
                 existingDatabases.Count,
                 TotalPersonaCount);
         }
@@ -111,16 +117,22 @@ public sealed class DevPersonaProvisioner(
             new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = ct },
             async (item, token) =>
             {
-                await EnsureProvisionedAsync(item.Account, item.Persona, token).ConfigureAwait(false);
+                // Isolate operational DB failures so one persona cannot cancel the shared
+                // Parallel.ForEachAsync token (and the remaining migrations). Unexpected
+                // exceptions still propagate. Failed personas retry on demand at dev login.
+                bool provisioned = await TryProvisionPersonaIsolatedAsync(item.Account, item.Persona, token)
+                    .ConfigureAwait(false);
+                if (!provisioned)
+                    return;
 
                 int current = _provisioned.Count;
-                if (current == 1 || current == TotalPersonaCount || current % 10 == 0)
-                {
-                    logger.LogInformation(
-                        "Provisioned persona database {Current}/{Total}",
-                        current,
-                        TotalPersonaCount);
-                }
+                if (current != 1 && current != TotalPersonaCount && current % 10 != 0)
+                    return;
+
+                logger.LogInformation(
+                    "Provisioned persona database {Current}/{Total}",
+                    current,
+                    TotalPersonaCount);
             });
 
         logger.LogInformation("Persona tenant database provisioning complete.");
@@ -129,34 +141,54 @@ public sealed class DevPersonaProvisioner(
     internal void MarkProvisioned(string databaseName) =>
         _provisioned.TryAdd(databaseName, 0);
 
+    private Task<bool> TryProvisionPersonaIsolatedAsync(
+        DevAccountDefinition account,
+        DevPersonaDefinition persona,
+        CancellationToken token) =>
+        OperationalExceptionGuard.RunAsync(
+            async () =>
+            {
+                await EnsureProvisionedAsync(account, persona, token).ConfigureAwait(false);
+                return true;
+            },
+            ex =>
+            {
+                // Persona DB names embed an email-derived slug; keep failure logs free of that taint.
+                logger.LogWarning(
+                    ex,
+                    "Skipping failed background persona provisioning for tenant '{TenantSlug}'; it can be retried at login.",
+                    account.TenantSlug);
+                return false;
+            });
+
     private async Task ProvisionPersonaCoreAsync(
         DevAccountDefinition account,
         DevPersonaDefinition persona,
         string databaseName,
         CancellationToken ct)
     {
-        try
-        {
-            await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName, ct)
-                .ConfigureAwait(false);
-            PersonaIdentity identity = await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(
-                    connectionResolver,
-                    account,
-                    persona,
-                    ct)
-                .ConfigureAwait(false);
-            RememberPersonaIdentity(databaseName, identity);
-            _provisioned.TryAdd(databaseName, 0);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(
-                ex,
-                "Failed to provision persona database '{DatabaseName}' for {PersonaEmail}",
-                databaseName,
-                persona.Email);
-            throw;
-        }
+        await OperationalExceptionGuard.RunObservingAsync(
+            async () =>
+            {
+                await TenantDatabaseProvisioner.EnsureDatabaseExistsAsync(connectionResolver, databaseName, ct)
+                    .ConfigureAwait(false);
+                PersonaIdentity identity = await TenantDatabaseProvisioner.MigrateAndSeedPersonaAsync(
+                        connectionResolver,
+                        account,
+                        persona,
+                        ct)
+                    .ConfigureAwait(false);
+                RememberPersonaIdentity(databaseName, identity);
+                _provisioned.TryAdd(databaseName, 0);
+            },
+            ex =>
+            {
+                logger.LogError(
+                    ex,
+                    "Failed to provision a persona tenant database for '{TenantSlug}'.",
+                    account.TenantSlug);
+                return Task.CompletedTask;
+            }).ConfigureAwait(false);
     }
 
     private async Task AwaitAndCleanupAsync(string databaseName, Lazy<Task> lazy)

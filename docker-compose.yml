@@ -2,6 +2,30 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Local-development ceilings. Environment overrides make it possible to scale an
+    # individual service without editing this file. These limits apply to ordinary
+    # `docker compose up` (unlike Swarm-only deploy.resources limits).
+    cpus: "${POSTGRES_CPUS:-1.0}"
+    mem_limit: "${POSTGRES_MEMORY_LIMIT:-512m}"
+    mem_reservation: 192m
+    pids_limit: 128
+    # PostgreSQL uses its own shared buffer cache plus dynamic shared-memory segments.
+    # Keep /dev/shm explicit and bounded instead of Docker's small implicit default.
+    shm_size: "192m"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - effective_cache_size=320MB
+      - -c
+      - max_connections=50
+      - -c
+      - jit=off
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
@@ -28,6 +52,10 @@ services:
       context: https://github.com/WebDecoy/FCaptcha.git#v1.12.0
       dockerfile: docker/Dockerfile
     restart: unless-stopped
+    cpus: "${FCAPTCHA_CPUS:-0.25}"
+    mem_limit: "${FCAPTCHA_MEMORY_LIMIT:-96m}"
+    mem_reservation: 32m
+    pids_limit: 64
     environment:
       FCAPTCHA_SECRET: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
       # Upstream Dockerfile copies client JS to /app/static/fcaptcha.js but the Go server
@@ -42,11 +70,88 @@ services:
       retries: 5
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    cpus: "${REDIS_CPUS:-0.25}"
+    mem_limit: "${REDIS_MEMORY_LIMIT:-96m}"
+    mem_reservation: 32m
+    pids_limit: 64
+    # Redis is only a disposable distributed cache in this stack. Bounding its own
+    # allocator gives it room below the cgroup limit and avoids OOM-kill restarts.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - "48mb"
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  clamav:
+    profiles: ["antivirus"]
+    build:
+      context: ./deploy/clamav
+      dockerfile: Dockerfile
+    image: homework-central-clamav:1.4-low-memory
+    restart: unless-stopped
+    cpus: "${CLAMAV_CPUS:-0.75}"
+    # This derived image disables concurrent database reloads, so clamd briefly pauses
+    # scans instead of retaining old and new signature engines simultaneously.
+    mem_limit: "${CLAMAV_MEMORY_LIMIT:-2560m}"
+    mem_reservation: 1536m
+    pids_limit: 128
+    ports:
+      - "${CLAMAV_HOST_PORT:-3310}:3310"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  llm:
+    profiles: ["ai"]
+    build:
+      context: ./llm-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    cpus: "${LLM_CPUS:-1.5}"
+    mem_limit: "${LLM_MEMORY_LIMIT:-1536m}"
+    mem_reservation: 768m
+    pids_limit: 256
+    environment:
+      LLM_CHAT_MODEL: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      # Keep CPU inference predictable on memory-constrained developer machines.
+      OLLAMA_MAX_LOADED_MODELS: "${OLLAMA_MAX_LOADED_MODELS:-1}"
+      OLLAMA_NUM_PARALLEL: "${OLLAMA_NUM_PARALLEL:-1}"
+      OLLAMA_MAX_QUEUE: "${OLLAMA_MAX_QUEUE:-32}"
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-2m}"
+    ports:
+      - "${LLM_HOST_PORT:-11434}:11434"
+    volumes:
+      - llmdata:/root/.ollama
+
   backend:
     build:
-      context: ./backend/HomeworkCentral.Api
-      dockerfile: backend.Dockerfile
+      # The API project links the canonical favicon from frontend/public, so its build
+      # context must include both source trees. The root .dockerignore keeps this small.
+      context: .
+      dockerfile: backend/HomeworkCentral.Api/backend.Dockerfile
     restart: unless-stopped
+    cpus: "${BACKEND_CPUS:-1.0}"
+    mem_limit: "${BACKEND_MEMORY_LIMIT:-512m}"
+    mem_reservation: 192m
+    pids_limit: 192
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__MasterConnection: >
@@ -60,12 +165,34 @@ services:
       FCaptcha__ServerUrl: "http://fcaptcha:3000"
       FCaptcha__PublicUrl: "http://localhost:${FCAPTCHA_HOST_PORT:-3010}"
       FCaptcha__Secret: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
+      Llm__BaseUrl: "http://llm:11434"
+      Llm__Enabled: "true"
+      Llm__ChatModel: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      Llm__EmbeddingModel: "${LLM_EMBED_MODEL:-nomic-embed-text}"
+      Tickets__OllamaBaseUrl: "http://llm:11434"
+      Tickets__ModelName: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      Tickets__InitialConfidenceScore: "${TICKET_AI_INITIAL_SCORE:-0.5}"
+      Tickets__MaxScoreDeltaPerMessage: "${TICKET_AI_MAX_DELTA:-0.15}"
+      Tickets__MaxMessageCharacters: "${TICKET_AI_MAX_MESSAGE_CHARACTERS:-2000}"
+      Tickets__StudentEnabled: "true"
+      Tickets__StudentConfidenceThreshold: "${TICKET_STUDENT_CONFIDENCE_THRESHOLD:-0.75}"
+      Tickets__ReviewerAuditRate: "${TICKET_REVIEWER_AUDIT_RATE:-0.10}"
+      Tickets__ReviewerBlendWeight: "${TICKET_REVIEWER_BLEND_WEIGHT:-0.70}"
+      Uploads__RootPath: "/app/App_Data/uploads"
+      ConnectionStrings__Redis: "redis:6379"
+      ClamAV__Host: "clamav"
+      ClamAV__Port: "3310"
+      ClamAV__Enabled: "true"
     ports:
       - "5000:8080"
+    volumes:
+      - uploads:/app/App_Data/uploads
     depends_on:
       postgres:
         condition: service_healthy
       fcaptcha:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
@@ -73,6 +200,10 @@ services:
       context: ./frontend
       dockerfile: frontend.Dockerfile
     restart: unless-stopped
+    cpus: "${FRONTEND_CPUS:-0.25}"
+    mem_limit: "${FRONTEND_MEMORY_LIMIT:-48m}"
+    mem_reservation: 16m
+    pids_limit: 64
     ports:
       - "5173:8080"
     depends_on:
@@ -83,3 +214,5 @@ volumes:
   # Use `docker compose down` (no -v) or scripts/stop-dev.sh to keep this data.
   # Only `docker compose down -v` or scripts/reset-dev-db.sh wipes it.
   pgdata:
+  llmdata:
+  uploads:

@@ -78,15 +78,17 @@ After a successful run, these services are available:
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Frontend** | http://localhost:5173/login | React app (Vite dev server) |
-| **API** | http://localhost:5000 | ASP.NET Core backend |
-| **Health check** | http://localhost:5000/healthz | API readiness probe |
+| **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
+| **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
+| **Health check** | http://localhost:5000/healthz | Listen probe (`starting` while migrate/seed runs, then `healthy`) |
 | **Postgres** | `localhost:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |
 
 On **Windows**, the API and frontend each open in a **separate terminal window**. On **Linux/macOS**, both run in the current terminal (use `Ctrl+C` to stop).
 
 The browser opens automatically when servers are ready.
+
+The API uses **`dotnet watch`** by default so a `git pull` (or local edits) rebuilds/restarts without closing the terminal. That is process restart / .NET Hot Reload, not Vite-style HMR. Set `HC_API_WATCH=0` for a one-shot `dotnet run`. After pulling migrations, unset `HC_SKIP_DEV_WARMUP` (or restart once) so schema updates apply.
 
 ---
 
@@ -113,6 +115,99 @@ The browser opens automatically when servers are ready.
 | Windows | `.\scripts\stop-dev.ps1` (close API/frontend terminals manually) |
 | Linux / macOS | `./scripts/stop-dev.sh` or `Ctrl+C` in the run terminal |
 
+### Release Docker resources (Windows)
+
+Stopping the stack releases container CPU and RAM immediately; the `pgdata` volume is retained:
+
+```powershell
+.\scripts\stop-dev.ps1
+docker compose down
+```
+
+If Docker Desktop's WSL 2 VM still holds memory after the containers stop, quit Docker Desktop
+and run `wsl --shutdown`, then start Docker Desktop again. To reclaim unused build cache and
+images without deleting the database volume, run `docker system prune -af`. Do not add
+`--volumes` unless you intentionally want to delete local Postgres data.
+
+### Docker Compose profiles (8 GiB workstation)
+
+`docker-compose.yml` keeps the lightweight core below a 1.25 GiB container ceiling.
+Heavy services are opt-in profiles:
+
+| Service | Profile | CPU ceiling | RAM ceiling |
+|---|---|---:|---:|
+| PostgreSQL, FCaptcha, Redis, API, nginx | default | ~1.75 total | ~1.25 GiB total |
+| ClamAV | `antivirus` | 0.75 | 2,560 MiB |
+| Ollama | `ai` | 1.50 | 1,536 MiB |
+
+```powershell
+docker compose up -d                          # core only
+docker compose --profile antivirus up -d      # + attachment malware scanning
+docker compose --profile ai up -d             # + local AI reviewer
+```
+
+Do not enable `antivirus` and `ai` together on an 8 GiB machine. CPU values are
+ceilings rather than reservations. The default development scripts run the API and
+frontend on the host, so Docker limits do not cap those two host processes.
+Override individual ceilings with `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`,
+`LLM_MEMORY_LIMIT`, and related keys in `.env` when `docker stats` shows a need.
+
+### WSL caps (Windows Docker Desktop)
+
+Compose limits do not include the Linux kernel, Docker daemon, or filesystem cache.
+Copy [`deploy/windows/.wslconfig.example`](deploy/windows/.wslconfig.example) to
+`%USERPROFILE%\.wslconfig` (4 GiB memory, 4 processors, 2 GiB swap), run
+`wsl --shutdown`, and restart Docker Desktop. Sustained swapping means the active
+profile is too large; avoid running other WSL distributions alongside a heavy profile.
+
+### ClamAV notes
+
+ClamAV is profile-gated because the signature engine dominates RAM. The local image
+disables concurrent database reloads so scans pause briefly during signature update
+instead of holding two engines. Enable it in the script path with
+`HC_ENABLE_CLAMAV=1` before `scripts/run-dev.sh`, or use
+`docker compose --profile antivirus up -d`. An npm ClamAV package is only a client
+wrapper; the backend already streams to `clamd` via `nClam`. A native Windows
+`clamd` on port `3310` moves signature RAM outside the WSL cap but does not shrink
+it — the Docker antivirus profile remains the safer default on the documented
+workstation. Upload scan statuses and fail-open behavior are in
+[`docs/chat.md`](docs/chat.md).
+
+Ticket AI uses bounded per-message confidence changes with an auditable vector
+archive; see [`docs/tickets.md`](docs/tickets.md#neural-monitors-and-ollama-blend).
+
+### Documentation
+
+Architecture, trust boundaries, and engineering standards live under
+[`docs/`](docs/README.md):
+
+| Document | Topic |
+|----------|-------|
+| [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](docs/COMMENT_DOCUMENTATION_GUIDE.md) | Comment Documentation Guide (comments, naming, readability; CodeQL CI) |
+| [`docs/identity.md`](docs/identity.md) | Authentication, sessions, account classes, tenant visibility |
+| [`docs/chat.md`](docs/chat.md) | Chat categories, rooms, messages, attachments |
+| [`docs/tickets.md`](docs/tickets.md) | Ticket portals, Trial Tutor, votes, AI scoring |
+| [`design.md`](design.md) | UI design tokens and motion |
+| [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md) | Kubernetes deployment |
+
+### Fast repeat starts
+
+`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
+can bind without a duplicate build. It also starts the frontend before the API. The API exposes
+`/healthz` as soon as Kestrel listens (`status: starting` during migrate/seed, then `healthy`),
+so the Vite BackendGate can wait without flooding the proxy with connection-refused errors.
+
+After one successful initialization of the local database, you can skip development migrations
+and seed warmup on repeat starts:
+
+```powershell
+$env:HC_SKIP_DEV_WARMUP = '1'
+.\scripts\run-dev.ps1
+```
+
+Unset this variable and start normally after pulling migrations or authorization/seed changes, or
+after resetting the local database. Never use it for a fresh database.
+
 ### Build without starting servers
 
 | Platform | Command |
@@ -135,6 +230,8 @@ The browser opens automatically when servers are ready.
 Homework-Central/
 ├── backend/HomeworkCentral.Api/   # ASP.NET Core API
 ├── frontend/                      # React + Vite SPA
+├── docs/                          # Architecture and engineering standards
+├── deploy/                        # Kubernetes and Windows Docker helpers
 ├── scripts/                       # Dev orchestration (.ps1 / .sh)
 ├── docker-compose.yml             # Postgres, FCaptcha, and production-style services
 ├── HomeworkCentral.sln            # .NET solution
@@ -148,6 +245,7 @@ Homework-Central/
 - **Docker not running** — Start Docker Desktop (or the Docker daemon) and retry.
 - **Port already in use** — Another Postgres install may own `5434` on localhost. The run scripts try to pick a free port and update `.env`; you can also set `POSTGRES_HOST_PORT` manually.
 - **Stale database volume** — Run the reset command above (`reset-dev-db` with `-Yes` / `--yes`), then `run-dev` again.
+- **`Network homework-central_default Resource is still in use`** — Harmless during reset. The `pgdata` volume was still removed; `run-dev` reuses the leftover Docker network. Optional: `docker network inspect homework-central_default` to see what is attached.
 - **Skip Docker** — If you already have Postgres on localhost: `.\scripts\run-dev.ps1 -SkipDocker` (Windows) or `./scripts/run-dev.sh --skip-docker` (Unix).
 
 ---

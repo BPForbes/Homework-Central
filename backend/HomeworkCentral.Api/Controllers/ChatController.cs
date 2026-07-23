@@ -2,6 +2,7 @@ using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
 using HomeworkCentral.Api.DTOs;
+using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
@@ -18,7 +19,11 @@ public class ChatController(
     IEffectiveMaskService effectiveMaskService,
     IChatMessageService chatMessageService,
     IChatRoomDetailService chatRoomDetailService,
-    IRoleAppearanceService roleAppearanceService) : ControllerBase
+    IRoleAppearanceService roleAppearanceService,
+    IChatMessageVoteService voteService,
+    Uploads.IChatAttachmentService attachmentService,
+    Uploads.IAttachmentAccessTokenService accessTokenService,
+    InfrastructureUserDirectory userDirectory) : ControllerBase
 {
     /// <summary>Returns chat navigation categories and rooms visible to the current user.</summary>
     [HttpGet("nav")]
@@ -29,7 +34,7 @@ public class ChatController(
             return Unauthorized();
 
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
-        return Ok(chatRoomAccess.GetAccessibleNav(masks));
+        return Ok(chatRoomAccess.GetAccessibleNav(masks, userId.Value));
     }
 
     /// <summary>Returns room metadata for catalog and custom rooms (chat, info, role claim).</summary>
@@ -43,7 +48,7 @@ public class ChatController(
         string decodedRoomId = Uri.UnescapeDataString(roomId);
         EffectiveMaskDto masks = await effectiveMaskService.GetEffectiveMaskDtoAsync(userId.Value, ct);
 
-        if (!chatRoomAccess.CanAccessRoom(masks, decodedRoomId))
+        if (!chatRoomAccess.CanAccessRoom(masks, userId.Value, decodedRoomId))
             return Forbid();
 
         ChatRoomDetailDto? room = await chatRoomDetailService.GetRoomAsync(decodedRoomId, masks, ct);
@@ -86,6 +91,31 @@ public class ChatController(
         return Ok(await roleAppearanceService.GetMentionableRolesAsync(ct));
     }
 
+    /// <summary>
+    /// Prefix user lookup for mentions and ticket intake. Available to any authenticated user
+    /// (unlike /api/infrastructure/users/search which requires ManageServerInfrastructure).
+    /// Reuses <see cref="InfrastructureUserDirectory"/> rather than duplicating search logic.
+    /// </summary>
+    [HttpGet("users/search")]
+    public async Task<ActionResult<IReadOnlyList<ChatUserLookupDto>>> SearchUsers(
+        [FromQuery] string q,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        IReadOnlyList<(User User, string? TenantDatabaseName)> hits =
+            await userDirectory.SearchUsersAsync(q ?? string.Empty, ct);
+
+        return Ok(hits.Select(entry => new ChatUserLookupDto
+        {
+            UserId = entry.User.UserId,
+            Username = entry.User.Username,
+            Email = entry.User.Email,
+        }).ToList());
+    }
+
     /// <summary>Sends a message to a chat room.</summary>
     [HttpPost("rooms/{roomId}/messages")]
     public async Task<ActionResult<ChatMessageDto>> SendMessage(
@@ -97,12 +127,11 @@ public class ChatController(
         if (userId is null)
             return Unauthorized();
 
-        // [Required]/[StringLength] on SendChatMessageRequest.Content already rejects null,
-        // empty, and oversized payloads before this action runs, but a whitespace-only string
-        // (e.g. "   ") passes those attributes, so it's still checked explicitly here — this
-        // way a bad-content rejection is always a 400, never conflated with the 403 below.
-        if (string.IsNullOrWhiteSpace(request.Content))
-            return BadRequest(new { message = "Message content cannot be empty." });
+        bool hasContent = !string.IsNullOrWhiteSpace(request.Content);
+        bool hasAttachments = request.AttachmentIds is { Count: > 0 };
+        bool hasForward = request.ForwardedFrom is not null;
+        if (!hasContent && !hasAttachments && !hasForward)
+            return BadRequest(new { message = "Message content, attachment, or forward is required." });
 
         string decodedRoomId = Uri.UnescapeDataString(roomId);
         if (!await chatMessageService.CanAccessRoomAsync(decodedRoomId, userId.Value, ct))
@@ -114,9 +143,11 @@ public class ChatController(
             message = await chatMessageService.SendMessageAsync(
                 decodedRoomId,
                 userId.Value,
-                request.Content,
+                request.Content ?? string.Empty,
                 request.ReplyToMessageId,
-                ct);
+                ct,
+                request.AttachmentIds,
+                request.ForwardedFrom);
         }
         catch (SendMessageMentionException mentionError)
         {
@@ -139,6 +170,11 @@ public class ChatController(
                     }),
                 _ => BadRequest(new { message = "Message content is invalid." }),
             };
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Missing, foreign-owned, or cross-scope attachment IDs fail the send before save.
+            return BadRequest(new { message = ex.Message });
         }
 
         // Access was already confirmed above, so a null result here can only mean the
@@ -227,6 +263,119 @@ public class ChatController(
             await chatMessageService.DeleteInboxCategoryAsync(userId.Value, categoryKey, ct);
 
         return NoContent();
+    }
+
+    [HttpPost("messages/{messageId:guid}/vote")]
+    public async Task<ActionResult<MessageVoteDto>> CastVote(
+        Guid messageId,
+        [FromBody] CastMessageVoteRequest request,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            MessageVoteDto? result = await voteService.CastVoteAsync(
+                messageId,
+                userId.Value,
+                (short)request.Value,
+                ct);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("attachments")]
+    [RequestSizeLimit(12_000_000)]
+    public async Task<ActionResult<Uploads.ChatAttachmentDto>> UploadAttachment(
+        IFormFile file,
+        CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+        if (file is null)
+            return BadRequest(new { message = "File is required." });
+
+        try
+        {
+            return Ok(await attachmentService.UploadAsync(userId.Value, file, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("attachments/{attachmentId:guid}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> DownloadAttachment(
+        Guid attachmentId,
+        [FromQuery] string? accessToken,
+        [FromQuery] bool riskAcknowledged = false,
+        CancellationToken ct = default)
+    {
+        Guid? userId = GetUserId();
+        bool accessTokenValidated = false;
+
+        switch (userId)
+        {
+            case null when string.IsNullOrWhiteSpace(accessToken):
+                return Unauthorized();
+            case null:
+            {
+                bool valid = await accessTokenService.TryValidateAsync(attachmentId, accessToken!, ct);
+                if (!valid)
+                    return Unauthorized();
+                accessTokenValidated = true;
+                userId = Guid.Empty;
+                break;
+            }
+        }
+
+        Uploads.AttachmentReadResult? opened =
+            await attachmentService.OpenReadAsync(
+                attachmentId,
+                userId!.Value,
+                ct,
+                accessTokenValidated,
+                riskAcknowledged);
+        if (opened is null)
+            return NotFound();
+
+        if (opened.RequiresCaution)
+        {
+            return Conflict(new
+            {
+                message = "This attachment needs a safety acknowledgement before it can be opened.",
+                scanStatus = opened.ScanStatus.ToString(),
+            });
+        }
+
+        return File(opened.Stream!, opened.ContentType!, opened.FileName!);
+    }
+
+    [HttpDelete("attachments/{attachmentId:guid}")]
+    public async Task<IActionResult> DeleteAttachment(Guid attachmentId, CancellationToken ct)
+    {
+        Guid? userId = GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        try
+        {
+            bool deleted = await attachmentService.DeleteUnattachedAsync(attachmentId, userId.Value, ct);
+            return deleted ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     private Guid? GetUserId()

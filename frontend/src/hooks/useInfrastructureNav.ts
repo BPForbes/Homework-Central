@@ -2,10 +2,10 @@ import { useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { CustomRoomType } from '../types/infrastructure'
 
-export type ServerNavSection = 'chat' | 'roleclaim' | 'info' | 'rooms'
+export type ServerNavSection = 'chat' | 'roleclaim' | 'info' | 'ticket' | 'rooms'
 export type UserConfigNavSection = 'create' | 'manage' | 'permissions' | 'users'
 
-const SERVER_SECTIONS = new Set<ServerNavSection>(['chat', 'roleclaim', 'info', 'rooms'])
+const SERVER_SECTIONS = new Set<ServerNavSection>(['chat', 'roleclaim', 'info', 'ticket', 'rooms'])
 const USER_CONFIG_SECTIONS = new Set<UserConfigNavSection>(['create', 'manage', 'permissions', 'users'])
 
 export function serverSectionToRoomType(section: ServerNavSection): CustomRoomType | 'rooms' {
@@ -14,6 +14,8 @@ export function serverSectionToRoomType(section: ServerNavSection): CustomRoomTy
       return 'RoleClaim'
     case 'info':
       return 'Info'
+    case 'ticket':
+      return 'Ticket'
     case 'rooms':
       return 'rooms'
     default:
@@ -27,6 +29,8 @@ export function roomTypeToServerSection(type: CustomRoomType | 'rooms'): ServerN
       return 'roleclaim'
     case 'Info':
       return 'info'
+    case 'Ticket':
+      return 'ticket'
     case 'rooms':
       return 'rooms'
     default:

@@ -71,7 +71,9 @@ for dark-mode text accents and bloom rather than large button fills.
 
 ### Semantic
 `--color-danger` / `--color-danger-hover` / `--color-danger-soft`, `--color-success` /
-`--color-success-soft` — same light/dark pairing pattern as brand colors.
+`--color-success-soft`, `--color-warning` / `--color-warning-soft` — same light/dark
+pairing pattern as brand colors. Warning (amber) is reserved for mid-pass reevaluation /
+blocking highlights on neural replay paths — not for primary actions.
 
 ### Subject/category hues
 Four extra hues exist so subjects or room categories can carry a distinct identity beyond

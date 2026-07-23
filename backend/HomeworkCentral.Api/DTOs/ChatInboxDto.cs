@@ -12,6 +12,11 @@ public class ChatInboxItemDto
     public string CategoryDisplayName { get; set; } = null!;
     public string MessageContent { get; set; } = null!;
     public string MentionKind { get; set; } = null!;
+    public Guid? TicketId { get; set; }
+    public string? TicketStatus { get; set; }
+    public List<TicketIntakeAnswerDto>? TicketIntakeAnswers { get; set; }
+    public string? TicketDecision { get; set; }
+    public string? TicketDecisionSummary { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? ReadAtUtc { get; set; }
     public bool IsRead => ReadAtUtc is not null;

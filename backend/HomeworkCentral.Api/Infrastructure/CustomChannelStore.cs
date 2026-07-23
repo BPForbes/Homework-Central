@@ -16,7 +16,8 @@ public interface ICustomChannelStore
 
 public sealed record CustomChannelAccessSnapshot(
     Guid? CustomRoleId,
-    short? PlatformRoleBit);
+    short? PlatformRoleBit,
+    Guid? AllowedUserId);
 
 public sealed record CustomChannelSnapshot(
     Guid ChannelId,
@@ -39,12 +40,14 @@ public sealed record CustomChannelSnapshot(
 
 public sealed class CustomChannelStore(IServiceScopeFactory scopeFactory) : ICustomChannelStore
 {
-    private IReadOnlyList<CustomChannelSnapshot> _channels = [];
+    private StoreSnapshot _snapshot = new(
+        [],
+        new Dictionary<string, CustomChannelSnapshot>(StringComparer.Ordinal));
 
-    public IReadOnlyList<CustomChannelSnapshot> Channels => _channels;
+    public IReadOnlyList<CustomChannelSnapshot> Channels => _snapshot.Channels;
 
     public CustomChannelSnapshot? FindByRoomId(string roomId) =>
-        _channels.FirstOrDefault(channel => string.Equals(channel.RoomId, roomId, StringComparison.Ordinal));
+        _snapshot.ByRoomId.GetValueOrDefault(roomId);
 
     public async Task RefreshAsync(CancellationToken ct = default)
     {
@@ -57,7 +60,7 @@ public sealed class CustomChannelStore(IServiceScopeFactory scopeFactory) : ICus
             .Where(c => !c.IsArchived)
             .ToListAsync(ct);
 
-        _channels = channels
+        List<CustomChannelSnapshot> snapshots = channels
             .Select(channel => new CustomChannelSnapshot(
                 channel.ChannelId,
                 channel.RoomId,
@@ -76,10 +79,22 @@ public sealed class CustomChannelStore(IServiceScopeFactory scopeFactory) : ICus
                 channel.TieSubjectBitIndex,
                 channel.TiePlatformRoleBit,
                 channel.AccessRules
-                    .Select(rule => new CustomChannelAccessSnapshot(rule.CustomRoleId, rule.PlatformRoleBit))
+                    .Select(rule => new CustomChannelAccessSnapshot(
+                        rule.CustomRoleId,
+                        rule.PlatformRoleBit,
+                        rule.AllowedUserId))
                     .ToList()))
             .ToList();
+
+        Dictionary<string, CustomChannelSnapshot> byRoomId = snapshots.ToDictionary(
+            channel => channel.RoomId,
+            StringComparer.Ordinal);
+        _snapshot = new StoreSnapshot(snapshots, byRoomId);
     }
+
+    private sealed record StoreSnapshot(
+        IReadOnlyList<CustomChannelSnapshot> Channels,
+        IReadOnlyDictionary<string, CustomChannelSnapshot> ByRoomId);
 }
 
 public static class CustomChannelIds

@@ -10,5 +10,7 @@ public interface IChatRoomAccessService
 
     bool CanAccessRoom(EffectiveMaskDto masks, string roomId);
 
-    ChatNavDto GetAccessibleNav(EffectiveMaskDto masks);
+    bool CanAccessRoom(EffectiveMaskDto masks, Guid userId, string roomId);
+
+    ChatNavDto GetAccessibleNav(EffectiveMaskDto masks, Guid userId);
 }

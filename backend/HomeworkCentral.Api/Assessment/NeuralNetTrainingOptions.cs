@@ -1,0 +1,52 @@
+namespace HomeworkCentral.Api.Assessment;
+
+/// <summary>Tunable synthetic-training efficiency knobs (LLM labels, local stop, batching, traces).</summary>
+public sealed class NeuralNetTrainingOptions
+{
+    /// <summary>Fraction of cross-domain tickets kept as negative controls in Both mode (0..1).</summary>
+    public double CrossDomainSampleRate { get; set; } = 0.15;
+
+    /// <summary>Fraction of trained messages that also receive an independent LLM-2 audit (0..1).</summary>
+    public double AuditSampleRate { get; set; } = 0.05;
+
+    /// <summary>
+    /// Fraction of LLM-1 tickets that also get an LLM-2 generator-steering audit.
+    /// 1.0 audits every ticket (slow); lower values cut sequential Ollama round-trips.
+    /// </summary>
+    public double GeneratorAuditSampleRate { get; set; } = 0.25;
+
+    /// <summary>Local SGD epochs per message when training against a fixed teacher label.</summary>
+    public int LocalEpochs { get; set; } = 12;
+
+    /// <summary>Stop local training when |evidence − target| is below this.</summary>
+    public float EvidenceTolerance { get; set; } = 0.12f;
+
+    /// <summary>Stop local training when |relevance − target| is below this.</summary>
+    public float RelevanceTolerance { get; set; } = 0.12f;
+
+    /// <summary>Stop local training when total BCE loss is at or below this.</summary>
+    public float LossStopThreshold { get; set; } = 0.35f;
+
+    /// <summary>Flush accumulated DB rows / vector upserts after this many training examples.</summary>
+    public int PersistenceBatchSize { get; set; } = 50;
+
+    /// <summary>
+    /// Mini-batch size for SGD (3Blue1Brown average cost). 1 = online SGD per example.
+    /// </summary>
+    public int MiniBatchSize { get; set; } = 8;
+
+    /// <summary>Use compact per-epoch replay (loss + grad norm) instead of full parameter deltas.</summary>
+    public bool CompactReplay { get; set; } = true;
+
+    /// <summary>Fraction of messages that still capture full parameter-level traces when CompactReplay is on.</summary>
+    public double FullTraceSampleRate { get; set; } = 0.12;
+
+    /// <summary>
+    /// When true, missing teacher labels use the deterministic fallback instead of a second
+    /// per-message LLM call (much faster; slightly noisier labels).
+    /// </summary>
+    public bool PreferDeterministicTeacherLabels { get; set; } = true;
+
+    /// <summary>Retry budget for training-time LLM-2 audits (generator audits do not retry).</summary>
+    public int AuditMaxAttempts { get; set; } = 1;
+}
