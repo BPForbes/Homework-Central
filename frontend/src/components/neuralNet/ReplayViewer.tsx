@@ -96,7 +96,7 @@ function nodeClassForTone(tone: PathTone, onPath: boolean, selected: boolean): s
   return classes.join(' ')
 }
 
-/** Even sample so dense layers keep Stage-1-like proportions instead of packing every node. */
+/** Even sample for preview detail only — max quality renders the full layer. */
 function takeEvenly<T>(items: T[], cap: number): T[] {
   if (cap <= 0 || items.length === 0) return []
   if (items.length <= cap) return items
@@ -105,6 +105,28 @@ function takeEvenly<T>(items: T[], cap: number): T[] {
     const sourceIndex = Math.round((index * (items.length - 1)) / (cap - 1))
     return items[sourceIndex]
   })
+}
+
+/** Cubic curve fit between layers so dense fans separate instead of stacking as a solid bar. */
+function curvedEdgePath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  bend: number,
+): string {
+  const dx = Math.abs(to.x - from.x)
+  const controlOffset = Math.max(28, dx * 0.42)
+  const c1x = from.x + controlOffset
+  const c2x = to.x - controlOffset
+  const c1y = from.y + bend
+  const c2y = to.y - bend
+  return `M ${from.x} ${from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to.x} ${to.y}`
+}
+
+function edgeBend(fromY: number, toY: number, edgeIndex: number): number {
+  const vertical = toY - fromY
+  // Small fitted offset so parallel edges fan instead of overlapping one stroke.
+  const fan = ((edgeIndex % 7) - 3) * 2.4
+  return vertical * 0.12 + fan
 }
 
 function resolveString(value: string | number | undefined, strings: string[] | undefined): string | undefined {
@@ -140,7 +162,7 @@ function phaseOpsLabel(phase: string | undefined): string {
 
 export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
   const [frameIndex, setFrameIndex] = useState(0)
-  const [detail, setDetail] = useState(1)
+  const [detail, setDetail] = useState(2)
   const [playing, setPlaying] = useState(false)
   const [ticket, setTicket] = useState<number | 'all'>('all')
   const [selected, setSelected] = useState<ReplayNode | null>(null)
@@ -178,44 +200,53 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     return () => window.clearInterval(timer)
   }, [playing, frames.length, reducedMotion])
 
-  const layerIds = Array.from(new Set(replay.topology.nodes.map((node) => node.layerId)))
-  // Stage-1 mini graph shows ~6 nodes/layer; detail 2 opens up without returning to a solid bar.
-  const shownCap = detail === 0 ? 0 : detail === 1 ? 6 : 12
+  const layerIds = useMemo(
+    () => Array.from(new Set(replay.topology.nodes.map((node) => node.layerId))),
+    [replay.topology.nodes],
+  )
+  // Preview samples; max quality (detail 2) keeps every node in every layer.
+  const maxQuality = detail >= 2
+  const shownCap = detail === 0 ? 0 : detail === 1 ? 8 : Number.POSITIVE_INFINITY
   const nodesByLayer = useMemo(() => {
     const map = new Map<string, ReplayNode[]>()
     for (const layerId of layerIds) {
       const layerNodes = replay.topology.nodes.filter((node) => node.layerId === layerId)
-      map.set(layerId, takeEvenly(layerNodes, shownCap || layerNodes.length))
+      map.set(layerId, maxQuality ? layerNodes : takeEvenly(layerNodes, shownCap))
     }
     return map
-  }, [replay.topology.nodes, layerIds, shownCap])
+  }, [replay.topology.nodes, layerIds, maxQuality, shownCap])
 
-  const nodes: ReplayNode[] = layerIds.flatMap((layerId) => nodesByLayer.get(layerId) ?? [])
-  const visibleIds = new Set(nodes.map((node) => node.index))
-  const edges: ReplayEdge[] =
-    detail === 0
-      ? []
-      : replay.topology.edges.filter(
-          (edge) => visibleIds.has(edge.sourceNodeIndex) && visibleIds.has(edge.targetNodeIndex),
-        )
+  const nodes: ReplayNode[] = useMemo(
+    () => layerIds.flatMap((layerId) => nodesByLayer.get(layerId) ?? []),
+    [layerIds, nodesByLayer],
+  )
+  const layerEdges = useMemo(() => {
+    if (detail === 0) return [] as ReplayEdge[]
+    const visibleIds = new Set(nodes.map((node) => node.index))
+    return replay.topology.edges.filter(
+      (edge) => visibleIds.has(edge.sourceNodeIndex) && visibleIds.has(edge.targetNodeIndex),
+    )
+  }, [detail, replay.topology.edges, nodes])
 
   const layerLabel = (layerId: string): string => layerId.replace(/-/g, ' ')
   const layerIndex = (layerId: string): number => layerIds.indexOf(layerId)
   const nodesInLayer = (layerId: string): ReplayNode[] => nodesByLayer.get(layerId) ?? []
 
   const maxLayerCount = Math.max(1, ...layerIds.map((layerId) => Math.max(1, nodesInLayer(layerId).length)))
-  // Match Stage-1 mini proportions: generous vertical gap (~24–36 for 6 nodes) and wide layer span.
-  const layerGap = Math.max(150, Math.min(210, 960 / Math.max(1, layerIds.length - 1)))
-  const nodeGap = Math.max(34, Math.min(52, 280 / Math.max(1, maxLayerCount - 1)))
+  // Fixed Stage-1-like gap (~36px) so tall layers grow the canvas instead of packing into a bar.
+  const layerGap = maxQuality
+    ? Math.max(190, Math.min(260, 1180 / Math.max(1, layerIds.length - 1)))
+    : Math.max(150, Math.min(210, 960 / Math.max(1, layerIds.length - 1)))
+  const nodeGap = maxQuality ? 36 : Math.max(34, Math.min(48, 300 / Math.max(1, maxLayerCount - 1)))
   const viewWidth = Math.max(720, 100 + (layerIds.length - 1) * layerGap + 100)
-  const viewHeight = Math.max(260, 56 + (maxLayerCount - 1) * nodeGap + 72)
+  const viewHeight = Math.max(280, 64 + (maxLayerCount - 1) * nodeGap + 80)
 
   const layerX = (layerId: string): number => 90 + layerIndex(layerId) * layerGap
   const nodeAt = (node: ReplayNode): { x: number; y: number } => {
     const layerNodes = nodesInLayer(node.layerId)
     const index = layerNodes.findIndex((item) => item.index === node.index)
-    const span = Math.max(1, layerNodes.length - 1)
-    return { x: layerX(node.layerId), y: 48 + index * ((viewHeight - 96) / span) }
+    if (index < 0) return { x: layerX(node.layerId), y: viewHeight / 2 }
+    return { x: layerX(node.layerId), y: 56 + index * nodeGap }
   }
 
   const nodeByIndex = new Map(replay.topology.nodes.map((node) => [node.index, node]))
@@ -300,7 +331,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
         return new Set(gradients.filter((item) => item.value !== 0).map((item) => item.index))
       }
       // Compact traces omit per-weight grads — light the visible edges so the phase still colorizes.
-      return new Set(edges.map((edge) => edge.parameterIndex))
+      return new Set(layerEdges.map((edge) => edge.parameterIndex))
     }
     const source =
       pathTone === 'forward'
@@ -310,15 +341,15 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
           : undefined
     const contributions = source?.edgeContributions ?? []
     if (contributions.length === 0 && (pathTone === 'forward' || pathTone === 'reeval')) {
-      return new Set(edges.map((edge) => edge.parameterIndex))
+      return new Set(layerEdges.map((edge) => edge.parameterIndex))
     }
     return new Set(contributions.filter((item) => Math.abs(item.value) > 1e-6).map((item) => item.index))
-  }, [pathTone, backpropPayload, forwardPayload, lastForwardPayload, edges])
+  }, [pathTone, backpropPayload, forwardPayload, lastForwardPayload, layerEdges])
 
   const activeNodeIds = useMemo(() => {
     const ids = new Set<number>()
     if (pathTone === 'backprop') {
-      for (const edge of edges) {
+      for (const edge of layerEdges) {
         if (!activeEdgeParams.has(edge.parameterIndex)) continue
         ids.add(edge.sourceNodeIndex)
         ids.add(edge.targetNodeIndex)
@@ -334,7 +365,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     for (const item of source?.nodeActivations ?? []) {
       if (Math.abs(item.value) > 1e-6) ids.add(item.index)
     }
-    for (const edge of edges) {
+    for (const edge of layerEdges) {
       if (!activeEdgeParams.has(edge.parameterIndex)) continue
       ids.add(edge.sourceNodeIndex)
       ids.add(edge.targetNodeIndex)
@@ -343,9 +374,21 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       for (const node of nodes) ids.add(node.index)
     }
     return ids
-  }, [pathTone, edges, activeEdgeParams, forwardPayload, lastForwardPayload, nodes])
+  }, [pathTone, layerEdges, activeEdgeParams, forwardPayload, lastForwardPayload, nodes])
+
+  // Max quality draws every edge as a curve; preview keeps a lighter idle mesh plus the thought path.
+  const drawnEdges = useMemo(() => {
+    if (layerEdges.length === 0) return [] as ReplayEdge[]
+    if (maxQuality) return layerEdges
+    const pathEdges = layerEdges.filter((edge) => activeEdgeParams.has(edge.parameterIndex))
+    const idleSample = layerEdges.filter(
+      (edge, index) => !activeEdgeParams.has(edge.parameterIndex) && index % 5 === 0,
+    )
+    return [...idleSample, ...pathEdges]
+  }, [layerEdges, maxQuality, activeEdgeParams])
 
   const hasThoughtPath = activeEdgeParams.size > 0 || activeNodeIds.size > 0
+  const totalNodeCount = replay.topology.nodes.length
   const totalInputCount = replay.topology.nodes.filter((node) => node.layerId === 'input').length
 
   return (
@@ -405,9 +448,9 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
         Frame {frames.length ? frameIndex + 1 : 0} of {frames.length} · {phase || 'No recorded frames'} ·{' '}
         {detail === 0
           ? `Clustered: ${totalInputCount} input nodes, ${replay.topology.edges.length} edges`
-          : detail === 1
-            ? `Stage-1 proportions · ≤${shownCap} nodes/layer · color thought path`
-            : `Expanded detail · ≤${shownCap} nodes/layer · color thought path`}
+          : maxQuality
+            ? `Max quality · all ${totalNodeCount} nodes · ${layerEdges.length} curve-fit edges · color thought path`
+            : `Preview · ≤${shownCap} nodes/layer · sampled curve-fit edges · color thought path`}
         {reducedMotion ? ' · Playback disabled by reduced-motion preference' : ''}
       </p>
       <p className="neural-path-legend" aria-label="Thought path color legend">
@@ -450,7 +493,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
               {layerLabel(layerId)}
             </text>
           ))}
-          {edges.map((edge) => {
+          {drawnEdges.map((edge) => {
             const source = nodeByIndex.get(edge.sourceNodeIndex)
             const target = nodeByIndex.get(edge.targetNodeIndex)
             if (!source || !target) return null
@@ -459,13 +502,12 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
             const onPath = !hasThoughtPath
               ? Boolean(pathTone)
               : activeEdgeParams.has(edge.parameterIndex)
+            const bend = edgeBend(from.y, to.y, edge.index)
             return (
-              <line
+              <path
                 key={edge.index}
-                x1={from.x}
-                y1={from.y}
-                x2={to.x}
-                y2={to.y}
+                d={curvedEdgePath(from, to, bend)}
+                fill="none"
                 className={edgeClassForTone(pathTone, Boolean(onPath && pathTone))}
               />
             )
@@ -604,8 +646,8 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       <p className="dashboard-hint">
         Selected: {selected ? `${selected.label} (${selected.layerId})` : 'none'} · Integrity:{' '}
         {replay.integrity?.reportChecksum ? 'recorded checksum' : 'not supplied'} · Completion:{' '}
-        {replay.completionStatus}. Spacing mirrors the Stage 1 mini-graph (few nodes, open gaps). Hover or select a
-        node for its name.
+        {replay.completionStatus}. Max quality (+ Detail) renders every node with fixed open spacing and cubic
+        curve-fit edges. Hover or select a node for its name.
       </p>
       <section className="sm-panel">
         <div className="sm-panel-header">
