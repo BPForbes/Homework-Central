@@ -99,8 +99,14 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
   const layerLabels = model.layerLabels.length === layerWidths.length
     ? model.layerLabels
     : layerWidths.map((_, index) => (index === 0 ? 'input' : index === layerWidths.length - 1 ? 'output' : `hidden-${index}`))
-  const layerX = (index: number) => 90 + index * (1260 / Math.max(1, layerWidths.length - 1))
-  const nodeY = (layerSize: number, nodeIndex: number) => 70 + nodeIndex * (540 / Math.max(1, layerSize - 1))
+  const detailCap = 16
+  const shownPerLayer = layerWidths.map((width) => Math.min(width, detailCap))
+  const maxShown = Math.max(1, ...shownPerLayer)
+  const layerGap = Math.max(180, Math.min(280, 1260 / Math.max(1, layerWidths.length - 1)))
+  const viewWidth = Math.max(1100, 140 + (layerWidths.length - 1) * layerGap + 140)
+  const viewHeight = Math.max(520, 80 + (maxShown - 1) * Math.max(28, Math.min(44, 900 / Math.max(1, maxShown - 1))) + 100)
+  const layerX = (index: number) => 90 + index * layerGap
+  const nodeY = (layerSize: number, nodeIndex: number) => 70 + nodeIndex * ((viewHeight - 130) / Math.max(1, layerSize - 1))
   const outputLabels = layerWidths.length
     ? ['Evidence', 'Relevance', ...Array.from({ length: Math.max(0, layerWidths[layerWidths.length - 1] - 2) }, (_, i) => `cat ${i + 1}`)]
     : visualizer.outputNodes
@@ -111,8 +117,9 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
         <h3><FontAwesomeIcon icon={faDiagramProject} /> Cascade map · {meta.composition}</h3>
       </div>
       <p className="dashboard-hint">
-        Each monitor is a two-stage cascade. Stage 1 embeds context; stage 2 scores evidence, relevance, and category.
-        Training applies the chain rule so stage-1 weights move when stage-2 loss needs a different embedding.
+        Each monitor is a two-stage cascade. Stage 1 embeds context; stage 2 scores evidence, relevance, and category
+        with categorical cross-entropy on the class head. Training applies the chain rule so stage-1 weights move when
+        stage-2 loss needs a different embedding.
       </p>
 
       <div className="sm-form-actions neural-cascade-tabs">
@@ -158,69 +165,79 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
       </dl>
 
       <p className="dashboard-hint neural-cascade-detail-label">
-        Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Click a node to inspect.
+        Stage-2 detail ({model.chatMonitoringKind}): {layerWidths.join(' → ')}. Preview pane scales with depth; labels
+        stay off until a node is selected.
       </p>
-      <svg className="neural-graph neural-graph--replay neural-graph--cascade-detail" viewBox="0 0 1440 680" role="group" aria-label={`${model.chatMonitoringKind} stage-2 scorer`}>
-        {layerLabels.map((label, layerIndex) => (
-          <text key={`label-${layerIndex}-${label}`} x={layerX(layerIndex)} y="28" textAnchor="middle" className="neural-layer-label">
-            {label.replace(/-/g, ' ')}
-          </text>
-        ))}
-        {layerWidths.slice(0, -1).flatMap((width, layerIndex) =>
-          Array.from({ length: Math.min(width, 12) }, (_, source) =>
-            Array.from({ length: Math.min(layerWidths[layerIndex + 1], 12) }, (_, target) => (
-              <line
-                key={`e-${layerIndex}-${source}-${target}`}
-                x1={layerX(layerIndex)}
-                y1={nodeY(Math.min(width, 12), source)}
-                x2={layerX(layerIndex + 1)}
-                y2={nodeY(Math.min(layerWidths[layerIndex + 1], 12), target)}
-                className="neural-edge"
-                style={{ opacity: 0.12 }}
-              />
-            )),
-          ),
-        )}
-        {layerWidths.flatMap((width, layerIndex) => {
-          const shown = Math.min(width, 12)
-          return Array.from({ length: shown }, (_, nodeIndex) => {
-            const isOutput = layerIndex === layerWidths.length - 1
-            const label = isOutput
-              ? (outputLabels[nodeIndex] ?? `out ${nodeIndex}`)
-              : `${layerLabels[layerIndex]} ${nodeIndex + 1}`
-            const x = layerX(layerIndex)
-            const y = nodeY(shown, nodeIndex)
-            return (
-              <g
-                key={`${layerIndex}-${nodeIndex}`}
-                role="button"
-                tabIndex={0}
-                aria-label={label}
-                onClick={() => setSelected(label)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    setSelected(label)
-                  }
-                }}
-                className="neural-node-group"
-              >
-                {isOutput
-                  ? <rect x={x - 70} y={y - 18} width="140" height="36" rx="10" className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} />
-                  : <circle cx={x} cy={y} r={layerIndex === 0 ? 10 : 14} className={`neural-node ${selected === label ? 'neural-node--selected' : ''}`} />}
-                {(isOutput || shown <= 8) && (
-                  <text x={x} y={isOutput ? y + 5 : y + 32} textAnchor="middle" className="neural-node-text">
-                    {isOutput ? label : (layerIndex === 0 ? `f${nodeIndex}` : `${nodeIndex + 1}`)}
-                  </text>
-                )}
-                {shown < width && nodeIndex === shown - 1 && (
-                  <text x={x} y={y + 48} textAnchor="middle" className="neural-layer-label">+{width - shown}</text>
-                )}
-              </g>
-            )
-          })
-        })}
-      </svg>
+      <div className="neural-graph-scroll">
+        <svg
+          className="neural-graph neural-graph--replay neural-graph--cascade-detail"
+          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+          width={viewWidth}
+          height={viewHeight}
+          role="group"
+          aria-label={`${model.chatMonitoringKind} stage-2 scorer`}
+        >
+          {layerLabels.map((label, layerIndex) => (
+            <text key={`label-${layerIndex}-${label}`} x={layerX(layerIndex)} y="28" textAnchor="middle" className="neural-layer-label">
+              {label.replace(/-/g, ' ')}
+            </text>
+          ))}
+          {layerWidths.slice(0, -1).flatMap((_, layerIndex) =>
+            Array.from({ length: shownPerLayer[layerIndex] }, (_, source) =>
+              Array.from({ length: shownPerLayer[layerIndex + 1] }, (_, target) => (
+                <line
+                  key={`e-${layerIndex}-${source}-${target}`}
+                  x1={layerX(layerIndex)}
+                  y1={nodeY(shownPerLayer[layerIndex], source)}
+                  x2={layerX(layerIndex + 1)}
+                  y2={nodeY(shownPerLayer[layerIndex + 1], target)}
+                  className="neural-edge"
+                  style={{ opacity: 0.1 }}
+                />
+              )),
+            ),
+          )}
+          {layerWidths.flatMap((width, layerIndex) => {
+            const shown = shownPerLayer[layerIndex]
+            return Array.from({ length: shown }, (_, nodeIndex) => {
+              const isOutput = layerIndex === layerWidths.length - 1
+              const label = isOutput
+                ? (outputLabels[nodeIndex] ?? `out ${nodeIndex}`)
+                : `${layerLabels[layerIndex]} ${nodeIndex + 1}`
+              const x = layerX(layerIndex)
+              const y = nodeY(shown, nodeIndex)
+              const isSelected = selected === label
+              return (
+                <g
+                  key={`${layerIndex}-${nodeIndex}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={label}
+                  onClick={() => setSelected(label)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setSelected(label)
+                    }
+                  }}
+                  className="neural-node-group"
+                >
+                  {isOutput
+                    ? <rect x={x - 18} y={y - 12} width="36" height="24" rx="8" className={`neural-node ${isSelected ? 'neural-node--selected' : ''}`} />
+                    : <circle cx={x} cy={y} r={layerIndex === 0 ? 8 : 11} className={`neural-node ${isSelected ? 'neural-node--selected' : ''}`} />}
+                  {isSelected && (
+                    <text x={x} y={y + 28} textAnchor="middle" className="neural-node-text">{label}</text>
+                  )}
+                  <title>{label}</title>
+                  {shown < width && nodeIndex === shown - 1 && (
+                    <text x={x} y={y + 44} textAnchor="middle" className="neural-layer-label">+{width - shown}</text>
+                  )}
+                </g>
+              )
+            })
+          })}
+        </svg>
+      </div>
       <p className="dashboard-hint">
         <strong>Selected:</strong> {selected}. {model.chatMonitoringKind} stage-2 · {model.nodeCount} nodes ·
         cascade {meta.composition} with chain-rule updates into {meta.role}.
@@ -233,8 +250,37 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
 export function NeuralNet() {
   const { pathname } = useLocation(); const view = viewForPath(pathname)
   const [feedback, setFeedback] = useState<NeuralNetTrainingFeedback[]>([]); const [data, setData] = useState<NeuralNetDataManagement | null>(null); const [visualizer, setVisualizer] = useState<NeuralNetVisualizer | null>(null); const [sessions, setSessions] = useState<NeuralNetTrainingSession[]>([])
-  const [loading, setLoading] = useState(true); const [busyId, setBusyId] = useState<string | null>(null); const [error, setError] = useState(''); const [ticketCount, setTicketCount] = useState(3); const [maxPasses, setMaxPasses] = useState(3); const [mode, setMode] = useState<NeuralTrainingMode>('Both'); const [replay, setReplay] = useState<ReplayReport | null>(null)
+  const [loading, setLoading] = useState(true); const [busyId, setBusyId] = useState<string | null>(null); const [error, setError] = useState(''); const [ticketCount, setTicketCount] = useState(3); const [maxPasses, setMaxPasses] = useState(3); const [mode, setMode] = useState<NeuralTrainingMode>('Both');   const [replay, setReplay] = useState<ReplayReport | null>(null)
+  const sessionStatusRef = useMemo(() => new Map<string, string>(), [])
   useEffect(() => { let cancelled = false; setLoading(true); setError(''); const load = async () => { try { if (view === 'feedback') { const r = await neuralNetApi.listFeedback(); if (!cancelled) setFeedback(r.data) } else if (view === 'training') { const r = await neuralNetApi.listTrainingSessions(); if (!cancelled) setSessions(r.data) } else if (view === 'data') { const r = await neuralNetApi.getDataManagement(); if (!cancelled) setData(r.data) } else { const r = await neuralNetApi.getVisualizer(); if (!cancelled) setVisualizer(r.data) } } catch { if (!cancelled) setError('Could not load neural-network administration data.') } finally { if (!cancelled) setLoading(false) } }; void load(); return () => { cancelled = true } }, [view])
+
+  const hasActiveTraining = sessions.some((session) => session.status === 'Running' || session.status === 'Queued')
+  useEffect(() => {
+    if (view !== 'training' || !hasActiveTraining) return
+    const timer = window.setInterval(() => {
+      void neuralNetApi.listTrainingSessions().then((response) => setSessions(response.data)).catch(() => undefined)
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [view, hasActiveTraining])
+
+  useEffect(() => {
+    const completedBoth: { sessionId: string; kinds: NeuralModelKindChatMonitoring[] }[] = []
+    for (const session of sessions) {
+      const previous = sessionStatusRef.get(session.sessionId)
+      sessionStatusRef.set(session.sessionId, session.status)
+      if (previous === undefined) continue
+      if (!(previous === 'Running' || previous === 'Queued')) continue
+      if (session.status !== 'Completed' || session.mode !== 'Both') continue
+      const kinds = (session.chatMonitoringRuns ?? [])
+        .filter((run) => run.hasWorkerReplay)
+        .map((run) => run.chatMonitoringKind)
+      if (kinds.length >= 2) completedBoth.push({ sessionId: session.sessionId, kinds })
+    }
+    for (const item of completedBoth) {
+      void downloadCascadeReports(item.sessionId, item.kinds)
+    }
+  }, [sessions, sessionStatusRef])
+
   async function decide(id: string, approve: boolean) { setBusyId(id); try { if (approve) await neuralNetApi.approve(id); else await neuralNetApi.reject(id); setFeedback(items => items.filter(item => item.scoreEventId !== id)) } catch { setError('The feedback decision could not be saved.') } finally { setBusyId(null) } }
   async function startTraining() { setBusyId('training'); try { await neuralNetApi.startTraining({ ticketCount, maxPassesPerTicket: maxPasses, mode }); const r = await neuralNetApi.listTrainingSessions(); setSessions(r.data) } catch { setError('Training could not be queued.') } finally { setBusyId(null) } }
   async function removeSession(sessionId: string) { const busyKey = `remove-${sessionId}`; setBusyId(busyKey); try { await neuralNetApi.removeTrainingSession(sessionId); setSessions(items => items.filter(item => item.sessionId !== sessionId)) } catch { setError('That training request could not be removed. It may still be running.') } finally { setBusyId(null) } }
@@ -246,7 +292,12 @@ export function NeuralNet() {
       const url = URL.createObjectURL(response.data)
       const link = document.createElement('a')
       link.href = url
-      link.download = `neural-net-training-${sessionId}${chatMonitoringKind ? `-${chatMonitoringKind.toLowerCase()}` : ''}.json`
+      const kindSuffix = chatMonitoringKind === 'Moderation'
+        ? '-moderation'
+        : chatMonitoringKind === 'Tutoring'
+          ? '-tutoring'
+          : ''
+      link.download = `neural-net-training-${sessionId}${kindSuffix}.json`
       link.click()
       URL.revokeObjectURL(url)
     } catch {
@@ -254,10 +305,34 @@ export function NeuralNet() {
     } finally { setBusyId(null) }
   }
 
+  async function downloadCascadeReports(sessionId: string, kinds: NeuralModelKindChatMonitoring[]) {
+    setBusyId(`${sessionId}-both`)
+    try {
+      for (const kind of kinds) {
+        const response = await neuralNetApi.downloadTrainingReport(sessionId, kind)
+        const url = URL.createObjectURL(response.data)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `neural-net-training-${sessionId}-${kind.toLowerCase()}.json`
+        link.click()
+        URL.revokeObjectURL(url)
+        await new Promise((resolve) => window.setTimeout(resolve, 350))
+      }
+    } catch {
+      setError('The Moderation and Tutoring replay files could not both be downloaded.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   function importReplay(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = parseReplayImport(String(reader.result)); setReplay(parsed); setError('') } catch { setError('That file is not a valid supported V2 neural-network replay.') } }; reader.readAsText(file) }
   const nav = useMemo(() => <div className="server-page-card"><p><Link to="/server/NeuralNet/Training">Training</Link>{' | '}<Link to="/server/NeuralNet/TrainingFeedback">Training Feedback</Link>{' | '}<Link to="/server/NeuralNet/DataManagement">Data Management</Link>{' | '}<Link to="/server/NeuralNet/Visualizer">Visualizer & Replay</Link></p></div>, [])
   return <div className="server-page sm-page"><ServerMaintenanceNav title="Server · Neural Network" /><header className="sm-hero"><div className="sm-hero-icon"><FontAwesomeIcon icon={faBrain} /></div><div className="sm-hero-copy"><h2>Neural Network</h2><p className="server-page-subtitle">Cascade monitors g(f(x)) for moderation and tutoring — chain-rule training, low-memory CPU scoring, review, and replay.</p></div></header>{nav}{error && <p className="error">{error}</p>}{loading ? <LoadingBars message="Loading neural-network data…" /> : <div className="sm-layout sm-layout--single">
-    {view === 'training' && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faPlay} /> Synthetic cascade training</h3></div><p className="dashboard-hint">LLM 1 builds fictional ticket threads. Each monitor trains as g(f(x)): stage-1 context router, stage-2 evidence scorer, joint chain-rule updates. Moderation uses 100 fine concept labels; tutoring uses Mask-C subjects. Opted-out real tickets are never used.</p><div className="sm-form"><label className="sm-label">Training mode <select className="sm-input" value={mode} onChange={e => setMode(e.target.value as NeuralTrainingMode)}><option value="Both">Both cascades</option><option value="Moderation">Moderation cascade</option><option value="Tutoring">Tutoring cascade</option></select></label><label className="sm-label">Tickets <input className="sm-input" type="number" min="1" max="10" value={ticketCount} onChange={e => setTicketCount(Number(e.target.value))} /></label><label className="sm-label">Maximum passes per message <input className="sm-input" type="number" min="1" max="6" value={maxPasses} onChange={e => setMaxPasses(Number(e.target.value))} /></label><div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === 'training'} onClick={() => void startTraining()}><FontAwesomeIcon icon={faPlay} /> Start training</button></div></div><ul className="ticket-watches-list">{sessions.map(s => <li key={s.sessionId} className="ticket-watch-chip"><div className="ticket-watch-chip-header"><strong>{s.status} · {s.mode} · {s.requestedTicketCount} tickets</strong><button type="button" className="ticket-watch-chip-remove" aria-label="Remove training request" title={s.status === 'Running' ? 'Running sessions cannot be removed yet' : 'Remove training request'} disabled={s.status === 'Running' || busyId === `remove-${s.sessionId}`} onClick={() => void removeSession(s.sessionId)}><FontAwesomeIcon icon={faXmark} /></button></div><span>Up to {s.maxPassesPerTicket} passes per message · cascade chain-rule SGD</span>{(s.chatMonitoringRuns ?? []).map(run => <div key={run.chatMonitoringKind} className="sm-form-actions"><span>{run.chatMonitoringKind} cascade · {run.status}{run.canonicalGeneration !== undefined ? ` · canonical generation ${run.canonicalGeneration}` : ''}</span>{run.hasWorkerReplay && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} replay</button>}</div>)}{s.hasReport && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-legacy`} onClick={() => void downloadReport(s.sessionId)}>Download legacy report</button>}{s.failureReason && <small>{s.failureReason}</small>}</li>)}</ul></section>}
+    {view === 'training' && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faPlay} /> Synthetic cascade training</h3></div><p className="dashboard-hint">LLM 1 builds fictional ticket threads. Each monitor trains as g(f(x)): stage-1 context router, stage-2 evidence scorer, joint chain-rule updates. Moderation uses 100 fine concept labels; tutoring uses Mask-C subjects. Training Both cascades writes two separate V2 JSON replays (one Moderation, one Tutoring) and downloads them when the session finishes. Opted-out real tickets are never used.</p><div className="sm-form"><label className="sm-label">Training mode <select className="sm-input" value={mode} onChange={e => setMode(e.target.value as NeuralTrainingMode)}><option value="Both">Both cascades</option><option value="Moderation">Moderation cascade</option><option value="Tutoring">Tutoring cascade</option></select></label><label className="sm-label">Tickets <input className="sm-input" type="number" min="1" max="10" value={ticketCount} onChange={e => setTicketCount(Number(e.target.value))} /></label><label className="sm-label">Maximum passes per message <input className="sm-input" type="number" min="1" max="6" value={maxPasses} onChange={e => setMaxPasses(Number(e.target.value))} /></label><div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === 'training'} onClick={() => void startTraining()}><FontAwesomeIcon icon={faPlay} /> Start training</button></div></div><ul className="ticket-watches-list">{sessions.map(s => {
+      const replayRuns = (s.chatMonitoringRuns ?? []).filter((run) => run.hasWorkerReplay)
+      const canDownloadBoth = s.mode === 'Both' && replayRuns.length >= 2
+      return <li key={s.sessionId} className="ticket-watch-chip"><div className="ticket-watch-chip-header"><strong>{s.status} · {s.mode} · {s.requestedTicketCount} tickets</strong><button type="button" className="ticket-watch-chip-remove" aria-label="Remove training request" title={s.status === 'Running' ? 'Running sessions cannot be removed yet' : 'Remove training request'} disabled={s.status === 'Running' || busyId === `remove-${s.sessionId}`} onClick={() => void removeSession(s.sessionId)}><FontAwesomeIcon icon={faXmark} /></button></div><span>Up to {s.maxPassesPerTicket} passes per message · cascade chain-rule SGD</span>{(s.chatMonitoringRuns ?? []).map(run => <div key={run.chatMonitoringKind} className="sm-form-actions"><span>{run.chatMonitoringKind} cascade · {run.status}{run.canonicalGeneration !== undefined ? ` · canonical generation ${run.canonicalGeneration}` : ''}</span>{run.hasWorkerReplay && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} replay</button>}</div>)}{canDownloadBoth && <div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-both`} onClick={() => void downloadCascadeReports(s.sessionId, replayRuns.map((run) => run.chatMonitoringKind))}>Download Mod + Tutor JSON</button></div>}{s.hasReport && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-legacy`} onClick={() => void downloadReport(s.sessionId)}>Download legacy report</button>}{s.failureReason && <small>{s.failureReason}</small>}</li>
+    })}</ul></section>}
     {view === 'feedback' && <section className="sm-panel"><div className="sm-panel-header"><h3>Training Feedback</h3></div>{feedback.length === 0 ? <p className="dashboard-hint">No reviewer feedback is awaiting approval.</p> : <ul className="ticket-watches-list">{feedback.map(item => <li key={item.scoreEventId} className="ticket-watch-chip"><strong>{item.category} · student {item.studentScore.toFixed(3)} → reviewer {item.reviewerScore.toFixed(3)}</strong><span>{item.messagePreview}</span><small>{item.explanation ?? 'No reviewer explanation supplied.'}</small><div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, true)}><FontAwesomeIcon icon={faCheck} /> Approve</button><button type="button" className="btn-secondary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, false)}><FontAwesomeIcon icon={faXmark} /> Reject</button></div></li>)}</ul>}</section>}
     {view === 'data' && data && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faDatabase} /> Data Management</h3></div><p className="dashboard-hint">PostgreSQL is authoritative; the vector store is a retrieval mirror. Category counts include fine moderation concepts and tutoring subject slugs.</p><ul className="ticket-watches-list"><li className="ticket-watch-chip"><strong>{data.trainingExamples}</strong><span>Approved examples</span></li><li className="ticket-watch-chip"><strong>{data.vectorExamples}</strong><span>Vector examples</span></li><li className="ticket-watch-chip"><strong>{data.pendingFeedback}</strong><span>Pending feedback</span></li></ul>{Object.keys(data.categoryCounts ?? {}).length > 0 && <div className="neural-category-cloud" aria-label="Training category distribution">{Object.entries(data.categoryCounts).sort((a, b) => b[1] - a[1]).slice(0, 24).map(([category, count]) => <span key={category} className="neural-category-chip">{category} · {count}</span>)}</div>}</section>}
     {view === 'visualizer' && visualizer && <><section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faFileImport} /> Import a replay file</h3></div><p className="dashboard-hint">Load a downloaded V2 report to replay recorded stage-2 topology and frames. Cascade stage-1 routers relearn online and are not stored in checkpoints.</p><input className="sm-input" type="file" accept="application/json,.json" onChange={importReplay} /></section>{replay?.schemaVersion ? <ReplayViewer replay={replay as NeuralNetReplay} /> : <NetworkGraph visualizer={visualizer} replay={replay} />}</>}
