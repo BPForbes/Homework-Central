@@ -1065,36 +1065,8 @@ public sealed class NeuralNetTrainingService(
         BackpropagationTrace? backward)
     {
         ChatMonitoringNeuralModelStateSnapshot state = telemetry.GetStateSnapshot();
-        List<int> activeNodes = [];
-        if (forward is not null)
-        {
-            activeNodes = forward.NodeActivations
-                .Where(item => Math.Abs(item.Value) > 1e-6f)
-                .Select(item => item.Index)
-                .Distinct()
-                .Take(480)
-                .ToList();
-        }
-
-        List<int> activeEdges = [];
-        if (backward is not null && backward.WeightGradients.Count > 0)
-        {
-            activeEdges = backward.WeightGradients
-                .Where(item => item.Value != 0f)
-                .OrderByDescending(item => Math.Abs(item.Value))
-                .Select(item => item.Index)
-                .Take(1200)
-                .ToList();
-        }
-        else if (forward is not null)
-        {
-            activeEdges = forward.EdgeContributions
-                .Where(item => Math.Abs(item.Value) > 1e-6f)
-                .OrderByDescending(item => Math.Abs(item.Value))
-                .Select(item => item.Index)
-                .Take(1200)
-                .ToList();
-        }
+        (IReadOnlyList<int> activeNodes, IReadOnlyList<int> activeEdges) =
+            NeuralMeshFrameExtractor.Extract(forward, backward);
 
         return progress with
         {
@@ -1618,12 +1590,13 @@ public sealed class NeuralNetTrainingService(
         TrainingSessionTimings timings)
     {
         private readonly List<TicketModelTrainingExample> examples = [];
-        private readonly List<(string Content, IReadOnlyList<float> Embedding, string PositionId, Guid CanonicalId, object Metadata)> pendingVectors = [];
+        private readonly List<(string Content, string PositionId, Guid CanonicalId, object Metadata)> pendingVectors = [];
 
         public async Task EnqueueAsync(TicketModelTrainingExample record, string content, string positionId, CancellationToken ct)
         {
             examples.Add(record);
-            pendingVectors.Add((content, ChatMonitoringFeatureEncoder.EmbedText(content), positionId, record.TrainingExampleId,
+            // Embeddings are computed on flush so a whole batch can hash in parallel.
+            pendingVectors.Add((content, positionId, record.TrainingExampleId,
                 new { record.TrainingExampleId, record.Category, record.TargetScore, record.TargetRelevance, record.Source, record.ChatMonitoringKind }));
             if (examples.Count >= Math.Clamp(batchSize, 1, 500))
                 await FlushAsync(ct);
@@ -1652,13 +1625,37 @@ public sealed class NeuralNetTrainingService(
                 if (pendingVectors.Count == 0) return;
 
                 System.Diagnostics.Stopwatch vectorWatch = System.Diagnostics.Stopwatch.StartNew();
-                while (pendingVectors.Count > 0)
+                List<(string Content, string PositionId, Guid CanonicalId, object Metadata)> batch = [.. pendingVectors];
+                IReadOnlyList<float>[] embeddings = new IReadOnlyList<float>[batch.Count];
+                Parallel.For(0, batch.Count, index =>
                 {
-                    (string content, IReadOnlyList<float> embedding, string positionId, Guid canonicalId, object metadata) =
-                        pendingVectors[0];
-                    await vectors.UpsertAsync(
-                        VectorNamespaces.TicketTrainingExample, content, embedding, positionId, canonicalId, metadata, ct);
-                    pendingVectors.RemoveAt(0);
+                    embeddings[index] = ChatMonitoringFeatureEncoder.EmbedText(batch[index].Content);
+                });
+
+                int nextIndex = 0;
+                try
+                {
+                    for (; nextIndex < batch.Count; nextIndex++)
+                    {
+                        (string content, string positionId, Guid canonicalId, object metadata) = batch[nextIndex];
+                        await vectors.UpsertAsync(
+                            VectorNamespaces.TicketTrainingExample,
+                            content,
+                            embeddings[nextIndex],
+                            positionId,
+                            canonicalId,
+                            metadata,
+                            ct);
+                    }
+
+                    pendingVectors.Clear();
+                }
+                catch
+                {
+                    // Keep only the unsent suffix so a later flush can retry.
+                    pendingVectors.Clear();
+                    pendingVectors.AddRange(batch.Skip(nextIndex));
+                    throw;
                 }
 
                 vectorWatch.Stop();

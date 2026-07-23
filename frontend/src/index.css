@@ -5236,6 +5236,7 @@ a {
 .neural-mesh3d-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 0.35rem 0.85rem;
   margin-bottom: 0.4rem;
@@ -5244,6 +5245,24 @@ a {
 }
 .neural-mesh3d-toolbar strong {
   color: var(--color-ink);
+}
+.neural-mesh3d-view-controls,
+.neural-mesh3d-slice-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.neural-mesh3d-slice-index {
+  min-width: 5.5rem;
+  text-align: center;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+.neural-mesh3d-control--active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 .neural-mesh3d-canvas {
   display: block;

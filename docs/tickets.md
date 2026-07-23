@@ -1136,6 +1136,7 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs) | Chat-monitor model inputs, targets, predictions, traces, telemetry, and factory contracts. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs) | Moderation/tutoring model selection and training-mode resolution. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs) | Math.NET Numerics dense network engine (`DenseLayer`, forward/backprop, momentum SGD, parameter flatten). |
+| [backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs](../backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs) | Parallel extraction of live mesh active node/edge indexes from forward/backprop traces. |
 | [backend/HomeworkCentral.Api/Assessment/Node.cs](../backend/HomeworkCentral.Api/Assessment/Node.cs) | Topology node identity/labels for replay and visualizer mapping. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs) | CPU hashed-MLP scorer + cascade wrappers over `NeuralNetwork`; telemetry, topology, and parameter snapshots. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs) | Shared 86-float feature encoder and vector embedding helper. |
@@ -1215,6 +1216,8 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [frontend/src/pages/NeuralNet.tsx](../frontend/src/pages/NeuralNet.tsx) | Server Maintenance neural page. |
 | [frontend/src/hooks/useChatRoom.ts](../frontend/src/hooks/useChatRoom.ts) | Message loading, SignalR connection, send, vote, and typing behavior. |
 | [frontend/src/components/neuralNet/ReplayViewer.tsx](../frontend/src/components/neuralNet/ReplayViewer.tsx) | V2 replay visualization and frame inspector. |
+| [frontend/src/components/neuralNet/NeuralNetMesh3D.tsx](../frontend/src/components/neuralNet/NeuralNetMesh3D.tsx) | Architecture-scaled 3D mesh with volume/2D-slice modes (top-down or side) and slice navigation. |
+| [frontend/src/components/neuralNet/meshProject.worker.ts](../frontend/src/components/neuralNet/meshProject.worker.ts) | Web Worker that builds/projects mesh draw commands off the UI thread. |
 | [frontend/src/components/tickets/TicketPortalPanel.tsx](../frontend/src/components/tickets/TicketPortalPanel.tsx) | Portal room panel. |
 | [frontend/src/components/tickets/TicketIntakeWizard.tsx](../frontend/src/components/tickets/TicketIntakeWizard.tsx) | Intake question rendering and answer collection. |
 | [frontend/src/components/tickets/TicketChatChrome.tsx](../frontend/src/components/tickets/TicketChatChrome.tsx) | Ticket-room chrome. |
