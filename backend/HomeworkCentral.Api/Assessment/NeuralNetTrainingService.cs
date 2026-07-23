@@ -1,6 +1,7 @@
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.DTOs;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Text.Json;
@@ -281,20 +282,21 @@ public sealed class NeuralNetTrainingService(
         TrainingSessionTimings timings = new();
         try
         {
-            List<(int TicketIndex, SyntheticTicket? Ticket)> tickets =
-                await GenerateSyntheticTicketsAsync(session, timings, ct);
-            await RunChatMonitoringRunsAsync(session, tickets, timings, ct);
-            await CompleteSyntheticSessionAsync(session, timings, ct);
-            await promoter.QueueSessionAsync(session.SessionId, ct);
+            await OperationalExceptionGuard.RunAsync(
+                async () =>
+                {
+                    List<(int TicketIndex, SyntheticTicket? Ticket)> tickets =
+                        await GenerateSyntheticTicketsAsync(session, timings, ct);
+                    await RunChatMonitoringRunsAsync(session, tickets, timings, ct);
+                    await CompleteSyntheticSessionAsync(session, timings, ct);
+                    await promoter.QueueSessionAsync(session.SessionId, ct);
+                },
+                ex => FailSyntheticSessionAsync(session, timings, ex));
         }
         catch (OperationCanceledException)
         {
             await CancelSyntheticSessionAsync(session, timings);
             throw;
-        }
-        catch (Exception ex)
-        {
-            await FailSyntheticSessionAsync(session, timings, ex);
         }
     }
 
@@ -443,22 +445,31 @@ public sealed class NeuralNetTrainingService(
         ChatMonitoringRunContext runContext = new(session, run, telemetry, replay, batch, pendingTrain, timings);
         try
         {
-            IReadOnlyList<(int TicketIndex, SyntheticTicket Ticket)> selected = SelectTicketsForRun(session.SessionId, run.ChatMonitoringKind, tickets, Options.CrossDomainSampleRate);
-            int miniBatchSize = Math.Clamp(Options.MiniBatchSize, 1, 64);
-            foreach ((int ticketIndex, SyntheticTicket generated) in selected)
-            {
-                await ProcessSyntheticTicketAsync(runContext, ticketIndex, generated, miniBatchSize, ct);
-            }
+            await OperationalExceptionGuard.RunObservingAsync(
+                async () =>
+                {
+                    IReadOnlyList<(int TicketIndex, SyntheticTicket Ticket)> selected =
+                        SelectTicketsForRun(
+                            session.SessionId,
+                            run.ChatMonitoringKind,
+                            tickets,
+                            Options.CrossDomainSampleRate);
+                    int miniBatchSize = Math.Clamp(Options.MiniBatchSize, 1, 64);
+                    foreach ((int ticketIndex, SyntheticTicket generated) in selected)
+                    {
+                        await ProcessSyntheticTicketAsync(
+                            runContext, ticketIndex, generated, miniBatchSize, ct);
+                    }
 
-            await FlushPendingTrainingAsync(runContext, ct);
-            await CompleteChatMonitoringRunAsync(runContext, ct);
+                    await FlushPendingTrainingAsync(runContext, ct);
+                    await CompleteChatMonitoringRunAsync(runContext, ct);
+                },
+                ex => FailChatMonitoringRunAsync(runContext, ex));
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        finally
         {
-            await FailChatMonitoringRunAsync(runContext, ex);
-            throw;
+            await PersistAsync(persistenceGate, timings, CancellationToken.None);
         }
-        finally { await PersistAsync(persistenceGate, timings, CancellationToken.None); }
     }
 
     private IChatMonitoringNeuralModelTelemetry ResolveChatMonitoringTelemetry(ChatMonitoringNeuralModelRun run) =>
@@ -712,45 +723,43 @@ public sealed class NeuralNetTrainingService(
 
     private async Task FailChatMonitoringRunAsync(ChatMonitoringRunContext runContext, Exception ex)
     {
+        // Best-effort drains only; preserve the original training FailureReason below.
         if (runContext.PendingTrain.Count > 0)
         {
-            try
-            {
-                await FlushPendingTrainingAsync(runContext, CancellationToken.None);
-            }
-            catch (Exception drainEx)
-            {
-                // Best-effort drain only; preserve the original training FailureReason.
-                logger.LogWarning(drainEx, "Failed to flush pending chat-monitor training after run failure.");
-            }
+            await OperationalExceptionGuard.RunAsync(
+                () => FlushPendingTrainingAsync(runContext, CancellationToken.None),
+                drainEx =>
+                {
+                    logger.LogWarning(drainEx, "Failed to flush pending chat-monitor training after run failure.");
+                });
         }
 
-        try
-        {
-            await runContext.Batch.FlushAsync(CancellationToken.None);
-        }
-        catch (Exception drainEx)
-        {
-            logger.LogWarning(drainEx, "Failed to flush chat-monitor persistence batch after run failure.");
-        }
+        await OperationalExceptionGuard.RunAsync(
+            () => runContext.Batch.FlushAsync(CancellationToken.None),
+            drainEx =>
+            {
+                logger.LogWarning(drainEx, "Failed to flush chat-monitor persistence batch after run failure.");
+            });
 
         runContext.Run.Status = "Failed";
         runContext.Run.CompletedAtUtc = DateTime.UtcNow;
         runContext.Run.FailureReason = Truncate(ex.Message, 1000);
-        try
-        {
-            runContext.Run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(
-                runContext.Replay.Build(
-                    ReplayCompletionStatus.Failed,
-                    new("training", "unhandled", Truncate(ex.Message, 1000)),
-                    Options.LocalEpochs));
-        }
-        catch (Exception replayEx)
-        {
-            // Keep the original FailureReason; do not replace it with a
-            // secondary replay-build error.
-            logger.LogWarning(replayEx, "Failed to serialize neural-net worker replay after training failure.");
-        }
+
+        // Keep the original FailureReason; do not replace it with a secondary replay-build error.
+        await OperationalExceptionGuard.RunAsync(
+            () =>
+            {
+                runContext.Run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(
+                    runContext.Replay.Build(
+                        ReplayCompletionStatus.Failed,
+                        new("training", "unhandled", Truncate(ex.Message, 1000)),
+                        Options.LocalEpochs));
+                return Task.CompletedTask;
+            },
+            replayEx =>
+            {
+                logger.LogWarning(replayEx, "Failed to serialize neural-net worker replay after training failure.");
+            });
     }
 
     private async Task FlushTrainMiniBatchAsync(

@@ -1,5 +1,6 @@
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Text.Json;
@@ -57,19 +58,22 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         PromotionLease? promotionLease = await TryClaimPromotionAsync(now, ct);
         if (promotionLease is null) return false;
 
-        try
-        {
-            List<TicketModelTrainingExample> examples = await LoadUnpromotedExamplesAsync(promotionLease, ct);
-            RetrainedSessionModel retrainedModel = await RetrainSessionLocalModelAsync(promotionLease, examples, ct);
-            await PublishAndMarkExamplesAsync(promotionLease, examples, retrainedModel, ct);
-            retrainedModel.Model.Dispose();
-            return true;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            await MarkPromotionFailedAsync(promotionLease, ex);
-            return false;
-        }
+        return await OperationalExceptionGuard.RunAsync(
+            async () =>
+            {
+                List<TicketModelTrainingExample> examples =
+                    await LoadUnpromotedExamplesAsync(promotionLease, ct);
+                RetrainedSessionModel retrainedModel =
+                    await RetrainSessionLocalModelAsync(promotionLease, examples, ct);
+                await PublishAndMarkExamplesAsync(promotionLease, examples, retrainedModel, ct);
+                retrainedModel.Model.Dispose();
+                return true;
+            },
+            async ex =>
+            {
+                await MarkPromotionFailedAsync(promotionLease, ex);
+                return false;
+            });
     }
 
     /// <summary>
@@ -102,28 +106,94 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
 
         Guid leaseId = Guid.NewGuid();
         DateTime leaseExpiresAtUtc = now.Add(PromotionLeaseDuration);
-        // Pending -> Promoting is an atomic lease claim; concurrent workers lose
-        // by observing zero updated rows rather than sharing a canonical write.
-        // Pending is always claimable. RetryPending allows a null/expired lease.
-        // Promoting is reclaimable only after the lease timestamp is past (null stays locked).
-        int claimed = await db.NeuralNetTrainingPromotions
-            .Where(x => x.PromotionId == candidate.PromotionId
-                        && (x.Status == StatusPending
-                            || (x.Status == StatusRetryPending
-                                && (x.LeaseExpiresAtUtc == null || x.LeaseExpiresAtUtc < now))
-                            || (x.Status == StatusPromoting
-                                && x.LeaseExpiresAtUtc != null
-                                && x.LeaseExpiresAtUtc < now)))
-            .ExecuteUpdateAsync(setters => setters
+        PromotionLease lease = new(
+            candidate.PromotionId,
+            candidate.SessionId,
+            candidate.ChatMonitoringKind,
+            leaseId);
+
+        // Split status predicates so each atomic claim update stays a simple filter.
+        // Concurrent workers lose by observing zero updated rows. Return on first claim.
+        if (await ClaimPendingLeaseAsync(candidate.PromotionId, leaseId, leaseExpiresAtUtc, ct) > 0)
+            return lease;
+        if (await ClaimRetryPendingWithoutLeaseAsync(candidate.PromotionId, leaseId, leaseExpiresAtUtc, ct) > 0)
+            return lease;
+        if (await ClaimRetryPendingWithExpiredLeaseAsync(candidate.PromotionId, leaseId, leaseExpiresAtUtc, now, ct) > 0)
+            return lease;
+        if (await ClaimExpiredPromotingLeaseAsync(candidate.PromotionId, leaseId, leaseExpiresAtUtc, now, ct) > 0)
+            return lease;
+
+        return null;
+    }
+
+    private Task<int> ClaimPendingLeaseAsync(
+        Guid promotionId,
+        Guid leaseId,
+        DateTime leaseExpiresAtUtc,
+        CancellationToken ct) =>
+        ApplyPromotionLeaseAsync(
+            db.NeuralNetTrainingPromotions.Where(x =>
+                x.PromotionId == promotionId && x.Status == StatusPending),
+            leaseId,
+            leaseExpiresAtUtc,
+            ct);
+
+    private Task<int> ClaimRetryPendingWithoutLeaseAsync(
+        Guid promotionId,
+        Guid leaseId,
+        DateTime leaseExpiresAtUtc,
+        CancellationToken ct) =>
+        ApplyPromotionLeaseAsync(
+            db.NeuralNetTrainingPromotions.Where(x =>
+                x.PromotionId == promotionId
+                && x.Status == StatusRetryPending
+                && x.LeaseExpiresAtUtc == null),
+            leaseId,
+            leaseExpiresAtUtc,
+            ct);
+
+    private Task<int> ClaimRetryPendingWithExpiredLeaseAsync(
+        Guid promotionId,
+        Guid leaseId,
+        DateTime leaseExpiresAtUtc,
+        DateTime now,
+        CancellationToken ct) =>
+        ApplyPromotionLeaseAsync(
+            db.NeuralNetTrainingPromotions.Where(x =>
+                x.PromotionId == promotionId
+                && x.Status == StatusRetryPending
+                && x.LeaseExpiresAtUtc < now),
+            leaseId,
+            leaseExpiresAtUtc,
+            ct);
+
+    private Task<int> ClaimExpiredPromotingLeaseAsync(
+        Guid promotionId,
+        Guid leaseId,
+        DateTime leaseExpiresAtUtc,
+        DateTime now,
+        CancellationToken ct) =>
+        ApplyPromotionLeaseAsync(
+            db.NeuralNetTrainingPromotions.Where(x =>
+                x.PromotionId == promotionId
+                && x.Status == StatusPromoting
+                && x.LeaseExpiresAtUtc < now),
+            leaseId,
+            leaseExpiresAtUtc,
+            ct);
+
+    private Task<int> ApplyPromotionLeaseAsync(
+        IQueryable<NeuralNetTrainingPromotion> claimable,
+        Guid leaseId,
+        DateTime leaseExpiresAtUtc,
+        CancellationToken ct) =>
+        claimable.ExecuteUpdateAsync(
+            setters => setters
                 .SetProperty(x => x.Status, StatusPromoting)
                 .SetProperty(x => x.LeaseId, leaseId)
                 .SetProperty(x => x.LeaseExpiresAtUtc, leaseExpiresAtUtc)
-                .SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1), ct);
-
-        return claimed == 0
-            ? null
-            : new PromotionLease(candidate.PromotionId, candidate.SessionId, candidate.ChatMonitoringKind, leaseId);
-    }
+                .SetProperty(x => x.AttemptCount, x => x.AttemptCount + 1),
+            ct);
 
     private async Task<List<TicketModelTrainingExample>> LoadUnpromotedExamplesAsync(
         PromotionLease promotionLease,
