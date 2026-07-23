@@ -202,8 +202,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     NeuralNetFinite.OrZero((evidenceLossSum + relevanceLossSum + categoryLossSum) / n),
                     n,
                     NeuralNetFinite.OrZero(categoryLossSum / n));
-                ForwardPropagationTrace beforeForward = network.Forward(encoded[0], captureTrace: true).Trace
-                    ?? AverageOutputForward(
+                // Compact epochs reuse batch averages; full traces keep a traced forward for replay fidelity.
+                ForwardPropagationTrace beforeForward = captureFull
+                    ? network.Forward(encoded[0], captureTrace: true).Trace
+                        ?? AverageOutputForward(
+                            evidenceLogitSum / n, relevanceLogitSum / n, evidenceProbSum / n, relevanceProbSum / n)
+                    : AverageOutputForward(
                         evidenceLogitSum / n, relevanceLogitSum / n, evidenceProbSum / n, relevanceProbSum / n);
 
                 float[]? parameterBefore = captureFull ? network.FlattenParameters() : null;
@@ -270,8 +274,11 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     NeuralNetFinite.OrZero((afterEvidenceLoss + afterRelevanceLoss + afterCategoryLoss) / n),
                     n,
                     NeuralNetFinite.OrZero(afterCategoryLoss / n));
-                ForwardPropagationTrace afterForward = network.Forward(encoded[0], captureTrace: true).Trace
-                    ?? AverageOutputForward(
+                ForwardPropagationTrace afterForward = captureFull
+                    ? network.Forward(encoded[0], captureTrace: true).Trace
+                        ?? AverageOutputForward(
+                            afterEvidenceLogit / n, afterRelevanceLogit / n, afterEvidenceProb / n, afterRelevanceProb / n)
+                    : AverageOutputForward(
                         afterEvidenceLogit / n, afterRelevanceLogit / n, afterEvidenceProb / n, afterRelevanceProb / n);
 
                 iterations.Add(new TrainingIterationReplay(epoch, beforeForward, lossBefore, backward,
