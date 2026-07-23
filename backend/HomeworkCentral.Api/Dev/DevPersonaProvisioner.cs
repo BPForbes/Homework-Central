@@ -153,10 +153,12 @@ public sealed class DevPersonaProvisioner(
             },
             ex =>
             {
+                // Log tenant DB name only — persona emails are PII even in local-dev bypass logs.
+                string databaseName = DevAccountCatalog.GetPersonaDatabaseName(account, persona);
                 logger.LogWarning(
                     ex,
-                    "Skipping failed background provisioning for persona {PersonaEmail}; it can be retried at login.",
-                    persona.Email);
+                    "Skipping failed background provisioning for persona database '{DatabaseName}'; it can be retried at login.",
+                    databaseName);
                 return false;
             });
 
@@ -184,9 +186,8 @@ public sealed class DevPersonaProvisioner(
             {
                 logger.LogError(
                     ex,
-                    "Failed to provision persona database '{DatabaseName}' for {PersonaEmail}",
-                    databaseName,
-                    persona.Email);
+                    "Failed to provision persona database '{DatabaseName}'.",
+                    databaseName);
                 return Task.CompletedTask;
             }).ConfigureAwait(false);
     }
