@@ -50,7 +50,10 @@ public static class NeuralMeshFrameExtractor
     {
         if (backward is not null && backward.WeightGradients.Count > 0)
         {
-            return TopParameterIndexes(backward.WeightGradients, value => value != 0f, MaxActiveEdges);
+            return TopParameterIndexes(
+                backward.WeightGradients,
+                value => MathF.Abs(value) > ActivationEpsilon,
+                MaxActiveEdges);
         }
 
         if (forward is null || forward.EdgeContributions.Count == 0)

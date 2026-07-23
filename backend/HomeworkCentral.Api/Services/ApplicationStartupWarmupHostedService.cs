@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Dev;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Hosting;
 
 namespace HomeworkCentral.Api.Services;
@@ -26,25 +27,31 @@ public sealed class ApplicationStartupWarmupHostedService(
 
         try
         {
-            await ApplicationStartupWarmup.RunAsync(
-                services,
-                environment.IsDevelopment(),
-                skipDevStartupWarmup,
-                devBypassEnabled,
-                eagerPersonaProvisioning,
-                stoppingToken);
+            // Operational failures mark /healthz failed and stop the host; unexpected bugs still bubble.
+            await OperationalExceptionGuard.RunAsync(
+                () => ApplicationStartupWarmup.RunAsync(
+                    services,
+                    environment.IsDevelopment(),
+                    skipDevStartupWarmup,
+                    devBypassEnabled,
+                    eagerPersonaProvisioning,
+                    stoppingToken),
+                ex =>
+                {
+                    readiness.MarkFailed(ex.Message);
+                    logger.LogCritical(ex, "Application startup warmup failed; stopping the host.");
+                    lifetime.StopApplication();
+                    return Task.CompletedTask;
+                });
+            if (readiness.State == ApplicationReadyState.Failed)
+                return;
+
             readiness.MarkReady();
             logger.LogInformation("Application startup warmup finished; API is ready.");
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Host is shutting down during warmup.
-        }
-        catch (Exception ex)
-        {
-            readiness.MarkFailed(ex.Message);
-            logger.LogCritical(ex, "Application startup warmup failed; stopping the host.");
-            lifetime.StopApplication();
         }
     }
 }

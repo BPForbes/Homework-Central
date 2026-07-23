@@ -4,6 +4,7 @@ using HomeworkCentral.Api.Dev;
 using HomeworkCentral.Api.Infrastructure;
 using HomeworkCentral.Api.Tenancy;
 using HomeworkCentral.Api.Tickets;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
 namespace HomeworkCentral.Api.Services;
@@ -34,23 +35,22 @@ public static class ApplicationStartupWarmup
             }
             else
             {
-                try
-                {
-                    await DatabaseStartup.InitializeDevelopmentAsync(services, ct);
-                }
-                catch (Exception ex)
-                {
-                    ILogger<Program> logger = services.GetRequiredService<ILogger<Program>>();
-                    ITenantConnectionResolver resolver = services.GetRequiredService<ITenantConnectionResolver>();
-                    logger.LogCritical(
-                        ex,
-                        "Database migration failed for master database '{DatabaseName}'. "
-                        + "If you upgraded from the single-database layout, reset the local Docker volume: "
-                        + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
-                        + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
-                        resolver.MasterDatabaseName);
-                    throw;
-                }
+                await OperationalExceptionGuard.RunObservingAsync(
+                    () => DatabaseStartup.InitializeDevelopmentAsync(services, ct),
+                    ex =>
+                    {
+                        ILogger<Program> logger = services.GetRequiredService<ILogger<Program>>();
+                        ITenantConnectionResolver resolver =
+                            services.GetRequiredService<ITenantConnectionResolver>();
+                        logger.LogCritical(
+                            ex,
+                            "Database migration failed for master database '{DatabaseName}'. "
+                            + "If you upgraded from the single-database layout, reset the local Docker volume: "
+                            + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
+                            + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
+                            resolver.MasterDatabaseName);
+                        return Task.CompletedTask;
+                    });
             }
         }
 

@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Captcha.FCaptcha;
@@ -30,9 +31,11 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     HttpResponseMessage response = await client.GetAsync("/healthz");
 
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    Dictionary<string, string>? body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-    Assert.NotNull(body);
-    Assert.Equal("healthy", body["status"]);
+    // /healthz returns mixed JSON types (string status, bool ready); parse explicitly.
+    using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    Assert.Equal(JsonValueKind.Object, body.RootElement.ValueKind);
+    Assert.Equal("healthy", body.RootElement.GetProperty("status").GetString());
+    Assert.True(body.RootElement.GetProperty("ready").GetBoolean());
   }
 
   [SkippableFact]
@@ -254,23 +257,36 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
       try
       {
         HttpResponseMessage response = client.GetAsync("/healthz").GetAwaiter().GetResult();
-        if (response.IsSuccessStatusCode)
+        if (!response.IsSuccessStatusCode)
         {
-          Dictionary<string, object>? body = response.Content
-            .ReadFromJsonAsync<Dictionary<string, object>>()
-            .GetAwaiter()
-            .GetResult();
-          if (body is not null
-              && body.TryGetValue("status", out object? status)
-              && string.Equals(status?.ToString(), "healthy", StringComparison.Ordinal))
-          {
-            return;
-          }
+          Thread.Sleep(100);
+          continue;
+        }
+
+        using JsonDocument body = JsonDocument.Parse(
+          response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+        if (body.RootElement.TryGetProperty("status", out JsonElement status)
+            && status.ValueKind == JsonValueKind.String
+            && string.Equals(status.GetString(), "healthy", StringComparison.Ordinal))
+        {
+          return;
         }
       }
-      catch
+      catch (HttpRequestException)
       {
-        // Warmup still in progress or host not accepting yet.
+        // Host not accepting connections yet during warmup.
+      }
+      catch (TaskCanceledException)
+      {
+        // Transient probe timeout while the host is still binding.
+      }
+      catch (JsonException)
+      {
+        // Incomplete or transitional health payload during startup.
+      }
+      catch (IOException)
+      {
+        // Connection reset while Kestrel is coming up.
       }
 
       Thread.Sleep(100);
@@ -287,7 +303,15 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
       connection.Open();
       return true;
     }
-    catch
+    catch (NpgsqlException)
+    {
+      return false;
+    }
+    catch (TimeoutException)
+    {
+      return false;
+    }
+    catch (IOException)
     {
       return false;
     }
