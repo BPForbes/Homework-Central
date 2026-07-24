@@ -1153,7 +1153,13 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/ModerationConceptContextRouter.cs](../backend/HomeworkCentral.Api/Assessment/ModerationConceptContextRouter.cs) | Moderation cascade stage-1 router. |
 | [backend/HomeworkCentral.Api/Assessment/TutoringSubjectContextRouter.cs](../backend/HomeworkCentral.Api/Assessment/TutoringSubjectContextRouter.cs) | Tutoring cascade stage-1 router. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs) | Synthetic training speed/quality knobs: generator-audit sampling, deterministic teacher labels, epochs, batching, compact replay. |
-| [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs) | Per-session cancel tokens for mid-run and continuous training stop. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs) | Per-session stop tokens for mid-run and continuous training. |
+
+Only an explicit stop (`POST /api/neural-net/training/{id}/stop`) ends a session. A running session
+with no live worker is marked stopped directly so the admin list cannot strand an unstoppable row.
+`GET /api/neural-net/training` projects replay presence flags rather than the JSON payloads: those
+blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
+Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
 
 A REVISE verdict from LLM-2 never halts a session. `CollectBalancedGeneratorAuditAsync` republishes
 the `reeval` path tone (amber in the live mesh), rewrites the LLM-1 prompt around the objection via
