@@ -437,7 +437,11 @@ public sealed class NeuralNetTrainingService(
 
                 SyntheticTicket singleMessageTicket = ToSingleMessageTicket(generated);
                 if (ShouldSampleGeneratorAudit(session.SessionId, ticketIndex))
-                    await CollectBalancedGeneratorAuditAsync(session, singleMessageTicket, feedback, timings, coverage, ct);
+                {
+                    // A REVISE verdict reworks the prompt in place; the loop always keeps training.
+                    singleMessageTicket = ToSingleMessageTicket(await CollectBalancedGeneratorAuditAsync(
+                        session, singleMessageTicket, feedback, timings, coverage, ct));
+                }
                 else
                 {
                     feedback.RecordCoverageGaps(
@@ -603,9 +607,9 @@ public sealed class NeuralNetTrainingService(
             string targetCategory = coverage.NextTarget(session.Mode, ticketIndex);
             SyntheticTicket? ticket = await GenerateSyntheticTicketAsync(
                 session.Mode, timings, feedback.Hints, targetCategory, ct);
-            tickets.Add((ticketIndex, ticket));
             if (ticket is null)
             {
+                tickets.Add((ticketIndex, null));
                 PublishProgress(session, progress => progress with
                 {
                     Phase = "LLM1 scenario generation",
@@ -617,7 +621,7 @@ public sealed class NeuralNetTrainingService(
             }
 
             if (ShouldSampleGeneratorAudit(session.SessionId, ticketIndex))
-                await CollectBalancedGeneratorAuditAsync(session, ticket, feedback, timings, coverage, ct);
+                ticket = await CollectBalancedGeneratorAuditAsync(session, ticket, feedback, timings, coverage, ct);
             else
                 feedback.RecordCoverageGaps(
                     coverage.Underrepresented(
@@ -625,12 +629,14 @@ public sealed class NeuralNetTrainingService(
                             ? NeuralModelKindChatMonitoring.Tutoring
                             : NeuralModelKindChatMonitoring.Moderation));
 
+            SyntheticTicket resolved = ticket;
+            tickets.Add((ticketIndex, resolved));
             PublishProgress(session, progress => progress with
             {
                 Phase = "LLM1 scenario generation",
                 TicketsGenerated = ticketIndex,
                 LatestLlm1Summary =
-                    $"Ticket {ticketIndex}: {ticket.Category} · {ticket.Messages.Count} messages",
+                    $"Ticket {ticketIndex}: {resolved.Category} · {resolved.Messages.Count} messages",
                 GeneratorHints = feedback.Hints.ToList(),
             });
         }
@@ -642,9 +648,11 @@ public sealed class NeuralNetTrainingService(
 
     /// <summary>
     /// Light LLM-2 pass after each LLM-1 scenario so later tickets get balanced hints
-    /// without letting REVISE notes dominate diversity.
+    /// without letting REVISE notes dominate diversity. A REVISE verdict never blocks the
+    /// pipeline: LLM-1 reworks the scenario prompt with the objection and training continues
+    /// with whichever attempt survives.
     /// </summary>
-    private async Task CollectBalancedGeneratorAuditAsync(
+    private async Task<SyntheticTicket> CollectBalancedGeneratorAuditAsync(
         NeuralNetTrainingSession session,
         SyntheticTicket ticket,
         SyntheticGeneratorFeedbackBuffer feedback,
@@ -652,12 +660,53 @@ public sealed class NeuralNetTrainingService(
         SyntheticConceptCoverageSampler coverage,
         CancellationToken ct)
     {
-        SyntheticThreadMessage primary = ticket.Messages.FirstOrDefault(message => !message.IsDistractor)
-            ?? ticket.Messages.First();
         NeuralModelKindChatMonitoring auditKind = IsModelDomainMatch(
             NeuralModelKindChatMonitoring.Tutoring, ticket.Category)
             ? NeuralModelKindChatMonitoring.Tutoring
             : NeuralModelKindChatMonitoring.Moderation;
+
+        SyntheticTicket current = ticket;
+        int maxRevisions = Math.Clamp(Options.GeneratorRevisionMaxAttempts, 0, 3);
+        for (int attempt = 0; attempt <= maxRevisions; attempt++)
+        {
+            SyntheticEvaluatorResult? audit = await AuditGeneratedTicketAsync(current, auditKind, timings, ct);
+            if (audit is null)
+                return current;
+
+            feedback.RecordAudit(audit.Verdict, audit.Feedback, current.Category);
+            feedback.RecordCoverageGaps(coverage.Underrepresented(auditKind));
+            PublishProgress(session, progress => progress with
+            {
+                Phase = "LLM2 → LLM1 feedback",
+                AuditsCompleted = progress.AuditsCompleted + 1,
+                LatestLlm2Feedback = Truncate($"{audit.Verdict}: {audit.Feedback}", 280),
+                GeneratorHints = feedback.Hints.ToList(),
+                PathTone = "reeval",
+            });
+
+            bool needsRevision = audit.Verdict.Contains("REVISE", StringComparison.OrdinalIgnoreCase);
+            if (!needsRevision || attempt == maxRevisions)
+                return current;
+
+            SyntheticTicket? revised = await ReviseGeneratedTicketAsync(
+                session, current, audit, feedback, timings, attempt + 1, maxRevisions, ct);
+            if (revised is null)
+                return current;
+
+            current = revised;
+        }
+
+        return current;
+    }
+
+    private async Task<SyntheticEvaluatorResult?> AuditGeneratedTicketAsync(
+        SyntheticTicket ticket,
+        NeuralModelKindChatMonitoring auditKind,
+        TrainingSessionTimings timings,
+        CancellationToken ct)
+    {
+        SyntheticThreadMessage primary = ticket.Messages.FirstOrDefault(message => !message.IsDistractor)
+            ?? ticket.Messages.First();
         ChatMonitoringNeuralModelPrediction seedPrediction = new(
             (float)ticket.ExpectedScore,
             (float)ticket.ExpectedRelevance,
@@ -673,19 +722,54 @@ public sealed class NeuralNetTrainingService(
             ct);
         watch.Stop();
         timings.AddAudit(watch.ElapsedMilliseconds);
-        if (audit is null)
-            return;
+        return audit;
+    }
 
-        feedback.RecordAudit(audit.Verdict, audit.Feedback, ticket.Category);
-        feedback.RecordCoverageGaps(coverage.Underrepresented(auditKind));
+    /// <summary>
+    /// Rebuilds the LLM-1 prompt around the evaluator's objection. Publishes the reeval tone so the
+    /// mesh shows yellow while LLM-1 is working the feedback rather than looking stalled.
+    /// </summary>
+    private async Task<SyntheticTicket?> ReviseGeneratedTicketAsync(
+        NeuralNetTrainingSession session,
+        SyntheticTicket rejected,
+        SyntheticEvaluatorResult audit,
+        SyntheticGeneratorFeedbackBuffer feedback,
+        TrainingSessionTimings timings,
+        int attempt,
+        int maxRevisions,
+        CancellationToken ct)
+    {
         PublishProgress(session, progress => progress with
         {
-            Phase = "LLM2 → LLM1 feedback",
-            AuditsCompleted = progress.AuditsCompleted + 1,
-            LatestLlm2Feedback = Truncate($"{audit.Verdict}: {audit.Feedback}", 280),
-            GeneratorHints = feedback.Hints.ToList(),
+            Phase = $"LLM1 considering LLM2 feedback · revision {attempt}/{maxRevisions}",
             PathTone = "reeval",
+            LatestLlm1Summary = Truncate(
+                $"Reworking '{rejected.Category}' prompt to resolve: {audit.Feedback}", 280),
+            GeneratorHints = feedback.Hints.ToList(),
         });
+
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        SyntheticTicket? revised = await GenerateSyntheticTicketAsync(
+            session.Mode,
+            timings,
+            feedback.Hints,
+            rejected.Category,
+            audit.Feedback,
+            ct);
+        watch.Stop();
+        timings.Llm1ScenarioMs += watch.ElapsedMilliseconds;
+        if (revised is null)
+            return null;
+
+        PublishProgress(session, progress => progress with
+        {
+            Phase = $"LLM1 revised scenario from LLM2 feedback · {revised.Category}",
+            PathTone = "reeval",
+            LatestLlm1Summary = Truncate(
+                $"Revision {attempt} applied for '{revised.Category}'.", 280),
+            GeneratorHints = feedback.Hints.ToList(),
+        });
+        return revised;
     }
 
     private async Task RunChatMonitoringRunsAsync(
@@ -1019,16 +1103,13 @@ public sealed class NeuralNetTrainingService(
             messageContext.ResolvedEvaluation.Community,
             null,
             true);
-        PublishProgress(runContext.Session, progress => WithMeshFrame(
-            progress with
-            {
-                Phase = "Forward · accepted",
-                ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
-            },
+        PublishLayerWalk(
+            runContext.Session,
+            runContext,
+            "Forward · accepted",
             "accepted",
-            runContext.Telemetry,
             messageContext.InitialInference.Forward,
-            null));
+            backward: null);
     }
 
     private void QueueSyntheticTrainingExample(
@@ -1188,23 +1269,21 @@ public sealed class NeuralNetTrainingService(
             })
             .ToList();
         TrainingIterationReplay? lastIteration = trainingTrace.Iterations.LastOrDefault();
-        PublishProgress(session, progress =>
+        PublishProgress(session, progress => progress with
         {
-            NeuralNetTrainingLiveProgress updated = progress with
-            {
-                Phase = $"Backprop · {run.ChatMonitoringKind}",
-                ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
-                ExamplesPersisted = progress.ExamplesPersisted + items.Count,
-                LatestLossSummary = lossSummary,
-                WeightUpdateFeed = weightFeed,
-            };
-            return WithMeshFrame(
-                updated,
-                "backprop",
-                telemetry,
-                lastIteration?.AfterUpdate ?? lastIteration?.BeforeUpdate,
-                lastIteration?.Backward);
+            Phase = $"Backprop · {run.ChatMonitoringKind}",
+            ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
+            ExamplesPersisted = progress.ExamplesPersisted + items.Count,
+            LatestLossSummary = lossSummary,
+            WeightUpdateFeed = weightFeed,
         });
+        PublishLayerWalk(
+            session,
+            runContext,
+            $"Backprop · {run.ChatMonitoringKind}",
+            "backprop",
+            lastIteration?.AfterUpdate ?? lastIteration?.BeforeUpdate,
+            lastIteration?.Backward);
 
         foreach (PendingTrainItem item in items)
         {
@@ -1337,11 +1416,13 @@ public sealed class NeuralNetTrainingService(
         string pathTone,
         IChatMonitoringNeuralModelTelemetry telemetry,
         ForwardPropagationTrace? forward,
-        BackpropagationTrace? backward)
+        BackpropagationTrace? backward,
+        int? layerIndex = null)
     {
         ChatMonitoringNeuralModelStateSnapshot state = telemetry.GetStateSnapshot();
-        (IReadOnlyList<int> activeNodes, IReadOnlyList<int> activeEdges) =
-            NeuralMeshFrameExtractor.Extract(forward, backward);
+        (IReadOnlyList<int> activeNodes, IReadOnlyList<int> activeEdges) = layerIndex is int layer
+            ? NeuralMeshFrameExtractor.ExtractLayer(forward, backward, state.LayerWidths, layer)
+            : NeuralMeshFrameExtractor.Extract(forward, backward);
 
         return progress with
         {
@@ -1350,7 +1431,51 @@ public sealed class NeuralNetTrainingService(
             LayerLabels = state.LayerLabels,
             ActiveNodeIndexes = activeNodes,
             ActiveEdgeParameterIndexes = activeEdges,
+            ActiveLayerIndex = layerIndex,
         };
+    }
+
+    /// <summary>
+    /// Publishes one live frame per layer transition so the mesh animates layer-by-layer instead of
+    /// jumping from input to output. Backward walks run output-to-input to mirror gradient flow.
+    /// </summary>
+    private void PublishLayerWalk(
+        NeuralNetTrainingSession session,
+        ChatMonitoringRunContext runContext,
+        string phase,
+        string pathTone,
+        ForwardPropagationTrace? forward,
+        BackpropagationTrace? backward)
+    {
+        IReadOnlyList<int> layerWidths = runContext.Telemetry.GetStateSnapshot().LayerWidths;
+        if (layerWidths.Count < 2)
+        {
+            PublishProgress(session, progress => WithMeshFrame(
+                progress with { Phase = phase }, pathTone, runContext.Telemetry, forward, backward));
+            return;
+        }
+
+        bool backwardWalk = backward is not null;
+        IEnumerable<int> layerOrder = backwardWalk
+            ? Enumerable.Range(1, layerWidths.Count - 1).Reverse()
+            : Enumerable.Range(1, layerWidths.Count - 1);
+
+        foreach (int layer in layerOrder)
+        {
+            int destination = layer;
+            string layerLabel = $"{phase} · layer {destination}/{layerWidths.Count - 1}";
+            PublishProgress(session, progress => WithMeshFrame(
+                progress with
+                {
+                    Phase = layerLabel,
+                    ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
+                },
+                pathTone,
+                runContext.Telemetry,
+                forward,
+                backward,
+                destination));
+        }
     }
 
     private sealed record ChatMonitoringRunContext(
@@ -1483,15 +1608,24 @@ public sealed class NeuralNetTrainingService(
 
     private static string Truncate(string value, int limit) => value.Length <= limit ? value : value[..limit] + "…";
 
+    private Task<SyntheticTicket?> GenerateSyntheticTicketAsync(
+        NeuralTrainingMode mode,
+        TrainingSessionTimings timings,
+        IReadOnlyList<string>? generatorHints,
+        string targetCategory,
+        CancellationToken ct) =>
+        GenerateSyntheticTicketAsync(mode, timings, generatorHints, targetCategory, revisionNotes: null, ct);
+
     private async Task<SyntheticTicket?> GenerateSyntheticTicketAsync(
         NeuralTrainingMode mode,
         TrainingSessionTimings timings,
         IReadOnlyList<string>? generatorHints,
         string targetCategory,
+        string? revisionNotes,
         CancellationToken ct)
     {
         SyntheticThreadScenario? scenario = await scenarioGenerator.GenerateAsync(
-            mode, generatorHints, targetCategory, ct);
+            mode, generatorHints, targetCategory, revisionNotes, ct);
         SyntheticThreadMessage? primaryMessage = scenario?.Messages.FirstOrDefault(x => !x.IsDistractor)
             ?? scenario?.Messages.FirstOrDefault();
         if (scenario is not null && primaryMessage is not null)
@@ -1836,6 +1970,7 @@ public sealed class NeuralNetTrainingService(
                     LayerLabels = live.LayerLabels,
                     ActiveNodeIndexes = live.ActiveNodeIndexes,
                     ActiveEdgeParameterIndexes = live.ActiveEdgeParameterIndexes,
+                    ActiveLayerIndex = live.ActiveLayerIndex,
                     UpdatedAtUtc = live.UpdatedAtUtc,
                 },
         };
@@ -1869,10 +2004,14 @@ public sealed class NeuralNetTrainingService(
         private long sequence;
         private int localRevision;
 
+        /// <summary>Dense transitions in the stage-2 network; one replay frame is emitted per transition.</summary>
+        private readonly int layerTransitions;
+
         public ReplayBuilder(NeuralNetTrainingSession session, IChatMonitoringNeuralModelTelemetry telemetry)
         {
             this.session = session; this.telemetry = telemetry;
             initial = telemetry.GetParameterSnapshot(0, 0);
+            layerTransitions = Math.Max(1, telemetry.GetStateSnapshot().LayerWidths.Count - 1);
         }
 
         public void BeginTicket(int ticketIndex, SyntheticTicket ticket) => tickets.Add(new TicketState(ticketIndex, ticket, []));
@@ -1905,7 +2044,7 @@ public sealed class NeuralNetTrainingService(
             {
                 AddForward(ReplayPhase.EpochForward, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, iteration.BeforeUpdate);
                 int lossBefore = losses.Count; losses.Add(iteration.LossBeforeUpdate); Frame(ReplayPhase.LossCalculation, ReplayPayloadKind.Loss, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, lossBefore);
-                int back = backwards.Count; backwards.Add(iteration.Backward); Frame(ReplayPhase.BackwardPropagation, ReplayPayloadKind.Backpropagation, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, back);
+                int back = backwards.Count; backwards.Add(iteration.Backward); AddLayerFrames(ReplayPhase.BackwardPropagation, ReplayPayloadKind.Backpropagation, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, back, forward: false);
                 int update = updates.Count; updates.Add(iteration.Update); Frame(ReplayPhase.ParameterUpdate, ReplayPayloadKind.ParameterUpdate, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, update);
                 AddForward(ReplayPhase.PostUpdateForward, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, iteration.AfterUpdate);
                 int lossAfter = losses.Count; losses.Add(iteration.LossAfterUpdate); Frame(ReplayPhase.LossCalculation, ReplayPayloadKind.Loss, ticketIndex, passIndex, message.MessageIndex, iteration.Epoch, lossAfter);
@@ -1932,8 +2071,37 @@ public sealed class NeuralNetTrainingService(
         }
 
         private int Intern(string value) { if (stringIndices.TryGetValue(value, out int existing)) return existing; int index = strings.Count; strings.Add(value); stringIndices[value] = index; return index; }
-        private int AddForward(ReplayPhase phase, int ticket, int pass, int message, int? epoch, ForwardPropagationTrace forward) { int index = forwards.Count; forwards.Add(forward); Frame(phase, ReplayPayloadKind.Forward, ticket, pass, message, epoch, index); return index; }
-        private void Frame(ReplayPhase phase, ReplayPayloadKind kind, int ticket, int pass, int? message, int? epoch, int payload) => frames.Add(new(++sequence, phase, kind, ticket, pass, message, epoch, DateTimeOffset.UtcNow, payload));
+
+        private int AddForward(ReplayPhase phase, int ticket, int pass, int message, int? epoch, ForwardPropagationTrace forward)
+        {
+            int index = forwards.Count;
+            forwards.Add(forward);
+            AddLayerFrames(phase, ReplayPayloadKind.Forward, ticket, pass, message, epoch, index, forward: true);
+            return index;
+        }
+
+        /// <summary>
+        /// Emits one frame per dense transition against a single shared payload so stepping the
+        /// replay advances a layer at a time. Forward phases run input-to-output, backward phases
+        /// output-to-input.
+        /// </summary>
+        private void AddLayerFrames(ReplayPhase phase, ReplayPayloadKind kind, int ticket, int pass, int? message, int? epoch, int payload, bool forward)
+        {
+            IEnumerable<int> layers = Enumerable.Range(1, layerTransitions);
+            foreach (int layer in forward ? layers : layers.Reverse())
+                Frame(phase, kind, ticket, pass, message, epoch, payload, layer);
+        }
+
+        private void Frame(ReplayPhase phase, ReplayPayloadKind kind, int ticket, int pass, int? message, int? epoch, int payload, int? layer = null)
+        {
+            frames.Add(new(++sequence, phase, kind, ticket, pass, message, epoch, DateTimeOffset.UtcNow, payload, layer));
+
+            // Layer walking multiplies frame counts, and continuous sessions never stop producing
+            // them. Keep the newest window so a long run stays under the V2 import limit instead of
+            // failing validation when the replay is serialized.
+            if (frames.Count > NeuralNetReplaySerializer.MaxFrames)
+                frames.RemoveRange(0, frames.Count - NeuralNetReplaySerializer.MaxFrames);
+        }
         private sealed record TicketState(int Index, SyntheticTicket Ticket, List<MessageState> Messages);
         private sealed record MessageState(SyntheticThreadMessage Message, List<TrainingPassReplay> Passes);
     }

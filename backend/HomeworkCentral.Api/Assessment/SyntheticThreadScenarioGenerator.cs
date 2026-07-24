@@ -24,16 +24,29 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         CancellationToken ct) =>
         GenerateAsync(mode, hints, targetCategory: null, ct);
 
+    public Task<SyntheticThreadScenario?> GenerateAsync(
+        NeuralTrainingMode mode,
+        IReadOnlyList<string>? hints,
+        string? targetCategory,
+        CancellationToken ct) =>
+        GenerateAsync(mode, hints, targetCategory, revisionNotes: null, ct);
+
+    /// <summary>
+    /// Generates a scenario, optionally reworking a previous attempt that LLM-2 asked to revise.
+    /// <paramref name="revisionNotes"/> is folded into the prompt so the generator resolves the
+    /// evaluator's objection instead of the pipeline stalling on a REVISE verdict.
+    /// </summary>
     public async Task<SyntheticThreadScenario?> GenerateAsync(
         NeuralTrainingMode mode,
         IReadOnlyList<string>? hints,
         string? targetCategory,
+        string? revisionNotes,
         CancellationToken ct)
     {
         string? resolvedTarget = ResolveTargetCategory(mode, targetCategory);
         string? json = await llm.ChatJsonAsync(
             ScenarioSystemPrompt,
-            BuildUserPrompt(mode, hints, resolvedTarget),
+            BuildUserPrompt(mode, hints, resolvedTarget, revisionNotes),
             ct);
         if (string.IsNullOrWhiteSpace(json))
             return CreateFallback(mode, resolvedTarget);
@@ -55,7 +68,14 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
     public static string BuildUserPrompt(
         NeuralTrainingMode mode,
         IReadOnlyList<string>? hints,
-        string? targetCategory)
+        string? targetCategory) =>
+        BuildUserPrompt(mode, hints, targetCategory, revisionNotes: null);
+
+    public static string BuildUserPrompt(
+        NeuralTrainingMode mode,
+        IReadOnlyList<string>? hints,
+        string? targetCategory,
+        string? revisionNotes)
     {
         string selected = mode == NeuralTrainingMode.Both
             ? "moderation or tutoring"
@@ -63,6 +83,13 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         string prompt = $"Create one {selected} training scenario with 4 to 8 messages.";
         if (!string.IsNullOrWhiteSpace(targetCategory))
             prompt += BuildTargetConstraint(mode, targetCategory);
+
+        if (!string.IsNullOrWhiteSpace(revisionNotes))
+        {
+            prompt += "\n\nThe previous attempt was rejected by the evaluator. Resolve this objection "
+                + "and return a corrected scenario with the same category:\n"
+                + Truncate(revisionNotes.Trim(), 600);
+        }
 
         if (hints is null || hints.Count == 0)
             return prompt;

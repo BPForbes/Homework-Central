@@ -18,6 +18,20 @@ public sealed class SyntheticThreadScenarioGeneratorTests
     }
 
     [Fact]
+    public void BuildUserPrompt_FoldsEvaluatorObjectionIntoRevision()
+    {
+        string prompt = SyntheticThreadScenarioGenerator.BuildUserPrompt(
+            NeuralTrainingMode.Moderation,
+            hints: null,
+            targetCategory: "doxxing",
+            revisionNotes: "The thread never shows identifying information being published.");
+
+        Assert.Contains("previous attempt was rejected", prompt);
+        Assert.Contains("never shows identifying information", prompt);
+        Assert.Contains("MUST set \"category\" exactly to \"doxxing\"", prompt);
+    }
+
+    [Fact]
     public void AlignScenarioToTarget_OverwritesDriftedCategory()
     {
         SyntheticThreadScenario drifted = new(

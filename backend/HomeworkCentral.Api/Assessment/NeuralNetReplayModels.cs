@@ -43,7 +43,13 @@ public sealed record TrainingPassTrace(IReadOnlyList<TrainingIterationReplay> It
 public sealed record NeuralNetParameterSnapshot(long? CanonicalGeneration, int LocalRevision, string NumericFormat, string Encoding, int ParameterCount, string PackedValues, string Checksum);
 
 public sealed record ReplayIntegrity(string CanonicalizationVersion, string HashAlgorithm, string TopologyChecksum, string InitialStateChecksum, string FinalStateChecksum, string ReportChecksum);
-public sealed record ReplayFrame(long Sequence, ReplayPhase Phase, ReplayPayloadKind PayloadKind, int TicketIndex, int PassIndex, int? MessageIndex, int? Epoch, DateTimeOffset? CapturedAt, int PayloadIndex);
+/// <summary>
+/// One replay step. Forward/backward phases advance a single layer per frame:
+/// <see cref="LayerIndex"/> is the destination layer for forward frames and the layer whose
+/// incoming parameters are being corrected for backward frames. Null means the frame covers the
+/// whole network (LLM, loss, verdict, and legacy V2 reports written before layer walking).
+/// </summary>
+public sealed record ReplayFrame(long Sequence, ReplayPhase Phase, ReplayPayloadKind PayloadKind, int TicketIndex, int PassIndex, int? MessageIndex, int? Epoch, DateTimeOffset? CapturedAt, int PayloadIndex, int? LayerIndex = null);
 public sealed record ReplayFailure(string Stage, string ErrorCode, string SanitizedMessage);
 public sealed record TrainingProvenance(string ModelVersion, string FeatureEncoderVersion, string LossFunctionVersion, string Optimizer, float LearningRate, int EpochCount, string RandomAlgorithm, int RandomSeed, string ReportProducerVersion);
 

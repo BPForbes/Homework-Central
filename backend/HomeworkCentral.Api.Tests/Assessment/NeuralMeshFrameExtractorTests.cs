@@ -4,6 +4,56 @@ namespace HomeworkCentral.Api.Tests.Assessment;
 
 public sealed class NeuralMeshFrameExtractorTests
 {
+    /// <summary>Widths 2 → 3 → 2: layer 1 owns nodes 0-4 / params 0-8, layer 2 nodes 2-6 / params 9-16.</summary>
+    private static readonly int[] LayerWidths = [2, 3, 2];
+
+    [Theory]
+    [InlineData(1, 0, 4, 0, 8)]
+    [InlineData(2, 2, 6, 9, 16)]
+    public void ExtractLayer_KeepsOnlyOneTransition(
+        int layerIndex,
+        int firstNode,
+        int lastNode,
+        int firstParameter,
+        int lastParameter)
+    {
+        List<SparseValue> activations = Enumerable.Range(0, 7)
+            .Select(index => new SparseValue(index, 1f))
+            .ToList();
+        List<SparseValue> edges = Enumerable.Range(0, 17)
+            .Select(index => new SparseValue(index, 1f))
+            .ToList();
+        ForwardPropagationTrace forward = new([], [], activations, edges, [], 0f, 0f, 0f, 0f, 0f);
+
+        (IReadOnlyList<int> nodes, IReadOnlyList<int> parameters) =
+            NeuralMeshFrameExtractor.ExtractLayer(forward, backward: null, LayerWidths, layerIndex);
+
+        Assert.Equal(Enumerable.Range(firstNode, lastNode - firstNode + 1), nodes.Order());
+        Assert.Equal(Enumerable.Range(firstParameter, lastParameter - firstParameter + 1), parameters.Order());
+    }
+
+    [Fact]
+    public void ExtractLayer_ClampsOutOfRangeLayerToLastTransition()
+    {
+        ForwardPropagationTrace forward = new(
+            [],
+            [],
+            [new SparseValue(6, 1f)],
+            [new SparseValue(16, 1f)],
+            [],
+            0f,
+            0f,
+            0f,
+            0f,
+            0f);
+
+        (IReadOnlyList<int> nodes, IReadOnlyList<int> parameters) =
+            NeuralMeshFrameExtractor.ExtractLayer(forward, backward: null, LayerWidths, layerIndex: 99);
+
+        Assert.Equal([6], nodes);
+        Assert.Equal([16], parameters);
+    }
+
     [Fact]
     public void Extract_SelectsLargestActivationsAndGradients()
     {

@@ -22,6 +22,56 @@ public static class NeuralMeshFrameExtractor
         return (activeNodes, activeEdges);
     }
 
+    /// <summary>
+    /// Restricts a frame to a single layer transition so replay advances one layer at a time
+    /// instead of lighting the whole input-to-output path at once. <paramref name="layerIndex"/>
+    /// is the destination layer: nodes come from layers <c>layerIndex - 1</c> and
+    /// <c>layerIndex</c>, edges from the dense block that feeds <paramref name="layerIndex"/>.
+    /// </summary>
+    public static (IReadOnlyList<int> ActiveNodeIndexes, IReadOnlyList<int> ActiveEdgeParameterIndexes) ExtractLayer(
+        ForwardPropagationTrace? forward,
+        BackpropagationTrace? backward,
+        IReadOnlyList<int> layerWidths,
+        int layerIndex)
+    {
+        (IReadOnlyList<int> allNodes, IReadOnlyList<int> allEdges) = Extract(forward, backward);
+        if (layerWidths.Count < 2)
+            return (allNodes, allEdges);
+
+        int destination = Math.Clamp(layerIndex, 1, layerWidths.Count - 1);
+        (int nodeStart, int nodeEnd) = NodeWindow(layerWidths, destination);
+        (int parameterStart, int parameterEnd) = ParameterWindow(layerWidths, destination);
+
+        List<int> nodes = allNodes.Where(index => index >= nodeStart && index < nodeEnd).ToList();
+        List<int> edges = allEdges.Where(index => index >= parameterStart && index < parameterEnd).ToList();
+        return (nodes, edges);
+    }
+
+    /// <summary>Global node index range covering the source and destination layers of a transition.</summary>
+    private static (int Start, int End) NodeWindow(IReadOnlyList<int> layerWidths, int destination)
+    {
+        int start = 0;
+        for (int layer = 0; layer < destination - 1; layer++)
+            start += layerWidths[layer];
+
+        int end = start + layerWidths[destination - 1] + layerWidths[destination];
+        return (start, end);
+    }
+
+    /// <summary>
+    /// Flattened parameter range for the dense block feeding <paramref name="destination"/>.
+    /// Each block stores, per target node, one weight per source followed by that node's bias.
+    /// </summary>
+    private static (int Start, int End) ParameterWindow(IReadOnlyList<int> layerWidths, int destination)
+    {
+        int start = 0;
+        for (int layer = 1; layer < destination; layer++)
+            start += layerWidths[layer] * (layerWidths[layer - 1] + 1);
+
+        int end = start + layerWidths[destination] * (layerWidths[destination - 1] + 1);
+        return (start, end);
+    }
+
     private static List<int> ExtractActiveNodes(ForwardPropagationTrace? forward)
     {
         if (forward is null || forward.NodeActivations.Count == 0)

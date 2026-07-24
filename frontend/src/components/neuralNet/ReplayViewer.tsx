@@ -330,7 +330,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
 
   const pathTone = pathToneForPhase(phase, finalVerdict?.accepted)
 
-  const activeEdgeParams = useMemo(() => {
+  const allActiveEdgeParams = useMemo(() => {
     if (pathTone === 'backprop') {
       const gradients = backpropPayload?.weightGradients ?? []
       if (gradients.length > 0) {
@@ -352,11 +352,11 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     return new Set(contributions.filter((item) => Math.abs(item.value) > 1e-6).map((item) => item.index))
   }, [pathTone, backpropPayload, forwardPayload, lastForwardPayload, layerEdges])
 
-  const activeNodeIds = useMemo(() => {
+  const allActiveNodeIds = useMemo(() => {
     const ids = new Set<number>()
     if (pathTone === 'backprop') {
       for (const edge of layerEdges) {
-        if (!activeEdgeParams.has(edge.parameterIndex)) continue
+        if (!allActiveEdgeParams.has(edge.parameterIndex)) continue
         ids.add(edge.sourceNodeIndex)
         ids.add(edge.targetNodeIndex)
       }
@@ -372,7 +372,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       if (Math.abs(item.value) > 1e-6) ids.add(item.index)
     }
     for (const edge of layerEdges) {
-      if (!activeEdgeParams.has(edge.parameterIndex)) continue
+      if (!allActiveEdgeParams.has(edge.parameterIndex)) continue
       ids.add(edge.sourceNodeIndex)
       ids.add(edge.targetNodeIndex)
     }
@@ -380,7 +380,37 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       for (const node of nodes) ids.add(node.index)
     }
     return ids
-  }, [pathTone, layerEdges, activeEdgeParams, forwardPayload, lastForwardPayload, nodes])
+  }, [pathTone, layerEdges, allActiveEdgeParams, forwardPayload, lastForwardPayload, nodes])
+
+  // Forward/backward frames carry a destination layer so a step lights one transition, not the
+  // whole input-to-output path. Whole-network frames (LLM, loss, verdict) leave it unset.
+  const activeLayerIndex = typeof frame?.layerIndex === 'number' ? frame.layerIndex : null
+  const layerIndexByNodeIndex = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const node of replay.topology.nodes) map.set(node.index, layerIds.indexOf(node.layerId))
+    return map
+  }, [replay.topology.nodes, layerIds])
+
+  const activeEdgeParams = useMemo(() => {
+    if (activeLayerIndex === null) return allActiveEdgeParams
+    const scoped = new Set<number>()
+    for (const edge of layerEdges) {
+      if (!allActiveEdgeParams.has(edge.parameterIndex)) continue
+      if (layerIndexByNodeIndex.get(edge.targetNodeIndex) !== activeLayerIndex) continue
+      scoped.add(edge.parameterIndex)
+    }
+    return scoped.size > 0 ? scoped : allActiveEdgeParams
+  }, [activeLayerIndex, allActiveEdgeParams, layerEdges, layerIndexByNodeIndex])
+
+  const activeNodeIds = useMemo(() => {
+    if (activeLayerIndex === null) return allActiveNodeIds
+    const scoped = new Set<number>()
+    for (const nodeIndex of allActiveNodeIds) {
+      const layer = layerIndexByNodeIndex.get(nodeIndex)
+      if (layer === activeLayerIndex || layer === activeLayerIndex - 1) scoped.add(nodeIndex)
+    }
+    return scoped.size > 0 ? scoped : allActiveNodeIds
+  }, [activeLayerIndex, allActiveNodeIds, layerIndexByNodeIndex])
 
   // Max quality draws every edge as a curve; preview keeps a lighter idle mesh plus the thought path.
   const drawnEdges = useMemo(() => {
@@ -465,6 +495,9 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       </div>
       <p className="dashboard-hint">
         Frame {frames.length ? frameIndex + 1 : 0} of {frames.length} · {phase || 'No recorded frames'} ·{' '}
+        {activeLayerIndex !== null
+          ? `layer ${layerLabel(layerIds[activeLayerIndex - 1] ?? 'input')} → ${layerLabel(layerIds[activeLayerIndex] ?? 'output')} · `
+          : ''}
         {detail === 0
           ? `Clustered: ${totalInputCount} input nodes, ${replay.topology.edges.length} edges`
           : maxQuality

@@ -49,4 +49,10 @@ public sealed class NeuralNetTrainingOptions
 
     /// <summary>Retry budget for training-time LLM-2 audits (generator audits do not retry).</summary>
     public int AuditMaxAttempts { get; set; } = 1;
+
+    /// <summary>
+    /// How many times LLM-1 may rewrite a scenario that LLM-2 asked to revise before training
+    /// continues with the best available attempt. 0 disables reworking (feedback becomes a hint only).
+    /// </summary>
+    public int GeneratorRevisionMaxAttempts { get; set; } = 1;
 }

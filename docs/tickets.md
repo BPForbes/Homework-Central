@@ -1154,6 +1154,15 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/TutoringSubjectContextRouter.cs](../backend/HomeworkCentral.Api/Assessment/TutoringSubjectContextRouter.cs) | Tutoring cascade stage-1 router. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs) | Synthetic training speed/quality knobs: generator-audit sampling, deterministic teacher labels, epochs, batching, compact replay. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs) | Per-session cancel tokens for mid-run and continuous training stop. |
+
+A REVISE verdict from LLM-2 never halts a session. `CollectBalancedGeneratorAuditAsync` republishes
+the `reeval` path tone (amber in the live mesh), rewrites the LLM-1 prompt around the objection via
+`SyntheticThreadScenarioGenerator.GenerateAsync(..., revisionNotes, ...)`, and continues training with
+whichever attempt survives. `NeuralNetTraining:GeneratorRevisionMaxAttempts` bounds the rework loop.
+
+Replay and live mesh frames advance **one dense transition per frame**. `ReplayFrame.LayerIndex` is
+the destination layer (forward frames run input-to-output, backward frames output-to-input), and
+`NeuralMeshFrameExtractor.ExtractLayer` narrows node/parameter highlights to that transition.
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingQueue.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingQueue.cs) | Bounded synthetic-session FIFO and training worker. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingService.cs) | Reviewer feedback approval, data summaries, visualizer data, synthetic sessions, replay reports, and example persistence. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingPromoter.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingPromoter.cs) | Promotion queueing, lease claiming, canonical replay, checkpoint publication, and retry/reject handling. |

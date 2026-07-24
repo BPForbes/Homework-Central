@@ -24,7 +24,9 @@ public sealed record NeuralNetTrainingLiveProgress(
     IReadOnlyList<string> LayerLabels,
     IReadOnlyList<int> ActiveNodeIndexes,
     IReadOnlyList<int> ActiveEdgeParameterIndexes,
-    DateTime UpdatedAtUtc);
+    DateTime UpdatedAtUtc,
+    /// <summary>Destination layer of the current one-layer step; null when no layer walk is active.</summary>
+    int? ActiveLayerIndex = null);
 
 public interface INeuralNetTrainingProgressStore
 {

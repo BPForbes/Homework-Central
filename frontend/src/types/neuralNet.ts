@@ -67,6 +67,8 @@ export interface NeuralNetTrainingLiveProgress {
   layerLabels?: string[]
   activeNodeIndexes?: number[]
   activeEdgeParameterIndexes?: number[]
+  /** Destination layer of the current one-layer step; absent when the whole net is shown. */
+  activeLayerIndex?: number | null
   updatedAtUtc: string
 }
 
