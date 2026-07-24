@@ -41,10 +41,11 @@ public interface INeuralNetTrainingService
     Task<NeuralNetTrainingSessionRemovalResult> RemoveSessionAsync(Guid sessionId, CancellationToken ct = default);
 
     /// <summary>
-    /// Cancels a queued or running session. Continuous sessions stop after the current
-    /// ticket/message step finishes flushing.
+    /// Stops a queued or running session. Continuous sessions end after the current
+    /// ticket/message step finishes flushing. Only an explicit stop ends a session:
+    /// evaluator feedback and generator failures never terminate training.
     /// </summary>
-    Task<bool> CancelTrainingSessionAsync(Guid sessionId, CancellationToken ct = default);
+    Task<bool> StopTrainingSessionAsync(Guid sessionId, CancellationToken ct = default);
 }
 
 public sealed class NeuralNetTrainingService(
@@ -229,14 +230,69 @@ public sealed class NeuralNetTrainingService(
         return MapSession(session);
     }
 
+    /// <summary>
+    /// Lists recent sessions without materializing replay JSON. Worker replays can reach tens of
+    /// megabytes per run, so the poll endpoint projects presence flags instead of the payloads;
+    /// selecting the blobs here exhausted memory and timed out the connection during long sessions.
+    /// </summary>
     public async Task<IReadOnlyList<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(CancellationToken ct = default)
     {
-        List<NeuralNetTrainingSession> sessions = await db.NeuralNetTrainingSessions.AsNoTracking().OrderByDescending(x => x.CreatedAtUtc).Take(50).ToListAsync(ct);
+        List<SessionSummary> sessions = await db.NeuralNetTrainingSessions.AsNoTracking()
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(50)
+            .Select(x => new SessionSummary(
+                x.SessionId,
+                x.RequestedTicketCount,
+                x.MaxPassesPerTicket,
+                x.Mode,
+                x.Status,
+                x.CreatedAtUtc,
+                x.StartedAtUtc,
+                x.CompletedAtUtc,
+                x.FailureReason,
+                x.ReportJson != null))
+            .ToListAsync(ct);
+
         Guid[] sessionIds = sessions.Select(x => x.SessionId).ToArray();
-        List<ChatMonitoringNeuralModelRun> runs = await db.ChatMonitoringNeuralModelRuns.AsNoTracking()
-            .Where(x => sessionIds.Contains(x.SessionId)).ToListAsync(ct);
-        return sessions.Select(session => MapSession(session, runs.Where(run => run.SessionId == session.SessionId))).ToList();
+        List<RunSummary> runs = await db.ChatMonitoringNeuralModelRuns.AsNoTracking()
+            .Where(x => sessionIds.Contains(x.SessionId))
+            .Select(x => new RunSummary(
+                x.SessionId,
+                x.ChatMonitoringKind,
+                x.Status,
+                x.CanonicalGeneration,
+                x.WorkerReplayJson != null,
+                x.PromotionReplayJson != null,
+                x.FailureReason))
+            .ToListAsync(ct);
+
+        return sessions
+            .Select(session => MapSessionSummary(
+                session,
+                runs.Where(run => run.SessionId == session.SessionId)))
+            .ToList();
     }
+
+    private sealed record SessionSummary(
+        Guid SessionId,
+        int RequestedTicketCount,
+        int MaxPassesPerTicket,
+        NeuralTrainingMode Mode,
+        string Status,
+        DateTime CreatedAtUtc,
+        DateTime? StartedAtUtc,
+        DateTime? CompletedAtUtc,
+        string? FailureReason,
+        bool HasReport);
+
+    private sealed record RunSummary(
+        Guid SessionId,
+        NeuralModelKindChatMonitoring ChatMonitoringKind,
+        string Status,
+        long? CanonicalGeneration,
+        bool HasWorkerReplay,
+        bool HasPromotionReplay,
+        string? FailureReason);
 
     public async Task<NeuralNetTrainingSessionRemovalResult> RemoveSessionAsync(Guid sessionId, CancellationToken ct = default)
     {
@@ -330,41 +386,48 @@ public sealed class NeuralNetTrainingService(
         }
     }
 
-    public async Task<bool> CancelTrainingSessionAsync(Guid sessionId, CancellationToken ct = default)
+    public async Task<bool> StopTrainingSessionAsync(Guid sessionId, CancellationToken ct = default)
     {
         NeuralNetTrainingSession? session = await db.NeuralNetTrainingSessions
             .FirstOrDefaultAsync(x => x.SessionId == sessionId, ct);
         if (session is null)
             return false;
 
-        if (string.Equals(session.Status, "Queued", StringComparison.OrdinalIgnoreCase))
-        {
-            queue.TryRemove(sessionId);
-            session.Status = "Cancelled";
-            session.CompletedAtUtc = DateTime.UtcNow;
-            session.FailureReason = "Training cancelled before start.";
-            await db.ChatMonitoringNeuralModelRuns
-                .Where(x => x.SessionId == sessionId && x.Status == "Queued")
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(x => x.Status, "Cancelled")
-                        .SetProperty(x => x.CompletedAtUtc, DateTime.UtcNow)
-                        .SetProperty(x => x.FailureReason, "Training cancelled before start."),
-                    ct);
-            await db.SaveChangesAsync(ct);
-            progressStore.Clear(sessionId);
-            return true;
-        }
-
-        if (!string.Equals(session.Status, "Running", StringComparison.OrdinalIgnoreCase))
+        bool queued = string.Equals(session.Status, "Queued", StringComparison.OrdinalIgnoreCase);
+        bool running = string.Equals(session.Status, "Running", StringComparison.OrdinalIgnoreCase);
+        if (!queued && !running)
             return false;
 
-        return cancellationRegistry.TryCancel(sessionId);
+        if (running && cancellationRegistry.TryCancel(sessionId))
+            return true;
+
+        // Queued, or Running with no live worker (the process that owned it went away). Mark the
+        // session stopped directly so the admin UI is not stuck on an unstoppable row.
+        queue.TryRemove(sessionId);
+        string reason = queued ? "Training stopped before start." : "Training stopped by an administrator.";
+        DateTime stoppedAt = DateTime.UtcNow;
+        session.Status = "Cancelled";
+        session.CompletedAtUtc = stoppedAt;
+        session.FailureReason = reason;
+        await db.ChatMonitoringNeuralModelRuns
+            .Where(x => x.SessionId == sessionId && (x.Status == "Queued" || x.Status == "Running"))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.Status, "Cancelled")
+                    .SetProperty(x => x.CompletedAtUtc, stoppedAt)
+                    .SetProperty(x => x.FailureReason, reason),
+                ct);
+        await db.SaveChangesAsync(ct);
+        progressStore.Clear(sessionId);
+        return true;
     }
 
+    /// <summary>Continuous steps between worker-replay snapshots; the JSON is far too large to rewrite per step.</summary>
+    private const int ContinuousReplaySnapshotInterval = 10;
+
     /// <summary>
-    /// Trains one synthetic ticket (single message) at a time until cancelled.
-    /// Snapshots worker replay JSON after each step so downloads work mid-session.
+    /// Trains one synthetic ticket (single message) at a time until stopped.
+    /// Worker replay JSON is snapshotted periodically (and on stop) so downloads work mid-session.
     /// </summary>
     private async Task RunContinuousSyntheticSessionAsync(
         NeuralNetTrainingSession session,
@@ -426,12 +489,14 @@ public sealed class NeuralNetTrainingService(
                 {
                     PublishProgress(session, progress => progress with
                     {
-                        Phase = "Continuous training",
+                        Phase = "Continuous training · waiting on generator",
                         TicketsRequested = ticketIndex,
                         TicketsGenerated = ticketIndex,
                         LatestLlm1Summary = $"Ticket {ticketIndex}: generation failed (target {targetCategory})",
                         GeneratorHints = feedback.Hints.ToList(),
                     });
+                    // Back off so an offline LLM does not spin the loop at full speed.
+                    await Task.Delay(TimeSpan.FromSeconds(2), ct);
                     continue;
                 }
 
@@ -485,8 +550,14 @@ public sealed class NeuralNetTrainingService(
                             runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
                         await FlushPendingTrainingAsync(runContext, ct);
                         await runContext.Batch.FlushAsync(ct);
-                        runContext.Run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(
-                            runContext.Replay.Build(ReplayCompletionStatus.Partial, epochs: Options.LocalEpochs));
+
+                        // Replay JSON grows into the megabytes; rewriting it every step saturates the
+                        // DB connection, so snapshot periodically and always on stop/completion.
+                        if (ticketIndex % ContinuousReplaySnapshotInterval == 0)
+                        {
+                            runContext.Run.WorkerReplayJson = NeuralNetReplaySerializer.Serialize(
+                                runContext.Replay.Build(ReplayCompletionStatus.Partial, epochs: Options.LocalEpochs));
+                        }
                     })
                     .ToList();
 
@@ -1975,6 +2046,59 @@ public sealed class NeuralNetTrainingService(
                 },
         };
     }
+
+    private NeuralNetTrainingSessionDto MapSessionSummary(SessionSummary session, IEnumerable<RunSummary> runs) => new()
+    {
+        SessionId = session.SessionId,
+        RequestedTicketCount = session.RequestedTicketCount,
+        MaxPassesPerTicket = session.MaxPassesPerTicket,
+        Continuous = session.RequestedTicketCount == 0,
+        Mode = session.Mode,
+        Status = session.Status,
+        CreatedAtUtc = session.CreatedAtUtc,
+        StartedAtUtc = session.StartedAtUtc,
+        CompletedAtUtc = session.CompletedAtUtc,
+        FailureReason = session.FailureReason,
+        HasReport = session.HasReport,
+        ChatMonitoringRuns = runs.OrderBy(x => x.ChatMonitoringKind).Select(x => new ChatMonitoringNeuralModelRunDto
+        {
+            ChatMonitoringKind = x.ChatMonitoringKind,
+            Status = x.Status,
+            CanonicalGeneration = x.CanonicalGeneration,
+            HasWorkerReplay = x.HasWorkerReplay,
+            HasPromotionReplay = x.HasPromotionReplay,
+            FailureReason = x.FailureReason,
+        }).ToList(),
+        LiveProgress = MapLiveProgress(progressStore.Get(session.SessionId)),
+    };
+
+    private static NeuralNetTrainingLiveProgressDto? MapLiveProgress(NeuralNetTrainingLiveProgress? live) =>
+        live is null
+            ? null
+            : new NeuralNetTrainingLiveProgressDto
+            {
+                Phase = live.Phase,
+                TicketsRequested = live.TicketsRequested,
+                TicketsGenerated = live.TicketsGenerated,
+                TicketsProcessed = live.TicketsProcessed,
+                MessagesProcessed = live.MessagesProcessed,
+                ExamplesPersisted = live.ExamplesPersisted,
+                AuditsCompleted = live.AuditsCompleted,
+                ActiveChatMonitoringKind = live.ActiveChatMonitoringKind,
+                LatestLlm1Summary = live.LatestLlm1Summary,
+                LatestLlm2Feedback = live.LatestLlm2Feedback,
+                LatestLossSummary = live.LatestLossSummary,
+                GeneratorHints = live.GeneratorHints,
+                WeightUpdateFeed = live.WeightUpdateFeed,
+                PathTone = live.PathTone,
+                LayerWidths = live.LayerWidths,
+                LayerLabels = live.LayerLabels,
+                ActiveNodeIndexes = live.ActiveNodeIndexes,
+                ActiveEdgeParameterIndexes = live.ActiveEdgeParameterIndexes,
+                ActiveLayerIndex = live.ActiveLayerIndex,
+                UpdatedAtUtc = live.UpdatedAtUtc,
+            };
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,

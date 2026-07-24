@@ -163,6 +163,10 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IAssessmentQueue, H
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ILlmClient>(sp =>
     sp.GetRequiredService<HomeworkCentral.Api.Assessment.LlmClient>());
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IVectorDocumentStore, HomeworkCentral.Api.Assessment.VectorDocumentStore>();
+// Stage-2 scorers are small dense nets (~22k parameters): a GPU round-trip costs more than the
+// math, so acceleration comes from a native BLAS provider when one is installed. Falls back to the
+// managed provider silently. GPU capacity belongs to the Ollama workload, not this process.
+MathNet.Numerics.Control.TryUseNative();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ModerationChatMonitorNeuralNet>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.TutoringChatMonitorNeuralNet>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IChatMonitoringNeuralModelFactory, HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelFactory>();
