@@ -66,16 +66,17 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
     }
 
     /// <summary>
-    /// Cancels a queued or running synthetic training session. Running sessions stop after the
-    /// current ticket/message step finishes flushing (including continuous mode).
+    /// Stops a queued or running synthetic training session. Running sessions end after the
+    /// current ticket/message step finishes flushing (including continuous mode). Nothing else
+    /// terminates a session: evaluator feedback and generator failures keep training alive.
     /// </summary>
-    [HttpPost("training/{sessionId:guid}/cancel")]
-    public async Task<IActionResult> CancelTrainingSession(Guid sessionId, CancellationToken ct)
+    [HttpPost("training/{sessionId:guid}/stop")]
+    public async Task<IActionResult> StopTrainingSession(Guid sessionId, CancellationToken ct)
     {
-        bool cancelled = await training.CancelTrainingSessionAsync(sessionId, ct);
-        return cancelled
-            ? Accepted(new { message = "Cancellation requested." })
-            : NotFound(new { message = "No queued or running training session found to cancel." });
+        bool stopped = await training.StopTrainingSessionAsync(sessionId, ct);
+        return stopped
+            ? Accepted(new { message = "Stop requested." })
+            : NotFound(new { message = "No queued or running training session found to stop." });
     }
 
     /// <summary>

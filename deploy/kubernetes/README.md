@@ -21,6 +21,23 @@ Live mesh frames are published into PostgreSQL-backed session state by the train
 
 The API rebuilds its small student model from persisted approved examples on startup. This is the convergence point for training work completed by separate pods. Reports record the individual worker's snapshot; they are not a shared mutable in-memory model.
 
+## Where a GPU helps
+
+Synthetic training wall-clock is dominated by Ollama calls, not by the stage-2 scorers. Put GPU
+capacity behind the language model and leave the .NET workloads on CPU:
+
+- **Ollama** is the only component worth a GPU. Run it on a GPU node (`nvidia.com/gpu` resource plus
+  the device plugin) and point `Llm:BaseUrl` at it. Ollama uses CUDA/ROCm/Metal automatically when
+  the runtime is visible; no application change is required.
+- **Stage-1 routers and stage-2 scorers** are ~11k–22k parameter dense nets. Host-to-device transfer
+  costs more than the multiply, so they stay on CPU. `MathNet.Numerics.Control.TryUseNative()` picks
+  up an installed MKL/OpenBLAS provider for SIMD; without one the managed provider is used.
+- **Training Jobs** need CPU and memory, not accelerators. Raise `resources.requests.cpu` before
+  considering a GPU for them.
+
+A training Job that cannot reach Ollama does not fail: generation returns nothing, the loop backs
+off, and only an explicit stop ends the session.
+
 ## What deliberately does not autoscale
 
 PostgreSQL is stateful. Ollama and ClamAV are memory-heavy. Scale them only with independently benchmarked remote nodes and explicit capacity, not HPA on the Windows development machine.
