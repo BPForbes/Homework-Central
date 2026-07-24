@@ -123,6 +123,8 @@ public sealed class NeuralNetTrainingLiveProgressDto
     public IReadOnlyList<string> LayerLabels { get; set; } = [];
     public IReadOnlyList<int> ActiveNodeIndexes { get; set; } = [];
     public IReadOnlyList<int> ActiveEdgeParameterIndexes { get; set; } = [];
+    /// <summary>Destination layer of the current one-layer step; null when the whole net is shown.</summary>
+    public int? ActiveLayerIndex { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
 }
 

@@ -198,7 +198,10 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
 function liveToneClass(phase: string): string {
   const lower = phase.toLowerCase()
   if (lower.includes('backprop') || lower.includes('loss') || lower.includes('ccel')) return 'neural-live-tone--backprop'
-  if (lower.includes('llm2') || lower.includes('audit') || lower.includes('feedback')) return 'neural-live-tone--reeval'
+  // LLM-1 reworking an evaluator objection stays amber so the pause reads as active, not stalled.
+  if (lower.includes('llm2') || lower.includes('audit') || lower.includes('feedback') || lower.includes('considering')) {
+    return 'neural-live-tone--reeval'
+  }
   if (lower.includes('forward') || lower.includes('llm1') || lower.includes('generat') || lower.includes('accepted')) {
     return 'neural-live-tone--forward'
   }
@@ -263,7 +266,11 @@ function LiveTrainingProgress({
       </p>
       <NeuralNetMesh3D
         className="neural-mesh3d--live"
-        title="Live training · 3D neural mesh"
+        title={
+          typeof progress.activeLayerIndex === 'number'
+            ? `Live training · layer ${layerLabels[progress.activeLayerIndex - 1] ?? 'input'} → ${layerLabels[progress.activeLayerIndex] ?? 'output'}`
+            : 'Live training · 3D neural mesh'
+        }
         layerWidths={layerWidths}
         layerLabels={layerLabels}
         frame={frame}
