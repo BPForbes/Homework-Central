@@ -9,8 +9,10 @@ namespace HomeworkCentral.Api.Assessment;
 public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
 {
     private const string ScenarioSystemPrompt =
-        "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, and messages. "
+        "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, messages, and selfCritique. "
         + "Each message needs authorId, authorRole, channel, content, isDistractor, channelRelevance (0..1), expectedScore (0..1 evidence teacher label), expectedRelevance (0..1), proposedApproval (0..1), proposedVoterCount (1..200), controversy (0..1), reasons array. "
+        + "selfCritique must be an object with verdict (LGTM or REVISE) and feedback (short objection if REVISE, otherwise a one-line confirmation). "
+        + "Use REVISE when the thread is weak for the target category, drifts off-concept, or lacks a clear non-distractor signal; otherwise LGTM. "
         + "Set category exactly to the kebab-case slug supplied in the user prompt from the ChatMonitoring taxonomy. "
         + "Do not substitute a different concept, and do not collapse onto payment-solicitation unless that slug is the target. "
         + "Include relevant messages, hard-negative near-misses when useful, unrelated casual distractors, multiple users/roles/channels, and a short thread. Never use real people or data.";
@@ -32,9 +34,9 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         GenerateAsync(mode, hints, targetCategory, revisionNotes: null, ct);
 
     /// <summary>
-    /// Generates a scenario, optionally reworking a previous attempt that LLM-2 asked to revise.
-    /// <paramref name="revisionNotes"/> is folded into the prompt so the generator resolves the
-    /// evaluator's objection instead of the pipeline stalling on a REVISE verdict.
+    /// Generates a scenario, optionally reworking a previous attempt that LLM-1 self-critique rejected.
+    /// <paramref name="revisionNotes"/> is folded into the prompt so the generator resolves its own
+    /// objection instead of calling a second evaluator model.
     /// </summary>
     public async Task<SyntheticThreadScenario?> GenerateAsync(
         NeuralTrainingMode mode,
@@ -86,7 +88,7 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
 
         if (!string.IsNullOrWhiteSpace(revisionNotes))
         {
-            prompt += "\n\nThe previous attempt was rejected by the evaluator. Resolve this objection "
+            prompt += "\n\nThe previous attempt was rejected by your own selfCritique. Resolve this objection "
                 + "and return a corrected scenario with the same category:\n"
                 + Truncate(revisionNotes.Trim(), 600);
         }
@@ -97,7 +99,7 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         // Balanced prior feedback: short constraints only — do not paste raw scores or over-steer.
         string joined = string.Join("\n- ", hints.Take(6));
         return prompt
-            + "\n\nPrior evaluator notes (keep scenario diversity; do not overfit to these):\n- "
+            + "\n\nPrior self-critique notes (keep scenario diversity; do not overfit to these):\n- "
             + joined;
     }
 
@@ -170,7 +172,8 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         };
     }
 
-    private static SyntheticThreadScenario? ParseScenario(string json)
+    /// <summary>Parses LLM-1 scenario JSON, including optional embedded selfCritique.</summary>
+    public static SyntheticThreadScenario? ParseScenario(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
@@ -187,11 +190,33 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         }
 
         List<SyntheticThreadMessage> messages = ReadMessages(source);
+        (string? critiqueVerdict, string? critiqueFeedback) = ReadSelfCritique(root);
         return new SyntheticThreadScenario(
             Truncate(category, 64),
             Truncate(requirement, 4000),
             Truncate(context, 2500),
-            messages);
+            messages,
+            critiqueVerdict,
+            critiqueFeedback);
+    }
+
+    private static (string? Verdict, string? Feedback) ReadSelfCritique(JsonElement root)
+    {
+        if (!root.TryGetProperty("selfCritique", out JsonElement critique)
+            || critique.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null);
+        }
+
+        string verdict = String(critique, "verdict").Trim().ToUpperInvariant();
+        if (!string.Equals(verdict, "LGTM", StringComparison.Ordinal)
+            && !string.Equals(verdict, "REVISE", StringComparison.Ordinal))
+        {
+            return (null, null);
+        }
+
+        string feedback = Truncate(String(critique, "feedback"), 600);
+        return (verdict, string.IsNullOrWhiteSpace(feedback) ? null : feedback);
     }
 
     private static List<SyntheticThreadMessage> ReadMessages(JsonElement source)

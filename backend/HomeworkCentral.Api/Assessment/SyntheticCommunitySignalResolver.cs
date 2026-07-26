@@ -9,7 +9,7 @@ public sealed record SyntheticCommunityResolution(
     SyntheticVoteEvaluationTrace Evaluation,
     SyntheticVoteSamplingTrace Sampling);
 
-/// <summary>Deterministically resolves an LLM 1 proposal against LLM 2's blind estimate.</summary>
+/// <summary>Deterministically resolves an LLM-1 proposal against teacher/self-critique estimates.</summary>
 public static class SyntheticCommunitySignalResolver
 {
     public static SyntheticCommunityResolution Resolve(

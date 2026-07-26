@@ -1161,10 +1161,22 @@ with no live worker is marked stopped directly so the admin list cannot strand a
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
 Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
 
-A REVISE verdict from LLM-2 never halts a session. `CollectBalancedGeneratorAuditAsync` republishes
-the `reeval` path tone (amber in the live mesh), rewrites the LLM-1 prompt around the objection via
-`SyntheticThreadScenarioGenerator.GenerateAsync(..., revisionNotes, ...)`, and continues training with
-whichever attempt survives. `NeuralNetTraining:GeneratorRevisionMaxAttempts` bounds the rework loop.
+Synthetic training uses **LLM-1 only** for scenario generation. The generation JSON includes
+`selfCritique` (`verdict` + `feedback`) in the same Ollama call — there is no independent LLM-2
+evaluator round-trip. A REVISE verdict never halts a session: `CollectBalancedGeneratorAuditAsync`
+republishes the `reeval` path tone (amber in the live mesh), folds the objection into the next
+LLM-1 prompt via `SyntheticThreadScenarioGenerator.GenerateAsync(..., revisionNotes, ...)`, and
+continues with whichever attempt survives. `NeuralNetTraining:GeneratorRevisionMaxAttempts` bounds
+the rework loop. Training-time second-pass audits are off (`AuditSampleRate=0`).
+
+### DevOps resource notes (training + stack)
+
+| Topic | Finding / decision |
+|---|---|
+| LLM cost | One Ollama chat per scenario (+ optional LLM-1 rewrite). GPU belongs on Ollama only. |
+| Docker duplicates | Compose defines **one** container each for postgres, fcaptcha, redis, backend, frontend, llm. Do not run Compose `backend`/`frontend` at the same time as `scripts/run-dev*` host processes. |
+| API gateway / LB | **Not present.** Frontend nginx proxies `/api/` locally; Kubernetes has no Ingress/Gateway yet. API HPA scales HTTP; KEDA ScaledJobs orchestrate training tasks. |
+| Asset cache | Water UI is canvas/CSS, not large media. Packaged nginx caches Vite `/assets/*` for 365d (`immutable`) and keeps `index.html` at `no-cache` (CDN-like edge behavior without a third-party CDN). |
 
 Replay and live mesh frames advance **one dense transition per frame**. `ReplayFrame.LayerIndex` is
 the destination layer (forward frames run input-to-output, backward frames output-to-input), and

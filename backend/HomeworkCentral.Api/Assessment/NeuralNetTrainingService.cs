@@ -658,7 +658,7 @@ public sealed class NeuralNetTrainingService(
         SyntheticGeneratorFeedbackBuffer feedback,
         CancellationToken ct)
     {
-        // Sequential generation so balanced LLM-2 notes can steer later LLM-1 scenarios
+        // Sequential generation so balanced self-critique notes can steer later LLM-1 scenarios
         // without concurrent prompt races. Forced taxonomy targets keep every filterable
         // moderation/tutoring concept in the session mix (not just payment-solicitation).
         List<(int TicketIndex, SyntheticTicket? Ticket)> tickets = [];
@@ -718,10 +718,10 @@ public sealed class NeuralNetTrainingService(
     }
 
     /// <summary>
-    /// Light LLM-2 pass after each LLM-1 scenario so later tickets get balanced hints
-    /// without letting REVISE notes dominate diversity. A REVISE verdict never blocks the
-    /// pipeline: LLM-1 reworks the scenario prompt with the objection and training continues
-    /// with whichever attempt survives.
+    /// Uses LLM-1's embedded selfCritique (same generation call) to steer later tickets and
+    /// optionally rewrite the prompt. No second Ollama evaluator round-trip. A REVISE verdict
+    /// never blocks the pipeline: LLM-1 reworks the scenario and training continues with
+    /// whichever attempt survives.
     /// </summary>
     private async Task<SyntheticTicket> CollectBalancedGeneratorAuditAsync(
         NeuralNetTrainingSession session,
@@ -740,15 +740,12 @@ public sealed class NeuralNetTrainingService(
         int maxRevisions = Math.Clamp(Options.GeneratorRevisionMaxAttempts, 0, 3);
         for (int attempt = 0; attempt <= maxRevisions; attempt++)
         {
-            SyntheticEvaluatorResult? audit = await AuditGeneratedTicketAsync(current, auditKind, timings, ct);
-            if (audit is null)
-                return current;
-
+            SyntheticEvaluatorResult audit = CritiqueGeneratedTicket(current);
             feedback.RecordAudit(audit.Verdict, audit.Feedback, current.Category);
             feedback.RecordCoverageGaps(coverage.Underrepresented(auditKind));
             PublishProgress(session, progress => progress with
             {
-                Phase = "LLM2 → LLM1 feedback",
+                Phase = "LLM1 self-critique",
                 AuditsCompleted = progress.AuditsCompleted + 1,
                 LatestLlm2Feedback = Truncate($"{audit.Verdict}: {audit.Feedback}", 280),
                 GeneratorHints = feedback.Hints.ToList(),
@@ -770,35 +767,55 @@ public sealed class NeuralNetTrainingService(
         return current;
     }
 
-    private async Task<SyntheticEvaluatorResult?> AuditGeneratedTicketAsync(
-        SyntheticTicket ticket,
-        NeuralModelKindChatMonitoring auditKind,
-        TrainingSessionTimings timings,
-        CancellationToken ct)
+    /// <summary>
+    /// Builds a critique from LLM-1 output only — embedded selfCritique fields, else a cheap
+    /// structural check. Never opens another Ollama chat request.
+    /// </summary>
+    private static SyntheticEvaluatorResult CritiqueGeneratedTicket(SyntheticTicket ticket)
     {
         SyntheticThreadMessage primary = ticket.Messages.FirstOrDefault(message => !message.IsDistractor)
-            ?? ticket.Messages.First();
-        ChatMonitoringNeuralModelPrediction seedPrediction = new(
-            (float)ticket.ExpectedScore,
-            (float)ticket.ExpectedRelevance,
-            0.55f,
-            auditKind,
-            "generator-audit",
-            ticket.Category,
-            "pre-train");
-        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-        SyntheticEvaluatorResult? audit = await EvaluateSyntheticTicketAsync(
-            ticket with { Message = primary.Content },
-            seedPrediction,
-            ct);
-        watch.Stop();
-        timings.AddAudit(watch.ElapsedMilliseconds);
-        return audit;
+            ?? ticket.Messages.FirstOrDefault()
+            ?? new SyntheticThreadMessage(0, "missing", "student", "general", string.Empty, false, 0f, new(0.5f, 1, 0.5f, []));
+
+        if (!string.IsNullOrWhiteSpace(ticket.SelfCritiqueVerdict))
+        {
+            string feedback = string.IsNullOrWhiteSpace(ticket.SelfCritiqueFeedback)
+                ? (string.Equals(ticket.SelfCritiqueVerdict, "REVISE", StringComparison.OrdinalIgnoreCase)
+                    ? "Self-critique requested a rewrite without detailed feedback."
+                    : "Self-critique accepted the scenario.")
+                : ticket.SelfCritiqueFeedback!;
+            return new SyntheticEvaluatorResult(
+                ticket.SelfCritiqueVerdict.ToUpperInvariant(),
+                ticket.ExpectedScore,
+                ticket.ExpectedRelevance,
+                Truncate(feedback, 2000),
+                primary.TeacherApprovalEstimate ?? primary.CommunityIntent.ProposedApproval,
+                primary.TeacherConfidence ?? 0.7);
+        }
+
+        if (string.IsNullOrWhiteSpace(primary.Content) || ticket.Messages.Count == 0)
+        {
+            return new SyntheticEvaluatorResult(
+                "REVISE",
+                ticket.ExpectedScore,
+                ticket.ExpectedRelevance,
+                "Scenario has no usable non-empty primary message.",
+                0.5,
+                0.4);
+        }
+
+        return new SyntheticEvaluatorResult(
+            "LGTM",
+            ticket.ExpectedScore,
+            ticket.ExpectedRelevance,
+            "Accepted without separate evaluator; LLM-1 output passed structural checks.",
+            primary.TeacherApprovalEstimate ?? primary.CommunityIntent.ProposedApproval,
+            primary.TeacherConfidence ?? 0.65);
     }
 
     /// <summary>
-    /// Rebuilds the LLM-1 prompt around the evaluator's objection. Publishes the reeval tone so the
-    /// mesh shows yellow while LLM-1 is working the feedback rather than looking stalled.
+    /// Rebuilds the LLM-1 prompt around its own self-critique objection. Publishes the reeval tone
+    /// so the mesh shows amber while LLM-1 is working the feedback rather than looking stalled.
     /// </summary>
     private async Task<SyntheticTicket?> ReviseGeneratedTicketAsync(
         NeuralNetTrainingSession session,
@@ -812,7 +829,7 @@ public sealed class NeuralNetTrainingService(
     {
         PublishProgress(session, progress => progress with
         {
-            Phase = $"LLM1 considering LLM2 feedback · revision {attempt}/{maxRevisions}",
+            Phase = $"LLM1 revising from self-critique · {attempt}/{maxRevisions}",
             PathTone = "reeval",
             LatestLlm1Summary = Truncate(
                 $"Reworking '{rejected.Category}' prompt to resolve: {audit.Feedback}", 280),
@@ -834,7 +851,7 @@ public sealed class NeuralNetTrainingService(
 
         PublishProgress(session, progress => progress with
         {
-            Phase = $"LLM1 revised scenario from LLM2 feedback · {revised.Category}",
+            Phase = $"LLM1 revised scenario from self-critique · {revised.Category}",
             PathTone = "reeval",
             LatestLlm1Summary = Truncate(
                 $"Revision {attempt} applied for '{revised.Category}'.", 280),
@@ -1389,35 +1406,11 @@ public sealed class NeuralNetTrainingService(
         }
     }
 
-    private async Task<SyntheticEvaluatorResult> MaybeAuditAsync(
-        SyntheticTicket generated,
-        SyntheticThreadMessage message,
-        string requirement,
-        ChatMonitoringNeuralModelPrediction prediction,
-        SyntheticEvaluatorResult evaluation,
-        TrainingSessionTimings timings,
-        CancellationToken ct)
-    {
-        System.Diagnostics.Stopwatch auditWatch = System.Diagnostics.Stopwatch.StartNew();
-        SyntheticEvaluatorResult? audit = null;
-        int maxAttempts = Math.Clamp(Options.AuditMaxAttempts, 1, 3);
-        for (int attempt = 0; attempt < maxAttempts && audit is null; attempt++)
-        {
-            if (attempt > 0) timings.AddLlm2Retry();
-            audit = await EvaluateSyntheticTicketAsync(generated with { Message = message.Content, Requirement = requirement }, prediction, ct);
-        }
-        auditWatch.Stop();
-        timings.AddAudit(auditWatch.ElapsedMilliseconds);
-        if (audit is null)
-            return evaluation;
-
-        return evaluation with
-        {
-            Feedback = Truncate($"{evaluation.Feedback} | audit:{audit.Verdict}/{audit.Feedback}", 2000),
-        };
-    }
-
-    private async Task<SyntheticEvaluatorResult> MaybeAuditAsync(
+    /// <summary>
+    /// Training-time second-pass audits are disabled: LLM-1 self-critique already steered the
+    /// scenario, and an independent Ollama auditor doubled GPU/CPU cost for little gain.
+    /// </summary>
+    private Task<SyntheticEvaluatorResult> MaybeAuditAsync(
         NeuralNetTrainingSession session,
         SyntheticTicket generated,
         SyntheticThreadMessage message,
@@ -1428,29 +1421,15 @@ public sealed class NeuralNetTrainingService(
         TrainingSessionTimings timings,
         CancellationToken ct)
     {
-        SyntheticEvaluatorResult audited = await MaybeAuditAsync(
-            generated, message, requirement, prediction, evaluation, timings, ct);
-        bool unchanged = ReferenceEquals(audited, evaluation)
-            || string.Equals(audited.Feedback, evaluation.Feedback, StringComparison.Ordinal);
-        if (unchanged)
-            return audited;
-
-        string verdict = audited.Feedback.Contains("audit:REVISE", StringComparison.OrdinalIgnoreCase)
-            ? "REVISE"
-            : "LGTM";
-        string note = audited.Feedback;
-        int auditMarker = note.LastIndexOf("audit:", StringComparison.OrdinalIgnoreCase);
-        if (auditMarker >= 0)
-            note = note[(auditMarker + "audit:".Length)..];
-        feedback.RecordAudit(verdict, note, generated.Category);
-        PublishProgress(session, progress => progress with
-        {
-            Phase = "LLM2 audit",
-            AuditsCompleted = progress.AuditsCompleted + 1,
-            LatestLlm2Feedback = Truncate($"{verdict}: {note}", 280),
-            GeneratorHints = feedback.Hints.ToList(),
-        });
-        return audited;
+        _ = session;
+        _ = generated;
+        _ = message;
+        _ = requirement;
+        _ = prediction;
+        _ = feedback;
+        _ = timings;
+        _ = ct;
+        return Task.FromResult(evaluation);
     }
 
     private void PublishProgress(
@@ -1654,7 +1633,7 @@ public sealed class NeuralNetTrainingService(
 
         bool accepted = Math.Abs(prediction.Evidence - target) < .12 && Math.Abs(prediction.Relevance - relevance) < .12;
         return new SyntheticEvaluatorResult(accepted ? "LGTM" : "REVISE", target, relevance,
-            "Fixed teacher label (LLM-1 scenario or one-shot LLM-2 label).", approval, confidence);
+            "Fixed teacher label (LLM-1 scenario or deterministic fallback).", approval, confidence);
     }
 
     private IQueryable<TicketMessageScore> PendingQuery() => db.TicketMessageScores
@@ -1710,7 +1689,9 @@ public sealed class NeuralNetTrainingService(
                 scenario.InitialContext,
                 primaryMessage.TeacherEvidence ?? .5,
                 primaryMessage.TeacherRelevance ?? primaryMessage.ChannelRelevance,
-                labeled);
+                labeled,
+                scenario.SelfCritiqueVerdict,
+                scenario.SelfCritiqueFeedback);
         }
 
         return await GenerateFallbackSyntheticTicketAsync(mode, targetCategory, ct);
@@ -1897,7 +1878,7 @@ public sealed class NeuralNetTrainingService(
             return false;
         if (rate >= 1)
             return true;
-        // Always audit the first ticket so LLM-2 steering has at least one signal.
+        // Always critique the first ticket so self-revise steering has at least one signal.
         if (ticketIndex == 1)
             return true;
         int bucket = HashCode.Combine(sessionId, ticketIndex, 0x47415544);
@@ -1928,29 +1909,6 @@ public sealed class NeuralNetTrainingService(
         catch (JsonException) { return null; }
     }
 
-    private async Task<SyntheticEvaluatorResult?> EvaluateSyntheticTicketAsync(SyntheticTicket ticket, ChatMonitoringNeuralModelPrediction prediction, CancellationToken ct)
-    {
-        const string systemPrompt = "You are an independent evaluator for a small school-chat classifier. Return JSON only: verdict (LGTM or REVISE), targetScore (0..1), targetRelevance (0..1), approvalEstimate (0..1), evaluatorConfidence (0..1), feedback. You receive no proposed vote data. Use LGTM only if the student classification is sufficiently correct.";
-        string prompt = $"<requirement>{ticket.Requirement}</requirement>\n<context>{ticket.ContextSnapshot}</context>\n<message>{ticket.Message}</message>\n<student_score>{prediction.Evidence:F3}</student_score>\n<student_relevance>{prediction.Relevance:F3}</student_relevance>\n<student_confidence>{prediction.Confidence:F3}</student_confidence>";
-        string? response = await llm.ChatJsonAsync(systemPrompt, prompt, ct);
-        if (string.IsNullOrWhiteSpace(response)) return null;
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(response);
-            JsonElement root = document.RootElement;
-            string verdict = GetString(root, "verdict");
-            if (!string.Equals(verdict, "LGTM", StringComparison.OrdinalIgnoreCase) && !string.Equals(verdict, "REVISE", StringComparison.OrdinalIgnoreCase)) return null;
-            return new(
-                verdict.ToUpperInvariant(),
-                GetUnit(root, "targetScore", prediction.Evidence),
-                GetUnit(root, "targetRelevance", prediction.Relevance),
-                Truncate(GetString(root, "feedback"), 2000),
-                GetUnit(root, "approvalEstimate", .5),
-                GetUnit(root, "evaluatorConfidence", prediction.Confidence));
-        }
-        catch (JsonException) { return null; }
-    }
-
     private static SyntheticEvaluatorResult CreateFallbackEvaluation(SyntheticTicket ticket, SyntheticThreadMessage message, ChatMonitoringNeuralModelPrediction prediction)
     {
         string text = message.Content.ToLowerInvariant();
@@ -1961,7 +1919,7 @@ public sealed class NeuralNetTrainingService(
         double relevance = message.IsDistractor ? .08 : message.ChannelRelevance;
         bool accepted = Math.Abs(prediction.Evidence - target) < .12 && Math.Abs(prediction.Relevance - relevance) < .12;
         return new SyntheticEvaluatorResult(accepted ? "LGTM" : "REVISE", target, relevance,
-            "Deterministic reviewer fallback used because LLM 2 returned no valid JSON.", target, .65);
+            "Deterministic teacher fallback used because LLM-1 labels were incomplete.", target, .65);
     }
 
     private static string GetString(JsonElement root, string property) => root.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
@@ -2104,7 +2062,16 @@ public sealed class NeuralNetTrainingService(
         WriteIndented = true,
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,
     };
-    private sealed record SyntheticTicket(string Category, string Requirement, string Message, string ContextSnapshot, double ExpectedScore, double ExpectedRelevance, IReadOnlyList<SyntheticThreadMessage> Messages);
+    private sealed record SyntheticTicket(
+        string Category,
+        string Requirement,
+        string Message,
+        string ContextSnapshot,
+        double ExpectedScore,
+        double ExpectedRelevance,
+        IReadOnlyList<SyntheticThreadMessage> Messages,
+        string? SelfCritiqueVerdict = null,
+        string? SelfCritiqueFeedback = null);
     private sealed record SyntheticEvaluatorResult(string Verdict, double TargetScore, double TargetRelevance, string Feedback, double ApprovalEstimate, double EvaluatorConfidence);
     private sealed class ReplayBuilder
     {
@@ -2156,7 +2123,7 @@ public sealed class NeuralNetTrainingService(
 
             int evaluationIndex = evaluations.Count;
             evaluations.Add(new(true, accepted, accepted, (float)evaluation.TargetScore, (float)evaluation.TargetRelevance,
-                (float)evaluation.TargetScore, (float)evaluation.ApprovalEstimate, (float)evaluation.EvaluatorConfidence, [], Intern(evaluation.Feedback), "llm-2", "blind-evaluator-v1"));
+                (float)evaluation.TargetScore, (float)evaluation.ApprovalEstimate, (float)evaluation.EvaluatorConfidence, [], Intern(evaluation.Feedback), "llm-1", "self-critique-v1"));
             Frame(ReplayPhase.Llm2Evaluation, ReplayPayloadKind.Evaluation, ticketIndex, passIndex, message.MessageIndex, null, evaluationIndex);
             int generationIndex = voteGeneration.Count; voteGeneration.Add(new("balanced", message.CommunityIntent.ProposedApproval, message.CommunityIntent.ProposedVoterCount, message.CommunityIntent.Reasons, "synthetic-thread-v1"));
             int voteEvaluationIndex = voteEvaluation.Count; voteEvaluation.Add(community.Evaluation);

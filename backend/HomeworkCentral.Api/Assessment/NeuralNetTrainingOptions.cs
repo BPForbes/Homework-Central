@@ -6,14 +6,16 @@ public sealed class NeuralNetTrainingOptions
     /// <summary>Fraction of cross-domain tickets kept as negative controls in Both mode (0..1).</summary>
     public double CrossDomainSampleRate { get; set; } = 0.15;
 
-    /// <summary>Fraction of trained messages that also receive an independent LLM-2 audit (0..1).</summary>
-    public double AuditSampleRate { get; set; } = 0.05;
+    /// <summary>
+    /// Reserved. Training-time second-pass Ollama audits are disabled; keep at 0.
+    /// </summary>
+    public double AuditSampleRate { get; set; } = 0;
 
     /// <summary>
-    /// Fraction of LLM-1 tickets that also get an LLM-2 generator-steering audit.
-    /// 1.0 audits every ticket (slow); lower values cut sequential Ollama round-trips.
+    /// Fraction of LLM-1 tickets that apply embedded selfCritique / structural critique.
+    /// Critique itself does not open a second Ollama call; set 1.0 to revise from every ticket.
     /// </summary>
-    public double GeneratorAuditSampleRate { get; set; } = 0.25;
+    public double GeneratorAuditSampleRate { get; set; } = 1;
 
     /// <summary>Local SGD epochs per message when training against a fixed teacher label.</summary>
     public int LocalEpochs { get; set; } = 12;
@@ -47,12 +49,13 @@ public sealed class NeuralNetTrainingOptions
     /// </summary>
     public bool PreferDeterministicTeacherLabels { get; set; } = true;
 
-    /// <summary>Retry budget for training-time LLM-2 audits (generator audits do not retry).</summary>
+    /// <summary>Reserved retry budget for retired training-time Ollama audits.</summary>
     public int AuditMaxAttempts { get; set; } = 1;
 
     /// <summary>
-    /// How many times LLM-1 may rewrite a scenario that LLM-2 asked to revise before training
-    /// continues with the best available attempt. 0 disables reworking (feedback becomes a hint only).
+    /// How many times LLM-1 may rewrite a scenario that its own selfCritique asked to revise
+    /// before training continues with the best available attempt. 0 disables reworking
+    /// (feedback becomes a hint only).
     /// </summary>
     public int GeneratorRevisionMaxAttempts { get; set; } = 1;
 }

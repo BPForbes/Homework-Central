@@ -26,9 +26,59 @@ public sealed class SyntheticThreadScenarioGeneratorTests
             targetCategory: "doxxing",
             revisionNotes: "The thread never shows identifying information being published.");
 
-        Assert.Contains("previous attempt was rejected", prompt);
+        Assert.Contains("previous attempt was rejected by your own selfCritique", prompt);
         Assert.Contains("never shows identifying information", prompt);
         Assert.Contains("MUST set \"category\" exactly to \"doxxing\"", prompt);
+    }
+
+    [Fact]
+    public void BuildUserPrompt_MentionsPriorSelfCritiqueNotes()
+    {
+        string prompt = SyntheticThreadScenarioGenerator.BuildUserPrompt(
+            NeuralTrainingMode.Moderation,
+            hints: ["REVISE on doxxing: add a concrete identifying leak"],
+            targetCategory: "doxxing");
+
+        Assert.Contains("Prior self-critique notes", prompt);
+        Assert.Contains("add a concrete identifying leak", prompt);
+    }
+
+    [Fact]
+    public void ParseScenario_ReadsEmbeddedSelfCritique()
+    {
+        const string json = """
+            {
+              "category": "doxxing",
+              "requirement": "Monitor reportedConcept=doxxing",
+              "initialContext": "A report about a shared address",
+              "messages": [
+                {
+                  "authorId": "u1",
+                  "authorRole": "student",
+                  "channel": "lounge",
+                  "content": "Here is their home address: 12 Oak St",
+                  "isDistractor": false,
+                  "channelRelevance": 1,
+                  "expectedScore": 0.95,
+                  "expectedRelevance": 1,
+                  "proposedApproval": 0.1,
+                  "proposedVoterCount": 12,
+                  "controversy": 0.2,
+                  "reasons": ["address shared"]
+                }
+              ],
+              "selfCritique": {
+                "verdict": "REVISE",
+                "feedback": "Need a clearer non-distractor peer reaction."
+              }
+            }
+            """;
+
+        SyntheticThreadScenario? scenario = SyntheticThreadScenarioGenerator.ParseScenario(json);
+
+        Assert.NotNull(scenario);
+        Assert.Equal("REVISE", scenario!.SelfCritiqueVerdict);
+        Assert.Contains("non-distractor peer reaction", scenario.SelfCritiqueFeedback);
     }
 
     [Fact]
