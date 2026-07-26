@@ -1177,6 +1177,8 @@ the rework loop. Training-time second-pass audits are off (`AuditSampleRate=0`).
 | Docker duplicates | Compose defines **one** container each for postgres, fcaptcha, redis, backend, frontend, llm. Do not run Compose `backend`/`frontend` at the same time as `scripts/run-dev*` host processes. |
 | API gateway / LB | **Not present.** Frontend nginx proxies `/api/` locally; Kubernetes has no Ingress/Gateway yet. API HPA scales HTTP; KEDA ScaledJobs orchestrate training tasks. |
 | Asset cache | Water UI is canvas/CSS, not large media. Packaged nginx caches Vite `/assets/*` for 365d (`immutable`) and keeps `index.html` at `no-cache` (CDN-like edge behavior without a third-party CDN). |
+| Object storage | Optional free MinIO (`docker compose --profile object-storage`) behind `Uploads:Backend=S3`. Chat/ticket attachment bytes use `IAttachmentBlobStore`; metadata stays in Postgres. |
+| Large API payloads | Response Brotli/gzip + request decompression enabled. Neural-net training sessions and feedback lists are cursor-paginated (`beforeUtc`, `limit`, `hasMore`). |
 
 Replay and live mesh frames advance **one dense transition per frame**. `ReplayFrame.LayerIndex` is
 the destination layer (forward frames run input-to-output, backward frames output-to-input), and

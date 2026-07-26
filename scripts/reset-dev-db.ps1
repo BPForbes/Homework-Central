@@ -31,8 +31,8 @@ $env:FCAPTCHA_SECRET = $envValues['FCAPTCHA_SECRET']
 $env:JWT_SECRET = $envValues['JWT_SECRET']
 $env:FCAPTCHA_HOST_PORT = $envValues['FCAPTCHA_HOST_PORT']
 
-# Include optional profiles so clamav/llm containers (if started) release the compose network.
-$composeArgs = @('-f', $ComposeFile, '--env-file', $script:DevStackEnvFile, '--profile', 'antivirus', '--profile', 'ai')
+# Include optional profiles so clamav/llm/minio containers (if started) release the compose network.
+$composeArgs = @('-f', $ComposeFile, '--env-file', $script:DevStackEnvFile, '--profile', 'antivirus', '--profile', 'ai', '--profile', 'object-storage')
 docker compose @composeArgs down -v --remove-orphans
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

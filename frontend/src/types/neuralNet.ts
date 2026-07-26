@@ -1,3 +1,10 @@
+export interface PagedResult<T> {
+  items: T[]
+  hasMore: boolean
+  nextBeforeUtc: string | null
+  limit: number
+}
+
 export interface NeuralNetTrainingFeedback {
   scoreEventId: string
   ticketId: string

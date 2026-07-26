@@ -324,6 +324,10 @@ function LiveTrainingProgress({
 export function NeuralNet() {
   const { pathname } = useLocation(); const view = viewForPath(pathname)
   const [feedback, setFeedback] = useState<NeuralNetTrainingFeedback[]>([]); const [data, setData] = useState<NeuralNetDataManagement | null>(null); const [visualizer, setVisualizer] = useState<NeuralNetVisualizer | null>(null); const [sessions, setSessions] = useState<NeuralNetTrainingSession[]>([])
+  const [feedbackHasMore, setFeedbackHasMore] = useState(false)
+  const [feedbackNextBeforeUtc, setFeedbackNextBeforeUtc] = useState<string | null>(null)
+  const [sessionsHasMore, setSessionsHasMore] = useState(false)
+  const [sessionsNextBeforeUtc, setSessionsNextBeforeUtc] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -334,13 +338,54 @@ export function NeuralNet() {
   const [replay, setReplay] = useState<ReplayReport | null>(null)
   const [downloadReadyIds, setDownloadReadyIds] = useState<string[]>([])
   const sessionStatusRef = useMemo(() => new Map<string, string>(), [])
-  useEffect(() => { let cancelled = false; setLoading(true); setError(''); const load = async () => { try { if (view === 'feedback') { const r = await neuralNetApi.listFeedback(); if (!cancelled) setFeedback(r.data) } else if (view === 'training') { const r = await neuralNetApi.listTrainingSessions(); if (!cancelled) setSessions(r.data) } else if (view === 'data') { const r = await neuralNetApi.getDataManagement(); if (!cancelled) setData(r.data) } else { const r = await neuralNetApi.getVisualizer(); if (!cancelled) setVisualizer(r.data) } } catch { if (!cancelled) setError('Could not load neural-network administration data.') } finally { if (!cancelled) setLoading(false) } }; void load(); return () => { cancelled = true } }, [view])
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    const load = async () => {
+      try {
+        if (view === 'feedback') {
+          const r = await neuralNetApi.listFeedback()
+          if (!cancelled) {
+            setFeedback(r.data.items)
+            setFeedbackHasMore(r.data.hasMore)
+            setFeedbackNextBeforeUtc(r.data.nextBeforeUtc)
+          }
+        } else if (view === 'training') {
+          const r = await neuralNetApi.listTrainingSessions()
+          if (!cancelled) {
+            setSessions(r.data.items)
+            setSessionsHasMore(r.data.hasMore)
+            setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+          }
+        } else if (view === 'data') {
+          const r = await neuralNetApi.getDataManagement()
+          if (!cancelled) setData(r.data)
+        } else {
+          const r = await neuralNetApi.getVisualizer()
+          if (!cancelled) setVisualizer(r.data)
+        }
+      } catch {
+        if (!cancelled) setError('Could not load neural-network administration data.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [view])
 
   const hasActiveTraining = sessions.some((session) => session.status === 'Running' || session.status === 'Queued')
   useEffect(() => {
     if (view !== 'training' || !hasActiveTraining) return
     const timer = window.setInterval(() => {
-      void neuralNetApi.listTrainingSessions().then((response) => setSessions(response.data)).catch(() => undefined)
+      void neuralNetApi.listTrainingSessions()
+        .then((response) => {
+          setSessions(response.data.items)
+          setSessionsHasMore(response.data.hasMore)
+          setSessionsNextBeforeUtc(response.data.nextBeforeUtc)
+        })
+        .catch(() => undefined)
     }, 2000)
     return () => window.clearInterval(timer)
   }, [view, hasActiveTraining])
@@ -374,7 +419,9 @@ export function NeuralNet() {
         continuous,
       })
       const r = await neuralNetApi.listTrainingSessions()
-      setSessions(r.data)
+      setSessions(r.data.items)
+      setSessionsHasMore(r.data.hasMore)
+      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
     } catch {
       setError('Training could not be queued.')
     } finally {
@@ -387,9 +434,47 @@ export function NeuralNet() {
     try {
       await neuralNetApi.stopTrainingSession(sessionId)
       const r = await neuralNetApi.listTrainingSessions()
-      setSessions(r.data)
+      setSessions(r.data.items)
+      setSessionsHasMore(r.data.hasMore)
+      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
     } catch {
       setError('That training session could not be stopped.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+  async function loadMoreSessions() {
+    if (!sessionsNextBeforeUtc || !sessionsHasMore) return
+    setBusyId('load-more-sessions')
+    try {
+      const r = await neuralNetApi.listTrainingSessions({ beforeUtc: sessionsNextBeforeUtc })
+      setSessions((current) => {
+        const seen = new Set(current.map((session) => session.sessionId))
+        const appended = r.data.items.filter((session) => !seen.has(session.sessionId))
+        return [...current, ...appended]
+      })
+      setSessionsHasMore(r.data.hasMore)
+      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+    } catch {
+      setError('Could not load more training sessions.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+  async function loadMoreFeedback() {
+    if (!feedbackNextBeforeUtc || !feedbackHasMore) return
+    setBusyId('load-more-feedback')
+    try {
+      const r = await neuralNetApi.listFeedback({ beforeUtc: feedbackNextBeforeUtc })
+      setFeedback((current) => {
+        const seen = new Set(current.map((item) => item.scoreEventId))
+        const appended = r.data.items.filter((item) => !seen.has(item.scoreEventId))
+        return [...current, ...appended]
+      })
+      setFeedbackHasMore(r.data.hasMore)
+      setFeedbackNextBeforeUtc(r.data.nextBeforeUtc)
+    } catch {
+      setError('Could not load more feedback.')
     } finally {
       setBusyId(null)
     }
@@ -451,7 +536,7 @@ export function NeuralNet() {
   function importReplay(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = parseReplayImport(String(reader.result)); setReplay(parsed); setError('') } catch { setError('That file is not a valid supported V2 neural-network replay.') } }; reader.readAsText(file) }
   const nav = useMemo(() => <div className="server-page-card"><p><Link to="/server/NeuralNet/Training">Training</Link>{' | '}<Link to="/server/NeuralNet/TrainingFeedback">Training Feedback</Link>{' | '}<Link to="/server/NeuralNet/DataManagement">Data Management</Link>{' | '}<Link to="/server/NeuralNet/Visualizer">Visualizer & Replay</Link></p></div>, [])
   return <div className="server-page sm-page"><ServerMaintenanceNav title="Server · Neural Network" /><header className="sm-hero"><div className="sm-hero-icon"><FontAwesomeIcon icon={faBrain} /></div><div className="sm-hero-copy"><h2>Neural Network</h2><p className="server-page-subtitle">Cascade monitors g(f(x)) for moderation and tutoring — chain-rule training, low-memory CPU scoring, review, and replay.</p></div></header>{nav}{error && <p className="error">{error}</p>}{loading ? <LoadingBars message="Loading neural-network data…" /> : <div className="sm-layout sm-layout--single">
-    {view === 'training' && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faPlay} /> Synthetic cascade training</h3></div><p className="dashboard-hint">LLM 1 builds fictional ticket threads. LLM 2 occasionally steers later scenarios (sampled — not every ticket). Continuous mode trains one ticket and one message at a time until you stop it. Only Stop ends a session — evaluator feedback and generator failures never terminate training. Browser auto-downloads are blocked often — use the Download buttons when a session finishes.</p><div className="sm-form"><label className="sm-label">Training mode <select className="sm-input" value={mode} onChange={e => setMode(e.target.value as NeuralTrainingMode)}><option value="Both">Both cascades</option><option value="Moderation">Moderation cascade</option><option value="Tutoring">Tutoring cascade</option></select></label><label className="sm-label"><input type="checkbox" checked={continuous} onChange={(e) => setContinuous(e.target.checked)} /> Continuous (train until cancelled · 1 ticket / 1 message)</label>{!continuous && <><label className="sm-label">Tickets <input className="sm-input" type="number" min="1" max="10" value={ticketCount} onChange={e => setTicketCount(Number(e.target.value))} /></label><label className="sm-label">Maximum passes per message <input className="sm-input" type="number" min="1" max="6" value={maxPasses} onChange={e => setMaxPasses(Number(e.target.value))} /></label></>}<div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === 'training'} onClick={() => void startTraining()}><FontAwesomeIcon icon={faPlay} /> {continuous ? 'Start continuous training' : 'Start training'}</button></div></div><ul className="ticket-watches-list">{sessions.map(s => {
+    {view === 'training' && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faPlay} /> Synthetic cascade training</h3></div><p className="dashboard-hint">LLM 1 builds fictional ticket threads and embeds self-critique in the same call; REVISE reworks the next prompt. Continuous mode trains one ticket and one message at a time until you stop it. Only Stop ends a session — self-critique and generator failures never terminate training. Browser auto-downloads are blocked often — use the Download buttons when a session finishes.</p><div className="sm-form"><label className="sm-label">Training mode <select className="sm-input" value={mode} onChange={e => setMode(e.target.value as NeuralTrainingMode)}><option value="Both">Both cascades</option><option value="Moderation">Moderation cascade</option><option value="Tutoring">Tutoring cascade</option></select></label><label className="sm-label"><input type="checkbox" checked={continuous} onChange={(e) => setContinuous(e.target.checked)} /> Continuous (train until cancelled · 1 ticket / 1 message)</label>{!continuous && <><label className="sm-label">Tickets <input className="sm-input" type="number" min="1" max="10" value={ticketCount} onChange={e => setTicketCount(Number(e.target.value))} /></label><label className="sm-label">Maximum passes per message <input className="sm-input" type="number" min="1" max="6" value={maxPasses} onChange={e => setMaxPasses(Number(e.target.value))} /></label></>}<div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === 'training'} onClick={() => void startTraining()}><FontAwesomeIcon icon={faPlay} /> {continuous ? 'Start continuous training' : 'Start training'}</button></div></div><ul className="ticket-watches-list">{sessions.map(s => {
       const replayRuns = (s.chatMonitoringRuns ?? []).filter((run) => run.hasWorkerReplay)
       const canDownloadBoth = s.mode === 'Both' && replayRuns.length >= 2
       const canStop = s.status === 'Running' || s.status === 'Queued'
@@ -460,8 +545,8 @@ export function NeuralNet() {
         ? 'continuous'
         : `${s.requestedTicketCount} tickets`
       return <li key={s.sessionId} className="ticket-watch-chip"><div className="ticket-watch-chip-header"><strong>{s.status} · {s.mode} · {ticketLabel}</strong><div className="sm-form-actions">{canStop && <button type="button" className="btn-secondary" aria-label="Stop training session" title="Stop this training session" disabled={busyId === `stop-${s.sessionId}`} onClick={() => void stopSession(s.sessionId)}><FontAwesomeIcon icon={faStop} /> Stop</button>}<button type="button" className="ticket-watch-chip-remove" aria-label="Remove training request" title={s.status === 'Running' ? 'Stop the running session before removing it' : 'Remove training request'} disabled={s.status === 'Running' || busyId === `remove-${s.sessionId}`} onClick={() => void removeSession(s.sessionId)}><FontAwesomeIcon icon={faXmark} /></button></div></div><span>{s.continuous || s.requestedTicketCount === 0 ? 'Continuous · 1 message per ticket until cancelled' : `Up to ${s.maxPassesPerTicket} passes per message`} · cascade chain-rule SGD</span>{s.liveProgress && <LiveTrainingProgress progress={s.liveProgress} status={s.status} /> }{(s.chatMonitoringRuns ?? []).map(run => <div key={run.chatMonitoringKind} className="sm-form-actions"><span>{run.chatMonitoringKind} cascade · {run.status}{run.canonicalGeneration !== undefined ? ` · canonical generation ${run.canonicalGeneration}` : ''}</span>{run.hasWorkerReplay && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} replay</button>}</div>)}{showDownloadPanel && (replayRuns.length > 0 || s.hasReport) && <div className="neural-download-ready" role="status"><strong>Downloads ready</strong><div className="sm-form-actions">{replayRuns.map((run) => <button key={run.chatMonitoringKind} type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} JSON</button>)}{canDownloadBoth && <button type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-both`} onClick={() => void downloadCascadeReports(s.sessionId, replayRuns.map((run) => run.chatMonitoringKind))}>Download Mod + Tutor JSON</button>}{s.hasReport && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-legacy`} onClick={() => void downloadReport(s.sessionId)}>Download legacy report</button>}</div></div>}{s.failureReason && <small>{s.failureReason}</small>}</li>
-    })}</ul></section>}
-    {view === 'feedback' && <section className="sm-panel"><div className="sm-panel-header"><h3>Training Feedback</h3></div>{feedback.length === 0 ? <p className="dashboard-hint">No reviewer feedback is awaiting approval.</p> : <ul className="ticket-watches-list">{feedback.map(item => <li key={item.scoreEventId} className="ticket-watch-chip"><strong>{item.category} · student {item.studentScore.toFixed(3)} → reviewer {item.reviewerScore.toFixed(3)}</strong><span>{item.messagePreview}</span><small>{item.explanation ?? 'No reviewer explanation supplied.'}</small><div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, true)}><FontAwesomeIcon icon={faCheck} /> Approve</button><button type="button" className="btn-secondary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, false)}><FontAwesomeIcon icon={faXmark} /> Reject</button></div></li>)}</ul>}</section>}
+    })}</ul>{sessionsHasMore && <div className="sm-form-actions"><button type="button" className="btn-secondary" disabled={busyId === 'load-more-sessions'} onClick={() => void loadMoreSessions()}>Load older sessions</button></div>}</section>}
+    {view === 'feedback' && <section className="sm-panel"><div className="sm-panel-header"><h3>Training Feedback</h3></div>{feedback.length === 0 ? <p className="dashboard-hint">No reviewer feedback is awaiting approval.</p> : <ul className="ticket-watches-list">{feedback.map(item => <li key={item.scoreEventId} className="ticket-watch-chip"><strong>{item.category} · student {item.studentScore.toFixed(3)} → reviewer {item.reviewerScore.toFixed(3)}</strong><span>{item.messagePreview}</span><small>{item.explanation ?? 'No reviewer explanation supplied.'}</small><div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, true)}><FontAwesomeIcon icon={faCheck} /> Approve</button><button type="button" className="btn-secondary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, false)}><FontAwesomeIcon icon={faXmark} /> Reject</button></div></li>)}</ul>}{feedbackHasMore && <div className="sm-form-actions"><button type="button" className="btn-secondary" disabled={busyId === 'load-more-feedback'} onClick={() => void loadMoreFeedback()}>Load older feedback</button></div>}</section>}
     {view === 'data' && data && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faDatabase} /> Data Management</h3></div><p className="dashboard-hint">PostgreSQL is authoritative; the vector store is a retrieval mirror. Category counts include fine moderation concepts and tutoring subject slugs.</p><ul className="ticket-watches-list"><li className="ticket-watch-chip"><strong>{data.trainingExamples}</strong><span>Approved examples</span></li><li className="ticket-watch-chip"><strong>{data.vectorExamples}</strong><span>Vector examples</span></li><li className="ticket-watch-chip"><strong>{data.pendingFeedback}</strong><span>Pending feedback</span></li></ul>{Object.keys(data.categoryCounts ?? {}).length > 0 && <div className="neural-category-cloud" aria-label="Training category distribution">{Object.entries(data.categoryCounts).sort((a, b) => b[1] - a[1]).slice(0, 24).map(([category, count]) => <span key={category} className="neural-category-chip">{category} · {count}</span>)}</div>}</section>}
     {view === 'visualizer' && visualizer && <><section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faFileImport} /> Import a replay file</h3></div><p className="dashboard-hint">Load a downloaded V2 report to replay recorded stage-2 topology and frames. Cascade stage-1 routers relearn online and are not stored in checkpoints.</p><input className="sm-input" type="file" accept="application/json,.json" onChange={importReplay} /></section>{replay?.schemaVersion ? <ReplayViewer replay={replay as NeuralNetReplay} /> : <NetworkGraph visualizer={visualizer} replay={replay} />}</>}
   </div>}</div>

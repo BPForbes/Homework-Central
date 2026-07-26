@@ -62,6 +62,7 @@ public sealed class ChatAttachmentService(
     IAttachmentTypeInspector typeInspector,
     IMalwareScanner malwareScanner,
     IAttachmentAccessTokenService accessTokenService,
+    IAttachmentBlobStore blobStore,
     IOptions<UploadOptions> options,
     IConfiguration configuration,
     IWebHostEnvironment environment) : IChatAttachmentService
@@ -94,7 +95,7 @@ public sealed class ChatAttachmentService(
 
         Guid attachmentId = Guid.NewGuid();
         string safeName = Path.GetFileName(file.FileName);
-        string storageName = await StoreAttachmentFileAsync(uploadOptions, file, attachmentId, safeName, ct);
+        string storageName = await StoreAttachmentFileAsync(file, attachmentId, safeName, inspection.ContentType, ct);
 
         ChatAttachment attachment = new()
         {
@@ -152,13 +153,10 @@ public sealed class ChatAttachmentService(
                 RequiresCaution: true);
         }
 
-        UploadOptions uploadOptions = options.Value;
-        if (!TryResolveStoragePath(uploadOptions.RootPath, attachment.StoragePath, out string fullPath))
-            return null;
-        if (!File.Exists(fullPath))
+        Stream? stream = await blobStore.OpenReadAsync(attachment.StoragePath, ct);
+        if (stream is null)
             return null;
 
-        Stream stream = File.OpenRead(fullPath);
         return new AttachmentReadResult(
             stream,
             attachment.ContentType,
@@ -181,12 +179,7 @@ public sealed class ChatAttachmentService(
         if (attachment.MessageLinks.Count > 0)
             throw new InvalidOperationException("Cannot delete an attachment linked to a message.");
 
-        UploadOptions uploadOptions = options.Value;
-        if (TryResolveStoragePath(uploadOptions.RootPath, attachment.StoragePath, out string fullPath)
-            && File.Exists(fullPath))
-        {
-            File.Delete(fullPath);
-        }
+        await blobStore.DeleteAsync(attachment.StoragePath, ct);
 
         db.ChatAttachments.Remove(attachment);
         await db.SaveChangesAsync(ct);
@@ -220,62 +213,20 @@ public sealed class ChatAttachmentService(
         BitMask.HasBit(featureMask, PlatformFeatures.ImageUploads)
         || BitMask.HasBit(featureMask, PlatformFeatures.FileUploads);
 
-    private static async Task<string> StoreAttachmentFileAsync(
-        UploadOptions uploadOptions,
+    private async Task<string> StoreAttachmentFileAsync(
         IFormFile file,
         Guid attachmentId,
         string safeName,
+        string contentType,
         CancellationToken ct)
     {
-        Directory.CreateDirectory(uploadOptions.RootPath);
         string storageName = $"{attachmentId:N}_{safeName}";
-        if (!TryResolveStoragePath(uploadOptions.RootPath, storageName, out string fullPath))
+        if (!AttachmentStorageKeys.IsValidObjectKey(storageName))
             throw new InvalidOperationException("Attachment storage path is invalid.");
 
-        await using (Stream saveStream = file.OpenReadStream())
-        await using (FileStream fileStream = File.Create(fullPath))
-        {
-            await saveStream.CopyToAsync(fileStream, ct);
-        }
-
+        await using Stream saveStream = file.OpenReadStream();
+        await blobStore.PutAsync(storageName, saveStream, contentType, file.Length, ct);
         return storageName;
-    }
-
-    /// <summary>
-    /// Joins <paramref name="relativeStoragePath"/> under the upload root only when the
-    /// relative segment is not rooted (Path.Combine would otherwise drop the root).
-    /// </summary>
-    private static bool TryResolveStoragePath(string rootPath, string relativeStoragePath, out string fullPath)
-    {
-        fullPath = string.Empty;
-        if (string.IsNullOrWhiteSpace(relativeStoragePath) || Path.IsPathRooted(relativeStoragePath))
-            return false;
-
-        // Avoid Path.Combine: a rooted second argument would silently drop RootPath.
-        string normalizedRelative = relativeStoragePath
-            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
-            .TrimStart(Path.DirectorySeparatorChar);
-        if (normalizedRelative.Contains(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-            || normalizedRelative.EndsWith("..", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        string rootFull = Path.GetFullPath(rootPath);
-        string candidateFull = Path.GetFullPath(
-            rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar
-            + normalizedRelative);
-        string rootPrefix = rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        if (!candidateFull.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(candidateFull, rootFull, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        fullPath = candidateFull;
-        return true;
     }
 
     private async Task PersistAttachmentMetadataAsync(ChatAttachment attachment, CancellationToken ct)

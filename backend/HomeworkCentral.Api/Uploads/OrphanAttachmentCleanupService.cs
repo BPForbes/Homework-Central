@@ -7,6 +7,7 @@ namespace HomeworkCentral.Api.Uploads;
 
 public sealed class OrphanAttachmentCleanupService(
     AppDbContext db,
+    IAttachmentBlobStore blobStore,
     IOptions<UploadOptions> options) : IOrphanAttachmentCleanupService
 {
     public async Task<int> PurgeOrphansAsync(CancellationToken ct = default)
@@ -22,9 +23,7 @@ public sealed class OrphanAttachmentCleanupService(
         int removed = 0;
         foreach (ChatAttachment orphan in orphans)
         {
-            string fullPath = Path.Combine(opts.RootPath, orphan.StoragePath);
-            if (File.Exists(fullPath))
-                File.Delete(fullPath);
+            await blobStore.DeleteAsync(orphan.StoragePath, ct);
             db.ChatAttachments.Remove(orphan);
             removed++;
         }

@@ -12,8 +12,11 @@ namespace HomeworkCentral.Api.Controllers;
 public sealed class NeuralNetController(INeuralNetTrainingService training) : ControllerBase
 {
     [HttpGet("training-feedback")]
-    public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingFeedbackDto>>> GetTrainingFeedback(CancellationToken ct) =>
-        Ok(await training.GetPendingFeedbackAsync(ct));
+    public async Task<ActionResult<PagedResultDto<NeuralNetTrainingFeedbackDto>>> GetTrainingFeedback(
+        [FromQuery] DateTime? beforeUtc,
+        [FromQuery] int limit = 50,
+        CancellationToken ct = default) =>
+        Ok(await training.GetPendingFeedbackAsync(beforeUtc, limit, ct));
 
     [HttpPost("training-feedback/{scoreEventId:guid}/approve")]
     public async Task<ActionResult<NeuralNetTrainingFeedbackDto>> Approve(Guid scoreEventId, CancellationToken ct)
@@ -50,8 +53,11 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
     }
 
     [HttpGet("training")]
-    public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingSessionDto>>> GetTrainingSessions(CancellationToken ct) =>
-        Ok(await training.GetTrainingSessionsAsync(ct));
+    public async Task<ActionResult<PagedResultDto<NeuralNetTrainingSessionDto>>> GetTrainingSessions(
+        [FromQuery] DateTime? beforeUtc,
+        [FromQuery] int limit = 50,
+        CancellationToken ct = default) =>
+        Ok(await training.GetTrainingSessionsAsync(beforeUtc, limit, ct));
 
     [HttpDelete("training/{sessionId:guid}")]
     public async Task<IActionResult> RemoveTrainingSession(Guid sessionId, CancellationToken ct)
