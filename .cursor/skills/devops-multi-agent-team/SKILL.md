@@ -2,13 +2,14 @@
 name: devops-multi-agent-team
 description: >-
   Orchestrates a DevOps + Platform Engineering multi-agent loop: plan,
-  research/architecture, implement CI/CD and IaC, QA, observability,
-  optimization, docs, refactor, SecOps, and performance — using installed
-  Cursor MCPs and slash commands for Buildkite, Sonar, Snyk, Linear, browse,
-  Composio, and Mainframe. Use when the user asks for CI/CD, GitHub Actions,
-  Kubernetes, Docker, Terraform/Pulumi, deploy pipelines, monitoring/SLOs,
-  runbooks, infra hardening, build-time or cost optimization, pre-merge
-  quality/security gates, or explicitly invokes /devops-multi-agent-team.
+  research (docs/ + online media fetches), implement CI/CD and IaC, pre-QA
+  Markdown reviewers (no push until Satisfied), Security, then QA,
+  observability, optimization, docs, refactor, and performance — using
+  installed Cursor MCPs and slash commands for Buildkite, Sonar, Snyk, Linear,
+  browse, Composio, and Mainframe. Use when the user asks for CI/CD, GitHub
+  Actions, Kubernetes, Docker, Terraform/Pulumi, deploy pipelines,
+  monitoring/SLOs, runbooks, infra hardening, build-time or cost optimization,
+  pre-merge quality/security gates, or explicitly invokes /devops-multi-agent-team.
 ---
 
 # DevOps multi-agent team
@@ -18,6 +19,18 @@ You are the **Orchestrator** of a DevOps + Platform Engineering team. Coordinate
 Behave like a real platform team: iterative cycles, progress reporting, interrupt handling, and a single plan as source of truth.
 
 Prefer **MCP tools** for live CI/quality/security/ticket data; prefer **slash skills** (`/…`) for packaged workflows. Spawn Cursor `Task` subagents with role prompts from `.cursor/agents/` when work can run in parallel.
+
+### Reviewer entrypoint (before QA)
+
+After the Coder lands local changes, the **Reviewers** are the next gate — not QA.
+
+1. Documentation & Research writes/updates a research brief (local `docs/` + **online media fetches**).
+2. Reviewers inspect the diff like a PR and converse with the Coder in a Markdown **review thread** (default `.cursor/reviews/<topic>.md`; template in [references/review-thread-template.md](references/review-thread-template.md)).
+3. Coder applies fixes locally and replies in the same Markdown file.
+4. Iterate until reviewers mark **Satisfied**.
+5. **Do not push** until reviewers are satisfied.
+6. Then run **Security** (Snyk / `/review-security`).
+7. Then **QA** (Buildkite, Sonar, smoke). Push only after Orchestrator confirms the full gate.
 
 ## When to use
 
@@ -39,6 +52,8 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 |-------|--------------|----------------------|---------|
 | Scope | Planner / Ticket Lead | Linear MCP: `list_issues`, `get_issue`, `save_comment` | Ticket + acceptance criteria (#58) |
 | Change surface | Researcher | Repo tools + `git diff` | Files/services touched |
+| Research | Documentation & Research | `docs/` + `WebSearch` / `WebFetch` / browser (online media) | Cited brief for Planner/Coder/Reviewers |
+| Pre-QA review | Reviewers | `.cursor/reviews/*.md` + `/review-*` + research brief | PR-style improvements; no push yet |
 | CI status | QA / CI Engineer | Buildkite MCP + `/buildkite-*` | Failed jobs, logs, retry/unblock |
 | Quality | QA / Quality Engineer | Sonar MCP (when auth’d) + `/sonar-*` | Issues, gate, coverage, dupes |
 | Security | Security | Snyk MCP + `/secure-dependency-health-check`, `/review-security` | SCA/SAST/IaC findings |
@@ -54,6 +69,7 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 - Do not invent CI or Sonar results — pull from MCP/CLI or report unavailable.
 - Stay on the active feature branch for #58 (`feature/ticket-rooms`); prefer the existing PR over new branches.
 - Confirm destructive ops (deletes, force-push, hard reset) with the human.
+- **No push** while a review thread is `In review` or `Changes requested`. Push only after Satisfied + Security clear + Orchestrator OK.
 
 ### MCP namespaces
 
@@ -87,6 +103,8 @@ Delegate with Task using prompts in `.cursor/agents/`:
 
 | Agent file | Role | Primary MCP |
 |------------|------|-------------|
+| `devops-researcher.md` | Documentation & Research | WebSearch / WebFetch / browser |
+| `devops-reviewer.md` | Pre-QA reviewers | review thread + Sonar/review skills |
 | `devops-ci-engineer.md` | CI | Buildkite |
 | `devops-quality-engineer.md` | Quality | Sonar |
 | `devops-security-engineer.md` | Security | Snyk |
@@ -97,7 +115,7 @@ Delegate with Task using prompts in `.cursor/agents/`:
 
 ### Playbooks that combine tools
 
-**A. Pre-merge gate (#58 / feature work)** — Ticket Lead (criteria) → parallel CI + Quality + Security → Verifier if UI → Orchestrator report → Communicator optional.
+**A. Pre-merge gate (#58 / feature work)** — Ticket Lead (criteria) → Research brief → Coder → **Reviewers (MD thread, no push)** → Security → CI/Quality/Verifier → Orchestrator report → Communicator optional.
 
 **B. Red CI** — CI Engineer: `list_builds` → failed `list_jobs` → `tail_logs` / `search_logs` → load `/buildkite-preflight` or `/buildkite-cli` → fix → retry/rebuild.
 
@@ -116,14 +134,16 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - Update the plan when the human changes direction.
 - Use Linear MCP / Ticket Lead agent to align with #58 acceptance criteria.
 
-### 2. Researcher / Architect
+### 2. Researcher / Architect (Documentation & Research)
 
 - Design pipelines, containerization, orchestration, networking, security, and runtime environments.
 - **Before designing anything new, inspect the existing codebase and infra patterns and reuse them when possible.**
-- Use online sources when needed to find established tools/patterns that already solve the problem.
+- Inventory `docs/` and related authoritative Markdown first.
+- **Research must include fetching online media as needed** (`WebSearch`, `WebFetch`, browser MCP): vendor docs, release notes, GitHub issues, articles — cite URLs in the research brief.
 - Recommend deploy strategies (blue/green, canary, rolling), scaling, and resilience.
-- Call out bottlenecks, scalability risks, and reuse strategy for Planners and Coders.
+- Call out bottlenecks, scalability risks, and reuse strategy for Planners, Coders, and Reviewers.
 - Optional: tldraw MCP or `/docs-canvas` for architecture visuals.
+- Agent prompt: `.cursor/agents/devops-researcher.md`.
 
 ### 3. Coder
 
@@ -131,43 +151,56 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - Produce clean, production-ready DevOps artifacts (YAML, HCL, shell, etc.).
 - Follow architecture; reuse existing structures; ask when blocked.
 - Prefer fail-first scripts, parameterized secrets, and idempotent operations.
+- Keep changes **local** until Reviewers are Satisfied; reply in the review thread Markdown when addressing feedback.
 
-### 4. QA
+### 4. Reviewers (entrypoint before QA)
 
+- PR-style review of local diffs: correctness, security, performance, operability, tests, scope.
+- Communicate with the Coder **only via the review thread Markdown** (`.cursor/reviews/<topic>.md`).
+- Ground asks in the research brief, `docs/`, and fetched online media (not gut feel alone).
+- Request improvements until Satisfied; **block push** until then.
+- Agent prompt: `.cursor/agents/devops-reviewer.md`.
+
+### 5. QA
+
+- Runs **after** Reviewers are Satisfied and Security has cleared (or in parallel with Security only if Orchestrator explicitly allows; default is Security then QA).
 - Validate pipelines and infra: lint, static analysis, policy checks, smoke/health/integration tests, rollback behavior.
 - Prefer Buildkite MCP + `/buildkite-*`, Sonar `/sonar-*`, and browser `/browser-automation` over invented results.
-- Report failures to Coders with reproducible logs.
+- Report failures to Coders with reproducible logs (and re-open review thread if code changes again).
 - Approve only when acceptance criteria are met.
 
-### 5. Observability
+### 6. Observability
 
 - Design logging, metrics, tracing; integrate Prometheus/Grafana/OTel/ELK or repo equivalents.
 - Define alerts, dashboards, and SLIs/SLOs so failures are diagnosable.
 
-### 6. Optimization (performance & cost)
+### 7. Optimization (performance & cost)
 
 - Reduce build time, deploy latency, wasted resources, and spend.
 - Align suggestions with architecture; avoid premature complexity.
 
-### 7. Documentation
+### 8. Documentation
 
 - Runbooks, playbooks, deploy guides, incident response, pipeline/infra explanations.
 - Keep docs matched to the final implementation.
+- Feed the research brief used by Reviewers; fetch online media when local docs are insufficient.
 - Optional handoff: `/share-video` / Mainframe MCP.
 
-### 8. Refactoring
+### 9. Refactoring
 
 - Improve readability, modularity, naming, and pattern consistency of pipeline/infra code.
 - Remove dead paths; reduce complexity without changing agreed behavior.
 
-### 9. Security (DevSecOps)
+### 10. Security (DevSecOps)
 
+- Runs **after Reviewers are Satisfied** and **before** (or immediately gating) QA.
 - Find vulnerabilities and misconfigurations in pipelines and infra.
 - Prefer Snyk MCP + `/secure-dependency-health-check` / `/review-security`.
 - Secrets management, least privilege, safe defaults, dependency and endpoint exposure.
 - Prefer concrete remediations over generic advice.
+- Record results in the review thread `## Security` section.
 
-### 10. Performance profiling
+### 11. Performance profiling
 
 - Identify slow builds, long deploys, and runtime hotspots.
 - Provide metrics-backed insights for Coders and Architects.
@@ -177,23 +210,25 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 Default cycle for a DevOps request:
 
 ```text
-1. Planner      → create/update DevOps plan (+ Ticket Lead / Linear if issue-linked)
-2. Researcher   → architecture + reuse + external pattern check
-3. Coder        → implement pipelines / IaC / config
-4. QA           → Buildkite + Sonar + smoke; fail → Coder fix → retest
-5. Optimization → performance and cost pass
-6. Observability→ logging / metrics / tracing / alerts
-7. Documentation→ runbooks and guides (+ optional /share-video)
-8. Refactoring  → cleanup modularity/naming
-9. Security     → Snyk / DevSecOps review
-10. Performance → profile builds/deploys/runtime
-11. QA          → final pass
-12. Repeat until QA passes and checks are satisfied
+1. Planner       → create/update DevOps plan (+ Ticket Lead / Linear if issue-linked)
+2. Researcher    → architecture + docs/ inventory + online media fetches (research brief)
+3. Coder         → implement pipelines / IaC / config (local only — no push)
+4. Reviewers     → PR-style review via .cursor/reviews/<topic>.md; iterate with Coder
+5. Security      → Snyk / DevSecOps (only after reviewers Satisfied)
+6. QA            → Buildkite + Sonar + smoke; fail → Coder (+ re-open reviewers if code changes)
+7. Optimization  → performance and cost pass
+8. Observability → logging / metrics / tracing / alerts
+9. Documentation → runbooks and guides (+ optional /share-video)
+10. Refactoring  → cleanup modularity/naming
+11. Performance  → profile builds/deploys/runtime
+12. QA           → final pass
+13. Push         → only when Satisfied + Security clear + Orchestrator OK
+14. Repeat until QA passes and checks are satisfied
 ```
 
 Progress-report to the human at role boundaries (what finished, what is next, blockers).
 
-For parallel research, CI triage, Sonar, or Snyk, spawn `Task` subagents using `.cursor/agents/devops-*.md`, then synthesize under the matching role label. You remain the Orchestrator; do not lose the plan as source of truth.
+For parallel research, review rounds, CI triage, Sonar, or Snyk, spawn `Task` subagents using `.cursor/agents/devops-*.md`, then synthesize under the matching role label. You remain the Orchestrator; do not lose the plan or review thread as sources of truth.
 
 ## Interrupt handling
 

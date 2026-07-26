@@ -13,6 +13,15 @@ spec:
         app.kubernetes.io/name: llm
     spec:
       serviceAccountName: llm
+      # Official ollama image defaults to root + /root/.ollama. Override HOME so a
+      # non-root UID can persist models on the PVC (Snyk SNYK-CC-K8S-6/9/10).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: llm
           image: homework-central-llm:latest
@@ -20,9 +29,22 @@ spec:
           ports:
             - name: http
               containerPort: 11434
+          env:
+            - name: HOME
+              value: /ollama
           envFrom:
             - configMapRef:
                 name: llm-config
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             requests:
               cpu: 250m
@@ -32,18 +54,23 @@ spec:
               memory: 2Gi
           volumeMounts:
             - name: model-cache
-              mountPath: /root/.ollama
+              mountPath: /ollama/.ollama
+          # Model pulls on empty volumes can take minutes; avoid killing the pod early.
+          startupProbe:
+            httpGet:
+              path: /api/tags
+              port: http
+            failureThreshold: 60
+            periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /api/tags
               port: http
-            initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /api/tags
               port: http
-            initialDelaySeconds: 30
             periodSeconds: 20
       volumes:
         - name: model-cache
