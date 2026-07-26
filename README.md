@@ -139,12 +139,19 @@ Heavy services are opt-in profiles:
 | PostgreSQL, FCaptcha, Redis, API, nginx | default | ~1.75 total | ~1.25 GiB total |
 | ClamAV | `antivirus` | 0.75 | 2,560 MiB |
 | Ollama | `ai` | 1.50 | 1,536 MiB |
+| MinIO (S3 API) | `object-storage` | 0.50 | 256 MiB |
 
 ```powershell
 docker compose up -d                          # core only
 docker compose --profile antivirus up -d      # + attachment malware scanning
 docker compose --profile ai up -d             # + local AI reviewer
+docker compose --profile object-storage up -d # + free S3-compatible MinIO
 ```
+
+Attachment bytes default to the local `uploads` volume (`Uploads:Backend=Local`).
+To use MinIO with the Compose API container, set `UPLOADS_BACKEND=S3` in `.env`
+(and start the `object-storage` profile). Downloads still go through the API so
+auth and malware caution gates are unchanged. The MinIO console is on port 9001.
 
 Do not enable `antivirus` and `ai` together on an 8 GiB machine. CPU values are
 ceilings rather than reservations. The default development scripts run the API and
@@ -153,14 +160,17 @@ Override individual ceilings with `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`
 `LLM_MEMORY_LIMIT`, and related keys in `.env` when `docker stats` shows a need.
 
 **One container per service type.** Compose already defines a single `fcaptcha`,
-`postgres`, `redis`, `backend`, `frontend`, and (with `--profile ai`) `llm` service.
-Reuse that Ollama container for both ticket review and neural synthetic training
-(`Tickets:OllamaBaseUrl` and `Llm:BaseUrl` point at the same host). Do **not** also
-`docker compose up` the `backend`/`frontend` services while `scripts/run-dev*` is
-serving them on the host — that doubles RAM/CPU for the same roles. There is no
-separate API gateway or load-balancer container in Compose; frontend nginx is the
-only reverse proxy. Packaged nginx caches hashed `/assets/*` for a year
-(`Cache-Control: public, immutable`) while `index.html` stays `no-cache`.
+`postgres`, `redis`, `backend`, `frontend`, and (with profiles) `llm` / `minio` /
+`clamav`. Reuse that Ollama container for both ticket review and neural synthetic
+training (`Tickets:OllamaBaseUrl` and `Llm:BaseUrl` point at the same host). Do
+**not** also `docker compose up` the `backend`/`frontend` services while
+`scripts/run-dev*` is serving them on the host — that doubles RAM/CPU for the
+same roles. There is no separate API gateway or load-balancer container in
+Compose; frontend nginx is the only reverse proxy. Packaged nginx caches hashed
+`/assets/*` for a year (`Cache-Control: public, immutable`) while `index.html`
+stays `no-cache`. The API compresses large JSON responses (Brotli/gzip) and
+accepts compressed request bodies; neural-net session/feedback lists are cursor-
+paginated (`beforeUtc` + `limit`).
 
 ### WSL caps (Windows Docker Desktop)
 

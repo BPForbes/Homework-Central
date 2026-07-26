@@ -22,13 +22,19 @@ public enum NeuralNetTrainingSessionRemovalResult
 /// </summary>
 public interface INeuralNetTrainingService
 {
-    Task<IReadOnlyList<NeuralNetTrainingFeedbackDto>> GetPendingFeedbackAsync(CancellationToken ct = default);
+    Task<PagedResultDto<NeuralNetTrainingFeedbackDto>> GetPendingFeedbackAsync(
+        DateTime? beforeUtc = null,
+        int limit = 50,
+        CancellationToken ct = default);
     Task<NeuralNetTrainingFeedbackDto> ApproveAsync(Guid scoreEventId, Guid actorUserId, CancellationToken ct = default);
     Task RejectAsync(Guid scoreEventId, Guid actorUserId, CancellationToken ct = default);
     Task<NeuralNetDataManagementDto> GetDataManagementAsync(CancellationToken ct = default);
     Task<NeuralNetVisualizerDto> GetVisualizerAsync(CancellationToken ct = default);
     Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default);
-    Task<IReadOnlyList<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(CancellationToken ct = default);
+    Task<PagedResultDto<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(
+        DateTime? beforeUtc = null,
+        int limit = 50,
+        CancellationToken ct = default);
 
     /// <summary>
     /// V2 replay JSON for a monitor kind, or legacy session report JSON when
@@ -62,12 +68,30 @@ public sealed class NeuralNetTrainingService(
     Microsoft.Extensions.Logging.ILogger<NeuralNetTrainingService> logger) : INeuralNetTrainingService
 {
     private NeuralNetTrainingOptions Options => trainingOptions.Value;
-    public async Task<IReadOnlyList<NeuralNetTrainingFeedbackDto>> GetPendingFeedbackAsync(CancellationToken ct = default)
+    public async Task<PagedResultDto<NeuralNetTrainingFeedbackDto>> GetPendingFeedbackAsync(
+        DateTime? beforeUtc = null,
+        int limit = 50,
+        CancellationToken ct = default)
     {
-        List<TicketMessageScore> scores = await PendingQuery()
-            .OrderByDescending(x => x.CreatedAtUtc).Take(200).ToListAsync(ct);
+        int pageSize = ClampPageSize(limit);
+        IQueryable<TicketMessageScore> query = PendingQuery();
+        if (beforeUtc is not null)
+            query = query.Where(x => x.CreatedAtUtc < beforeUtc.Value);
+
+        List<TicketMessageScore> scores = await query
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(pageSize + 1)
+            .ToListAsync(ct);
+        bool hasMore = scores.Count > pageSize;
+        if (hasMore)
+            scores = scores.Take(pageSize).ToList();
+
         Dictionary<Guid, string> messages = await LoadMessagesAsync(scores.Select(x => x.MessageId), ct);
-        return scores.Select(score => Map(score, messages.GetValueOrDefault(score.MessageId))).ToList();
+        List<NeuralNetTrainingFeedbackDto> items = scores
+            .Select(score => Map(score, messages.GetValueOrDefault(score.MessageId)))
+            .ToList();
+        DateTime? nextBeforeUtc = items.Count == 0 ? null : scores[^1].CreatedAtUtc;
+        return new PagedResultDto<NeuralNetTrainingFeedbackDto>(items, hasMore, nextBeforeUtc, pageSize);
     }
 
     public async Task<NeuralNetTrainingFeedbackDto> ApproveAsync(Guid scoreEventId, Guid actorUserId, CancellationToken ct = default)
@@ -235,11 +259,19 @@ public sealed class NeuralNetTrainingService(
     /// megabytes per run, so the poll endpoint projects presence flags instead of the payloads;
     /// selecting the blobs here exhausted memory and timed out the connection during long sessions.
     /// </summary>
-    public async Task<IReadOnlyList<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(CancellationToken ct = default)
+    public async Task<PagedResultDto<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(
+        DateTime? beforeUtc = null,
+        int limit = 50,
+        CancellationToken ct = default)
     {
-        List<SessionSummary> sessions = await db.NeuralNetTrainingSessions.AsNoTracking()
+        int pageSize = ClampPageSize(limit);
+        IQueryable<NeuralNetTrainingSession> query = db.NeuralNetTrainingSessions.AsNoTracking();
+        if (beforeUtc is not null)
+            query = query.Where(x => x.CreatedAtUtc < beforeUtc.Value);
+
+        List<SessionSummary> sessions = await query
             .OrderByDescending(x => x.CreatedAtUtc)
-            .Take(50)
+            .Take(pageSize + 1)
             .Select(x => new SessionSummary(
                 x.SessionId,
                 x.RequestedTicketCount,
@@ -253,25 +285,35 @@ public sealed class NeuralNetTrainingService(
                 x.ReportJson != null))
             .ToListAsync(ct);
 
-        Guid[] sessionIds = sessions.Select(x => x.SessionId).ToArray();
-        List<RunSummary> runs = await db.ChatMonitoringNeuralModelRuns.AsNoTracking()
-            .Where(x => sessionIds.Contains(x.SessionId))
-            .Select(x => new RunSummary(
-                x.SessionId,
-                x.ChatMonitoringKind,
-                x.Status,
-                x.CanonicalGeneration,
-                x.WorkerReplayJson != null,
-                x.PromotionReplayJson != null,
-                x.FailureReason))
-            .ToListAsync(ct);
+        bool hasMore = sessions.Count > pageSize;
+        if (hasMore)
+            sessions = sessions.Take(pageSize).ToList();
 
-        return sessions
+        Guid[] sessionIds = sessions.Select(x => x.SessionId).ToArray();
+        List<RunSummary> runs = sessionIds.Length == 0
+            ? []
+            : await db.ChatMonitoringNeuralModelRuns.AsNoTracking()
+                .Where(x => sessionIds.Contains(x.SessionId))
+                .Select(x => new RunSummary(
+                    x.SessionId,
+                    x.ChatMonitoringKind,
+                    x.Status,
+                    x.CanonicalGeneration,
+                    x.WorkerReplayJson != null,
+                    x.PromotionReplayJson != null,
+                    x.FailureReason))
+                .ToListAsync(ct);
+
+        List<NeuralNetTrainingSessionDto> items = sessions
             .Select(session => MapSessionSummary(
                 session,
                 runs.Where(run => run.SessionId == session.SessionId)))
             .ToList();
+        DateTime? nextBeforeUtc = items.Count == 0 ? null : sessions[^1].CreatedAtUtc;
+        return new PagedResultDto<NeuralNetTrainingSessionDto>(items, hasMore, nextBeforeUtc, pageSize);
     }
+
+    private static int ClampPageSize(int limit) => limit is > 0 and <= 100 ? limit : 50;
 
     private sealed record SessionSummary(
         Guid SessionId,

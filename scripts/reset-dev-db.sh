@@ -20,8 +20,8 @@ fi
 
 ensure_dev_env_file 1
 
-# Include optional profiles so clamav/llm containers (if started) release the compose network.
-compose_args=(-f "$COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" --profile antivirus --profile ai)
+# Include optional profiles so clamav/llm/minio containers (if started) release the compose network.
+compose_args=(-f "$COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" --profile antivirus --profile ai --profile object-storage)
 docker compose "${compose_args[@]}" down -v --remove-orphans
 
 # Compose warns "Network … Resource is still in use" when something outside this

@@ -19,9 +19,12 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RequestDecompression;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using System.IO.Compression;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -96,6 +99,16 @@ builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Co
 builder.Services.Configure<HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions>(
     builder.Configuration.GetSection("NeuralNetTraining"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
+builder.Services.AddSingleton<HomeworkCentral.Api.Uploads.IAttachmentBlobStore>(sp =>
+{
+    HomeworkCentral.Api.Uploads.UploadOptions uploadOptions = sp
+        .GetRequiredService<IOptions<HomeworkCentral.Api.Uploads.UploadOptions>>().Value;
+    return uploadOptions.UsesS3Backend
+        ? new HomeworkCentral.Api.Uploads.S3AttachmentBlobStore(
+            sp.GetRequiredService<IOptions<HomeworkCentral.Api.Uploads.UploadOptions>>())
+        : new HomeworkCentral.Api.Uploads.LocalAttachmentBlobStore(
+            sp.GetRequiredService<IOptions<HomeworkCentral.Api.Uploads.UploadOptions>>());
+});
 builder.Services.Configure<HomeworkCentral.Api.Uploads.ClamAvOptions>(builder.Configuration.GetSection("ClamAv"));
 builder.Services.Configure<HomeworkCentral.Api.Uploads.AttachmentAccessOptions>(
     builder.Configuration.GetSection("AttachmentAccess"));
@@ -251,6 +264,27 @@ builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>()
 builder.Services.AddSingleton<IProcessingStrategy, AsyncKeyLockProcessingStrategy>();
 builder.Services.AddInMemoryRateLimiting();
 
+// Compress large JSON/API responses (Brotli + gzip). Clients send Accept-Encoding.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+    [
+        "application/json",
+        "application/problem+json",
+        "text/json",
+    ]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
+
+// Accept Content-Encoding: gzip|br on large request bodies (clients may compress uploads/JSON).
+builder.Services.AddRequestDecompression();
+
 // CORS — allow the configured frontend origin; tighten for production
 builder.Services.AddCors(opts =>
     opts.AddPolicy("Frontend", p =>
@@ -283,6 +317,8 @@ WebApplication app = builder.Build();
 
 // ForwardedHeaders must run before any middleware that inspects the IP
 app.UseForwardedHeaders();
+app.UseRequestDecompression();
+app.UseResponseCompression();
 
 // Security headers on every response
 app.Use(async (ctx, next) =>

@@ -856,14 +856,23 @@ return cached is not null;
 
 If a file is written successfully but metadata persistence fails afterward, the
 current upload path does not remove the file immediately. The orphan cleanup
-worker only sees metadata rows, so files without rows require operational
-cleanup from `Uploads:RootPath`.
+worker only sees metadata rows, so orphaned objects require operational cleanup
+from `Uploads:RootPath` (Local) or the MinIO/S3 bucket (S3).
+
+Downloads remain API-proxied for both backends so JWT/signed-token auth and the
+infected-file caution gate stay unchanged. Prefer the free self-hosted MinIO
+Compose profile (`object-storage`) over a paid cloud bucket for local/dev.
 
 ## Configuration
 
 | Key | Purpose | Current default or behavior |
 |---|---|---|
-| `Uploads:RootPath` | Filesystem directory for attachment bytes. Attachment `StoragePath` values must stay relative under this root; rooted or `..` segments are rejected before open/delete. | `App_Data/uploads`; Docker sets `/app/App_Data/uploads`. |
+| `Uploads:Backend` | Blob backend: `Local` disk or `S3` (MinIO / any S3 API). | `Local`. |
+| `Uploads:RootPath` | Filesystem directory when `Backend=Local`. Attachment `StoragePath` values must stay relative under this root; rooted or `..` segments are rejected before open/delete. | `App_Data/uploads`; Docker sets `/app/App_Data/uploads`. |
+| `Uploads:S3ServiceUrl` | S3/MinIO endpoint when `Backend=S3`. | `http://localhost:9000` (Compose uses `http://minio:9000`). |
+| `Uploads:S3Bucket` | Bucket for attachment object keys. Created on first use if missing. | `homework-central-uploads`. |
+| `Uploads:S3AccessKey` / `Uploads:S3SecretKey` | S3 credentials (MinIO root user/password in Compose). | Empty locally; Compose maps `MINIO_ROOT_*`. |
+| `Uploads:S3ForcePathStyle` | Path-style addressing required by MinIO. | `true`. |
 | `Uploads:MaxBytes` | Service-level maximum upload size. | `10 * 1024 * 1024`. |
 | `Uploads:OrphanTtlHours` | Age before unattached metadata rows and files are eligible for cleanup. | `24`. |
 | `Uploads:CleanupIntervalMinutes` | Background cleanup interval. | `60`. |
