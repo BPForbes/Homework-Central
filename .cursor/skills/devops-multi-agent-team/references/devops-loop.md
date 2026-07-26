@@ -35,8 +35,28 @@ Before proposing new structure:
 - Make scripts non-interactive for agents (`--yes`, flags, env vars).
 - Prefer idempotent apply/deploy paths and dry-run where available.
 - Show file paths and diffs.
+- **Do not push** until Reviewers are Satisfied (communicate in `.cursor/reviews/<topic>.md`).
 
-## 4. QA
+## 3b. Documentation & Research (online media)
+
+- Inventory `docs/` and authoritative Markdown first.
+- Fetch online media as needed (`WebSearch`, `WebFetch`, browser): vendor docs, releases, issues, articles.
+- Write a research brief into the review thread (URLs + takeaways). Reviewers must use it.
+
+## 3c. Reviewers (entrypoint before QA)
+
+- PR-style review of local diffs; request improvements like a human PR review.
+- Converse with Coder **in the review thread Markdown** only.
+- Cite research brief, `docs/`, and fetched URLs on each request-change.
+- Iterate until all reviewers mark Satisfied → then Security → then QA.
+- Template: [review-thread-template.md](review-thread-template.md).
+
+## 4. Security (after Satisfied)
+
+- Snyk / secret scan / `/review-security` on the change surface.
+- Record verdict in the review thread before QA proceeds.
+
+## 5. QA
 
 Minimum validation set (adapt to stack):
 
@@ -46,9 +66,9 @@ Minimum validation set (adapt to stack):
 - Rollback drill notes (or actual rollback dry-run)
 - Record exact commands and exit codes
 
-Fail → feedback list for Coder → retest.
+Fail → feedback list for Coder → retest (re-open reviewers if code changes).
 
-## 5. Optimization
+## 6. Optimization
 
 Ask:
 
@@ -59,14 +79,14 @@ Ask:
 
 Propose measurable changes (e.g. “cache key X should cut Y”).
 
-## 6. Observability
+## 7. Observability
 
 - Golden signals or RED/USE as appropriate
 - Log labels/fields needed for incident triage
 - Alert: symptom-based, with runbook link when docs exist
 - Define SLI/SLO only when the human wants them (do not invent targets)
 
-## 7. Documentation
+## 8. Documentation
 
 Update or add:
 
@@ -75,15 +95,15 @@ Update or add:
 - Common failures and fixes
 - Ownership / when to page
 
-Match final paths and flags from the implementation.
+Match final paths and flags from the implementation. Keep the research brief current for Reviewers.
 
-## 8. Refactoring
+## 9. Refactoring
 
 - Consistent naming and layout with existing `deploy/` / workflow conventions
 - Extract repeated YAML/HCL via existing patterns (not new frameworks unless planned)
 - No behavior change unless the plan says so
 
-## 9. Security
+## 10. Security (checklist detail)
 
 Review for:
 
@@ -93,7 +113,7 @@ Review for:
 - Public endpoints without auth
 - Over-broad CI permissions (`contents: write`, etc.)
 
-## 10. Performance profiling
+## 11. Performance profiling
 
 Capture before/after where possible:
 

@@ -95,3 +95,27 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  llm-service:
+    name: LLM service (shell)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Syntax-check entrypoint
+        run: bash -n llm-service/entrypoint.sh
+
+      - name: Reject unpinned Ollama base image
+        run: |
+          if grep -nE 'FROM[[:space:]]+ollama/ollama:latest' llm-service/Dockerfile; then
+            echo "llm-service/Dockerfile must pin ollama/ollama to a version tag, not :latest."
+            exit 1
+          fi
+          if ! grep -nE 'OLLAMA_VERSION=0\.[0-9]+' llm-service/Dockerfile; then
+            echo "llm-service/Dockerfile must declare OLLAMA_VERSION=<major.minor.patch>."
+            exit 1
+          fi

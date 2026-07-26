@@ -158,6 +158,9 @@ services:
     pids_limit: 256
     environment:
       LLM_CHAT_MODEL: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      # Matches LlmOptions.EmbeddingModel / entrypoint default so compose --profile ai
+      # does not leave the API on HashEmbed when the chat model alone was pulled.
+      LLM_EMBED_MODEL: "${LLM_EMBED_MODEL:-nomic-embed-text}"
       # Keep CPU inference predictable on memory-constrained developer machines.
       OLLAMA_MAX_LOADED_MODELS: "${OLLAMA_MAX_LOADED_MODELS:-1}"
       OLLAMA_NUM_PARALLEL: "${OLLAMA_NUM_PARALLEL:-1}"
@@ -167,6 +170,13 @@ services:
       - "${LLM_HOST_PORT:-11434}:11434"
     volumes:
       - llmdata:/root/.ollama
+    # Official ollama image has no curl; use the CLI (same as llm-service HEALTHCHECK).
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   backend:
     build:

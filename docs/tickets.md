@@ -1174,6 +1174,7 @@ the rework loop. Training-time second-pass audits are off (`AuditSampleRate=0`).
 | Topic | Finding / decision |
 |---|---|
 | LLM cost | One Ollama chat per scenario (+ optional LLM-1 rewrite). GPU belongs on Ollama only. |
+| LLM container ops | `llm-service/` pins `ollama/ollama` (not `:latest`), healthchecks with `ollama list` (no `curl` in the image), and ensures chat + embed models on boot (`LLM_CHAT_MODEL` / `LLM_EMBED_MODEL`, defaults `qwen3:0.6b` + `nomic-embed-text`) — **skipping pull when already cached** for faster restarts. Compose profile `ai` mirrors those env vars. `LlmClient` prefers `POST /api/embed` (with `truncate`), remembers a 404 so later calls skip straight to legacy `/api/embeddings`, then HashEmbed. K8s `deploy/k8s/llm` runs non-root with dropped capabilities and stores models under `$HOME/.ollama` on the PVC. |
 | Docker duplicates | Compose defines **one** container each for postgres, fcaptcha, redis, backend, frontend, llm. Do not run Compose `backend`/`frontend` at the same time as `scripts/run-dev*` host processes. |
 | API gateway / LB | **Not present.** Frontend nginx proxies `/api/` locally; Kubernetes has no Ingress/Gateway yet. API HPA scales HTTP; KEDA ScaledJobs orchestrate training tasks. |
 | Asset cache | Water UI is canvas/CSS, not large media. Packaged nginx caches Vite `/assets/*` for 365d (`immutable`) and keeps `index.html` at `no-cache` (CDN-like edge behavior without a third-party CDN). |

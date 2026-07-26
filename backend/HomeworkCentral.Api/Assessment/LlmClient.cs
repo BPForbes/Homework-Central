@@ -46,6 +46,11 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
+    /// <summary>
+    /// Once this client sees 404 for <c>/api/embed</c>, later embeds in the same scope skip that
+    /// probe and go straight to legacy <c>/api/embeddings</c> (avoids a failed round-trip per call).
+    /// </summary>
+    private bool skipModernEmbedEndpoint;
     private readonly SemaphoreSlim concurrency = new(Math.Clamp(options.Value.MaxConcurrentRequests, 1, 16));
     private readonly object availabilityGate = new();
     private DateTime? unavailableUntilUtc;
@@ -111,28 +116,16 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         await concurrency.WaitAsync(ct);
         try
         {
-            OllamaEmbedRequest body = new()
+            if (!skipModernEmbedEndpoint)
             {
-                Model = opts.EmbeddingModel,
-                Prompt = text,
-            };
-            using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
-                $"{opts.BaseUrl.TrimEnd('/')}/api/embeddings",
-                body,
-                JsonOptions,
-                ct);
-            if (!response.IsSuccessStatusCode)
-                return HashEmbed(text);
-
-            JsonElement payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct);
-            if (payload.TryGetProperty("embedding", out JsonElement embedding)
-                && embedding.ValueKind == JsonValueKind.Array)
-            {
-                List<float> values = [];
-                foreach (JsonElement el in embedding.EnumerateArray())
-                    values.Add(el.GetSingle());
-                return values;
+                IReadOnlyList<float>? modern = await TryModernEmbedAsync(opts, text, ct);
+                if (modern is not null)
+                    return modern;
             }
+
+            IReadOnlyList<float>? legacy = await TryLegacyEmbedAsync(opts, text, ct);
+            if (legacy is not null)
+                return legacy;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -142,6 +135,82 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
         finally { concurrency.Release(); }
 
         return HashEmbed(text);
+    }
+
+    /// <summary>
+    /// Current Ollama embed API (<c>POST /api/embed</c> with <c>input</c> → <c>embeddings[]</c>).
+    /// Returns null when the endpoint is missing or the payload cannot be parsed.
+    /// </summary>
+    private async Task<IReadOnlyList<float>?> TryModernEmbedAsync(LlmOptions opts, string text, CancellationToken ct)
+    {
+        OllamaEmbedRequest body = new()
+        {
+            Model = opts.EmbeddingModel,
+            Input = text,
+            // Official default is true; keep explicit so long ticket text truncates instead of 400s.
+            Truncate = true,
+        };
+        using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
+            $"{opts.BaseUrl.TrimEnd('/')}/api/embed",
+            body,
+            JsonOptions,
+            ct);
+        // Null means "not usable here" so the caller can try legacy / HashEmbed.
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            skipModernEmbedEndpoint = true;
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        JsonElement payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct);
+        if (payload.TryGetProperty("embeddings", out JsonElement embeddings)
+            && embeddings.ValueKind == JsonValueKind.Array
+            && embeddings.GetArrayLength() > 0
+            && embeddings[0].ValueKind == JsonValueKind.Array)
+        {
+            return ReadFloatVector(embeddings[0]);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Legacy <c>POST /api/embeddings</c> (<c>prompt</c> → <c>embedding</c>) for older Ollama builds.
+    /// </summary>
+    private async Task<IReadOnlyList<float>?> TryLegacyEmbedAsync(LlmOptions opts, string text, CancellationToken ct)
+    {
+        OllamaLegacyEmbedRequest body = new()
+        {
+            Model = opts.EmbeddingModel,
+            Prompt = text,
+        };
+        using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
+            $"{opts.BaseUrl.TrimEnd('/')}/api/embeddings",
+            body,
+            JsonOptions,
+            ct);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        JsonElement payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct);
+        if (payload.TryGetProperty("embedding", out JsonElement embedding)
+            && embedding.ValueKind == JsonValueKind.Array)
+        {
+            return ReadFloatVector(embedding);
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<float> ReadFloatVector(JsonElement array)
+    {
+        List<float> values = [];
+        foreach (JsonElement el in array.EnumerateArray())
+            values.Add(el.GetSingle());
+        return values;
     }
 
     private bool IsTemporarilyUnavailable()
@@ -201,6 +270,13 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
     }
 
     private sealed class OllamaEmbedRequest
+    {
+        public string Model { get; set; } = string.Empty;
+        public string Input { get; set; } = string.Empty;
+        public bool Truncate { get; set; } = true;
+    }
+
+    private sealed class OllamaLegacyEmbedRequest
     {
         public string Model { get; set; } = string.Empty;
         public string Prompt { get; set; } = string.Empty;
