@@ -38,6 +38,18 @@ capacity behind the language model and leave the .NET workloads on CPU:
 A training Job that cannot reach Ollama does not fail: generation returns nothing, the loop backs
 off, and only an explicit stop ends the session.
 
+## API gateway, load balancer, and task orchestration
+
+| Concern | Status in this repo |
+|---|---|
+| API gateway (Kong, YARP gateway product, etc.) | **Not deployed** |
+| Cluster Ingress / Gateway API / Traefik / Caddy | **Not deployed** |
+| HTTP edge | Frontend nginx (Compose image) proxies `/api/` → API; K8s manifests here expose the API Service only |
+| Load balancing | API Deployment + CPU HPA (1–3). No external LB object is defined |
+| Task orchestration | **KEDA ScaledJob** `neural-net-training` claims queued sessions; API pods disable the in-process worker |
+
+Do not add a second Ollama Deployment beside `deploy/k8s/llm`, and do not run a second API image for training — reuse `homework-central-api:latest` for both the Deployment and ScaledJob.
+
 ## What deliberately does not autoscale
 
 PostgreSQL is stateful. Ollama and ClamAV are memory-heavy. Scale them only with independently benchmarked remote nodes and explicit capacity, not HPA on the Windows development machine.

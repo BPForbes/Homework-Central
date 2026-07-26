@@ -510,7 +510,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
           <i className="neural-path-swatch neural-path-swatch--forward" aria-hidden /> Forward / ReLU
         </span>
         <span>
-          <i className="neural-path-swatch neural-path-swatch--reeval" aria-hidden /> LLM2 / blocking
+          <i className="neural-path-swatch neural-path-swatch--reeval" aria-hidden /> LLM1 revise / blocking
         </span>
         <span>
           <i className="neural-path-swatch neural-path-swatch--backprop" aria-hidden /> CCEL / backprop

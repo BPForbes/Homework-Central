@@ -152,6 +152,16 @@ frontend on the host, so Docker limits do not cap those two host processes.
 Override individual ceilings with `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`,
 `LLM_MEMORY_LIMIT`, and related keys in `.env` when `docker stats` shows a need.
 
+**One container per service type.** Compose already defines a single `fcaptcha`,
+`postgres`, `redis`, `backend`, `frontend`, and (with `--profile ai`) `llm` service.
+Reuse that Ollama container for both ticket review and neural synthetic training
+(`Tickets:OllamaBaseUrl` and `Llm:BaseUrl` point at the same host). Do **not** also
+`docker compose up` the `backend`/`frontend` services while `scripts/run-dev*` is
+serving them on the host — that doubles RAM/CPU for the same roles. There is no
+separate API gateway or load-balancer container in Compose; frontend nginx is the
+only reverse proxy. Packaged nginx caches hashed `/assets/*` for a year
+(`Cache-Control: public, immutable`) while `index.html` stays `no-cache`.
+
 ### WSL caps (Windows Docker Desktop)
 
 Compose limits do not include the Linux kernel, Docker daemon, or filesystem cache.

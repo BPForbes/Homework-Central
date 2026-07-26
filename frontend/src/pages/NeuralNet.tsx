@@ -199,7 +199,15 @@ function liveToneClass(phase: string): string {
   const lower = phase.toLowerCase()
   if (lower.includes('backprop') || lower.includes('loss') || lower.includes('ccel')) return 'neural-live-tone--backprop'
   // LLM-1 reworking an evaluator objection stays amber so the pause reads as active, not stalled.
-  if (lower.includes('llm2') || lower.includes('audit') || lower.includes('feedback') || lower.includes('considering')) {
+  if (
+    lower.includes('llm2')
+    || lower.includes('self-critique')
+    || lower.includes('self critique')
+    || lower.includes('revising from')
+    || lower.includes('audit')
+    || lower.includes('feedback')
+    || lower.includes('considering')
+  ) {
     return 'neural-live-tone--reeval'
   }
   if (lower.includes('forward') || lower.includes('llm1') || lower.includes('generat') || lower.includes('accepted')) {

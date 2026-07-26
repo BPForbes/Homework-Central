@@ -1,7 +1,7 @@
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
-/// Balanced hints from LLM-2 audits / teacher labels for the next LLM-1 scenario.
+/// Balanced hints from LLM-1 self-critique / teacher labels for the next LLM-1 scenario.
 /// Caps revise pressure so generator feedback does not collapse diversity.
 /// Coverage hints steer toward underrepresented taxonomy labels without replacing forced targets.
 /// </summary>
