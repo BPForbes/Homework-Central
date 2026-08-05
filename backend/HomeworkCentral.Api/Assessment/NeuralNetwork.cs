@@ -406,7 +406,6 @@ public sealed class NeuralNetwork
         {
             DenseLayer dense = _layers[layer];
             Vector<float> upstream = activationGradients[layer + 1];
-            Vector<float> source = DenseVector.OfArray(state.Activations[layer]);
             float[] localGrad = new float[dense.TargetCount];
 
             for (int target = 0; target < dense.TargetCount; target++)
@@ -421,20 +420,24 @@ public sealed class NeuralNetwork
                 gradients.BiasGradients[layer][target] += gradient;
             }
 
-            Vector<float> delta = DenseVector.OfArray(localGrad);
-            // ∂C/∂W = δ xᵀ  (outer product via Math.NET)
-            Matrix<float> weightGrad = delta.OuterProduct(source);
-            gradients.WeightGradients[layer].Add(weightGrad, gradients.WeightGradients[layer]);
-            if (trackGradient is not null)
+            // ∂C/∂W = δ xᵀ accumulated in place — OuterProduct allocates a full matrix per layer/sample.
+            Matrix<float> weightGradient = gradients.WeightGradients[layer];
+            float[] sourceActivations = state.Activations[layer];
+            for (int row = 0; row < dense.TargetCount; row++)
             {
-                for (int row = 0; row < weightGrad.RowCount; row++)
+                float gradient = localGrad[row];
+                if (gradient == 0f)
+                    continue;
+                for (int column = 0; column < sourceActivations.Length; column++)
                 {
-                    for (int column = 0; column < weightGrad.ColumnCount; column++)
-                        trackGradient(weightGrad[row, column]);
+                    float contribution = gradient * sourceActivations[column];
+                    weightGradient[row, column] += contribution;
+                    trackGradient?.Invoke(contribution);
                 }
             }
 
             // ∂C/∂x = Wᵀ δ
+            Vector<float> delta = DenseVector.OfArray(localGrad);
             activationGradients[layer] = dense.Weights.TransposeThisAndMultiply(delta);
         }
 

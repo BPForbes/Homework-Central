@@ -25,13 +25,26 @@ public sealed class OrphanAttachmentCleanupWorker(
                 int removed = await cleanup.PurgeOrphansAsync(stoppingToken);
                 if (removed > 0)
                     logger.LogInformation("Purged {Count} orphan attachments", removed);
+
+                await Task.Delay(interval, stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Host shutdown cancels Delay; do not surface TaskCanceledException (StopHost behavior).
+                return;
+            }
+            catch (Exception ex)
             {
                 logger.LogWarning(ex, "Orphan attachment cleanup failed");
+                try
+                {
+                    await Task.Delay(interval, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
             }
-
-            await Task.Delay(interval, stoppingToken);
         }
     }
 }
