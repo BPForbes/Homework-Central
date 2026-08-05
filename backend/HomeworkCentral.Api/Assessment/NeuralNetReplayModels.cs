@@ -5,7 +5,8 @@ namespace HomeworkCentral.Api.Assessment;
 // See docs/tickets.md.
 
 public enum NeuralTrainingMode { Both, Moderation, Tutoring }
-public enum NeuralTrainingTraceDetail { Full, Compact }
+/// <summary>Full/Compact build admin replay payloads; None skips FlattenParameters and epoch traces (online Train / startup warmup).</summary>
+public enum NeuralTrainingTraceDetail { Full, Compact, None }
 public enum ReplayCompletionStatus { Completed, Cancelled, Failed, Partial }
 public enum ReplayPhase { Llm1Input, InitialForward, Llm2Evaluation, VoteResolution, EpochForward, LossCalculation, BackwardPropagation, ParameterUpdate, PostUpdateForward, FinalVerdict }
 public enum ReplayPayloadKind { Llm1Input, Forward, Evaluation, Loss, Backpropagation, ParameterUpdate, VoteGeneration, VoteEvaluation, VoteSampling, FinalVerdict }

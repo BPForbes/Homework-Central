@@ -24,9 +24,26 @@ public sealed class NeuralNetCheckpointRefreshService(IServiceScopeFactory scope
                         logger.LogInformation("Loaded {ChatMonitoringKind} canonical neural checkpoint {Generation}.", chatMonitoringKind, checkpoint.Generation);
                     }
                 }
+
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Canonical neural checkpoint refresh failed."); }
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Host shutdown cancels Delay; do not surface TaskCanceledException (StopHost behavior).
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Canonical neural checkpoint refresh failed.");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
         }
     }
 }

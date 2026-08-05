@@ -86,7 +86,11 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     public void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12)
     {
-        _ = TrainWithTrace(new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"), epochs);
+        // Online Train must not allocate Full/Compact replay (FlattenParameters twice per epoch).
+        _ = TrainWithTrace(
+            new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"),
+            epochs,
+            NeuralTrainingTraceDetail.None);
     }
 
     public TrainingPassTrace TrainWithTrace(
@@ -146,12 +150,14 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             int boundedEpochs = Math.Clamp(epochs, 1, 100);
             bool earlyStopEnabled = evidenceTolerance > 0f || relevanceTolerance > 0f || lossStopThreshold > 0f;
             bool captureFull = detail == NeuralTrainingTraceDetail.Full;
+            bool recordTrace = detail != NeuralTrainingTraceDetail.None;
             string optimizer = onSampleInputGradients is null
                 ? (n == 1 ? "momentum-SGD" : "momentum-mini-batch-SGD")
                 : (n == 1 ? "momentum-cascade-chain-rule-SGD" : "momentum-cascade-chain-rule-mini-batch-SGD");
 
             float[][]? lastEncoded = null;
             int[]? lastCategoryIndices = null;
+            float finalAverageCost = 0f;
 
             for (int epoch = 0; epoch < boundedEpochs; epoch++)
             {
@@ -169,19 +175,24 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 float evidenceProbSum = 0, relevanceProbSum = 0, evidenceLogitSum = 0, relevanceLogitSum = 0;
                 GradientMagnitudeTracker gradientMagnitudes = new();
                 float[][] inputGradients = new float[n][];
+                Action<float>? trackGradient = recordTrace ? gradientMagnitudes.Track : null;
 
                 for (int i = 0; i < n; i++)
                 {
                     NeuralNetworkForwardState cache = network.Forward(encoded[i], captureTrace: false);
                     float evidence = cache.Activations[^1][0];
                     float relevance = cache.Activations[^1][1];
-                    evidenceProbSum += evidence;
-                    relevanceProbSum += relevance;
-                    evidenceLogitSum += cache.PreActivations[^1][0];
-                    relevanceLogitSum += cache.PreActivations[^1][1];
-                    evidenceLossSum += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
-                    relevanceLossSum += NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
-                    categoryLossSum += network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
+                    if (recordTrace)
+                    {
+                        evidenceProbSum += evidence;
+                        relevanceProbSum += relevance;
+                        evidenceLogitSum += cache.PreActivations[^1][0];
+                        relevanceLogitSum += cache.PreActivations[^1][1];
+                        evidenceLossSum += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
+                        relevanceLossSum += NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
+                        categoryLossSum += network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
+                    }
+
                     ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
                     inputGradients[i] = network.AccumulateMixedHeadGradients(
                         cache,
@@ -189,10 +200,41 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                         targets.Relevance,
                         targets.CategoryIndex,
                         gradients,
-                        gradientMagnitudes.Track);
+                        trackGradient);
                 }
 
                 onSampleInputGradients?.Invoke(inputGradients);
+
+                if (!recordTrace)
+                {
+                    network.ApplyMomentumUpdate(
+                        gradients, n, LearningRate, MomentumCoefficient, MaxAbsGradient, MaxAbsWeight);
+                    if (!earlyStopEnabled)
+                        continue;
+
+                    float silentMeanAbsEvidenceError = 0, silentMeanAbsRelevanceError = 0, silentAfterTotalLoss = 0;
+                    for (int i = 0; i < n; i++)
+                    {
+                        NeuralNetworkForwardState afterCache = network.Forward(encoded[i], captureTrace: false);
+                        float evidence = afterCache.Activations[^1][0];
+                        float relevance = afterCache.Activations[^1][1];
+                        silentMeanAbsEvidenceError += MathF.Abs(evidence - batch[i].Targets.Evidence);
+                        silentMeanAbsRelevanceError += MathF.Abs(relevance - batch[i].Targets.Relevance);
+                        silentAfterTotalLoss += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence)
+                            + NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance)
+                            + network.CategoricalCrossEntropy(afterCache.Activations[^1], categoryIndices[i]);
+                    }
+
+                    finalAverageCost = NeuralNetFinite.OrZero(silentAfterTotalLoss / n);
+                    if (silentMeanAbsEvidenceError / n <= evidenceTolerance
+                        && silentMeanAbsRelevanceError / n <= relevanceTolerance
+                        && (lossStopThreshold <= 0f || finalAverageCost <= lossStopThreshold))
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
 
                 LossTrace lossBefore = new(
                     "bce+categorical-cross-entropy-avg-v1",
@@ -287,6 +329,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 if (!captureFull && iterations.Count > 2)
                     iterations.RemoveAt(0);
 
+                finalAverageCost = NeuralNetFinite.OrZero(lossAfter.TotalLoss);
                 if (earlyStopEnabled
                     && meanAbsEvidenceError / n <= evidenceTolerance
                     && meanAbsRelevanceError / n <= relevanceTolerance
@@ -307,9 +350,6 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 }
             }
 
-            float finalAverageCost = iterations.Count == 0
-                ? 0f
-                : NeuralNetFinite.OrZero(iterations[^1].LossAfterUpdate.TotalLoss);
             return new TrainingPassTrace(iterations, n, finalAverageCost);
         }
     }
@@ -534,7 +574,10 @@ public sealed class ModerationChatMonitorNeuralNet : IChatMonitoringNeuralModelT
 
     public void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12)
     {
-        _ = TrainWithTrace(new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"), epochs);
+        _ = TrainWithTrace(
+            new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"),
+            epochs,
+            NeuralTrainingTraceDetail.None);
     }
 
     public TrainingPassTrace TrainWithTrace(
@@ -683,7 +726,10 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
 
     public void Train(ChatMonitoringNeuralModelInput input, ChatMonitoringNeuralModelTargets targets, int epochs = 12)
     {
-        _ = TrainWithTrace(new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"), epochs);
+        _ = TrainWithTrace(
+            new ChatMonitoringNeuralModelTrainingExample(input, targets, "general"),
+            epochs,
+            NeuralTrainingTraceDetail.None);
     }
 
     public TrainingPassTrace TrainWithTrace(
