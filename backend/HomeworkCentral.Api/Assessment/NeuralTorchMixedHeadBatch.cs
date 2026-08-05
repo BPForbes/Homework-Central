@@ -82,22 +82,28 @@ public static class NeuralTorchMixedHeadBatch
                 return false;
         }
 
-        try
-        {
-            result = AccumulateCore(
-                network,
-                encodedInputs,
-                batch,
-                categoryIndices,
-                gradients,
-                computeInputGradients);
-            return true;
-        }
-        catch
+        BatchGradientResult? captured = null;
+        bool ok = NeuralTorchAcceleratorGuard.TryRun(
+            () =>
+            {
+                captured = AccumulateCore(
+                    network,
+                    encodedInputs,
+                    batch,
+                    categoryIndices,
+                    gradients,
+                    computeInputGradients);
+            },
+            onFailure: _ => gradients.Clear());
+
+        if (!ok || captured is null)
         {
             gradients.Clear();
             return false;
         }
+
+        result = captured.Value;
+        return true;
     }
 
     private static BatchGradientResult AccumulateCore(

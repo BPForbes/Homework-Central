@@ -91,48 +91,51 @@ public static class NeuralTorchRuntime
             if (_ready)
                 return _available;
 
-            try
+            bool wantCuda = _devicePreference switch
             {
-                bool wantCuda = _devicePreference switch
-                {
-                    "cuda" => true,
-                    "cpu" => false,
-                    _ => true,
-                };
+                "cuda" => true,
+                "cpu" => false,
+                _ => true,
+            };
 
-                // Resolve TorchSharp only inside this try so missing natives degrade to Math.NET.
-                bool cudaAvailable = TorchSharp.torch.cuda.is_available();
-                if (wantCuda && cudaAvailable)
-                {
-                    _useCuda = true;
-                    _backendLabel = "torch-cuda";
-                    using TorchSharp.torch.Tensor probe = TorchSharp.torch.zeros(1, device: TorchSharp.torch.CUDA);
-                    _ = probe.item<float>();
-                }
-                else
-                {
-                    if (_devicePreference == "cuda")
-                        _lastFailure = "TorchDevice=cuda but cuda.is_available() is false; using CPU LibTorch.";
-                    _useCuda = false;
-                    _backendLabel = "torch-cpu";
-                    using TorchSharp.torch.Tensor probe = TorchSharp.torch.zeros(1, device: TorchSharp.torch.CPU);
-                    _ = probe.item<float>();
-                }
+            // Missing natives / CUDA bind failures degrade to Math.NET (closed catch set).
+            bool bound = NeuralTorchAcceleratorGuard.TryRun(
+                () => BindDevice(wantCuda),
+                exception => _lastFailure = exception.Message);
 
-                _available = true;
-                _ready = true;
-                return true;
-            }
-            catch (Exception exception)
+            if (!bound)
             {
                 _available = false;
                 _ready = true;
                 _useCuda = false;
                 _backendLabel = "mathnet-cpu";
-                _lastFailure = exception.Message;
                 return false;
             }
+
+            _available = true;
+            _ready = true;
+            return true;
         }
+    }
+
+    private static void BindDevice(bool wantCuda)
+    {
+        bool cudaAvailable = TorchSharp.torch.cuda.is_available();
+        if (wantCuda && cudaAvailable)
+        {
+            _useCuda = true;
+            _backendLabel = "torch-cuda";
+            using TorchSharp.torch.Tensor probe = TorchSharp.torch.zeros(1, device: TorchSharp.torch.CUDA);
+            _ = probe.item<float>();
+            return;
+        }
+
+        if (_devicePreference == "cuda")
+            _lastFailure = "TorchDevice=cuda but cuda.is_available() is false; using CPU LibTorch.";
+        _useCuda = false;
+        _backendLabel = "torch-cpu";
+        using TorchSharp.torch.Tensor probeCpu = TorchSharp.torch.zeros(1, device: TorchSharp.torch.CPU);
+        _ = probeCpu.item<float>();
     }
 
     internal static TorchSharp.torch.Device ResolveDevice()
