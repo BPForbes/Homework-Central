@@ -873,7 +873,8 @@ public sealed class NeuralNetTrainingService(
     /// Uses the training LLM's embedded selfCritique (same generation call) to steer later tickets and
     /// optionally rewrite the prompt. No second Ollama evaluator round-trip. A REVISE verdict
     /// never blocks the pipeline: the same module reworks the scenario and training continues with
-    /// whichever attempt survives.
+    /// whichever attempt survives. REVISE / REINTERPRET steps publish amber (reeval) mesh lighting
+    /// and append explicit audit-feed lines so the UI can show feedback, not only LGTM.
     /// </summary>
     private async Task<SyntheticTicket> CollectBalancedGeneratorAuditAsync(
         NeuralNetTrainingSession session,
@@ -895,35 +896,56 @@ public sealed class NeuralNetTrainingService(
             SyntheticEvaluatorResult audit = trainingLlm.CritiqueTicket(current);
             feedback.RecordAudit(audit.Verdict, audit.Feedback, current.Category);
             feedback.RecordCoverageGaps(coverage.Underrepresented(auditKind));
-            string auditLine = Truncate(
-                $"[{current.Category}] {audit.Verdict}: {audit.Feedback}", 400);
-            PublishProgress(session, progress =>
-            {
-                List<string> auditFeed = progress.AuditFeedbackFeed.ToList();
-                auditFeed.Add(auditLine);
-                if (auditFeed.Count > 64)
-                    auditFeed.RemoveRange(0, auditFeed.Count - 64);
-
-                return progress with
-                {
-                    Phase = "Training LLM · self-critique",
-                    AuditsCompleted = progress.AuditsCompleted + 1,
-                    LatestAuditFeedback = Truncate($"{audit.Verdict}: {audit.Feedback}", 280),
-                    AuditFeedbackFeed = auditFeed,
-                    CurrentEvaluationData = FormatEvaluationData(progress.TicketsGenerated, current, current.Messages.FirstOrDefault()),
-                    GeneratorHints = feedback.Hints.ToList(),
-                    PathTone = "reeval",
-                };
-            });
 
             bool needsRevision = audit.Verdict.Contains("REVISE", StringComparison.OrdinalIgnoreCase);
+            string attemptTag = attempt == 0 ? "generate+evaluate" : $"after reinterpret {attempt}";
+            string auditLine = Truncate(
+                needsRevision
+                    ? $"[{current.Category}] REVISE ({attemptTag}): {audit.Feedback}"
+                    : $"[{current.Category}] LGTM ({attemptTag}): {audit.Feedback}",
+                400);
+
+            PublishProgress(session, progress =>
+            {
+                List<string> auditFeed = AppendAuditFeedLine(progress.AuditFeedbackFeed, auditLine);
+                return WithReevalMesh(
+                    progress with
+                    {
+                        Phase = needsRevision
+                            ? "Training LLM · self-critique REVISE"
+                            : "Training LLM · self-critique LGTM",
+                        AuditsCompleted = progress.AuditsCompleted + 1,
+                        LatestAuditFeedback = Truncate($"{audit.Verdict}: {audit.Feedback}", 280),
+                        AuditFeedbackFeed = auditFeed,
+                        CurrentEvaluationData = FormatEvaluationData(
+                            progress.TicketsGenerated, current, current.Messages.FirstOrDefault()),
+                        GeneratorHints = feedback.Hints.ToList(),
+                        PathTone = needsRevision ? "reeval" : "accepted",
+                    },
+                    lightFullMesh: needsRevision);
+            });
+
+            // Hold amber long enough for the 2s live poll to paint yellow neurons before rewrite.
+            if (needsRevision)
+                await Task.Delay(TimeSpan.FromMilliseconds(1250), ct);
+
             if (!needsRevision || attempt == maxRevisions)
                 return current;
 
             SyntheticTicket? revised = await ReviseGeneratedTicketAsync(
                 session, current, audit, feedback, timings, attempt + 1, maxRevisions, ct);
             if (revised is null)
+            {
+                string failedLine = Truncate(
+                    $"[{current.Category}] REINTERPRET failed · keeping prior scenario", 400);
+                PublishProgress(session, progress => progress with
+                {
+                    AuditFeedbackFeed = AppendAuditFeedLine(progress.AuditFeedbackFeed, failedLine),
+                    LatestAuditFeedback = failedLine,
+                    PathTone = "reeval",
+                });
                 return current;
+            }
 
             current = revised;
         }
@@ -945,14 +967,25 @@ public sealed class NeuralNetTrainingService(
         int maxRevisions,
         CancellationToken ct)
     {
-        PublishProgress(session, progress => progress with
+        string reinterpretLine = Truncate(
+            $"[{rejected.Category}] REINTERPRET ({attempt}/{maxRevisions}): {audit.Feedback}", 400);
+        PublishProgress(session, progress =>
         {
-            Phase = $"Training LLM · revising · {attempt}/{maxRevisions}",
-            PathTone = "reeval",
-            LatestTrainingLlmSummary = Truncate(
-                $"Reworking '{rejected.Category}' prompt to resolve: {audit.Feedback}", 280),
-            CurrentEvaluationData = FormatEvaluationData(progress.TicketsGenerated, rejected, rejected.Messages.FirstOrDefault()),
-            GeneratorHints = feedback.Hints.ToList(),
+            List<string> auditFeed = AppendAuditFeedLine(progress.AuditFeedbackFeed, reinterpretLine);
+            return WithReevalMesh(
+                progress with
+                {
+                    Phase = $"Training LLM · reinterpreting · {attempt}/{maxRevisions}",
+                    PathTone = "reeval",
+                    LatestAuditFeedback = Truncate($"REINTERPRET: {audit.Feedback}", 280),
+                    LatestTrainingLlmSummary = Truncate(
+                        $"Reworking '{rejected.Category}' prompt to resolve: {audit.Feedback}", 280),
+                    AuditFeedbackFeed = auditFeed,
+                    CurrentEvaluationData = FormatEvaluationData(
+                        progress.TicketsGenerated, rejected, rejected.Messages.FirstOrDefault()),
+                    GeneratorHints = feedback.Hints.ToList(),
+                },
+                lightFullMesh: true);
         });
 
         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
@@ -968,16 +1001,58 @@ public sealed class NeuralNetTrainingService(
         if (revised is null)
             return null;
 
-        PublishProgress(session, progress => progress with
+        string revisedLine = Truncate(
+            $"[{revised.Category}] REINTERPRETED ({attempt}/{maxRevisions}): new scenario ready · re-evaluating",
+            400);
+        PublishProgress(session, progress =>
         {
-            Phase = $"Training LLM · revised · {revised.Category}",
-            PathTone = "reeval",
-            LatestTrainingLlmSummary = Truncate(
-                $"Revision {attempt} applied for '{revised.Category}'.", 280),
-            CurrentEvaluationData = FormatEvaluationData(progress.TicketsGenerated, revised, revised.Messages.FirstOrDefault()),
-            GeneratorHints = feedback.Hints.ToList(),
+            List<string> auditFeed = AppendAuditFeedLine(progress.AuditFeedbackFeed, revisedLine);
+            return WithReevalMesh(
+                progress with
+                {
+                    Phase = $"Training LLM · reinterpreted · {revised.Category}",
+                    PathTone = "reeval",
+                    LatestAuditFeedback = revisedLine,
+                    LatestTrainingLlmSummary = Truncate(
+                        $"Revision {attempt} applied for '{revised.Category}'.", 280),
+                    AuditFeedbackFeed = auditFeed,
+                    CurrentEvaluationData = FormatEvaluationData(
+                        progress.TicketsGenerated, revised, revised.Messages.FirstOrDefault()),
+                    GeneratorHints = feedback.Hints.ToList(),
+                },
+                lightFullMesh: true);
         });
+        // Brief hold so the reinterpreted line is visible before the next critique paint.
+        await Task.Delay(TimeSpan.FromMilliseconds(750), ct);
         return revised;
+    }
+
+    /// <summary>
+    /// Amber reeval lighting: empty active indexes mean the mesh/graph lights the full topology
+    /// for <c>pathTone=reeval</c> (see worker + NeuralNetGraph2D idle-path rules).
+    /// </summary>
+    private static NeuralNetTrainingLiveProgress WithReevalMesh(
+        NeuralNetTrainingLiveProgress progress,
+        bool lightFullMesh)
+    {
+        if (!lightFullMesh)
+            return progress;
+
+        return progress with
+        {
+            ActiveNodeIndexes = [],
+            ActiveEdgeParameterIndexes = [],
+            ActiveLayerIndex = null,
+        };
+    }
+
+    private static List<string> AppendAuditFeedLine(IReadOnlyList<string> existing, string line)
+    {
+        List<string> auditFeed = existing.ToList();
+        auditFeed.Add(line);
+        if (auditFeed.Count > 64)
+            auditFeed.RemoveRange(0, auditFeed.Count - 64);
+        return auditFeed;
     }
 
     private async Task RunChatMonitoringRunsAsync(

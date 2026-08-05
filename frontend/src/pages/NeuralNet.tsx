@@ -235,6 +235,13 @@ function meshToneFromProgress(progress: NeuralNetTrainingLiveProgress): MeshPath
   return 'idle'
 }
 
+function auditFeedLineClass(line: string): string | undefined {
+  const upper = line.toUpperCase()
+  if (upper.includes('REVISE') || upper.includes('REINTERPRET')) return 'neural-feed-item--reeval'
+  if (upper.includes('LGTM')) return 'neural-feed-item--accepted'
+  return undefined
+}
+
 function liveMeshFrame(progress: NeuralNetTrainingLiveProgress, layerWidths: number[]): NeuralMeshFrame {
   const pathTone = meshToneFromProgress(progress)
   const activeNodes = progress.activeNodeIndexes ?? []
@@ -280,6 +287,17 @@ function LiveTrainingProgress({
       <p className="neural-ops-strip">
         Ops · Leaky ReLU · BCE + categorical CE (CCEL) · backprop · momentum SGD
         {progress.latestLossSummary ? ` · ${progress.latestLossSummary}` : ''}
+      </p>
+      <p className="neural-path-legend" aria-label="Thought path color legend">
+        <span>
+          <i className="neural-path-swatch neural-path-swatch--forward" aria-hidden /> Forward
+        </span>
+        <span>
+          <i className="neural-path-swatch neural-path-swatch--reeval" aria-hidden /> REVISE / reinterpret
+        </span>
+        <span>
+          <i className="neural-path-swatch neural-path-swatch--backprop" aria-hidden /> Backprop
+        </span>
       </p>
       <div className="sm-form-actions">
         <button type="button" className="btn-secondary" onClick={() => setDetail((value) => Math.max(0, value - 1))}>
@@ -370,9 +388,11 @@ function LiveTrainingProgress({
           </p>
           <p className="dashboard-hint">Audits {progress.auditsCompleted}</p>
           {(progress.auditFeedbackFeed?.length ?? 0) > 0 ? (
-            <ul className="neural-feed-list">
+            <ul className="neural-feed-list neural-feed-list--scroll">
               {progress.auditFeedbackFeed!.map((line, index) => (
-                <li key={`${index}-${line}`}>{line}</li>
+                <li key={`${index}-${line}`} className={auditFeedLineClass(line)}>
+                  {line}
+                </li>
               ))}
             </ul>
           ) : (progress.generatorHints?.length ?? 0) > 0 ? (
@@ -455,8 +475,11 @@ export function NeuralNet() {
   }, [view])
 
   const hasActiveTraining = sessions.some((session) => session.status === 'Running' || session.status === 'Queued')
+  const hasReevalTone = sessions.some((session) => session.liveProgress?.pathTone === 'reeval')
   useEffect(() => {
     if (view !== 'training' || !hasActiveTraining) return
+    // Poll faster during REVISE / reinterpret so yellow mesh + audit lines are visible.
+    const intervalMs = hasReevalTone ? 750 : 2000
     const timer = window.setInterval(() => {
       void neuralNetApi.listTrainingSessions()
         .then((response) => {
@@ -465,9 +488,9 @@ export function NeuralNet() {
           setSessionsNextBeforeUtc(response.data.nextBeforeUtc)
         })
         .catch(() => undefined)
-    }, 2000)
+    }, intervalMs)
     return () => window.clearInterval(timer)
-  }, [view, hasActiveTraining])
+  }, [view, hasActiveTraining, hasReevalTone])
 
   useEffect(() => {
     // Auto browser downloads are often blocked; surface an explicit download panel instead.
