@@ -1195,7 +1195,9 @@ surface that embedded verdict, or a structural accept when the model omits the f
 separate second-model evaluator. A REVISE verdict never halts a session: `CollectBalancedGeneratorAuditAsync`
 republishes the `reeval` path tone (amber in the live mesh), folds the objection into the next
 training-LLM prompt via `INeuralNetTrainingLlmModule.GenerateScenarioAsync(..., revisionNotes, ...)`,
-and continues with whichever attempt survives. Live progress exposes the current evaluation payload,
+and continues with whichever attempt survives. The live audit feed logs distinct `REVISE`,
+`REINTERPRET`, `REINTERPRETED`, and `LGTM` lines for that loop; amber mesh lighting is held long
+enough for the training UI poll to show yellow neurons and connections during rewrite. Live progress exposes the current evaluation payload,
 the full session audit feed, and a per-node weight-update feed for the active mini-batch step.
 `NeuralNetTraining:GeneratorRevisionMaxAttempts` bounds the rework loop. Training-time second-pass
 audits are off (`AuditSampleRate=0`).

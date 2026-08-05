@@ -5237,6 +5237,13 @@ a {
   padding-right: 0.35rem;
 }
 .neural-feed-list li + li { margin-top: 0.2rem; }
+.neural-feed-item--reeval {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+.neural-feed-item--accepted {
+  color: var(--color-success);
+}
 
 .neural-live-progress {
   margin: 0.65rem 0 0.35rem;
