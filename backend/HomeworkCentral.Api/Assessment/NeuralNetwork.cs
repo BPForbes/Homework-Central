@@ -15,6 +15,7 @@ public enum NeuralLayerActivation
 /// <summary>
 /// Dense layer backed by Math.NET matrices (weights rows = targets, columns = sources).
 /// Momentum buffers share the same shapes for heavy-ball SGD.
+/// Column-major <see cref="WeightStorage"/> aliases the live matrix so GEMV skips indexer overhead.
 /// </summary>
 public sealed class DenseLayer
 {
@@ -26,11 +27,21 @@ public sealed class DenseLayer
             throw new ArgumentOutOfRangeException(nameof(targetCount));
 
         Activation = activation;
-        Weights = DenseMatrix.Create(targetCount, sourceCount, (_, _) =>
+        DenseMatrix weights = DenseMatrix.Create(targetCount, sourceCount, (_, _) =>
             (float)((random.NextDouble() * 2d - 1d) * initScale));
-        Biases = DenseVector.Create(targetCount, _ => 0f);
-        WeightVelocity = DenseMatrix.Create(targetCount, sourceCount, 0f);
-        BiasVelocity = DenseVector.Create(targetCount, _ => 0f);
+        DenseMatrix weightVelocity = DenseMatrix.Create(targetCount, sourceCount, 0f);
+        DenseVector biases = DenseVector.Create(targetCount, _ => 0f);
+        DenseVector biasVelocity = DenseVector.Create(targetCount, _ => 0f);
+        Weights = weights;
+        Biases = biases;
+        WeightVelocity = weightVelocity;
+        BiasVelocity = biasVelocity;
+        WeightStorage = weights.AsColumnMajorArray();
+        WeightVelocityStorage = weightVelocity.AsColumnMajorArray();
+        BiasStorage = biases.AsArray();
+        BiasVelocityStorage = biasVelocity.AsArray();
+        SourceCount = sourceCount;
+        TargetCount = targetCount;
     }
 
     public NeuralLayerActivation Activation { get; }
@@ -38,8 +49,12 @@ public sealed class DenseLayer
     public Vector<float> Biases { get; }
     public Matrix<float> WeightVelocity { get; }
     public Vector<float> BiasVelocity { get; }
-    public int SourceCount => Weights.ColumnCount;
-    public int TargetCount => Weights.RowCount;
+    public float[] WeightStorage { get; }
+    public float[] WeightVelocityStorage { get; }
+    public float[] BiasStorage { get; }
+    public float[] BiasVelocityStorage { get; }
+    public int SourceCount { get; }
+    public int TargetCount { get; }
 }
 
 /// <summary>Forward activations retained for backprop and optional replay traces.</summary>
@@ -66,27 +81,36 @@ public sealed class NeuralNetworkGradientBuffers
 {
     public NeuralNetworkGradientBuffers(IReadOnlyList<DenseLayer> layers)
     {
-        WeightGradients = layers.Select(layer => DenseMatrix.Create(layer.TargetCount, layer.SourceCount, 0f)).ToArray();
-        BiasGradients = layers.Select(layer => DenseVector.Create(layer.TargetCount, _ => 0f)).ToArray();
+        // Column-major float buffers match DenseLayer.WeightStorage layout for in-place GEMV/SGD.
+        WeightGradientStorage = layers
+            .Select(layer => new float[layer.TargetCount * layer.SourceCount])
+            .ToArray();
+        BiasGradientStorage = layers
+            .Select(layer => new float[layer.TargetCount])
+            .ToArray();
+        TargetCounts = layers.Select(layer => layer.TargetCount).ToArray();
+        SourceCounts = layers.Select(layer => layer.SourceCount).ToArray();
     }
 
-    public Matrix<float>[] WeightGradients { get; }
-    public Vector<float>[] BiasGradients { get; }
+    public float[][] WeightGradientStorage { get; }
+    public float[][] BiasGradientStorage { get; }
+    public int[] TargetCounts { get; }
+    public int[] SourceCounts { get; }
 
     public void Clear()
     {
-        for (int layer = 0; layer < WeightGradients.Length; layer++)
+        for (int layer = 0; layer < WeightGradientStorage.Length; layer++)
         {
-            WeightGradients[layer].Clear();
-            BiasGradients[layer].Clear();
+            Array.Clear(WeightGradientStorage[layer]);
+            Array.Clear(BiasGradientStorage[layer]);
         }
     }
 }
 
 /// <summary>
-/// Dense feed-forward network using Math.NET Numerics for matrix-vector products,
-/// outer products, and transpose-multiply during backprop. Parameter flatten order
-/// matches historical HashedMlp checkpoints: per layer, per target, all weights then bias.
+/// Dense feed-forward network with column-major GEMV forward/backprop kernels.
+/// Parameter flatten order matches historical HashedMlp checkpoints: per layer, per target,
+/// all weights then bias.
 /// </summary>
 public sealed class NeuralNetwork
 {
@@ -160,16 +184,18 @@ public sealed class NeuralNetwork
         for (int layer = 0; layer < _layers.Length; layer++)
         {
             DenseLayer dense = _layers[layer];
-            Vector<float> source = DenseVector.OfArray(activations[layer]);
-            // Math.NET: z = W x + b
-            Vector<float> pre = dense.Weights * source + dense.Biases;
-            float[] layerPre = pre.ToArray();
+            float[] layerPre = new float[dense.TargetCount];
+            // z = W x + b via column-major GEMV (no temporary Math.NET vectors).
+            MultiplyBias(dense.WeightStorage, dense.TargetCount, dense.SourceCount, activations[layer], dense.BiasStorage, layerPre);
             float[] layerAct = ApplyActivation(dense.Activation, layerPre);
             preActivations[layer] = layerPre;
             activations[layer + 1] = layerAct;
         }
 
-        UpdateNodeState(activations, preActivations);
+        // Node mesh state is only needed for Full replay / visualizer traces.
+        if (captureTrace)
+            UpdateNodeState(activations, preActivations);
+
         ForwardPropagationTrace? trace = captureTrace
             ? BuildForwardTrace(activations[0], activations, preActivations)
             : null;
@@ -192,14 +218,14 @@ public sealed class NeuralNetwork
             throw new InvalidOperationException("Mixed-head backprop requires a MixedEvidenceRelevanceSoftmax output layer.");
 
         float[] output = state.Activations[^1];
-        Vector<float>[] activationGradients = new Vector<float>[state.Activations.Length];
+        float[][] activationGradients = new float[state.Activations.Length][];
         float[] outputGrad = new float[output.Length];
         outputGrad[0] = output[0] - Math.Clamp(evidenceTarget, 0f, 1f);
         outputGrad[1] = output[1] - Math.Clamp(relevanceTarget, 0f, 1f);
         int clampedCategory = Math.Clamp(categoryIndex, 0, Math.Max(0, _categoryLabels.Length - 1));
         for (int category = 0; category < _categoryLabels.Length; category++)
             outputGrad[2 + category] = output[2 + category] - (category == clampedCategory ? 1f : 0f);
-        activationGradients[^1] = DenseVector.OfArray(outputGrad);
+        activationGradients[^1] = outputGrad;
 
         return Backpropagate(state, activationGradients, gradients, trackGradient);
     }
@@ -216,10 +242,10 @@ public sealed class NeuralNetwork
         if (outputGradient.Length < OutputSize)
             throw new ArgumentException($"Expected at least {OutputSize} upstream gradients.", nameof(outputGradient));
 
-        Vector<float>[] activationGradients = new Vector<float>[state.Activations.Length];
+        float[][] activationGradients = new float[state.Activations.Length][];
         float[] outputGrad = new float[OutputSize];
         outputGradient[..OutputSize].CopyTo(outputGrad);
-        activationGradients[^1] = DenseVector.OfArray(outputGrad);
+        activationGradients[^1] = outputGrad;
         return Backpropagate(state, activationGradients, gradients, trackGradient);
     }
 
@@ -238,29 +264,34 @@ public sealed class NeuralNetwork
         for (int layer = 0; layer < _layers.Length; layer++)
         {
             DenseLayer dense = _layers[layer];
-            Matrix<float> weightGrad = gradients.WeightGradients[layer];
-            Vector<float> biasGrad = gradients.BiasGradients[layer];
+            float[] weightGrad = gradients.WeightGradientStorage[layer];
+            float[] biasGrad = gradients.BiasGradientStorage[layer];
+            float[] weights = dense.WeightStorage;
+            float[] weightVelocity = dense.WeightVelocityStorage;
+            float[] biases = dense.BiasStorage;
+            float[] biasVelocity = dense.BiasVelocityStorage;
+            int rows = dense.TargetCount;
 
-            for (int row = 0; row < dense.TargetCount; row++)
+            for (int index = 0; index < weightGrad.Length; index++)
             {
-                for (int column = 0; column < dense.SourceCount; column++)
-                {
-                    float avgGrad = NeuralNetFinite.ClampFinite(
-                        weightGrad[row, column] * invN, -maxAbsGradient, maxAbsGradient);
-                    float velocity = momentumCoefficient * NeuralNetFinite.OrZero(dense.WeightVelocity[row, column]) + avgGrad;
-                    dense.WeightVelocity[row, column] = velocity;
-                    float updated = NeuralNetFinite.OrZero(dense.Weights[row, column] - learningRate * velocity);
-                    dense.Weights[row, column] = maxAbsWeight is float bound
-                        ? NeuralNetFinite.ClampFinite(updated, -bound, bound)
-                        : updated;
-                }
+                float avgGrad = NeuralNetFinite.ClampFinite(
+                    weightGrad[index] * invN, -maxAbsGradient, maxAbsGradient);
+                float velocity = momentumCoefficient * NeuralNetFinite.OrZero(weightVelocity[index]) + avgGrad;
+                weightVelocity[index] = velocity;
+                float updated = NeuralNetFinite.OrZero(weights[index] - learningRate * velocity);
+                weights[index] = maxAbsWeight is float bound
+                    ? NeuralNetFinite.ClampFinite(updated, -bound, bound)
+                    : updated;
+            }
 
+            for (int row = 0; row < rows; row++)
+            {
                 float avgBiasGrad = NeuralNetFinite.ClampFinite(
                     biasGrad[row] * invN, -maxAbsGradient, maxAbsGradient);
-                float biasVelocity = momentumCoefficient * NeuralNetFinite.OrZero(dense.BiasVelocity[row]) + avgBiasGrad;
-                dense.BiasVelocity[row] = biasVelocity;
-                float updatedBias = NeuralNetFinite.OrZero(dense.Biases[row] - learningRate * biasVelocity);
-                dense.Biases[row] = maxAbsWeight is float biasBound
+                float velocity = momentumCoefficient * NeuralNetFinite.OrZero(biasVelocity[row]) + avgBiasGrad;
+                biasVelocity[row] = velocity;
+                float updatedBias = NeuralNetFinite.OrZero(biases[row] - learningRate * velocity);
+                biases[row] = maxAbsWeight is float biasBound
                     ? NeuralNetFinite.ClampFinite(updatedBias, -biasBound, biasBound)
                     : updatedBias;
             }
@@ -274,11 +305,14 @@ public sealed class NeuralNetwork
         for (int layer = 0; layer < _layers.Length; layer++)
         {
             DenseLayer dense = _layers[layer];
-            for (int target = 0; target < dense.TargetCount; target++)
+            float[] weights = dense.WeightStorage;
+            float[] biases = dense.BiasStorage;
+            int rows = dense.TargetCount;
+            for (int target = 0; target < rows; target++)
             {
                 for (int source = 0; source < dense.SourceCount; source++)
-                    values[offset++] = dense.Weights[target, source];
-                values[offset++] = dense.Biases[target];
+                    values[offset++] = weights[source * rows + target];
+                values[offset++] = biases[target];
             }
         }
 
@@ -294,15 +328,18 @@ public sealed class NeuralNetwork
         for (int layer = 0; layer < _layers.Length; layer++)
         {
             DenseLayer dense = _layers[layer];
-            for (int target = 0; target < dense.TargetCount; target++)
+            float[] weights = dense.WeightStorage;
+            float[] biases = dense.BiasStorage;
+            int rows = dense.TargetCount;
+            for (int target = 0; target < rows; target++)
             {
                 for (int source = 0; source < dense.SourceCount; source++)
-                    dense.Weights[target, source] = values[offset++];
-                dense.Biases[target] = values[offset++];
+                    weights[source * rows + target] = values[offset++];
+                biases[target] = values[offset++];
             }
 
-            dense.WeightVelocity.Clear();
-            dense.BiasVelocity.Clear();
+            Array.Clear(dense.WeightVelocityStorage);
+            Array.Clear(dense.BiasVelocityStorage);
         }
     }
 
@@ -398,17 +435,22 @@ public sealed class NeuralNetwork
 
     private float[] Backpropagate(
         NeuralNetworkForwardState state,
-        Vector<float>[] activationGradients,
+        float[][] activationGradients,
         NeuralNetworkGradientBuffers gradients,
         Action<float>? trackGradient)
     {
         for (int layer = _layers.Length - 1; layer >= 0; layer--)
         {
             DenseLayer dense = _layers[layer];
-            Vector<float> upstream = activationGradients[layer + 1];
+            float[] upstream = activationGradients[layer + 1];
             float[] localGrad = new float[dense.TargetCount];
+            float[] biasGradient = gradients.BiasGradientStorage[layer];
+            float[] weightGradient = gradients.WeightGradientStorage[layer];
+            float[] sourceActivations = state.Activations[layer];
+            int rows = dense.TargetCount;
+            int cols = dense.SourceCount;
 
-            for (int target = 0; target < dense.TargetCount; target++)
+            for (int target = 0; target < rows; target++)
             {
                 float gradient = upstream[target];
                 gradient *= ActivationDerivative(
@@ -417,31 +459,70 @@ public sealed class NeuralNetwork
                     state.Activations[layer + 1][target]);
                 localGrad[target] = gradient;
                 trackGradient?.Invoke(gradient);
-                gradients.BiasGradients[layer][target] += gradient;
+                biasGradient[target] += gradient;
             }
 
-            // ∂C/∂W = δ xᵀ accumulated in place — OuterProduct allocates a full matrix per layer/sample.
-            Matrix<float> weightGradient = gradients.WeightGradients[layer];
-            float[] sourceActivations = state.Activations[layer];
-            for (int row = 0; row < dense.TargetCount; row++)
+            // ∂C/∂W = δ xᵀ into column-major storage (index = column * rows + row).
+            for (int column = 0; column < cols; column++)
             {
-                float gradient = localGrad[row];
-                if (gradient == 0f)
+                float sourceValue = sourceActivations[column];
+                if (sourceValue == 0f)
                     continue;
-                for (int column = 0; column < sourceActivations.Length; column++)
+                int offset = column * rows;
+                for (int row = 0; row < rows; row++)
                 {
-                    float contribution = gradient * sourceActivations[column];
-                    weightGradient[row, column] += contribution;
+                    float contribution = localGrad[row] * sourceValue;
+                    weightGradient[offset + row] += contribution;
                     trackGradient?.Invoke(contribution);
                 }
             }
 
             // ∂C/∂x = Wᵀ δ
-            Vector<float> delta = DenseVector.OfArray(localGrad);
-            activationGradients[layer] = dense.Weights.TransposeThisAndMultiply(delta);
+            float[] inputGrad = new float[cols];
+            MultiplyTranspose(dense.WeightStorage, rows, cols, localGrad, inputGrad);
+            activationGradients[layer] = inputGrad;
         }
 
-        return activationGradients[0].ToArray();
+        return activationGradients[0];
+    }
+
+    /// <summary>y = W x + b with W stored column-major (rows = targets).</summary>
+    private static void MultiplyBias(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] source,
+        float[] biases,
+        float[] destination)
+    {
+        Array.Copy(biases, destination, rows);
+        for (int column = 0; column < cols; column++)
+        {
+            float sourceValue = source[column];
+            if (sourceValue == 0f)
+                continue;
+            int offset = column * rows;
+            for (int row = 0; row < rows; row++)
+                destination[row] += weightsColumnMajor[offset + row] * sourceValue;
+        }
+    }
+
+    /// <summary>destination = Wᵀ delta with W stored column-major.</summary>
+    private static void MultiplyTranspose(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] delta,
+        float[] destination)
+    {
+        for (int column = 0; column < cols; column++)
+        {
+            float sum = 0f;
+            int offset = column * rows;
+            for (int row = 0; row < rows; row++)
+                sum += weightsColumnMajor[offset + row] * delta[row];
+            destination[column] = sum;
+        }
     }
 
     private float[] ApplyActivation(NeuralLayerActivation activation, float[] pre)
@@ -567,18 +648,21 @@ public sealed class NeuralNetwork
         {
             DenseLayer dense = _layers[layer];
             float[] source = activations[layer];
-            for (int target = 0; target < dense.TargetCount; target++)
+            float[] weights = dense.WeightStorage;
+            float[] biases = dense.BiasStorage;
+            int rows = dense.TargetCount;
+            for (int target = 0; target < rows; target++)
             {
                 for (int sourceIndex = 0; sourceIndex < dense.SourceCount; sourceIndex++)
                 {
                     edgeContributions.Add(new SparseValue(
                         parameterCursor++,
-                        NeuralNetFinite.OrZero(source[sourceIndex] * dense.Weights[target, sourceIndex])));
+                        NeuralNetFinite.OrZero(source[sourceIndex] * weights[sourceIndex * rows + target])));
                 }
 
                 biasContributions.Add(new SparseValue(
                     parameterCursor++,
-                    NeuralNetFinite.OrZero(dense.Biases[target])));
+                    NeuralNetFinite.OrZero(biases[target])));
             }
         }
 
