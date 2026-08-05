@@ -41,13 +41,14 @@ public sealed class NeuralNetTrainingLlmModule(SyntheticThreadScenarioGenerator 
 
         if (!string.IsNullOrWhiteSpace(ticket.SelfCritiqueVerdict))
         {
+            string normalizedVerdict = NormalizeVerdict(ticket.SelfCritiqueVerdict) ?? ticket.SelfCritiqueVerdict.Trim().ToUpperInvariant();
             string feedback = string.IsNullOrWhiteSpace(ticket.SelfCritiqueFeedback)
-                ? (string.Equals(ticket.SelfCritiqueVerdict, "REVISE", StringComparison.OrdinalIgnoreCase)
-                    ? "Self-critique requested a rewrite without detailed feedback."
-                    : "Self-critique accepted the scenario.")
+                ? (string.Equals(normalizedVerdict, "REVISE", StringComparison.Ordinal)
+                    ? "Training LLM self-critique requested a rewrite."
+                    : "Training LLM self-critique accepted the scenario (generate+evaluate).")
                 : ticket.SelfCritiqueFeedback!;
             return new SyntheticEvaluatorResult(
-                ticket.SelfCritiqueVerdict.ToUpperInvariant(),
+                normalizedVerdict,
                 ticket.ExpectedScore,
                 ticket.ExpectedRelevance,
                 Truncate(feedback, 2000),
@@ -61,18 +62,37 @@ public sealed class NeuralNetTrainingLlmModule(SyntheticThreadScenarioGenerator 
                 "REVISE",
                 ticket.ExpectedScore,
                 ticket.ExpectedRelevance,
-                "Scenario has no usable non-empty primary message.",
+                "Training LLM scenario has no usable non-empty primary message.",
                 0.5,
                 0.4);
         }
 
+        // Generation JSON omitted selfCritique; local structural gate still runs on the same
+        // generate+evaluate path (no separate reviewer model).
         return new SyntheticEvaluatorResult(
             "LGTM",
             ticket.ExpectedScore,
             ticket.ExpectedRelevance,
-            "Accepted without a second model; training LLM output passed structural checks.",
+            "Training LLM · structural accept (generate+evaluate; embedded selfCritique omitted).",
             primary.TeacherApprovalEstimate ?? primary.CommunityIntent.ProposedApproval,
             primary.TeacherConfidence ?? 0.65);
+    }
+
+    /// <summary>Maps common LLM phrasings onto the LGTM / REVISE contract.</summary>
+    internal static string? NormalizeVerdict(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        string token = raw.Trim().TrimEnd('.', '!', ':').ToUpperInvariant();
+        return token switch
+        {
+            "LGTM" or "OK" or "OKAY" or "PASS" or "PASSED" or "ACCEPT" or "ACCEPTED"
+                or "APPROVE" or "APPROVED" or "GOOD" or "LOOKS GOOD" => "LGTM",
+            "REVISE" or "REJECT" or "REJECTED" or "FAIL" or "FAILED" or "REDO"
+                or "REWRITE" or "NEEDS WORK" => "REVISE",
+            _ => null,
+        };
     }
 
     private static string Truncate(string value, int limit) =>

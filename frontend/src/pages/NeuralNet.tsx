@@ -6,6 +6,7 @@ import { neuralNetApi } from '../api/neuralNetApi'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { LoadingBars } from '../components/LoadingBars'
 import { NeuralNetMesh3D, edgeKeysFromDenseParameterIndexes, type MeshPathTone, type NeuralMeshFrame } from '../components/neuralNet/NeuralNetMesh3D'
+import { NeuralNetGraph2D } from '../components/neuralNet/NeuralNetGraph2D'
 import { ReplayViewer } from '../components/neuralNet/ReplayViewer'
 import type { NeuralNetReplay } from '../types/neuralNetReplay'
 import { assertDownloadableJsonBlob, triggerBrowserDownload } from '../utils/downloadBlob'
@@ -330,30 +331,15 @@ function LiveTrainingProgress({
             2D topology detail {detail} · {layerWidths.join(' → ')} · path tone {frame.pathTone}
             {frame.activeNodeIndexes.length ? ` · ${frame.activeNodeIndexes.length} active nodes` : ''}
           </p>
-          <div className="neural-graph-scroll">
-            <svg
-              className="neural-graph neural-graph--live-summary"
-              viewBox="0 0 640 160"
-              width="100%"
-              height="160"
-              role="img"
-              aria-label="Live training layer summary"
-            >
-              {layerWidths.map((width, index) => {
-                const x = 40 + (index * 560) / Math.max(1, layerWidths.length - 1)
-                const label = layerLabels[index] ?? `L${index}`
-                const r = detail === 0 ? 18 : detail === 1 ? 12 : 8
-                return (
-                  <g key={`${label}-${index}`}>
-                    <circle cx={x} cy={80} r={r} className="neural-node neural-node--path-forward" />
-                    <text x={x} y={130} textAnchor="middle" className="neural-layer-label">
-                      {label} · {width}
-                    </text>
-                  </g>
-                )
-              })}
-            </svg>
-          </div>
+          <NeuralNetGraph2D
+            layerWidths={layerWidths}
+            layerLabels={layerLabels}
+            detail={detail}
+            pathTone={frame.pathTone}
+            activeNodeIndexes={progress.activeNodeIndexes ?? []}
+            activeEdgeParameterIndexes={progress.activeEdgeParameterIndexes ?? []}
+            ariaLabel="Live training neural network topology"
+          />
         </div>
       </div>
       <div className="neural-replay-panels neural-replay-panels--live">

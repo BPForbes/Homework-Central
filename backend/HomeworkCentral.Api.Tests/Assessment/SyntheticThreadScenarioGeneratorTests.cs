@@ -82,6 +82,66 @@ public sealed class SyntheticThreadScenarioGeneratorTests
     }
 
     [Fact]
+    public void ParseScenario_ReadsSnakeCaseSelfCritique_Aliases()
+    {
+        const string json = """
+            {
+              "category": "tutoring-mathematics",
+              "requirement": "Tutor math applicants",
+              "initialContext": "Algebra help",
+              "messages": [
+                {
+                  "authorId": "u1",
+                  "authorRole": "student",
+                  "channel": "math-help",
+                  "content": "How do I solve 2x+3=11?",
+                  "isDistractor": false,
+                  "channelRelevance": 1,
+                  "expectedScore": 0.9,
+                  "expectedRelevance": 1,
+                  "proposedApproval": 0.8,
+                  "proposedVoterCount": 4,
+                  "controversy": 0.1,
+                  "reasons": ["on topic"]
+                }
+              ],
+              "self_critique": {
+                "verdict": "ok",
+                "notes": "Clear non-distractor math ask."
+              }
+            }
+            """;
+
+        SyntheticThreadScenario? scenario = SyntheticThreadScenarioGenerator.ParseScenario(json);
+
+        Assert.NotNull(scenario);
+        Assert.Equal("LGTM", scenario!.SelfCritiqueVerdict);
+        Assert.Contains("Clear non-distractor math ask", scenario.SelfCritiqueFeedback);
+    }
+
+    [Fact]
+    public void CritiqueTicket_UsesGenerateEvaluateCopy_NotSecondModel()
+    {
+        SyntheticTicket ticket = new(
+            "tutoring-science",
+            "Tutor science",
+            "Explain photosynthesis",
+            "bio thread",
+            0.8,
+            0.9,
+            [
+                new SyntheticThreadMessage(
+                    0, "u1", "student", "science-help", "Explain photosynthesis",
+                    false, 1f, new(0.8f, 3, 0.2f, []), 0.8f, 0.9f, 0.8f, 0.7f),
+            ]);
+        NeuralNetTrainingLlmModule module = new(new SyntheticThreadScenarioGenerator(new StubLlm()));
+        SyntheticEvaluatorResult result = module.CritiqueTicket(ticket);
+        Assert.Equal("LGTM", result.Verdict);
+        Assert.Contains("generate+evaluate", result.Feedback);
+        Assert.DoesNotContain("second model", result.Feedback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void AlignScenarioToTarget_OverwritesDriftedCategory()
     {
         SyntheticThreadScenario drifted = new(
@@ -126,5 +186,14 @@ public sealed class SyntheticThreadScenarioGeneratorTests
 
         Assert.Equal(slug, scenario.Category);
         Assert.NotEmpty(scenario.Messages);
+    }
+
+    private sealed class StubLlm : ILlmClient
+    {
+        public Task<string?> ChatJsonAsync(string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
+        public Task<IReadOnlyList<float>> EmbedAsync(string text, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<float>>([]);
     }
 }
