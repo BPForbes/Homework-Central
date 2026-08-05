@@ -3,13 +3,15 @@ using System.Text.Json;
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
-/// Builds fictional ticket threads for neural training without using real student data.
+/// Input-side data generator: builds fictional ticket threads for neural training without real student data.
 /// When a target category is supplied, scenarios are forced onto that filterable taxonomy slug.
+/// Live Ollama reviewer feedback is output-only and does not consume this generator’s message text.
 /// </summary>
 public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
 {
     private const string ScenarioSystemPrompt =
-        "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, messages, and selfCritique. "
+        "You are the input data generator for neural-net training (not the output reviewer). "
+        + "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, messages, and selfCritique. "
         + "Each message needs authorId, authorRole, channel, content, isDistractor, channelRelevance (0..1), expectedScore (0..1 evidence teacher label), expectedRelevance (0..1), proposedApproval (0..1), proposedVoterCount (1..200), controversy (0..1), reasons array. "
         + "selfCritique must be an object with verdict (LGTM or REVISE) and feedback (short objection if REVISE, otherwise a one-line confirmation). "
         + "Use REVISE when the thread is weak for the target category, drifts off-concept, or lacks a clear non-distractor signal; otherwise LGTM. "

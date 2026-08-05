@@ -220,7 +220,7 @@ answer to the canonical display string, such as `Biology, Rust`.
 
 Lenient mode (`ModerationConceptPrefaceCheck`) extracts verified moderation
 concepts while preserving the reporter's original narrative. Unknown wording
-therefore stays available to staff and to the reviewer prompt instead of
+therefore stays available to staff in the ticket intake record instead of
 blocking a Mod-Mail report.
 
 `VocabularyTicketPrefaceCheck` lowercases input, normalizes aliases such as
@@ -338,10 +338,14 @@ The stage-2 input layout is shared across both monitors:
 
 Live scoring can run without Ollama when `Tickets:NeuralOnlyScoring=true` or
 `Tickets:OllamaEnabled=false`. Otherwise, student confidence below `0.75` is sent
-to `qwen3:0.6b` for review, and a deterministic 10% UUID sample of higher
-confidence predictions is reviewed for audit. Reviewer evidence and relevance use
-the configured `ReviewerBlendWeight` default of `0.70`. If the reviewer is not
-called or cannot return a valid review, bounded neural output is still recorded.
+to `qwen3:0.6b` for an **output-only** review (neural score, confidence, relevance,
+category, reasoning, plus the monitoring requirement that labels those fields —
+never message text, chat context, similar examples, features, or layer state), and a
+deterministic 10% UUID sample of higher confidence predictions is reviewed for audit.
+Reviewer evidence and relevance use the configured `ReviewerBlendWeight` default of
+`0.70`. If the reviewer is not called or cannot return a valid review, bounded neural
+output is still recorded. Synthetic training’s data-generator LLM owns input text
+(scenarios / messages); the live reviewer does not.
 
 ### Live scoring path vs training path
 
@@ -1134,7 +1138,7 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 |---|---|
 | [backend/HomeworkCentral.Api/Assessment/AssessmentQueue.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentQueue.cs) | Bounded live message assessment queue. |
 | [backend/HomeworkCentral.Api/Assessment/AssessmentWorker.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentWorker.cs) | Background live assessment worker. |
-| [backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs) | Live scoring, optional reviewer invocation, score ledger persistence, and vector mirror writes. |
+| [backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs](../backend/HomeworkCentral.Api/Assessment/AssessmentPipelineService.cs) | Live scoring, output-only optional reviewer invocation, score ledger persistence, and vector mirror writes. |
 | [backend/HomeworkCentral.Api/Assessment/TicketConfidenceScoring.cs](../backend/HomeworkCentral.Api/Assessment/TicketConfidenceScoring.cs) | Deterministic confidence delta and clamp math. |
 | [backend/HomeworkCentral.Api/Assessment/TicketReviewerEvaluation.cs](../backend/HomeworkCentral.Api/Assessment/TicketReviewerEvaluation.cs) | Reviewer parse and policy types. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs) | Chat-monitor model inputs, targets, predictions, traces, telemetry, and factory contracts. |
