@@ -85,6 +85,16 @@ public static class RoleMaskBuilder
             case "Tutor":
                 SetFeatures(mask, TutorFeatures());
                 break;
+            case "TrialTutor":
+                // Cosmetic + mentionable only — same messaging baseline as VerifiedUser, no tutor features.
+                SetFeatures(mask,
+                    PlatformFeatures.PublicMessages,
+                    PlatformFeatures.PrivateMessages,
+                    PlatformFeatures.GroupMessages,
+                    PlatformFeatures.PublicProfile,
+                    PlatformFeatures.FileUploads,
+                    PlatformFeatures.ImageUploads);
+                break;
             case "SeniorTutor":
             case "HeadTutor":
                 SetFeatures(mask, TutorFeatures());

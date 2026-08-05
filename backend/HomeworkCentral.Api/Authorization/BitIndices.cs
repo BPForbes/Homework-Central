@@ -49,6 +49,11 @@ public static class PlatformRoles
     public const short BoardMember = 17;
     public const short Owner = 18;
     public const short Founder = 19;
+    /// <summary>
+    /// Cosmetic trial tutor badge. Stored at bit 20 but excluded from grant-authority ranking
+    /// (see <see cref="PlatformRoleCatalog"/>); mutually exclusive with <see cref="Tutor"/>.
+    /// </summary>
+    public const short TrialTutor = 20;
 }
 
 /// <summary>Mask C — general subjects (bit indices 0–127).</summary>

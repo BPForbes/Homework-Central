@@ -6,10 +6,14 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
     DOTNET_NOLOGO=1
 
-COPY *.csproj ./
+COPY backend/HomeworkCentral.Api/*.csproj backend/HomeworkCentral.Api/
+WORKDIR /src/backend/HomeworkCentral.Api
 RUN dotnet restore --disable-parallel
 
-COPY . ./
+WORKDIR /src
+COPY backend/HomeworkCentral.Api backend/HomeworkCentral.Api
+COPY frontend/public/favicon.svg frontend/public/favicon.svg
+WORKDIR /src/backend/HomeworkCentral.Api
 RUN dotnet publish -c Release -o /app/publish --no-restore /p:UseSharedCompilation=false
 
 # ---------- Runtime Stage ----------

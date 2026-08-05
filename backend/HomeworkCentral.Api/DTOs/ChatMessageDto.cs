@@ -7,7 +7,8 @@ namespace HomeworkCentral.Api.DTOs;
 /// (it's built once and sent to all recipients, including via a single shared SignalR
 /// broadcast), so it must carry the real sender identity rather than a viewer-relative
 /// "is this mine" flag — ownership is derived client-side by comparing <see cref="SenderId"/>
-/// to the current user.
+/// to the current user. Vote aggregates are shared; <see cref="ViewerVote"/> is only populated
+/// on history GET for the requesting user.
 /// </summary>
 public class ChatMessageDto
 {
@@ -19,35 +20,76 @@ public class ChatMessageDto
     public string Content { get; set; } = null!;
     public DateTime CreatedAtUtc { get; set; }
 
-    /// <summary>Populated only when this message is a reply to another message in the same room.</summary>
     public Guid? ReplyToMessageId { get; set; }
     public Guid? ReplyToSenderId { get; set; }
     public string? ReplyToSenderUsername { get; set; }
     public string? ReplyToContentSnippet { get; set; }
+
+    public int Score { get; set; }
+    public int UpvoteCount { get; set; }
+    public int DownvoteCount { get; set; }
+    public string? ViewerVote { get; set; }
+
+    public List<ChatAttachmentInfoDto> Attachments { get; set; } = [];
+    public ChatForwardSnapshotDto? ForwardedFrom { get; set; }
+    public List<LinkPreviewDto> LinkPreviews { get; set; } = [];
+}
+
+public class ChatAttachmentInfoDto
+{
+    public Guid AttachmentId { get; set; }
+    public string FileName { get; set; } = null!;
+    public string ContentType { get; set; } = null!;
+    public long SizeBytes { get; set; }
+    public string DownloadUrl { get; set; } = null!;
+    public bool IsHazard { get; set; }
+    public string? InlinePreviewKind { get; set; }
+    public string ScanStatus { get; set; } = null!;
+}
+
+public class ChatForwardSnapshotDto
+{
+    public string SourceRoomId { get; set; } = null!;
+    public Guid SourceMessageId { get; set; }
+    public Guid SourceSenderId { get; set; }
+    public string SourceSenderUsername { get; set; } = null!;
+    public string ContentSnippet { get; set; } = null!;
+}
+
+public class LinkPreviewDto
+{
+    public string Url { get; set; } = null!;
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public string? ImageUrl { get; set; }
 }
 
 public class SendChatMessageRequest
 {
-    /// <summary>
-    /// Raw message text. <see cref="HomeworkCentral.Api.Chat.ChatMessageService"/> also enforces this same length limit
-    /// server-side (defense in depth), but these attributes let [ApiController]'s automatic
-    /// model validation reject empty/oversized payloads with a 400 before the request even
-    /// reaches the controller action, rather than falling through to a 403.
-    /// </summary>
-    [Required]
-    [StringLength(4000, MinimumLength = 1)]
-    public string Content { get; set; } = null!;
+    [StringLength(4000)]
+    public string? Content { get; set; }
 
-    /// <summary>
-    /// Optional id of the message being replied to. Silently ignored (message sends as a normal,
-    /// non-reply message) if it doesn't resolve to a real, visible message in the same room —
-    /// this keeps a stale or cross-scope reply target from blocking the send entirely.
-    /// </summary>
     public Guid? ReplyToMessageId { get; set; }
+    public List<Guid>? AttachmentIds { get; set; }
+    public ChatForwardSnapshotDto? ForwardedFrom { get; set; }
+}
+
+public class CastMessageVoteRequest
+{
+    [Range(-1, 1)]
+    public int Value { get; set; }
 }
 
 public class ChatTypingDto
 {
     public Guid UserId { get; set; }
     public string Username { get; set; } = null!;
+}
+
+/// <summary>Slim user hit for chat mentions and ticket intake (no role/permission payload).</summary>
+public class ChatUserLookupDto
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = null!;
+    public string Email { get; set; } = null!;
 }

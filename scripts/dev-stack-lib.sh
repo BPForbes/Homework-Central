@@ -9,6 +9,7 @@ DEV_STACK_ENV_FILE="$DEV_STACK_REPO_ROOT/.env"
 DEV_STACK_POSTGRES_PASSWORD="postgres"
 DEV_STACK_POSTGRES_HOST_PORT="5434"
 DEV_STACK_FCAPTCHA_HOST_PORT="3010"
+DEV_STACK_CLAMAV_HOST_PORT="3310"
 DEV_STACK_SERVER_REGISTERED=0
 
 trim_dev_env_whitespace() {
@@ -354,6 +355,79 @@ stop_dev_stack_fcaptcha() {
   docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" stop fcaptcha >/dev/null 2>&1 || true
 }
 
+# ClamAV (see docker-compose.yml's `clamav` service) backs upload malware scanning
+# (appsettings.Development.json enables it). Like FCaptcha it is stateless from the app's
+# point of view, so it is started alongside Postgres and stopped whenever Postgres is.
+# Unlike FCaptcha, readiness is best-effort: the first run downloads virus signatures
+# (minutes), and the API scanner fails open (NotScanned) while clamd is unreachable, so a
+# slow ClamAV must never block the dev stack.
+start_dev_stack_clamav_container() {
+  local port="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 || return 1
+
+  export CLAMAV_HOST_PORT="$port"
+  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d clamav
+}
+
+test_dev_clamav_connection() {
+  local port="$1"
+  local reply=""
+  if command -v nc >/dev/null 2>&1; then
+    reply="$(printf 'PING\n' | nc -w 2 127.0.0.1 "$port" 2>/dev/null || true)"
+    [[ "$reply" == PONG* ]]
+  else
+    # Fallback: TCP connect check only (no PING round-trip without nc).
+    (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+  fi
+}
+
+# ClamAV is opt-in for local dev: clamd keeps ~1.2-1.5g of signatures resident, which is a
+# lot on small machines, and the API scanner fails open (NotScanned) when it's absent.
+dev_clamav_opted_in() {
+  [[ "${HC_ENABLE_CLAMAV:-0}" == "1" ]]
+}
+
+ensure_dev_clamav_running() {
+  local port="$1"
+  local attempt
+
+  if ! dev_clamav_opted_in; then
+    return 0
+  fi
+
+  if test_dev_clamav_connection "$port"; then
+    return 0
+  fi
+
+  printf '==> Starting Docker ClamAV on localhost:%s\n' "$port"
+  start_dev_stack_clamav_container "$port" || return 1
+
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    if test_dev_clamav_connection "$port"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  printf '==> ClamAV is still loading virus signatures (first run downloads them; can take minutes).\n'
+  printf '==> Uploads scan as NotScanned (fail-open) until clamd is ready; check: docker compose logs clamav\n'
+  return 0
+}
+
+stop_dev_stack_clamav() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" stop clamav >/dev/null 2>&1 || true
+}
+
+# The local API defaults to the in-memory cache (appsettings.Development.json blanks the
+# Redis connection string), but docker-compose.yml defines a `redis` service a developer may
+# have started by hand. Stop it with the rest of the stack; a no-op when it was never started.
+stop_dev_stack_redis() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" stop redis >/dev/null 2>&1 || true
+}
+
 _join_dev_stack_if_managed() {
   local port="$1"
   if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
@@ -415,6 +489,8 @@ _init_dev_stack_state_impl() {
       printf '==> Stopping previous dev stack Postgres session\n'
       stop_dev_stack_postgres "$state_port"
       stop_dev_stack_fcaptcha
+      stop_dev_stack_clamav
+      stop_dev_stack_redis
     fi
   fi
 
@@ -431,6 +507,8 @@ _stop_dev_stack_impl() {
     if [[ -n "$state_port" ]]; then
       stop_dev_stack_postgres "$state_port"
       stop_dev_stack_fcaptcha
+      stop_dev_stack_clamav
+      stop_dev_stack_redis
     fi
   fi
 
@@ -469,6 +547,8 @@ _unregister_dev_stack_server_impl() {
   rm -f "$DEV_STACK_STATE_FILE"
   stop_dev_stack_postgres "$state_port"
   stop_dev_stack_fcaptcha
+  stop_dev_stack_clamav
+  stop_dev_stack_redis
   DEV_STACK_SERVER_REGISTERED=0
   printf '==> Stopped Docker Postgres and freed localhost port\n'
 }

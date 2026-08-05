@@ -1,5 +1,7 @@
 using System.Collections;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
+using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Chat;
 using HomeworkCentral.Api.Chat.Mentions;
@@ -9,6 +11,7 @@ using HomeworkCentral.Api.Hubs;
 using HomeworkCentral.Api.Models;
 using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Tenancy;
+using HomeworkCentral.Api.Uploads;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -59,7 +62,9 @@ internal static class ChatMessageServiceTestSupport
             new MentionCooldownTracker(),
             new NoRecipientsMentionResolver(),
             new NoOpRoleAppearanceService(),
-            new NoOpHubContext());
+            new NoOpHubContext(),
+            new NoOpAssessmentQueue(),
+            new NoOpAttachmentAccessTokenService());
 
     internal static HttpContext BuildHttpContext(Guid userId, string username)
     {
@@ -189,5 +194,26 @@ internal static class ChatMessageServiceTestSupport
             public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
                 Task.CompletedTask;
         }
+    }
+
+    internal sealed class NoOpAssessmentQueue : IAssessmentQueue
+    {
+        public bool TryEnqueue(AssessmentMessageJob job) => true;
+
+        public async IAsyncEnumerable<AssessmentMessageJob> ReadAllAsync(
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+    }
+
+    internal sealed class NoOpAttachmentAccessTokenService : IAttachmentAccessTokenService
+    {
+        public string MintDownloadUrl(Guid attachmentId, Guid userId) =>
+            $"/api/chat/attachments/{attachmentId}";
+
+        public Task<bool> TryValidateAsync(Guid attachmentId, string accessToken, CancellationToken ct = default) =>
+            Task.FromResult(false);
     }
 }

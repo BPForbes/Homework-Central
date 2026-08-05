@@ -10,7 +10,52 @@ gate for account verification, and an admin "Server Maintenance" panel.
 
 - `backend/` — .NET API (`HomeworkCentral.Api`), EF Core migrations, SignalR chat hubs.
 - `frontend/` — React + TypeScript + Vite SPA, plain CSS (no Tailwind/component library).
-- `scripts/` — local dev stack helpers (`run-dev.sh` / `run-dev.ps1`, etc.); see `SETUP.md`.
+- `scripts/` — local dev stack helpers (`run-dev.sh` / `run-dev.ps1`, etc.); see [`README.md`](./README.md)
+  for application setup and [`SETUP.md`](./SETUP.md) for optional local contributor tooling.
+- `docs/` — architecture and engineering standards; start at [`docs/README.md`](./docs/README.md).
+
+## Comments, documentation, naming, and readability
+
+Before adding or modifying source comments, XML documentation, Markdown files, naming,
+or function structure, read and follow the Comment Documentation Guide at
+[`docs/COMMENT_DOCUMENTATION_GUIDE.md`](./docs/COMMENT_DOCUMENTATION_GUIDE.md).
+
+Inspect the implementation, related infrastructure, tests, configuration, and the
+current branch diff against the integration base. Improve structure, names, and
+explicit type declarations before adding comments.
+
+Hard rules:
+
+- Do not use C# `var`; use explicit local and iteration types.
+- Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
+- Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
+  unindented at the end of the function.
+- Prefer speakable names. Abbreviations that cannot be spoken clearly as words or standard
+  domain terms must be renamed (for example prefer `roomId` over `rid`, `eligibleUsers`
+  over `eus`). Conventional short forms such as `ct` for `CancellationToken` and small
+  loop indices remain acceptable.
+- Prefer collection transforms over hand-written loops when clearer: TypeScript/Python-style
+  `map` / `filter` / `reduce`, and the C# LINQ equivalents `Select()` / `Where()` /
+  `Aggregate()` (also `Sum()` / `ToDictionary()` / `ToHashSet()` where they fit). Use an
+  explicit loop for multi-step side effects, early exits that do not map cleanly, or
+  performance-critical inner kernels.
+- Comments must explain project-specific intent, constraints, trust boundaries, state
+  ownership, lifecycle behavior, or non-obvious implementation decisions.
+- Comments must not be self-referential and must not mention an AI agent, prompt,
+  conversation, authoring process, or temporary branch state.
+- Prefer updating an authoritative existing Markdown document over creating a duplicate.
+- Functions with high cognitive or cyclomatic complexity, excessive nesting, or a
+  structural readability score below the accepted threshold must be split into cohesive,
+  precisely named subfunctions unless an approved exception applies.
+
+## Optional local tooling
+
+When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
+
+- Prefer `codegraph search <term>` over broad directory reads.
+- Do not stage generated local directories (`.codegraph/`, `.code-review-graph/`,
+  `claude-mem/`, `node_modules/`).
+- Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
 ## UI and styling work
 
@@ -36,3 +81,19 @@ Key implementation entry points:
 - FontAwesome (`@fortawesome/*`) for icons.
 - Keep component structure changes and pure styling changes separate where possible;
   most visual work in this app can be done at the CSS-token level without touching JSX.
+- CI rejects unparameterized EF raw SQL (`FromSqlRaw` / `ExecuteSqlRaw` / `SqlQueryRaw`)
+  in `backend/HomeworkCentral.Api`.
+
+## Git branches and pull requests
+
+Minimize branches and PRs. Do not open extra workstreams unless a human asks.
+
+- **On `main` only:** create a feature branch when starting work that needs one.
+- **Already on a non-`main` branch:** stay on that branch. Do **not** create a new
+  branch unless a human explicitly asks for a separate branch.
+- **Opening or updating a PR while on a non-`main` branch:** first check whether an
+  open PR already exists for the current branch (or for the integration branch the
+  active work is targeting). If one exists, push commits there and update that PR.
+  Do **not** open a new PR unless a human explicitly asks for a separate PR.
+- Prefer landing related follow-up work on the existing integration PR (for example
+  `feature/ticket-rooms` / PR #58) instead of stacking new `cursor/*` PRs.

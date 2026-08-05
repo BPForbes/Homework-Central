@@ -26,6 +26,11 @@ if ($PreRegistered) {
 Write-Host 'Homework Central frontend - http://localhost:5173' -ForegroundColor Cyan
 
 $env:VITE_HC_DEV_BYPASS = 'true' # Exposes the /devlogin route in the frontend router.
+if (-not (Test-Path Env:NODE_OPTIONS) -or [string]::IsNullOrWhiteSpace($env:NODE_OPTIONS)) {
+    # Vite normally stays well below this; the cap protects an 8 GiB workstation
+    # from plugin/cache growth. An explicit caller value always wins.
+    $env:NODE_OPTIONS = '--max-old-space-size=384'
+}
 
 Push-Location $FrontendDir
 try {
