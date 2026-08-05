@@ -439,7 +439,8 @@ export function NeuralNet() {
     setBusyId('training')
     try {
       await neuralNetApi.startTraining({
-        ticketCount: continuous ? 1 : ticketCount,
+        // ticketCount 0 reinforces continuous even if the boolean is dropped in transit.
+        ticketCount: continuous ? 0 : ticketCount,
         maxPassesPerTicket: continuous ? 1 : maxPasses,
         mode,
         continuous,

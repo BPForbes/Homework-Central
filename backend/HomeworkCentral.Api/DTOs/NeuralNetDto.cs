@@ -77,8 +77,9 @@ public sealed class StartNeuralNetTrainingRequest
     public NeuralTrainingMode Mode { get; set; } = NeuralTrainingMode.Both;
 
     /// <summary>
-    /// When true, train one ticket / one message at a time until the session is cancelled.
+    /// When true, train one ticket / one message at a time until the session is stopped.
     /// <see cref="TicketCount"/> is ignored; stored as RequestedTicketCount = 0.
+    /// TicketCount &lt;= 0 is also treated as continuous so a missing flag cannot become a one-shot run.
     /// </summary>
     public bool Continuous { get; set; }
 }

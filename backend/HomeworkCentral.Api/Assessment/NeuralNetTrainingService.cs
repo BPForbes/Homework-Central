@@ -212,8 +212,9 @@ public sealed class NeuralNetTrainingService(
     public async Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(
         StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default)
     {
-        // Continuous mode stores RequestedTicketCount=0 (no fixed budget); one ticket/message per step.
-        bool continuous = request.Continuous;
+        // Continuous = train until Stop. Prefer the flag; TicketCount <= 0 is also continuous
+        // so a dropped `continuous` boolean still cannot collapse into a one-shot finite run.
+        bool continuous = ResolveContinuousTraining(request.Continuous, request.TicketCount);
         NeuralNetTrainingSession session = new()
         {
             SessionId = Guid.NewGuid(), StartedByUserId = actorUserId,
@@ -392,16 +393,39 @@ public sealed class NeuralNetTrainingService(
         TrainingSessionTimings timings = new();
         try
         {
+            // Continuous sessions must not FailSyntheticSessionAsync on transient step errors —
+            // only an explicit stop (or host shutdown) ends them.
+            if (IsContinuousSession(session))
+            {
+                try
+                {
+                    SyntheticGeneratorFeedbackBuffer feedback = new();
+                    await RunContinuousSyntheticSessionAsync(session, timings, feedback, sessionToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Defensive: continuous loop should absorb step failures; if something escapes,
+                    // keep the session alive only until cancel — never mark Completed/Failed here.
+                    logger.LogError(
+                        ex,
+                        "Continuous training session {SessionId} hit an unexpected outer failure; waiting for stop.",
+                        sessionId);
+                    await WaitUntilContinuousCancelledAsync(sessionToken);
+                    throw new OperationCanceledException(sessionToken);
+                }
+
+                // RunContinuous only returns after cancellation throws; treat a clean return as stop.
+                throw new OperationCanceledException(sessionToken);
+            }
+
             await OperationalExceptionGuard.RunAsync(
                 async () =>
                 {
                     SyntheticGeneratorFeedbackBuffer feedback = new();
-                    if (session.RequestedTicketCount == 0)
-                    {
-                        await RunContinuousSyntheticSessionAsync(session, timings, feedback, sessionToken);
-                        return;
-                    }
-
                     List<(int TicketIndex, SyntheticTicket? Ticket)> tickets =
                         await GenerateSyntheticTicketsAsync(session, timings, feedback, sessionToken);
                     await RunChatMonitoringRunsAsync(session, tickets, timings, feedback, sessionToken);
@@ -425,6 +449,31 @@ public sealed class NeuralNetTrainingService(
         finally
         {
             cancellationRegistry.Unregister(sessionId);
+        }
+    }
+
+    private static bool IsContinuousSession(NeuralNetTrainingSession session) =>
+        session.RequestedTicketCount == 0;
+
+    /// <summary>
+    /// Continuous when the client sets the flag or sends a non-positive ticket budget.
+    /// Finite runs always clamp to at least one ticket.
+    /// </summary>
+    public static bool ResolveContinuousTraining(bool continuousFlag, int ticketCount) =>
+        continuousFlag || ticketCount <= 0;
+
+    /// <summary>Blocks until the continuous session token is cancelled (Stop or host shutdown).</summary>
+    private static async Task WaitUntilContinuousCancelledAsync(CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return;
+
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
         }
     }
 
@@ -468,7 +517,8 @@ public sealed class NeuralNetTrainingService(
     private const int ContinuousReplaySnapshotInterval = 10;
 
     /// <summary>
-    /// Trains one synthetic ticket (single message) at a time until stopped.
+    /// Trains one synthetic ticket (single message) at a time until Stop cancels the session token.
+    /// Generator failures, train-step exceptions, and snapshot OOM never complete or fail the session.
     /// Worker replay JSON is snapshotted periodically (and on stop) so downloads work mid-session.
     /// </summary>
     private async Task RunContinuousSyntheticSessionAsync(
@@ -515,117 +565,51 @@ public sealed class NeuralNetTrainingService(
         int ticketIndex = 0;
         try
         {
-            while (!ct.IsCancellationRequested)
+            // Continuous has no ticket budget — only session cancel (Stop) or host shutdown exits.
+            while (true)
             {
                 ct.ThrowIfCancellationRequested();
                 ticketIndex++;
-                string targetCategory = coverage.NextTarget(session.Mode, ticketIndex);
-
-                System.Diagnostics.Stopwatch llm1Watch = System.Diagnostics.Stopwatch.StartNew();
-                SyntheticTicket? generated = await GenerateSyntheticTicketAsync(
-                    session.Mode, timings, feedback.Hints, targetCategory, ct);
-                llm1Watch.Stop();
-                timings.TrainingLlmScenarioMs += llm1Watch.ElapsedMilliseconds;
-
-                if (generated is null)
+                try
                 {
+                    await RunContinuousTrainingStepAsync(
+                        session,
+                        timings,
+                        feedback,
+                        coverage,
+                        contexts,
+                        persistenceGate,
+                        ticketIndex,
+                        ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (AggregateException aggregate) when (ct.IsCancellationRequested
+                    || aggregate.Flatten().InnerExceptions.All(inner => inner is OperationCanceledException))
+                {
+                    throw new OperationCanceledException(ct);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Continuous training step {TicketIndex} for session {SessionId} failed; continuing until stop.",
+                        ticketIndex,
+                        session.SessionId);
                     PublishProgress(session, progress => progress with
                     {
-                        Phase = "Continuous training · waiting on generator",
+                        Phase = "Continuous training · step error, retrying",
                         TicketsRequested = ticketIndex,
                         TicketsGenerated = ticketIndex,
-                        LatestTrainingLlmSummary = $"Ticket {ticketIndex}: generation failed (target {targetCategory})",
+                        LatestTrainingLlmSummary = Truncate(
+                            $"Ticket {ticketIndex}: step error — {ex.Message}", 280),
                         GeneratorHints = feedback.Hints.ToList(),
                     });
-                    // Back off so an offline LLM does not spin the loop at full speed.
                     await Task.Delay(TimeSpan.FromSeconds(2), ct);
-                    continue;
                 }
-
-                SyntheticTicket singleMessageTicket = ToSingleMessageTicket(generated);
-                if (ShouldSampleGeneratorAudit(session.SessionId, ticketIndex))
-                {
-                    // A REVISE verdict reworks the prompt in place; the loop always keeps training.
-                    singleMessageTicket = ToSingleMessageTicket(await CollectBalancedGeneratorAuditAsync(
-                        session, singleMessageTicket, feedback, timings, coverage, ct));
-                }
-                else
-                {
-                    feedback.RecordCoverageGaps(
-                        coverage.Underrepresented(
-                            IsModelDomainMatch(NeuralModelKindChatMonitoring.Tutoring, singleMessageTicket.Category)
-                                ? NeuralModelKindChatMonitoring.Tutoring
-                                : NeuralModelKindChatMonitoring.Moderation));
-                }
-
-                PublishProgress(session, progress => progress with
-                {
-                    Phase = "Continuous training",
-                    TicketsRequested = ticketIndex,
-                    TicketsGenerated = ticketIndex,
-                    LatestTrainingLlmSummary =
-                        $"Ticket {ticketIndex}: {singleMessageTicket.Category} · 1 message",
-                    CurrentEvaluationData = FormatEvaluationData(ticketIndex, singleMessageTicket, singleMessageTicket.Messages.FirstOrDefault()),
-                    GeneratorHints = feedback.Hints.ToList(),
-                });
-
-                List<Task> trainTasks = contexts
-                    .Where(runContext => ShouldTrainContinuousTicket(
-                        session.SessionId,
-                        ticketIndex,
-                        runContext.Run.ChatMonitoringKind,
-                        singleMessageTicket.Category))
-                    .Select(async runContext =>
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        ChatMonitoringNeuralModelStateSnapshot topologyState =
-                            runContext.Telemetry.GetStateSnapshot();
-                        PublishProgress(session, progress => progress with
-                        {
-                            Phase = $"Continuous · {runContext.Run.ChatMonitoringKind}",
-                            ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
-                            PathTone = "forward",
-                            LayerWidths = topologyState.LayerWidths,
-                            LayerLabels = topologyState.LayerLabels,
-                        });
-
-                        await ProcessSyntheticTicketAsync(
-                            runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
-                        await FlushPendingTrainingAsync(runContext, ct);
-                        await runContext.Batch.FlushAsync(ct);
-
-                        // Replay JSON grows into the megabytes; rewriting it every step saturates the
-                        // DB connection, so snapshot periodically and always on stop/completion.
-                        if (ticketIndex % ContinuousReplaySnapshotInterval == 0)
-                        {
-                            string? snapshotJson = NeuralNetReplaySerializer.TrySerialize(
-                                runContext.Replay.Build(ReplayCompletionStatus.Partial, epochs: Options.LocalEpochs));
-                            if (snapshotJson is not null)
-                                runContext.Run.WorkerReplayJson = snapshotJson;
-                            else
-                                logger.LogWarning(
-                                    "Skipped continuous replay snapshot for session {SessionId} (insufficient memory).",
-                                    session.SessionId);
-                        }
-                    })
-                    .ToList();
-
-                await Task.WhenAll(trainTasks);
-                await PersistAsync(persistenceGate, timings, ct);
-
-                PublishProgress(session, progress => progress with
-                {
-                    Phase = "Continuous training",
-                    TicketsRequested = ticketIndex,
-                    TicketsGenerated = ticketIndex,
-                    TicketsProcessed = ticketIndex,
-                    MessagesProcessed = progress.MessagesProcessed + 1,
-                    ExamplesPersisted = timings.ExamplesPersisted,
-                    GeneratorHints = feedback.Hints.ToList(),
-                });
             }
-
-            ct.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)
         {
@@ -654,6 +638,122 @@ public sealed class NeuralNetTrainingService(
             await PersistAsync(persistenceGate, timings, CancellationToken.None);
             throw;
         }
+    }
+
+    private async Task RunContinuousTrainingStepAsync(
+        NeuralNetTrainingSession session,
+        TrainingSessionTimings timings,
+        SyntheticGeneratorFeedbackBuffer feedback,
+        SyntheticConceptCoverageSampler coverage,
+        List<ChatMonitoringRunContext> contexts,
+        SemaphoreSlim persistenceGate,
+        int ticketIndex,
+        CancellationToken ct)
+    {
+        string targetCategory = coverage.NextTarget(session.Mode, ticketIndex);
+
+        System.Diagnostics.Stopwatch llm1Watch = System.Diagnostics.Stopwatch.StartNew();
+        SyntheticTicket? generated = await GenerateSyntheticTicketAsync(
+            session.Mode, timings, feedback.Hints, targetCategory, ct);
+        llm1Watch.Stop();
+        timings.TrainingLlmScenarioMs += llm1Watch.ElapsedMilliseconds;
+
+        if (generated is null)
+        {
+            PublishProgress(session, progress => progress with
+            {
+                Phase = "Continuous training · waiting on generator",
+                TicketsRequested = ticketIndex,
+                TicketsGenerated = ticketIndex,
+                LatestTrainingLlmSummary = $"Ticket {ticketIndex}: generation failed (target {targetCategory})",
+                GeneratorHints = feedback.Hints.ToList(),
+            });
+            // Back off so an offline LLM does not spin the loop at full speed.
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            return;
+        }
+
+        SyntheticTicket singleMessageTicket = ToSingleMessageTicket(generated);
+        if (ShouldSampleGeneratorAudit(session.SessionId, ticketIndex))
+        {
+            // A REVISE verdict reworks the prompt in place; the loop always keeps training.
+            singleMessageTicket = ToSingleMessageTicket(await CollectBalancedGeneratorAuditAsync(
+                session, singleMessageTicket, feedback, timings, coverage, ct));
+        }
+        else
+        {
+            feedback.RecordCoverageGaps(
+                coverage.Underrepresented(
+                    IsModelDomainMatch(NeuralModelKindChatMonitoring.Tutoring, singleMessageTicket.Category)
+                        ? NeuralModelKindChatMonitoring.Tutoring
+                        : NeuralModelKindChatMonitoring.Moderation));
+        }
+
+        PublishProgress(session, progress => progress with
+        {
+            Phase = "Continuous training",
+            TicketsRequested = ticketIndex,
+            TicketsGenerated = ticketIndex,
+            LatestTrainingLlmSummary =
+                $"Ticket {ticketIndex}: {singleMessageTicket.Category} · 1 message",
+            CurrentEvaluationData = FormatEvaluationData(ticketIndex, singleMessageTicket, singleMessageTicket.Messages.FirstOrDefault()),
+            GeneratorHints = feedback.Hints.ToList(),
+        });
+
+        List<Task> trainTasks = contexts
+            .Where(runContext => ShouldTrainContinuousTicket(
+                session.SessionId,
+                ticketIndex,
+                runContext.Run.ChatMonitoringKind,
+                singleMessageTicket.Category))
+            .Select(async runContext =>
+            {
+                ct.ThrowIfCancellationRequested();
+                ChatMonitoringNeuralModelStateSnapshot topologyState =
+                    runContext.Telemetry.GetStateSnapshot();
+                PublishProgress(session, progress => progress with
+                {
+                    Phase = $"Continuous · {runContext.Run.ChatMonitoringKind}",
+                    ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
+                    PathTone = "forward",
+                    LayerWidths = topologyState.LayerWidths,
+                    LayerLabels = topologyState.LayerLabels,
+                });
+
+                await ProcessSyntheticTicketAsync(
+                    runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
+                await FlushPendingTrainingAsync(runContext, ct);
+                await runContext.Batch.FlushAsync(ct);
+
+                // Replay JSON grows into the megabytes; rewriting it every step saturates the
+                // DB connection, so snapshot periodically and always on stop/completion.
+                if (ticketIndex % ContinuousReplaySnapshotInterval == 0)
+                {
+                    string? snapshotJson = NeuralNetReplaySerializer.TrySerialize(
+                        runContext.Replay.Build(ReplayCompletionStatus.Partial, epochs: Options.LocalEpochs));
+                    if (snapshotJson is not null)
+                        runContext.Run.WorkerReplayJson = snapshotJson;
+                    else
+                        logger.LogWarning(
+                            "Skipped continuous replay snapshot for session {SessionId} (insufficient memory).",
+                            session.SessionId);
+                }
+            })
+            .ToList();
+
+        await Task.WhenAll(trainTasks);
+        await PersistAsync(persistenceGate, timings, ct);
+
+        PublishProgress(session, progress => progress with
+        {
+            Phase = "Continuous training",
+            TicketsRequested = ticketIndex,
+            TicketsGenerated = ticketIndex,
+            TicketsProcessed = ticketIndex,
+            MessagesProcessed = progress.MessagesProcessed + 1,
+            ExamplesPersisted = timings.ExamplesPersisted,
+            GeneratorHints = feedback.Hints.ToList(),
+        });
     }
 
     private bool ShouldTrainContinuousTicket(

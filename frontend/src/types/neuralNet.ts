@@ -117,8 +117,10 @@ export interface ChatMonitoringNeuralModelRun {
   failureReason?: string
 }
 export interface StartNeuralNetTrainingRequest {
+  /** Use 0 with continuous=true (train until Stop). Finite runs use 1–10. */
   ticketCount: number
   maxPassesPerTicket: number
   mode: NeuralTrainingMode
+  /** When true, trains until Stop; ticketCount is ignored server-side (stored as 0). */
   continuous?: boolean
 }
