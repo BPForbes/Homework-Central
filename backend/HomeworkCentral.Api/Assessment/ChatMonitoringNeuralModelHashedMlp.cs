@@ -3,9 +3,10 @@ using System.Security.Cryptography;
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
-/// CPU hashed MLP for chat monitoring, shaped for an eventual LLM-free stack.
-/// Linear algebra (matrix-vector products, outer products, transpose-multiply)
-/// runs through <see cref="NeuralNetwork"/> / Math.NET Numerics.
+/// Hashed MLP for chat monitoring, shaped for an eventual LLM-free stack.
+/// Silent/compact mini-batch SGD prefers LibTorch (CUDA when present, else CPU) via
+/// <see cref="NeuralTorchMixedHeadBatch"/>; Full replay traces and checkpoints stay on
+/// Math.NET column-major GEMV so IEEE754 flatten order is unchanged.
 /// <list type="bullet">
 /// <item>Hidden layers: leaky ReLU + He init</item>
 /// <item>Evidence/relevance: sigmoid + BCE (independent probabilities)</item>
@@ -151,7 +152,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             bool earlyStopEnabled = evidenceTolerance > 0f || relevanceTolerance > 0f || lossStopThreshold > 0f;
             bool captureFull = detail == NeuralTrainingTraceDetail.Full;
             bool recordTrace = detail != NeuralTrainingTraceDetail.None;
-            string optimizer = onSampleInputGradients is null
+            // Full traces stay on Math.NET for per-layer replay; silent/compact may use LibTorch.
+            bool preferTorch = !captureFull && NeuralTorchRuntime.PreferAccelerated;
+            string optimizerBase = onSampleInputGradients is null
                 ? (n == 1 ? "momentum-SGD" : "momentum-mini-batch-SGD")
                 : (n == 1 ? "momentum-cascade-chain-rule-SGD" : "momentum-cascade-chain-rule-mini-batch-SGD");
 
@@ -177,31 +180,67 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 float[][] inputGradients = new float[n][];
                 Action<float>? trackGradient = recordTrace ? gradientMagnitudes.Track : null;
 
-                for (int i = 0; i < n; i++)
+                bool torchEpoch = false;
+                NeuralTorchMixedHeadBatch.BatchGradientResult torchResult = default;
+                if (preferTorch)
                 {
-                    NeuralNetworkForwardState cache = network.Forward(encoded[i], captureTrace: false);
-                    float evidence = cache.Activations[^1][0];
-                    float relevance = cache.Activations[^1][1];
+                    torchEpoch = NeuralTorchMixedHeadBatch.TryAccumulate(
+                        network,
+                        encoded,
+                        batch,
+                        categoryIndices,
+                        gradients,
+                        computeInputGradients: onSampleInputGradients is not null,
+                        out torchResult);
+                }
+
+                if (torchEpoch)
+                {
+                    inputGradients = torchResult.InputGradients;
                     if (recordTrace)
                     {
-                        evidenceProbSum += evidence;
-                        relevanceProbSum += relevance;
-                        evidenceLogitSum += cache.PreActivations[^1][0];
-                        relevanceLogitSum += cache.PreActivations[^1][1];
-                        evidenceLossSum += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
-                        relevanceLossSum += NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
-                        categoryLossSum += network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
+                        evidenceLossSum = torchResult.EvidenceLossSum;
+                        relevanceLossSum = torchResult.RelevanceLossSum;
+                        categoryLossSum = torchResult.CategoryLossSum;
+                        evidenceProbSum = torchResult.EvidenceProbSum;
+                        relevanceProbSum = torchResult.RelevanceProbSum;
+                        evidenceLogitSum = torchResult.EvidenceLogitSum;
+                        relevanceLogitSum = torchResult.RelevanceLogitSum;
+                        gradientMagnitudes.TrackAggregate(torchResult.GradSqSum, torchResult.MaxAbsGrad);
                     }
-
-                    ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
-                    inputGradients[i] = network.AccumulateMixedHeadGradients(
-                        cache,
-                        targets.Evidence,
-                        targets.Relevance,
-                        targets.CategoryIndex,
-                        gradients,
-                        trackGradient);
                 }
+                else
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        NeuralNetworkForwardState cache = network.Forward(encoded[i], captureTrace: false);
+                        float evidence = cache.Activations[^1][0];
+                        float relevance = cache.Activations[^1][1];
+                        if (recordTrace)
+                        {
+                            evidenceProbSum += evidence;
+                            relevanceProbSum += relevance;
+                            evidenceLogitSum += cache.PreActivations[^1][0];
+                            relevanceLogitSum += cache.PreActivations[^1][1];
+                            evidenceLossSum += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
+                            relevanceLossSum += NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
+                            categoryLossSum += network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
+                        }
+
+                        ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
+                        inputGradients[i] = network.AccumulateMixedHeadGradients(
+                            cache,
+                            targets.Evidence,
+                            targets.Relevance,
+                            targets.CategoryIndex,
+                            gradients,
+                            trackGradient);
+                    }
+                }
+
+                string optimizer = torchEpoch
+                    ? $"{optimizerBase}+{NeuralTorchRuntime.BackendLabel}"
+                    : optimizerBase;
 
                 onSampleInputGradients?.Invoke(inputGradients);
 
@@ -471,6 +510,17 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             if (abs > 0f && abs < _minNonZero)
                 _minNonZero = abs;
             GradSqSum += gradient * gradient;
+        }
+
+        /// <summary>Import LibTorch batch gradient norms without per-element callbacks.</summary>
+        public void TrackAggregate(float gradSqSum, float maxAbsGrad)
+        {
+            if (float.IsFinite(gradSqSum) && gradSqSum > 0f)
+                GradSqSum += gradSqSum;
+            if (float.IsFinite(maxAbsGrad) && maxAbsGrad > MaxAbs)
+                MaxAbs = maxAbsGrad;
+            if (float.IsFinite(maxAbsGrad) && maxAbsGrad > 0f && maxAbsGrad < _minNonZero)
+                _minNonZero = maxAbsGrad;
         }
 
         public float ResolveMinNonZero() => _minNonZero >= float.MaxValue ? 0f : _minNonZero;

@@ -356,9 +356,15 @@ confidence like on-topic subject-channel help. Score reasons label
 `appliedSubjects` separately from `messageRoomChannel` so intake subjects are not
 mistaken for the room the user typed in.
 
-Dense hashed-MLP training uses column-major GEMV, not matrix powers \(A^n\). Eigen
-diagonalization (\(A^n = P D^n P^{-1}\)) does not speed this feed-forward path; keep
-optimizing with silent traces, GEMV kernels, and capped warmup instead.
+Dense hashed-MLP training uses column-major GEMV on Math.NET for Full replay traces and
+checkpoints. Silent and compact mini-batch SGD prefers LibTorch via
+`NeuralTorchMixedHeadBatch` (`NeuralNetTraining:PreferTorchAccelerator`, default true):
+batched mixed-head BCE+CE backward on CUDA when `cuda.is_available()`, otherwise CPU
+LibTorch (`TorchSharp-cpu`). Gradients sync back into the same column-major buffers so
+momentum SGD, weight clips, and IEEE754 flatten order stay identical. Set
+`TorchDevice` to `cpu`, `cuda`, or `auto`. GPU hosts replace the `TorchSharp-cpu`
+package with `TorchSharp-cuda-linux` / `TorchSharp-cuda-windows`. Eigen diagonalization
+(\(A^n = P D^n P^{-1}\)) does not speed this feed-forward path.
 
 ### Live scoring path vs training path
 
