@@ -108,7 +108,7 @@ public static class NeuralTorchMixedHeadBatch
         NeuralNetworkGradientBuffers gradients,
         bool computeInputGradients)
     {
-        Device device = NeuralTorchRuntime.Device;
+        Device device = NeuralTorchRuntime.ResolveDevice();
         int batchSize = encodedInputs.Length;
         int inputSize = network.InputSize;
         int categoryCount = network.CategoryLabels.Count;

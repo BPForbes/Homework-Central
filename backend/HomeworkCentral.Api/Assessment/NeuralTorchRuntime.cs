@@ -1,6 +1,3 @@
-using TorchSharp;
-using static TorchSharp.torch;
-
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
@@ -18,7 +15,7 @@ public static class NeuralTorchRuntime
     private static string _devicePreference = "auto";
     private static bool _ready;
     private static bool _available;
-    private static Device _device = CPU;
+    private static bool _useCuda;
     private static string _backendLabel = "mathnet-cpu";
     private static string? _lastFailure;
 
@@ -42,9 +39,10 @@ public static class NeuralTorchRuntime
         get { lock (Gate) return _lastFailure; }
     }
 
-    public static Device Device
+    /// <summary>True when the bound LibTorch device is CUDA.</summary>
+    public static bool UsesCuda
     {
-        get { lock (Gate) return _device; }
+        get { lock (Gate) return _useCuda; }
     }
 
     /// <summary>Apply training options; safe to call more than once (tests / host restart).</summary>
@@ -60,15 +58,17 @@ public static class NeuralTorchRuntime
             _configured = true;
             _ready = false;
             _available = false;
+            _useCuda = false;
             _lastFailure = null;
             _backendLabel = "mathnet-cpu";
-            _device = CPU;
         }
     }
 
     /// <summary>
     /// Lazily loads LibTorch and selects CUDA when requested and present.
     /// Returns false when acceleration is disabled or native load fails.
+    /// Must not touch TorchSharp types until this method runs so Math.NET fallback
+    /// still works when LibTorch natives are missing.
     /// </summary>
     public static bool TryEnsureReady()
     {
@@ -100,19 +100,22 @@ public static class NeuralTorchRuntime
                     _ => true,
                 };
 
-                if (wantCuda && cuda.is_available())
+                // Resolve TorchSharp only inside this try so missing natives degrade to Math.NET.
+                bool cudaAvailable = TorchSharp.torch.cuda.is_available();
+                if (wantCuda && cudaAvailable)
                 {
-                    _device = CUDA;
+                    _useCuda = true;
                     _backendLabel = "torch-cuda";
+                    using TorchSharp.torch.Tensor probe = TorchSharp.torch.zeros(1, device: TorchSharp.torch.CUDA);
+                    _ = probe.item<float>();
                 }
                 else
                 {
                     if (_devicePreference == "cuda")
                         _lastFailure = "TorchDevice=cuda but cuda.is_available() is false; using CPU LibTorch.";
-                    _device = CPU;
+                    _useCuda = false;
                     _backendLabel = "torch-cpu";
-                    // Touch a tiny tensor so missing native binaries fail here, not mid-epoch.
-                    using Tensor probe = zeros(1, device: _device);
+                    using TorchSharp.torch.Tensor probe = TorchSharp.torch.zeros(1, device: TorchSharp.torch.CPU);
                     _ = probe.item<float>();
                 }
 
@@ -124,10 +127,18 @@ public static class NeuralTorchRuntime
             {
                 _available = false;
                 _ready = true;
+                _useCuda = false;
                 _backendLabel = "mathnet-cpu";
                 _lastFailure = exception.Message;
                 return false;
             }
         }
+    }
+
+    internal static TorchSharp.torch.Device ResolveDevice()
+    {
+        if (!TryEnsureReady())
+            throw new InvalidOperationException("LibTorch backend is not available.");
+        return _useCuda ? TorchSharp.torch.CUDA : TorchSharp.torch.CPU;
     }
 }
