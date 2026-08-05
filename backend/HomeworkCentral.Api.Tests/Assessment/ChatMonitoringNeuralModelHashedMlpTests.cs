@@ -224,7 +224,7 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
-    public void Compact_training_records_loss_without_parameter_deltas()
+    public void Compact_training_records_sparse_parameter_deltas_without_dense_forwards()
     {
         using ModerationChatMonitorNeuralNet model = new();
         ChatMonitoringNeuralModelInput input = new("Monitor for persistent-unwanted-contact.", "Repeated insults.", "You are worthless.", 0, 1f, .6f, .5f);
@@ -236,10 +236,18 @@ public class ChatMonitoringNeuralModelHashedMlpTests
             evidenceTolerance: 0.2f,
             relevanceTolerance: 0.2f,
             lossStopThreshold: 1.2f);
+        // Compact keeps only the newest epochs for the weight feed / viewer.
         Assert.True(trace.Iterations.Count >= 1);
-        Assert.True(trace.Iterations.Count <= 40);
-        Assert.All(trace.Iterations, iteration => Assert.Empty(iteration.Update.Parameters));
-        Assert.True(trace.Iterations[^1].LossAfterUpdate.TotalLoss > 0f);
+        Assert.True(trace.Iterations.Count <= 2);
+        Assert.All(trace.Iterations, iteration =>
+        {
+            Assert.NotEmpty(iteration.Update.Parameters);
+            Assert.Empty(iteration.BeforeUpdate.Features);
+            Assert.Empty(iteration.BeforeUpdate.NodeActivations);
+            Assert.Empty(iteration.AfterUpdate.Features);
+            Assert.Empty(iteration.AfterUpdate.NodeActivations);
+            Assert.True(iteration.LossAfterUpdate.TotalLoss > 0f);
+        });
     }
 
     [Fact]
