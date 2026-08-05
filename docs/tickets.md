@@ -1159,8 +1159,12 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs) | Synthetic training speed/quality knobs: generator-audit sampling, deterministic teacher labels, epochs, batching, compact replay. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs) | Per-session stop tokens for mid-run and continuous training. |
 
-Only an explicit stop (`POST /api/neural-net/training/{id}/stop`) ends a session. A running session
-with no live worker is marked stopped directly so the admin list cannot strand an unstoppable row.
+Only an explicit stop (`POST /api/neural-net/training/{id}/stop`) ends a continuous session.
+Continuous mode stores `RequestedTicketCount = 0` (also accepted when the client sends
+`ticketCount <= 0`). Generator failures, self-critique REVISE loops, train-step exceptions, and
+replay-snapshot memory pressure never mark the session Completed or Failed — the worker retries
+the next step until Stop. A running session with no live worker is marked stopped directly so the
+admin list cannot strand an unstoppable row.
 `GET /api/neural-net/training` projects replay presence flags rather than the JSON payloads: those
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
 Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
