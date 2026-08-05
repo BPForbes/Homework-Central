@@ -37,6 +37,15 @@ public class ChatMonitoringNeuralModelHashedMlpTests
             [SubjectMaskNames.Mathematics],
             SubjectMaskNames.Art);
         Assert.True(unrelated.RewardScale < snapshot.RewardScale);
+
+        SubjectSignalSnapshot offChannel = ChatMonitoringSubjectSignals.Resolve(
+            [SubjectMaskNames.Medicine],
+            channelGeneral: null);
+        Assert.Null(offChannel.ChannelGeneral);
+        Assert.Equal(ChatMonitoringSubjectSignals.OffChannelRewardScale, offChannel.RewardScale);
+        Assert.Equal(SubjectMaskNames.Medicine, ChatMonitoringSubjectSignals.ResolveChannelSubject("subject:Medicine:3"));
+        Assert.Null(ChatMonitoringSubjectSignals.ResolveChannelSubject("general:lobby"));
+        Assert.Null(ChatMonitoringSubjectSignals.ResolveChannelSubject("custom:abcdef"));
     }
 
     [Fact]

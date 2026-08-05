@@ -64,7 +64,7 @@ public sealed class AssessmentPipelineService(
         TicketOptions ticketOptions = options.Value;
         IReadOnlyList<float> messageEmbedding = ChatMonitoringFeatureEncoder.EmbedText(job.Content);
         List<ChatMessage> recentMessages = await LoadRecentRoomMessagesAsync(job, ct);
-        string contextSnapshot = BuildContextSnapshot(recentMessages);
+        string contextSnapshot = BuildContextSnapshot(recentMessages, job.RoomId);
         MessageScoringContext scoringContext = new(
             job,
             ticketOptions,
@@ -403,7 +403,10 @@ public sealed class AssessmentPipelineService(
                 studentScore = scoringResult.NeuralEvaluation.Prediction.Evidence,
                 studentConfidence = scoringResult.NeuralEvaluation.Prediction.Confidence,
                 studentCategory = scoringResult.NeuralEvaluation.Prediction.Category,
-                chatMonitoringKind = scoringResult.NeuralEvaluation.ChatMonitoringKind,
+                chatMonitoringKind = scoringResult.NeuralEvaluation.ChatMonitoringKind.ToString(),
+                roomId = scoringContext.Job.RoomId,
+                messageRoomChannel = ChatMonitoringSubjectSignals.ResolveChannelSubject(scoringContext.Job.RoomId) ?? "unscoped",
+                rewardScale = scoringResult.NeuralEvaluation.SubjectSignals.RewardScale,
                 reviewerInvoked = scoringResult.ReviewerEvaluationAttempt.ReviewerInvoked,
                 reviewerScore = scoringResult.ReviewerEvaluationAttempt.Review?.ReviewerScore,
                 contextMessageCount = scoringContext.RecentMessages.Count,
@@ -481,18 +484,21 @@ public sealed class AssessmentPipelineService(
     private static string AppendSubjectReason(string reasoning, SubjectSignalSnapshot subjects)
     {
         if (subjects.AppliedGenerals.Count == 0 && subjects.ChannelGeneral is null)
-            return reasoning;
+            return $"{reasoning} messageRoomChannel=unscoped; reward×{subjects.RewardScale:F2}.";
         string applied = subjects.AppliedGenerals.Count == 0 ? "none" : string.Join(", ", subjects.AppliedGenerals);
         string expertise = subjects.AppliedExpertise.Count == 0
             ? string.Empty
-            : $"; expertise=[{string.Join(", ", subjects.AppliedExpertise)}]";
+            : $"; appliedExpertise=[{string.Join(", ", subjects.AppliedExpertise)}]";
         string channel = subjects.ChannelGeneral ?? "unscoped";
-        return $"{reasoning} Applied=[{applied}]{expertise}; channel={channel}; exact={subjects.ExactMatch:F2}; cross={subjects.CrossSubjectSupport:F2}; reward×{subjects.RewardScale:F2}.";
+        return $"{reasoning} appliedSubjects=[{applied}]{expertise}; messageRoomChannel={channel}; exact={subjects.ExactMatch:F2}; cross={subjects.CrossSubjectSupport:F2}; reward×{subjects.RewardScale:F2}.";
     }
 
-    private static string BuildContextSnapshot(IEnumerable<ChatMessage> messages)
+    private static string BuildContextSnapshot(IEnumerable<ChatMessage> messages, string roomId)
     {
         StringBuilder builder = new();
+        builder.AppendLine($"messageRoomId={roomId}");
+        string? channelSubject = ChatMonitoringSubjectSignals.ResolveChannelSubject(roomId);
+        builder.AppendLine($"messageRoomChannel={channelSubject ?? "unscoped"}");
         foreach (ChatMessage message in messages)
         {
             string text = Truncate(message.RawContent, 400);

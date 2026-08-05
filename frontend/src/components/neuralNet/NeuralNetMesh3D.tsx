@@ -31,6 +31,8 @@ type Props = {
   frame: NeuralMeshFrame
   title?: string
   className?: string
+  /** Shared with SVG graph: 0 clustered, 1 preview, 2 max quality. */
+  detail?: number
 }
 
 const EMPTY_LABELS: string[] = []
@@ -88,7 +90,7 @@ export function edgeKeysFromDenseParameterIndexes(
   return keys
 }
 
-export function NeuralNetMesh3D({ layerWidths, layerLabels, frame, title, className }: Props) {
+export function NeuralNetMesh3D({ layerWidths, layerLabels, frame, title, className, detail = 2 }: Props) {
   const shellRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const workerRef = useRef<Worker | null>(null)
@@ -104,6 +106,7 @@ export function NeuralNetMesh3D({ layerWidths, layerLabels, frame, title, classN
   const [hud, setHud] = useState('Building mesh…')
 
   const labels = layerLabels ?? EMPTY_LABELS
+  const detailLevel = Math.max(0, Math.min(2, Math.floor(detail)))
   const maxSliceIndex = Math.max(0, layerWidths.length - 1)
   const clampedSliceIndex = Math.min(Math.max(0, sliceIndex), maxSliceIndex)
 
@@ -156,10 +159,11 @@ export function NeuralNetMesh3D({ layerWidths, layerLabels, frame, title, classN
       viewMode,
       slicePerspective,
       clampedSliceIndex,
+      detailLevel,
       size,
       orbitTick,
     }),
-    [clampedSliceIndex, frame, labels, layerWidths, orbitTick, size, slicePerspective, viewMode],
+    [clampedSliceIndex, detailLevel, frame, labels, layerWidths, orbitTick, size, slicePerspective, viewMode],
   )
 
   useEffect(() => {
@@ -183,6 +187,7 @@ export function NeuralNetMesh3D({ layerWidths, layerLabels, frame, title, classN
       viewMode,
       slicePerspective,
       sliceIndex: clampedSliceIndex,
+      detail: detailLevel,
       yaw: orbit.yaw,
       pitch: orbit.pitch,
       zoom: orbit.zoom,
@@ -193,7 +198,7 @@ export function NeuralNetMesh3D({ layerWidths, layerLabels, frame, title, classN
       colors: readThemeColors(),
     }
     worker.postMessage(payload)
-  }, [requestKey, clampedSliceIndex, frame, labels, layerWidths, size.height, size.width, slicePerspective, viewMode])
+  }, [requestKey, clampedSliceIndex, detailLevel, frame, labels, layerWidths, size.height, size.width, slicePerspective, viewMode])
 
   useEffect(() => {
     const canvas = canvasRef.current

@@ -347,6 +347,19 @@ Reviewer evidence and relevance use the configured `ReviewerBlendWeight` default
 output is still recorded. Synthetic training’s data-generator LLM owns input text
 (scenarios / messages); the live reviewer does not.
 
+Every chat message from a user with an active ticket watch is enqueued for scoring
+(`AssessmentMessageJob`). Tutor portal tickets (`FilterName=Tutor`) always use the
+Tutoring monitor. The message room id (`general:lobby`, `subject:Medicine:…`, ticket
+`custom:…`) is resolved into `messageRoomChannel`; off-subject rooms use
+`OffChannelRewardScale` (0.15) so General/lounge chatter cannot move tutoring
+confidence like on-topic subject-channel help. Score reasons label
+`appliedSubjects` separately from `messageRoomChannel` so intake subjects are not
+mistaken for the room the user typed in.
+
+Dense hashed-MLP training uses column-major GEMV, not matrix powers \(A^n\). Eigen
+diagonalization (\(A^n = P D^n P^{-1}\)) does not speed this feed-forward path; keep
+optimizing with silent traces, GEMV kernels, and capped warmup instead.
+
 ### Live scoring path vs training path
 
 Live scoring is message-driven and follows the [Assessment pipeline](#assessment-pipeline):
