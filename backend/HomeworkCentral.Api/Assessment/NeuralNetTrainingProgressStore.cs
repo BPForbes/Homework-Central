@@ -13,10 +13,17 @@ public sealed record NeuralNetTrainingLiveProgress(
     int ExamplesPersisted,
     int AuditsCompleted,
     string? ActiveChatMonitoringKind,
-    string? LatestLlm1Summary,
-    string? LatestLlm2Feedback,
+    /// <summary>Latest training-LLM scenario summary (generation / revision).</summary>
+    string? LatestTrainingLlmSummary,
+    /// <summary>Latest self-critique / audit line from the same training LLM.</summary>
+    string? LatestAuditFeedback,
     string? LatestLossSummary,
     IReadOnlyList<string> GeneratorHints,
+    /// <summary>Full audit feed for the current session instance (newest last).</summary>
+    IReadOnlyList<string> AuditFeedbackFeed,
+    /// <summary>Ticket/message currently under evaluation / training.</summary>
+    string? CurrentEvaluationData,
+    /// <summary>Per-node weight-update lines for the current mini-batch step.</summary>
     IReadOnlyList<string> WeightUpdateFeed,
     /// <summary>forward | reeval | backprop | accepted | revision | idle</summary>
     string PathTone,
@@ -26,7 +33,14 @@ public sealed record NeuralNetTrainingLiveProgress(
     IReadOnlyList<int> ActiveEdgeParameterIndexes,
     DateTime UpdatedAtUtc,
     /// <summary>Destination layer of the current one-layer step; null when no layer walk is active.</summary>
-    int? ActiveLayerIndex = null);
+    int? ActiveLayerIndex = null)
+{
+    /// <summary>Compatibility alias for older UI bindings that still read LLM-1 naming.</summary>
+    public string? LatestLlm1Summary => LatestTrainingLlmSummary;
+
+    /// <summary>Compatibility alias for older UI bindings that still read LLM-2 naming.</summary>
+    public string? LatestLlm2Feedback => LatestAuditFeedback;
+}
 
 public interface INeuralNetTrainingProgressStore
 {

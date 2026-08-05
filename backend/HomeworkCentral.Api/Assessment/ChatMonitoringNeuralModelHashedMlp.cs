@@ -210,10 +210,12 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                     : AverageOutputForward(
                         evidenceLogitSum / n, relevanceLogitSum / n, evidenceProbSum / n, relevanceProbSum / n);
 
-                float[]? parameterBefore = captureFull ? network.FlattenParameters() : null;
+                // Sparse Δw capture (compact + full) so the live weight feed can list every updated node
+                // without storing dense input→output parameter arrays when |Δ| is zero.
+                float[] parameterBefore = network.FlattenParameters();
                 network.ApplyMomentumUpdate(
                     gradients, n, LearningRate, MomentumCoefficient, MaxAbsGradient, MaxAbsWeight);
-                float[]? parameterAfter = captureFull ? network.FlattenParameters() : null;
+                float[] parameterAfter = network.FlattenParameters();
                 float avgGradScale = 1f / n;
                 float gradientL2 = NeuralNetFinite.OrZero(
                     MathF.Sqrt((float)(gradientMagnitudes.GradSqSum * avgGradScale * avgGradScale)));
@@ -221,27 +223,25 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                 float minNonZeroAbsGradient = NeuralNetFinite.OrZero(
                     gradientMagnitudes.ResolveMinNonZero() * avgGradScale);
 
-                IReadOnlyList<ParameterDelta> deltas = captureFull
-                    ? BuildParameterDeltas(parameterBefore!, parameterAfter!)
-                    : [];
-                IReadOnlyList<SparseValue> sparseGradients = captureFull
-                    ? deltas.Select(delta => new SparseValue(delta.ParameterIndex, NeuralNetFinite.OrZero(delta.Gradient))).ToList()
-                    : [];
+                IReadOnlyList<ParameterDelta> deltas = BuildParameterDeltas(parameterBefore, parameterAfter);
+                IReadOnlyList<SparseValue> sparseGradients = deltas
+                    .Select(delta => new SparseValue(delta.ParameterIndex, NeuralNetFinite.OrZero(delta.Gradient)))
+                    .ToList();
                 GradientHealth health = new(
                     gradientL2 < 0.000001f,
                     gradientL2 > 1000f,
                     0.000001f,
                     1000f,
-                    captureFull
-                        ? (sparseGradients.Count == 0 ? 0 : sparseGradients.Max(gradient => MathF.Abs(gradient.Value)))
-                        : maxAbsGradient,
-                    captureFull
-                        ? sparseGradients
+                    sparseGradients.Count == 0
+                        ? maxAbsGradient
+                        : sparseGradients.Max(gradient => MathF.Abs(gradient.Value)),
+                    sparseGradients.Count == 0
+                        ? minNonZeroAbsGradient
+                        : sparseGradients
                             .Where(gradient => MathF.Abs(gradient.Value) > 0f)
                             .Select(gradient => MathF.Abs(gradient.Value))
                             .DefaultIfEmpty(0)
-                            .Min()
-                        : minNonZeroAbsGradient);
+                            .Min());
                 BackpropagationTrace backward = new([], [],
                     sparseGradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Weight).ToList(),
                     sparseGradients.Where(gradient => topology.Parameters[gradient.Index].Kind == ReplayParameterKind.Bias).ToList(),
@@ -283,6 +283,9 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 iterations.Add(new TrainingIterationReplay(epoch, beforeForward, lossBefore, backward,
                     new ParameterUpdateTrace(LearningRate, optimizer, deltas), afterForward, lossAfter));
+                // Compact replays only need the newest epochs for the weight feed / viewer.
+                if (!captureFull && iterations.Count > 2)
+                    iterations.RemoveAt(0);
 
                 if (earlyStopEnabled
                     && meanAbsEvidenceError / n <= evidenceTolerance
@@ -449,10 +452,14 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     private IReadOnlyList<ParameterDelta> BuildParameterDeltas(float[] before, float[] after)
     {
+        const float deltaEpsilon = 1e-8f;
         List<ParameterDelta> deltas = [];
         for (int index = 0; index < before.Length; index++)
         {
             float delta = after[index] - before[index];
+            if (MathF.Abs(delta) <= deltaEpsilon)
+                continue;
+
             deltas.Add(new ParameterDelta(
                 index,
                 NeuralNetFinite.OrZero(before[index]),

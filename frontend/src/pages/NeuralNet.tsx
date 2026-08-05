@@ -198,7 +198,7 @@ function NetworkGraph({ visualizer, replay }: { visualizer: NeuralNetVisualizer;
 function liveToneClass(phase: string): string {
   const lower = phase.toLowerCase()
   if (lower.includes('backprop') || lower.includes('loss') || lower.includes('ccel')) return 'neural-live-tone--backprop'
-  // LLM-1 reworking an evaluator objection stays amber so the pause reads as active, not stalled.
+  // Training-LLM self-critique / revision stays amber so the pause reads as active, not stalled.
   if (
     lower.includes('llm2')
     || lower.includes('self-critique')
@@ -210,7 +210,13 @@ function liveToneClass(phase: string): string {
   ) {
     return 'neural-live-tone--reeval'
   }
-  if (lower.includes('forward') || lower.includes('llm1') || lower.includes('generat') || lower.includes('accepted')) {
+  if (
+    lower.includes('forward')
+    || lower.includes('llm1')
+    || lower.includes('training llm')
+    || lower.includes('generat')
+    || lower.includes('accepted')
+  ) {
     return 'neural-live-tone--forward'
   }
   return 'neural-live-tone--idle'
@@ -285,31 +291,51 @@ function LiveTrainingProgress({
       />
       <div className="neural-replay-panels neural-replay-panels--live">
         <section className="neural-replay-panel">
-          <h4>LLM 1 training data</h4>
-          <p className="dashboard-hint">{progress.latestLlm1Summary ?? 'Waiting for scenario generation…'}</p>
+          <h4>Training LLM</h4>
+          <p className="dashboard-hint">
+            {progress.latestTrainingLlmSummary
+              ?? progress.latestLlm1Summary
+              ?? 'Waiting for scenario generation…'}
+          </p>
           <p className="dashboard-hint">
             Processed {progress.ticketsProcessed} tickets · {progress.messagesProcessed} messages ·{' '}
             {progress.examplesPersisted} examples
           </p>
+          <h5 className="neural-feed-subhead">Currently evaluating</h5>
+          <p className="dashboard-hint neural-feed-pre">
+            {progress.currentEvaluationData?.trim()
+              ? progress.currentEvaluationData
+              : 'No ticket/message under evaluation yet.'}
+          </p>
         </section>
         <section className="neural-replay-panel">
-          <h4>LLM 2 → LLM 1 feedback</h4>
-          <p className="dashboard-hint">{progress.latestLlm2Feedback ?? 'No audit notes yet.'}</p>
+          <h4>Audit feedback</h4>
+          <p className="dashboard-hint">
+            {progress.latestAuditFeedback
+              ?? progress.latestLlm2Feedback
+              ?? 'No audit notes yet.'}
+          </p>
           <p className="dashboard-hint">Audits {progress.auditsCompleted}</p>
-          {(progress.generatorHints?.length ?? 0) > 0 && (
+          {(progress.auditFeedbackFeed?.length ?? 0) > 0 ? (
             <ul className="neural-feed-list">
-              {progress.generatorHints.slice(-4).map((hint) => (
+              {progress.auditFeedbackFeed!.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          ) : (progress.generatorHints?.length ?? 0) > 0 ? (
+            <ul className="neural-feed-list">
+              {progress.generatorHints.slice(-8).map((hint) => (
                 <li key={hint}>{hint}</li>
               ))}
             </ul>
-          )}
+          ) : null}
         </section>
         <section className="neural-replay-panel neural-replay-panel--wide">
-          <h4>Weight update feed</h4>
+          <h4>Weight update feed · all nodes</h4>
           {(progress.weightUpdateFeed?.length ?? 0) > 0 ? (
-            <ul className="neural-feed-list neural-feed-list--mono">
-              {progress.weightUpdateFeed.map((line) => (
-                <li key={line}>{line}</li>
+            <ul className="neural-feed-list neural-feed-list--mono neural-feed-list--scroll">
+              {progress.weightUpdateFeed.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
               ))}
             </ul>
           ) : (
@@ -536,7 +562,7 @@ export function NeuralNet() {
   function importReplay(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = parseReplayImport(String(reader.result)); setReplay(parsed); setError('') } catch { setError('That file is not a valid supported V2 neural-network replay.') } }; reader.readAsText(file) }
   const nav = useMemo(() => <div className="server-page-card"><p><Link to="/server/NeuralNet/Training">Training</Link>{' | '}<Link to="/server/NeuralNet/TrainingFeedback">Training Feedback</Link>{' | '}<Link to="/server/NeuralNet/DataManagement">Data Management</Link>{' | '}<Link to="/server/NeuralNet/Visualizer">Visualizer & Replay</Link></p></div>, [])
   return <div className="server-page sm-page"><ServerMaintenanceNav title="Server · Neural Network" /><header className="sm-hero"><div className="sm-hero-icon"><FontAwesomeIcon icon={faBrain} /></div><div className="sm-hero-copy"><h2>Neural Network</h2><p className="server-page-subtitle">Cascade monitors g(f(x)) for moderation and tutoring — chain-rule training, low-memory CPU scoring, review, and replay.</p></div></header>{nav}{error && <p className="error">{error}</p>}{loading ? <LoadingBars message="Loading neural-network data…" /> : <div className="sm-layout sm-layout--single">
-    {view === 'training' && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faPlay} /> Synthetic cascade training</h3></div><p className="dashboard-hint">LLM 1 builds fictional ticket threads and embeds self-critique in the same call; REVISE reworks the next prompt. Continuous mode trains one ticket and one message at a time until you stop it. Only Stop ends a session — self-critique and generator failures never terminate training. Browser auto-downloads are blocked often — use the Download buttons when a session finishes.</p><div className="sm-form"><label className="sm-label">Training mode <select className="sm-input" value={mode} onChange={e => setMode(e.target.value as NeuralTrainingMode)}><option value="Both">Both cascades</option><option value="Moderation">Moderation cascade</option><option value="Tutoring">Tutoring cascade</option></select></label><label className="sm-label"><input type="checkbox" checked={continuous} onChange={(e) => setContinuous(e.target.checked)} /> Continuous (train until cancelled · 1 ticket / 1 message)</label>{!continuous && <><label className="sm-label">Tickets <input className="sm-input" type="number" min="1" max="10" value={ticketCount} onChange={e => setTicketCount(Number(e.target.value))} /></label><label className="sm-label">Maximum passes per message <input className="sm-input" type="number" min="1" max="6" value={maxPasses} onChange={e => setMaxPasses(Number(e.target.value))} /></label></>}<div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === 'training'} onClick={() => void startTraining()}><FontAwesomeIcon icon={faPlay} /> {continuous ? 'Start continuous training' : 'Start training'}</button></div></div><ul className="ticket-watches-list">{sessions.map(s => {
+    {view === 'training' && <section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faPlay} /> Synthetic cascade training</h3></div><p className="dashboard-hint">One training LLM builds fictional ticket threads and embeds self-critique in the same call; REVISE reworks the next prompt. Continuous mode trains one ticket and one message at a time until you stop it. Only Stop ends a session — self-critique and generator failures never terminate training. Browser auto-downloads are blocked often — use the Download buttons when a session finishes.</p><div className="sm-form"><label className="sm-label">Training mode <select className="sm-input" value={mode} onChange={e => setMode(e.target.value as NeuralTrainingMode)}><option value="Both">Both cascades</option><option value="Moderation">Moderation cascade</option><option value="Tutoring">Tutoring cascade</option></select></label><label className="sm-label"><input type="checkbox" checked={continuous} onChange={(e) => setContinuous(e.target.checked)} /> Continuous (train until cancelled · 1 ticket / 1 message)</label>{!continuous && <><label className="sm-label">Tickets <input className="sm-input" type="number" min="1" max="10" value={ticketCount} onChange={e => setTicketCount(Number(e.target.value))} /></label><label className="sm-label">Maximum passes per message <input className="sm-input" type="number" min="1" max="6" value={maxPasses} onChange={e => setMaxPasses(Number(e.target.value))} /></label></>}<div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === 'training'} onClick={() => void startTraining()}><FontAwesomeIcon icon={faPlay} /> {continuous ? 'Start continuous training' : 'Start training'}</button></div></div><ul className="ticket-watches-list">{sessions.map(s => {
       const replayRuns = (s.chatMonitoringRuns ?? []).filter((run) => run.hasWorkerReplay)
       const canDownloadBoth = s.mode === 'Both' && replayRuns.length >= 2
       const canStop = s.status === 'Running' || s.status === 'Queued'

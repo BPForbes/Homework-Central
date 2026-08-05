@@ -5214,6 +5214,16 @@ a {
   font-weight: 650;
   color: var(--color-ink);
 }
+.neural-feed-subhead {
+  margin: 0.55rem 0 0.25rem;
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: var(--color-ink-secondary);
+}
+.neural-feed-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .neural-feed-list {
   margin: 0;
   padding-left: 1.1rem;
@@ -5221,6 +5231,11 @@ a {
   color: var(--color-ink-secondary);
 }
 .neural-feed-list--mono { font-family: var(--font-mono, ui-monospace, monospace); }
+.neural-feed-list--scroll {
+  max-height: 14rem;
+  overflow: auto;
+  padding-right: 0.35rem;
+}
 .neural-feed-list li + li { margin-top: 0.2rem; }
 
 .neural-live-progress {
