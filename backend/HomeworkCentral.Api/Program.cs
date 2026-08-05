@@ -184,9 +184,10 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ModerationChatMonit
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.TutoringChatMonitorNeuralNet>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IChatMonitoringNeuralModelFactory, HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelFactory>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingProgressStore, HomeworkCentral.Api.Assessment.NeuralNetTrainingProgressStore>();
-builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
-builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
-builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetCheckpointStore>();
+    builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
+    builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
+    builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingLlmModule, HomeworkCentral.Api.Assessment.NeuralNetTrainingLlmModule>();
+    builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetCheckpointStore>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.NeuralNetTrainingPromoter>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingQueue, HomeworkCentral.Api.Assessment.NeuralNetTrainingQueue>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingCancellationRegistry, HomeworkCentral.Api.Assessment.NeuralNetTrainingCancellationRegistry>();

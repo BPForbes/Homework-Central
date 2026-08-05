@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
-import type { NeuralNetReplay, ReplayEdge, ReplayNode } from '../../types/neuralNetReplay'
+import type { NeuralNetReplay, ReplayEdge, ReplayNode, ReplayParameter } from '../../types/neuralNetReplay'
 import { normalizeReplayPhase, payloadCollectionForPhase } from '../../utils/neuralNetReplay'
 import {
   NeuralNetMesh3D,
@@ -154,9 +154,9 @@ function phaseOpsLabel(phase: string | undefined): string {
     case 'ParameterUpdate':
       return 'Parameter update · momentum mini-batch SGD'
     case 'Llm1Input':
-      return 'LLM 1 · synthetic ticket / message payload into the cascade'
+      return 'Training LLM · synthetic ticket / message payload into the cascade'
     case 'Llm2Evaluation':
-      return 'LLM 2 · teacher / audit feedback (balanced; not over-steering)'
+      return 'Training LLM · embedded self-critique / audit (same call; not a second model)'
     case 'VoteResolution':
       return 'Community vote resolution · blocking / reevaluation'
     case 'FinalVerdict':
@@ -293,6 +293,66 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
 
   const recentWeightFeed = useMemo(() => {
     const lines: string[] = []
+    // Prefer topology.parameters; fall back to edges so every Δw still maps to a target node.
+    const topologyParams: ReplayParameter[] =
+      replay.topology?.parameters?.length
+        ? replay.topology.parameters
+        : (replay.topology?.edges ?? []).map((edge) => ({
+            index: edge.parameterIndex,
+            sourceNodeIndex: edge.sourceNodeIndex,
+            targetNodeIndex: edge.targetNodeIndex,
+          }))
+    const nodeLabels = new Map(
+      (replay.topology?.nodes ?? []).map((node) => [node.index, node.label] as const),
+    )
+    const paramMeta = new Map(
+      topologyParams.map((parameter) => [parameter.index, parameter] as const),
+    )
+
+    if (updatePayload) {
+      const deltas = updatePayload.parameters ?? []
+      lines.push(
+        `epoch ${frame?.epoch ?? '—'} · SGD Δw ×${deltas.length} · lr ${updatePayload.learningRate ?? '—'}`,
+      )
+      if (deltas.length === 0) {
+        lines.push('No parameter deltas recorded for this update frame.')
+        return lines
+      }
+
+      const byTarget = new Map<number, typeof deltas>()
+      for (const delta of deltas) {
+        const index = delta.parameterIndex ?? -1
+        const meta = paramMeta.get(index)
+        const target = meta?.targetNodeIndex ?? -1
+        const bucket = byTarget.get(target) ?? []
+        bucket.push(delta)
+        byTarget.set(target, bucket)
+      }
+
+      const sortedTargets = [...byTarget.keys()].sort((left, right) => left - right)
+      for (const target of sortedTargets) {
+        const group = byTarget.get(target) ?? []
+        const label = nodeLabels.get(target) ?? `node[${target}]`
+        const sumAbs = group.reduce((total, item) => total + Math.abs(item.delta ?? 0), 0)
+        lines.push(`node[${target}] ${label}: ${group.length} weights · Σ|Δ|=${sumAbs.toPrecision(4)}`)
+        for (const delta of [...group].sort(
+          (left, right) => Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0),
+        )) {
+          const meta = paramMeta.get(delta.parameterIndex ?? -1)
+          const edge =
+            typeof meta?.sourceNodeIndex === 'number'
+              ? `w[${meta.sourceNodeIndex}→${meta.targetNodeIndex}]`
+              : `b[${meta?.targetNodeIndex ?? target}]`
+          lines.push(
+            `  ${edge} #${delta.parameterIndex ?? '—'}: Δ ${(delta.delta ?? 0).toPrecision(4)} → ${
+              delta.valueAfter?.toPrecision?.(4) ?? '—'
+            }`,
+          )
+        }
+      }
+      return lines
+    }
+
     for (let i = Math.max(0, frameIndex - 24); i <= frameIndex; i += 1) {
       const item = frames[i]
       if (!item) continue
@@ -326,7 +386,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       )
     }
     return lines.slice(-8)
-  }, [frameIndex, frames, replay.payloads])
+  }, [frame, frameIndex, frames, replay.payloads, replay.topology, updatePayload])
 
   const pathTone = pathToneForPhase(phase, finalVerdict?.accepted)
 
@@ -654,7 +714,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
 
       <div className="neural-replay-panels" aria-live="polite">
         <section className="neural-replay-panel">
-          <h4>LLM 1 → cascade</h4>
+          <h4>Training LLM → cascade</h4>
           {llm1Payload ? (
             <ul className="neural-feed-list">
               <li>Channel: {resolveString(llm1Payload.channel, strings) ?? '—'}</li>
@@ -662,11 +722,11 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
               <li>{resolveString(llm1Payload.message, strings) ?? 'Message payload recorded'}</li>
             </ul>
           ) : (
-            <p className="dashboard-hint">Step to an Llm1Input frame for the synthetic ticket feed.</p>
+            <p className="dashboard-hint">Step to a Training LLM input frame for the synthetic ticket feed.</p>
           )}
         </section>
         <section className="neural-replay-panel">
-          <h4>LLM 2 feedback</h4>
+          <h4>Training LLM self-critique</h4>
           {llm2Payload ? (
             <ul className="neural-feed-list">
               <li>
@@ -677,13 +737,13 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
               <li>{resolveString(llm2Payload.feedback, strings) ?? 'No written feedback'}</li>
             </ul>
           ) : (
-            <p className="dashboard-hint">Step to Llm2Evaluation for teacher / audit notes.</p>
+            <p className="dashboard-hint">Step to a self-critique frame for embedded audit notes (same training LLM).</p>
           )}
         </section>
         <section className="neural-replay-panel neural-replay-panel--wide">
-          <h4>Weight update feed</h4>
+          <h4>Weight update feed · all nodes</h4>
           {recentWeightFeed.length > 0 ? (
-            <ul className="neural-feed-list neural-feed-list--mono">
+            <ul className="neural-feed-list neural-feed-list--mono neural-feed-list--scroll">
               {recentWeightFeed.map((line, index) => (
                 <li key={`${index}-${line}`}>{line}</li>
               ))}

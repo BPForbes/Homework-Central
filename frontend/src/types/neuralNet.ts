@@ -64,10 +64,21 @@ export interface NeuralNetTrainingLiveProgress {
   examplesPersisted: number
   auditsCompleted: number
   activeChatMonitoringKind?: string | null
+  /** Latest training-LLM scenario summary (generation / revision). */
+  latestTrainingLlmSummary?: string | null
+  /** Latest self-critique / audit line from the same training LLM. */
+  latestAuditFeedback?: string | null
+  /** Compatibility alias of latestTrainingLlmSummary. */
   latestLlm1Summary?: string | null
+  /** Compatibility alias of latestAuditFeedback. */
   latestLlm2Feedback?: string | null
   latestLossSummary?: string | null
   generatorHints: string[]
+  /** Full audit feed for the current session instance (newest last). */
+  auditFeedbackFeed?: string[]
+  /** Ticket/message currently under evaluation / training. */
+  currentEvaluationData?: string | null
+  /** Per-node weight-update lines for the active mini-batch step. */
   weightUpdateFeed: string[]
   pathTone?: string | null
   layerWidths?: number[]

@@ -13,8 +13,8 @@ public sealed class S3AttachmentBlobStore : IAttachmentBlobStore, IAsyncDisposab
 {
     private readonly IAmazonS3 s3;
     private readonly UploadOptions options;
-    private readonly SemaphoreSlim bucketGate = new(1, 1);
-    private bool bucketReady;
+    private readonly object bucketGate = new();
+    private Task? ensureBucketTask;
 
     public S3AttachmentBlobStore(IOptions<UploadOptions> uploadOptions)
     {
@@ -99,35 +99,36 @@ public sealed class S3AttachmentBlobStore : IAttachmentBlobStore, IAsyncDisposab
         }
     }
 
-    private async Task EnsureBucketAsync(CancellationToken ct)
+    private Task EnsureBucketAsync(CancellationToken ct)
     {
-        if (bucketReady)
-            return;
+        Task? existing = Volatile.Read(ref ensureBucketTask);
+        if (existing is not null)
+            return existing.WaitAsync(ct);
 
-        await bucketGate.WaitAsync(ct);
-        try
+        lock (bucketGate)
         {
-            if (bucketReady)
-                return;
+            existing = ensureBucketTask;
+            if (existing is not null)
+                return existing.WaitAsync(ct);
 
-            ListBucketsResponse buckets = await s3.ListBucketsAsync(ct);
-            bool exists = buckets.Buckets.Any(bucket =>
-                string.Equals(bucket.BucketName, options.S3Bucket, StringComparison.Ordinal));
-            if (!exists)
-                await s3.PutBucketAsync(options.S3Bucket, ct);
+            Task created = CreateBucketIfMissingAsync();
+            ensureBucketTask = created;
+            return created.WaitAsync(ct);
+        }
+    }
 
-            bucketReady = true;
-        }
-        finally
-        {
-            bucketGate.Release();
-        }
+    private async Task CreateBucketIfMissingAsync()
+    {
+        ListBucketsResponse buckets = await s3.ListBucketsAsync(CancellationToken.None);
+        bool exists = buckets.Buckets.Any(bucket =>
+            string.Equals(bucket.BucketName, options.S3Bucket, StringComparison.Ordinal));
+        if (!exists)
+            await s3.PutBucketAsync(options.S3Bucket, CancellationToken.None);
     }
 
     public ValueTask DisposeAsync()
     {
         s3.Dispose();
-        bucketGate.Dispose();
         return ValueTask.CompletedTask;
     }
 }

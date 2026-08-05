@@ -215,6 +215,11 @@ function cameraForView(
 }
 
 self.onmessage = (event: MessageEvent<MeshProjectRequest>) => {
+  // Dedicated workers only receive from the owning page; reject unexpected origins when present.
+  if (typeof event.origin === 'string' && event.origin.length > 0 && event.origin !== self.location.origin) {
+    return
+  }
+
   const request = event.data
   if (!request?.layerWidths?.length) {
     return

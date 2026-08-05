@@ -11,7 +11,7 @@ public sealed class LlmClientTests
     [Fact]
     public async Task EmbedAsync_UsesModernEmbedEndpoint()
     {
-        RecordingHandler handler = new(async (request, ct) =>
+        using RecordingHandler handler = new(async (request, ct) =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal("/api/embed", request.RequestUri!.AbsolutePath);
@@ -25,7 +25,8 @@ public sealed class LlmClientTests
             return JsonResponse(HttpStatusCode.OK, """{"embeddings":[[0.25,0.5,0.75]]}""");
         });
 
-        LlmClient client = CreateClient(handler);
+        using HttpClient httpClient = CreateHttpClient(handler);
+        LlmClient client = CreateClient(httpClient);
         IReadOnlyList<float> vector = await client.EmbedAsync("hello world");
 
         Assert.Equal([0.25f, 0.5f, 0.75f], vector);
@@ -35,10 +36,10 @@ public sealed class LlmClientTests
     [Fact]
     public async Task EmbedAsync_FallsBackToLegacyEmbeddingsEndpoint()
     {
-        RecordingHandler handler = new(async (request, ct) =>
+        using RecordingHandler handler = new(async (request, ct) =>
         {
             if (request.RequestUri!.AbsolutePath == "/api/embed")
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
+                return JsonResponse(HttpStatusCode.NotFound, """{"error":"not found"}""");
 
             Assert.Equal("/api/embeddings", request.RequestUri.AbsolutePath);
             string body = await request.Content!.ReadAsStringAsync(ct);
@@ -48,7 +49,8 @@ public sealed class LlmClientTests
             return JsonResponse(HttpStatusCode.OK, """{"embedding":[1,0,0]}""");
         });
 
-        LlmClient client = CreateClient(handler);
+        using HttpClient httpClient = CreateHttpClient(handler);
+        LlmClient client = CreateClient(httpClient);
         IReadOnlyList<float> vector = await client.EmbedAsync("legacy text");
 
         Assert.Equal([1f, 0f, 0f], vector);
@@ -63,10 +65,11 @@ public sealed class LlmClientTests
     [Fact]
     public async Task EmbedAsync_UsesHashEmbedWhenOllamaUnavailable()
     {
-        RecordingHandler handler = new((_, _) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        using RecordingHandler handler = new((_, _) =>
+            Task.FromResult(JsonResponse(HttpStatusCode.ServiceUnavailable, """{"error":"unavailable"}""")));
 
-        LlmClient client = CreateClient(handler);
+        using HttpClient httpClient = CreateHttpClient(handler);
+        LlmClient client = CreateClient(httpClient);
         IReadOnlyList<float> vector = await client.EmbedAsync("offline");
 
         Assert.Equal(64, vector.Count);
@@ -76,19 +79,22 @@ public sealed class LlmClientTests
     [Fact]
     public async Task EmbedAsync_ReturnsEmptyWhenDisabled()
     {
-        RecordingHandler handler = new((_, _) =>
+        using RecordingHandler handler = new((_, _) =>
             throw new InvalidOperationException("HTTP should not be called when LLM is disabled."));
 
-        LlmClient client = CreateClient(handler, enabled: false);
+        using HttpClient httpClient = CreateHttpClient(handler);
+        LlmClient client = CreateClient(httpClient, enabled: false);
         IReadOnlyList<float> vector = await client.EmbedAsync("ignored");
 
         Assert.Empty(vector);
         Assert.Equal(0, handler.RequestCount);
     }
 
-    private static LlmClient CreateClient(HttpMessageHandler handler, bool enabled = true)
+    private static HttpClient CreateHttpClient(HttpMessageHandler handler) =>
+        new(handler, disposeHandler: true) { BaseAddress = new Uri("http://llm.test") };
+
+    private static LlmClient CreateClient(HttpClient httpClient, bool enabled = true)
     {
-        HttpClient httpClient = new(handler) { BaseAddress = new Uri("http://llm.test") };
         LlmOptions options = new()
         {
             BaseUrl = "http://llm.test",
@@ -108,6 +114,8 @@ public sealed class LlmClientTests
     private sealed class RecordingHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
         : HttpMessageHandler
     {
+        private readonly List<HttpResponseMessage> responses = [];
+
         public int RequestCount { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
@@ -115,7 +123,25 @@ public sealed class LlmClientTests
             CancellationToken cancellationToken)
         {
             RequestCount++;
-            return await responder(request, cancellationToken);
+            HttpResponseMessage response = await responder(request, cancellationToken);
+            lock (responses)
+                responses.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                lock (responses)
+                {
+                    foreach (HttpResponseMessage response in responses)
+                        response.Dispose();
+                    responses.Clear();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 }

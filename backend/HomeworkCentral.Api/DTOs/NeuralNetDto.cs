@@ -112,10 +112,21 @@ public sealed class NeuralNetTrainingLiveProgressDto
     public int ExamplesPersisted { get; set; }
     public int AuditsCompleted { get; set; }
     public string? ActiveChatMonitoringKind { get; set; }
+    /// <summary>Latest training-LLM scenario summary.</summary>
+    public string? LatestTrainingLlmSummary { get; set; }
+    /// <summary>Latest self-critique / audit feedback from the training LLM.</summary>
+    public string? LatestAuditFeedback { get; set; }
+    /// <summary>Compatibility alias of <see cref="LatestTrainingLlmSummary"/>.</summary>
     public string? LatestLlm1Summary { get; set; }
+    /// <summary>Compatibility alias of <see cref="LatestAuditFeedback"/>.</summary>
     public string? LatestLlm2Feedback { get; set; }
     public string? LatestLossSummary { get; set; }
     public IReadOnlyList<string> GeneratorHints { get; set; } = [];
+    /// <summary>All audit feedback lines recorded for the current session instance.</summary>
+    public IReadOnlyList<string> AuditFeedbackFeed { get; set; } = [];
+    /// <summary>Training data currently being evaluated / trained.</summary>
+    public string? CurrentEvaluationData { get; set; }
+    /// <summary>Per-node weight-update lines for the active mini-batch step.</summary>
     public IReadOnlyList<string> WeightUpdateFeed { get; set; } = [];
     /// <summary>forward | reeval | backprop | accepted | revision | idle</summary>
     public string PathTone { get; set; } = "idle";

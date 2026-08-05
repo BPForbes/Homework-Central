@@ -1161,19 +1161,22 @@ with no live worker is marked stopped directly so the admin list cannot strand a
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
 Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
 
-Synthetic training uses **LLM-1 only** for scenario generation. The generation JSON includes
-`selfCritique` (`verdict` + `feedback`) in the same Ollama call — there is no independent LLM-2
+Synthetic training uses a **single multipurpose training LLM** (`INeuralNetTrainingLlmModule`) for
+scenario generation, embedded self-critique, and revision rewrites. The generation JSON includes
+`selfCritique` (`verdict` + `feedback`) in the same Ollama call — there is no independent second-model
 evaluator round-trip. A REVISE verdict never halts a session: `CollectBalancedGeneratorAuditAsync`
 republishes the `reeval` path tone (amber in the live mesh), folds the objection into the next
-LLM-1 prompt via `SyntheticThreadScenarioGenerator.GenerateAsync(..., revisionNotes, ...)`, and
-continues with whichever attempt survives. `NeuralNetTraining:GeneratorRevisionMaxAttempts` bounds
-the rework loop. Training-time second-pass audits are off (`AuditSampleRate=0`).
+training-LLM prompt via `INeuralNetTrainingLlmModule.GenerateScenarioAsync(..., revisionNotes, ...)`,
+and continues with whichever attempt survives. Live progress exposes the current evaluation payload,
+the full session audit feed, and a per-node weight-update feed for the active mini-batch step.
+`NeuralNetTraining:GeneratorRevisionMaxAttempts` bounds the rework loop. Training-time second-pass
+audits are off (`AuditSampleRate=0`).
 
 ### DevOps resource notes (training + stack)
 
 | Topic | Finding / decision |
 |---|---|
-| LLM cost | One Ollama chat per scenario (+ optional LLM-1 rewrite). GPU belongs on Ollama only. |
+| LLM cost | One Ollama chat per scenario (+ optional training-LLM rewrite). GPU belongs on Ollama only. |
 | LLM container ops | `llm-service/` pins `ollama/ollama` (not `:latest`), healthchecks with `ollama list` (no `curl` in the image), and ensures chat + embed models on boot (`LLM_CHAT_MODEL` / `LLM_EMBED_MODEL`, defaults `qwen3:0.6b` + `nomic-embed-text`) — **skipping pull when already cached** for faster restarts. Compose profile `ai` mirrors those env vars. `LlmClient` prefers `POST /api/embed` (with `truncate`), remembers a 404 so later calls skip straight to legacy `/api/embeddings`, then HashEmbed. K8s `deploy/k8s/llm` runs non-root with dropped capabilities and stores models under `$HOME/.ollama` on the PVC. |
 | Docker duplicates | Compose defines **one** container each for postgres, fcaptcha, redis, backend, frontend, llm. Do not run Compose `backend`/`frontend` at the same time as `scripts/run-dev*` host processes. |
 | API gateway / LB | **Not present.** Frontend nginx proxies `/api/` locally; Kubernetes has no Ingress/Gateway yet. API HPA scales HTTP; KEDA ScaledJobs orchestrate training tasks. |

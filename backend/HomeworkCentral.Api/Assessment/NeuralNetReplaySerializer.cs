@@ -9,6 +9,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// Produces the V2 report envelope and validates cascade evidence-scorer topologies.
 /// Numeric checkpoints are packed as little-endian IEEE-754 float32 before JSON encoding.
 /// Limits cover dense MLP graphs (e.g. moderation 86→48→72→64→56→103 ≈ 21k edges).
+/// Compact (non-indented) JSON keeps continuous-session snapshots under process memory limits.
 /// </summary>
 public static class NeuralNetReplaySerializer
 {
@@ -20,7 +21,8 @@ public static class NeuralNetReplaySerializer
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = true,
+        // Indented replay JSON doubled peak memory and caused OutOfMemoryException on continuous runs.
+        WriteIndented = false,
         // Replay frames look up payloads by phase name; numeric enums break the viewer.
         Converters = { new JsonStringEnumConverter() },
         // Training traces can still surface extreme floats; never fail the whole session on JSON.
@@ -28,6 +30,22 @@ public static class NeuralNetReplaySerializer
     };
 
     public static string Serialize(NeuralNetReplayReportV2 report) => JsonSerializer.Serialize(report, Options);
+
+    /// <summary>
+    /// Serializes a report, returning null when the process cannot allocate enough memory.
+    /// Continuous snapshots skip rather than failing the whole training session.
+    /// </summary>
+    public static string? TrySerialize(NeuralNetReplayReportV2 report)
+    {
+        try
+        {
+            return Serialize(report);
+        }
+        catch (OutOfMemoryException)
+        {
+            return null;
+        }
+    }
 
     public static string ComputeSha256(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
