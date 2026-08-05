@@ -14,6 +14,8 @@ export type MeshProjectRequest = {
   viewMode: MeshViewMode
   slicePerspective: SlicePerspective
   sliceIndex: number
+  /** 0 = clustered, 1 = preview sample, 2 = max quality (all nodes). */
+  detail: number
   yaw: number
   pitch: number
   zoom: number
@@ -197,6 +199,59 @@ function toneFill(
   return { color: colors.primary, alpha: 0.7 }
 }
 
+function applyDetailLod(
+  nodes: Node3[],
+  edges: Edge3[],
+  layerWidths: number[],
+  detail: number,
+): { nodes: Node3[]; edges: Edge3[]; idleStride: number } {
+  const level = Number.isFinite(detail) ? Math.max(0, Math.min(2, Math.floor(detail))) : 2
+  if (level >= 2) {
+    const idleStride = edges.length > 8000 ? 7 : edges.length > 3000 ? 3 : 1
+    return { nodes, edges, idleStride }
+  }
+
+  if (level <= 0) {
+    // One representative node per layer (clustered).
+    const kept = new Set<number>()
+    let offset = 0
+    for (let layer = 0; layer < layerWidths.length; layer++) {
+      const count = Math.max(0, layerWidths[layer] ?? 0)
+      if (count > 0) kept.add(offset)
+      offset += count
+    }
+    return {
+      nodes: nodes.filter((node) => kept.has(node.index)),
+      edges: [],
+      idleStride: 1,
+    }
+  }
+
+  // Preview: evenly sample up to 8 nodes per layer; keep edges between kept nodes only.
+  const kept = new Set<number>()
+  let offset = 0
+  for (let layer = 0; layer < layerWidths.length; layer++) {
+    const count = Math.max(0, layerWidths[layer] ?? 0)
+    if (count === 0) continue
+    const cap = Math.min(8, count)
+    if (cap === 1) {
+      kept.add(offset)
+    } else {
+      for (let sample = 0; sample < cap; sample++) {
+        const local = Math.round((sample * (count - 1)) / (cap - 1))
+        kept.add(offset + local)
+      }
+    }
+    offset += count
+  }
+
+  return {
+    nodes: nodes.filter((node) => kept.has(node.index)),
+    edges: edges.filter((edge) => kept.has(edge.a) && kept.has(edge.b)),
+    idleStride: 5,
+  }
+}
+
 function cameraForView(
   viewMode: MeshViewMode,
   slicePerspective: SlicePerspective,
@@ -225,7 +280,13 @@ self.onmessage = (event: MessageEvent<MeshProjectRequest>) => {
     return
   }
 
-  const { nodes, edges } = buildMesh(request.layerWidths, request.nodeGap, request.layerGap)
+  const built = buildMesh(request.layerWidths, request.nodeGap, request.layerGap)
+  const { nodes, edges, idleStride } = applyDetailLod(
+    built.nodes,
+    built.edges,
+    request.layerWidths,
+    request.detail ?? 2,
+  )
   const maxX = Math.max(0, (request.layerWidths.length - 1) * request.layerGap)
   const activeNodes = new Set(request.activeNodeIndexes)
   const activeEdges = new Set(request.activeEdgeKeys)
@@ -287,7 +348,7 @@ self.onmessage = (event: MessageEvent<MeshProjectRequest>) => {
     visibleNodes.push({ node, screen })
   }
 
-  const idleStride = edges.length > 8000 ? 7 : edges.length > 3000 ? 3 : 1
+  const idleStrideForEdges = idleStride
   for (let index = 0; index < edges.length; index++) {
     const edge = edges[index]
     const touchesSlice = !sliceMode || edge.layer === sliceIndex || edge.layer + 1 === sliceIndex
@@ -297,7 +358,7 @@ self.onmessage = (event: MessageEvent<MeshProjectRequest>) => {
 
     // Slice view keeps edges that land on the selected layer; neighbor stubs stay when one end is on-slice.
     const onPath = !hasEdgeSelection || activeEdges.has(edge.key)
-    if (!onPath && index % idleStride !== 0) {
+    if (!onPath && index % idleStrideForEdges !== 0) {
       continue
     }
 

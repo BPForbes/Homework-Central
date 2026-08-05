@@ -340,16 +340,16 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
             $"Please look at this — it matches {category.Replace('-', ' ')}: {meaning}";
         IReadOnlyList<SyntheticThreadMessage> messages =
         [
-            new(0, "synthetic-reported", "student", "math-help", concerning, false, 1f,
+            new(0, "synthetic-reported", "student", "lounge", concerning, false, .08f,
                 new(.05f, 34, .15f, [category]), .95f, 1f, .05f, .9f),
-            new(1, "synthetic-peer", "student", "math-help",
-                "Thanks for the homework tip earlier — that was just friendly help.", true, .9f,
+            new(1, "synthetic-peer", "student", "lounge",
+                "Thanks for the homework tip earlier — that was just friendly help.", true, .08f,
                 new(.8f, 18, .1f, ["benign hard-negative"]), .15f, .9f, .8f, .7f),
             new(2, "synthetic-reported", "student", "lounge",
                 "I finally finished my homework.", true, .05f,
                 new(.55f, 8, .25f, ["unrelated casual message"]), .5f, .08f, .55f, .6f),
-            new(3, "synthetic-reported", "student", "math-help",
-                $"Continuing the same {category.Replace('-', ' ')} pattern after being asked to stop.", false, 1f,
+            new(3, "synthetic-reported", "student", "lounge",
+                $"Continuing the same {category.Replace('-', ' ')} pattern after being asked to stop.", false, .08f,
                 new(.08f, 28, .1f, [$"{category} escalation"]), .92f, 1f, .08f, .88f),
         ];
         return new SyntheticThreadScenario(category, requirement, context, messages);

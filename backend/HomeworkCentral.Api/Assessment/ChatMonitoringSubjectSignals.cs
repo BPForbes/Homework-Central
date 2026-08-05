@@ -157,7 +157,14 @@ public static class ChatMonitoringSubjectSignals
             0f,
             countNorm,
             Math.Clamp(fallbackChannelRelevance, 0f, 1f),
-            1f);
+            // Off-subject rooms (General, lounge, ticket private rooms) must not reward like an exact channel hit.
+            OffChannelRewardScale);
+
+    /// <summary>
+    /// Relevance multiplier when the message room is not a subject channel.
+    /// Keeps General / lounge / ticket-room chatter from moving tutoring confidence like on-topic help.
+    /// </summary>
+    public const float OffChannelRewardScale = .15f;
 
     private static SubjectChannelMatch CalculateChannelMatch(IReadOnlyList<string> applied, string channel)
     {
@@ -283,22 +290,33 @@ public static class ChatMonitoringSubjectSignals
         if (string.IsNullOrWhiteSpace(roomOrChannel)) return null;
         string value = roomOrChannel.Trim();
 
+        // Canonical catalog ids: general:lobby, subject:Medicine:3, staff:…
+        if (value.StartsWith("general:", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("general", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("staff:", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("custom:", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         if (value.StartsWith("subject:", StringComparison.OrdinalIgnoreCase))
         {
             string[] parts = value.Split(':', 3, StringSplitOptions.TrimEntries);
             if (parts.Length >= 2 && GeneralIndex(parts[1]) >= 0)
                 return CanonicalMask(parts[1]);
+            return null;
         }
 
         string lower = value.ToLowerInvariant();
+        if (lower.Contains("lounge", StringComparison.Ordinal) || lower is "general")
+            return null;
+
         foreach ((string needle, string mask) in ChannelNeedles)
         {
             if (lower.Contains(needle, StringComparison.Ordinal))
                 return mask;
         }
 
-        if (lower.Contains("lounge", StringComparison.Ordinal) || lower is "general")
-            return null;
         return null;
     }
 

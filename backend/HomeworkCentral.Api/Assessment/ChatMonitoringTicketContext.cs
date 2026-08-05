@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Tickets;
 
 namespace HomeworkCentral.Api.Assessment;
 
@@ -52,13 +53,40 @@ public static class ChatMonitoringTicketContext
     /// <summary>
     /// Routes live inference to the Tutoring monitor for tutor-application style tickets;
     /// everything else uses the Moderation monitor.
+    /// Prefer portal FilterName / room key over free-text haystacks so Tutor tickets cannot
+    /// fall through to Moderation when intake text is sparse.
     /// </summary>
     public static NeuralModelKindChatMonitoring ResolveKind(TicketUserWatch watch)
     {
+        if (IsTutorPortalTicket(watch))
+            return NeuralModelKindChatMonitoring.Tutoring;
+
         string haystack = $"{watch.Ticket.FilterName} {watch.ContextLabel} {watch.Ticket.Portal.TrackingInstructions} {watch.Ticket.TrackingTemplateJson}";
         return IsTutoringDomain(haystack)
             ? NeuralModelKindChatMonitoring.Tutoring
             : NeuralModelKindChatMonitoring.Moderation;
+    }
+
+    private static bool IsTutorPortalTicket(TicketUserWatch watch)
+    {
+        if (string.Equals(
+                watch.Ticket.FilterName,
+                DefaultTicketPortalPresets.TutorFilterName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(
+                watch.Ticket.Portal.FilterName,
+                DefaultTicketPortalPresets.TutorFilterName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string purpose = watch.Ticket.Portal.Purpose ?? string.Empty;
+        return purpose.Contains("tutor", StringComparison.OrdinalIgnoreCase);
     }
 
     public static NeuralModelKindChatMonitoring ResolveKind(string requirement, string? category = null)

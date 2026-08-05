@@ -255,6 +255,8 @@ function LiveTrainingProgress({
   progress: NeuralNetTrainingLiveProgress
   status: string
 }) {
+  const [detail, setDetail] = useState(2)
+  const [renderSurface, setRenderSurface] = useState<'3d' | '2d'>('3d')
   const tone = liveToneClass(progress.phase)
   const layerWidths = progress.layerWidths?.length
     ? progress.layerWidths
@@ -278,17 +280,82 @@ function LiveTrainingProgress({
         Ops · Leaky ReLU · BCE + categorical CE (CCEL) · backprop · momentum SGD
         {progress.latestLossSummary ? ` · ${progress.latestLossSummary}` : ''}
       </p>
-      <NeuralNetMesh3D
-        className="neural-mesh3d--live"
-        title={
-          typeof progress.activeLayerIndex === 'number'
-            ? `Live training · layer ${layerLabels[progress.activeLayerIndex - 1] ?? 'input'} → ${layerLabels[progress.activeLayerIndex] ?? 'output'}`
-            : 'Live training · 3D neural mesh'
-        }
-        layerWidths={layerWidths}
-        layerLabels={layerLabels}
-        frame={frame}
-      />
+      <div className="sm-form-actions">
+        <button type="button" className="btn-secondary" onClick={() => setDetail((value) => Math.max(0, value - 1))}>
+          − Detail
+        </button>
+        <button type="button" className="btn-secondary" onClick={() => setDetail((value) => Math.min(2, value + 1))}>
+          + Detail
+        </button>
+        <div className="neural-mesh3d-view-controls" role="group" aria-label="Render surface">
+          <button
+            type="button"
+            className={renderSurface === '3d' ? 'btn-secondary neural-mesh3d-control--active' : 'btn-secondary'}
+            onClick={() => setRenderSurface('3d')}
+          >
+            3D
+          </button>
+          <button
+            type="button"
+            className={renderSurface === '2d' ? 'btn-secondary neural-mesh3d-control--active' : 'btn-secondary'}
+            onClick={() => setRenderSurface('2d')}
+          >
+            2D
+          </button>
+        </div>
+      </div>
+      <div className="neural-render-stack" data-surface={renderSurface}>
+        <div
+          className={`neural-render-stack-layer neural-render-stack-layer--3d${renderSurface === '3d' ? ' is-active' : ''}`}
+          aria-hidden={renderSurface !== '3d'}
+        >
+          <NeuralNetMesh3D
+            className="neural-mesh3d--live"
+            title={
+              typeof progress.activeLayerIndex === 'number'
+                ? `Live training · layer ${layerLabels[progress.activeLayerIndex - 1] ?? 'input'} → ${layerLabels[progress.activeLayerIndex] ?? 'output'}`
+                : 'Live training · 3D neural mesh'
+            }
+            layerWidths={layerWidths}
+            layerLabels={layerLabels}
+            frame={frame}
+            detail={detail}
+          />
+        </div>
+        <div
+          className={`neural-render-stack-layer neural-render-stack-layer--2d${renderSurface === '2d' ? ' is-active' : ''}`}
+          aria-hidden={renderSurface !== '2d'}
+        >
+          <p className="dashboard-hint">
+            2D topology detail {detail} · {layerWidths.join(' → ')} · path tone {frame.pathTone}
+            {frame.activeNodeIndexes.length ? ` · ${frame.activeNodeIndexes.length} active nodes` : ''}
+          </p>
+          <div className="neural-graph-scroll">
+            <svg
+              className="neural-graph neural-graph--live-summary"
+              viewBox="0 0 640 160"
+              width="100%"
+              height="160"
+              role="img"
+              aria-label="Live training layer summary"
+            >
+              {layerWidths.map((width, index) => {
+                const x = 40 + (index * 560) / Math.max(1, layerWidths.length - 1)
+                const label = layerLabels[index] ?? `L${index}`
+                const r = detail === 0 ? 18 : detail === 1 ? 12 : 8
+                return (
+                  <g key={`${label}-${index}`}>
+                    <circle cx={x} cy={80} r={r} className="neural-node neural-node--path-forward" />
+                    <text x={x} y={130} textAnchor="middle" className="neural-layer-label">
+                      {label} · {width}
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
+          </div>
+        </div>
+      </div>
       <div className="neural-replay-panels neural-replay-panels--live">
         <section className="neural-replay-panel">
           <h4>Training LLM</h4>

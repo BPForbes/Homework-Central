@@ -169,6 +169,7 @@ function phaseOpsLabel(phase: string | undefined): string {
 export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
   const [frameIndex, setFrameIndex] = useState(0)
   const [detail, setDetail] = useState(2)
+  const [renderSurface, setRenderSurface] = useState<'3d' | '2d'>('3d')
   const [playing, setPlaying] = useState(false)
   const [ticket, setTicket] = useState<number | 'all'>('all')
   const [selected, setSelected] = useState<ReplayNode | null>(null)
@@ -527,6 +528,22 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
         <button type="button" className="btn-secondary" onClick={() => setDetail((value) => Math.min(2, value + 1))}>
           + Detail
         </button>
+        <div className="neural-mesh3d-view-controls" role="group" aria-label="Render surface">
+          <button
+            type="button"
+            className={renderSurface === '3d' ? 'btn-secondary neural-mesh3d-control--active' : 'btn-secondary'}
+            onClick={() => setRenderSurface('3d')}
+          >
+            3D
+          </button>
+          <button
+            type="button"
+            className={renderSurface === '2d' ? 'btn-secondary neural-mesh3d-control--active' : 'btn-secondary'}
+            onClick={() => setRenderSurface('2d')}
+          >
+            2D
+          </button>
+        </div>
         <button
           type="button"
           className="btn-secondary"
@@ -585,22 +602,33 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
           {lossPayload.totalLoss?.toFixed?.(4) ?? '—'}
         </p>
       )}
-      <NeuralNetMesh3D
-        className="neural-mesh3d--replay"
-        title="Replay · 3D neural mesh"
-        layerWidths={meshLayerWidths}
-        layerLabels={layerIds}
-        frame={meshFrame}
-      />
-      <div className="neural-graph-scroll">
-        <svg
-          className="neural-graph neural-graph--replay"
-          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
-          width={viewWidth}
-          height={viewHeight}
-          role="img"
-          aria-label="Recorded neural network topology with thought-path coloring"
+      <div className="neural-render-stack" data-surface={renderSurface}>
+        <div
+          className={`neural-render-stack-layer neural-render-stack-layer--3d${renderSurface === '3d' ? ' is-active' : ''}`}
+          aria-hidden={renderSurface !== '3d'}
         >
+          <NeuralNetMesh3D
+            className="neural-mesh3d--replay"
+            title="Replay · 3D neural mesh"
+            layerWidths={meshLayerWidths}
+            layerLabels={layerIds}
+            frame={meshFrame}
+            detail={detail}
+          />
+        </div>
+        <div
+          className={`neural-render-stack-layer neural-render-stack-layer--2d${renderSurface === '2d' ? ' is-active' : ''}`}
+          aria-hidden={renderSurface !== '2d'}
+        >
+          <div className="neural-graph-scroll">
+            <svg
+              className="neural-graph neural-graph--replay"
+              viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+              width={viewWidth}
+              height={viewHeight}
+              role="img"
+              aria-label="Recorded neural network topology with thought-path coloring"
+            >
           {layerIds.map((layerId) => (
             <text
               key={`label-${layerId}`}
@@ -710,6 +738,8 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
                 )
               })}
         </svg>
+      </div>
+        </div>
       </div>
 
       <div className="neural-replay-panels" aria-live="polite">
