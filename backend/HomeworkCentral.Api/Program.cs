@@ -98,6 +98,11 @@ builder.Services.Configure<TicketOptions>(builder.Configuration.GetSection("Tick
 builder.Services.Configure<HomeworkCentral.Api.Assessment.LlmOptions>(builder.Configuration.GetSection("Llm"));
 builder.Services.Configure<HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions>(
     builder.Configuration.GetSection("NeuralNetTraining"));
+HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions neuralNetTrainingOptions =
+    builder.Configuration.GetSection("NeuralNetTraining")
+        .Get<HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions>()
+    ?? new HomeworkCentral.Api.Assessment.NeuralNetTrainingOptions();
+HomeworkCentral.Api.Assessment.NeuralTorchRuntime.Configure(neuralNetTrainingOptions);
 builder.Services.Configure<HomeworkCentral.Api.Uploads.UploadOptions>(builder.Configuration.GetSection("Uploads"));
 builder.Services.AddSingleton<HomeworkCentral.Api.Uploads.IAttachmentBlobStore>(sp =>
 {

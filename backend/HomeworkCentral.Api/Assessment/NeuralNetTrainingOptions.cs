@@ -58,4 +58,18 @@ public sealed class NeuralNetTrainingOptions
     /// (feedback becomes a hint only).
     /// </summary>
     public int GeneratorRevisionMaxAttempts { get; set; } = 1;
+
+    /// <summary>
+    /// When true, silent/compact mini-batch SGD uses LibTorch (CUDA if available, else CPU).
+    /// Full replay traces stay on Math.NET for layer-level fidelity. Falls back to Math.NET
+    /// if LibTorch fails to load.
+    /// </summary>
+    public bool PreferTorchAccelerator { get; set; } = true;
+
+    /// <summary>
+    /// LibTorch device preference: <c>auto</c> (CUDA when present), <c>cpu</c>, or <c>cuda</c>.
+    /// GPU hosts must reference <c>TorchSharp-cuda-linux</c> / <c>TorchSharp-cuda-windows</c>
+    /// instead of the default <c>TorchSharp-cpu</c> package.
+    /// </summary>
+    public string TorchDevice { get; set; } = "auto";
 }
