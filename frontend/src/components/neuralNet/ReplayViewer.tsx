@@ -9,6 +9,7 @@ import {
   type MeshPathTone,
   type NeuralMeshFrame,
 } from './NeuralNetMesh3D'
+import { NeuralNetGraph2D } from './NeuralNetGraph2D'
 
 type SparseValue = { index: number; value: number }
 type ForwardPayload = {
@@ -66,41 +67,6 @@ function pathToneForPhase(phase: string | undefined, accepted?: boolean): PathTo
   return null
 }
 
-function edgeClassForTone(tone: PathTone, onPath: boolean): string {
-  if (!onPath || !tone) return 'neural-edge neural-edge--recorded neural-edge--idle'
-  if (tone === 'forward') return 'neural-edge neural-edge--recorded neural-edge--path-forward'
-  if (tone === 'reeval') return 'neural-edge neural-edge--recorded neural-edge--path-reeval'
-  if (tone === 'backprop') return 'neural-edge neural-edge--recorded neural-edge--path-backprop'
-  if (tone === 'accepted') return 'neural-edge neural-edge--recorded neural-edge--accepted'
-  return 'neural-edge neural-edge--recorded neural-edge--revision'
-}
-
-function nodeClassForTone(tone: PathTone, onPath: boolean, selected: boolean): string {
-  const classes = ['neural-node']
-  if (selected) classes.push('neural-node--selected')
-  if (!onPath || !tone) {
-    classes.push('neural-node--dim')
-    return classes.join(' ')
-  }
-  switch (tone) {
-    case 'forward':
-      classes.push('neural-node--path-forward')
-      break
-    case 'reeval':
-      classes.push('neural-node--path-reeval')
-      break
-    case 'backprop':
-      classes.push('neural-node--path-backprop')
-      break
-    case 'accepted':
-      classes.push('neural-node--accepted')
-      break
-    default:
-      classes.push('neural-node--revision')
-      break
-  }
-  return classes.join(' ')
-}
 
 /** Even sample for preview detail only — max quality renders the full layer. */
 function takeEvenly<T>(items: T[], cap: number): T[] {
@@ -111,28 +77,6 @@ function takeEvenly<T>(items: T[], cap: number): T[] {
     const sourceIndex = Math.round((index * (items.length - 1)) / (cap - 1))
     return items[sourceIndex]
   })
-}
-
-/** Cubic curve fit between layers so dense fans separate instead of stacking as a solid bar. */
-function curvedEdgePath(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  bend: number,
-): string {
-  const dx = Math.abs(to.x - from.x)
-  const controlOffset = Math.max(28, dx * 0.42)
-  const c1x = from.x + controlOffset
-  const c2x = to.x - controlOffset
-  const c1y = from.y + bend
-  const c2y = to.y - bend
-  return `M ${from.x} ${from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to.x} ${to.y}`
-}
-
-function edgeBend(fromY: number, toY: number, edgeIndex: number): number {
-  const vertical = toY - fromY
-  // Small fitted offset so parallel edges fan instead of overlapping one stroke.
-  const fan = ((edgeIndex % 7) - 3) * 2.4
-  return vertical * 0.12 + fan
 }
 
 function resolveString(value: string | number | undefined, strings: string[] | undefined): string | undefined {
@@ -156,7 +100,7 @@ function phaseOpsLabel(phase: string | undefined): string {
     case 'Llm1Input':
       return 'Training LLM · synthetic ticket / message payload into the cascade'
     case 'Llm2Evaluation':
-      return 'Training LLM · embedded self-critique / audit (same call; not a second model)'
+      return 'Training LLM · generate + evaluate (single call)'
     case 'VoteResolution':
       return 'Community vote resolution · blocking / reevaluation'
     case 'FinalVerdict':
@@ -236,27 +180,6 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
   }, [detail, replay.topology.edges, nodes])
 
   const layerLabel = (layerId: string): string => layerId.replace(/-/g, ' ')
-  const layerIndex = (layerId: string): number => layerIds.indexOf(layerId)
-  const nodesInLayer = (layerId: string): ReplayNode[] => nodesByLayer.get(layerId) ?? []
-
-  const maxLayerCount = Math.max(1, ...layerIds.map((layerId) => Math.max(1, nodesInLayer(layerId).length)))
-  // Fixed Stage-1-like gap (~36px) so tall layers grow the canvas instead of packing into a bar.
-  const layerGap = maxQuality
-    ? Math.max(190, Math.min(260, 1180 / Math.max(1, layerIds.length - 1)))
-    : Math.max(150, Math.min(210, 960 / Math.max(1, layerIds.length - 1)))
-  const nodeGap = maxQuality ? 36 : Math.max(34, Math.min(48, 300 / Math.max(1, maxLayerCount - 1)))
-  const viewWidth = Math.max(720, 100 + (layerIds.length - 1) * layerGap + 100)
-  const viewHeight = Math.max(280, 64 + (maxLayerCount - 1) * nodeGap + 80)
-
-  const layerX = (layerId: string): number => 90 + layerIndex(layerId) * layerGap
-  const nodeAt = (node: ReplayNode): { x: number; y: number } => {
-    const layerNodes = nodesInLayer(node.layerId)
-    const index = layerNodes.findIndex((item) => item.index === node.index)
-    if (index < 0) return { x: layerX(node.layerId), y: viewHeight / 2 }
-    return { x: layerX(node.layerId), y: 56 + index * nodeGap }
-  }
-
-  const nodeByIndex = new Map(replay.topology.nodes.map((node) => [node.index, node]))
   const stringTable = (replay as { strings?: { values?: string[] } | string[] }).strings
   const strings = Array.isArray(stringTable)
     ? stringTable
@@ -473,18 +396,6 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     return scoped.size > 0 ? scoped : allActiveNodeIds
   }, [activeLayerIndex, allActiveNodeIds, layerIndexByNodeIndex])
 
-  // Max quality draws every edge as a curve; preview keeps a lighter idle mesh plus the thought path.
-  const drawnEdges = useMemo(() => {
-    if (layerEdges.length === 0) return [] as ReplayEdge[]
-    if (maxQuality) return layerEdges
-    const pathEdges = layerEdges.filter((edge) => activeEdgeParams.has(edge.parameterIndex))
-    const idleSample = layerEdges.filter(
-      (edge, index) => !activeEdgeParams.has(edge.parameterIndex) && index % 5 === 0,
-    )
-    return [...idleSample, ...pathEdges]
-  }, [layerEdges, maxQuality, activeEdgeParams])
-
-  const hasThoughtPath = activeEdgeParams.size > 0 || activeNodeIds.size > 0
   const totalNodeCount = replay.topology.nodes.length
   const totalInputCount = replay.topology.nodes.filter((node) => node.layerId === 'input').length
 
@@ -620,125 +531,20 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
           className={`neural-render-stack-layer neural-render-stack-layer--2d${renderSurface === '2d' ? ' is-active' : ''}`}
           aria-hidden={renderSurface !== '2d'}
         >
-          <div className="neural-graph-scroll">
-            <svg
-              className="neural-graph neural-graph--replay"
-              viewBox={`0 0 ${viewWidth} ${viewHeight}`}
-              width={viewWidth}
-              height={viewHeight}
-              role="img"
-              aria-label="Recorded neural network topology with thought-path coloring"
-            >
-          {layerIds.map((layerId) => (
-            <text
-              key={`label-${layerId}`}
-              x={layerX(layerId)}
-              y="24"
-              textAnchor="middle"
-              className="neural-layer-label"
-            >
-              {layerLabel(layerId)}
-            </text>
-          ))}
-          {drawnEdges.map((edge) => {
-            const source = nodeByIndex.get(edge.sourceNodeIndex)
-            const target = nodeByIndex.get(edge.targetNodeIndex)
-            if (!source || !target) return null
-            const from = nodeAt(source)
-            const to = nodeAt(target)
-            const onPath = !hasThoughtPath
-              ? Boolean(pathTone)
-              : activeEdgeParams.has(edge.parameterIndex)
-            const bend = edgeBend(from.y, to.y, edge.index)
-            return (
-              <path
-                key={edge.index}
-                d={curvedEdgePath(from, to, bend)}
-                fill="none"
-                className={edgeClassForTone(pathTone, Boolean(onPath && pathTone))}
-              />
-            )
-          })}
-          {detail === 0
-            ? layerIds.map((layerId) => {
-                const layerNodes = replay.topology.nodes.filter((node) => node.layerId === layerId)
-                return (
-                  <g key={`cluster-${layerId}`}>
-                    <circle
-                      cx={layerX(layerId)}
-                      cy={viewHeight / 2}
-                      r="42"
-                      className={nodeClassForTone(pathTone, Boolean(pathTone), false)}
-                    />
-                    <title>{`${layerLabel(layerId)} · ${layerNodes.length} nodes`}</title>
-                  </g>
-                )
-              })
-            : nodes.map((node) => {
-                const point = nodeAt(node)
-                const onPath = !hasThoughtPath ? Boolean(pathTone) : activeNodeIds.has(node.index)
-                const isOutput = node.layerId === 'output'
-                const isInput = node.layerId === 'input'
-                if (isOutput) {
-                  return (
-                    <g
-                      key={node.nodeId}
-                      className="neural-node-group"
-                      onClick={() => setSelected(node)}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={node.label}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
-                          setSelected(node)
-                        }
-                      }}
-                    >
-                      <rect
-                        x={point.x - 16}
-                        y={point.y - 11}
-                        width="32"
-                        height="22"
-                        rx="8"
-                        className={nodeClassForTone(pathTone, onPath, selected?.index === node.index)}
-                      />
-                      <title>{node.label}</title>
-                    </g>
-                  )
-                }
-                return (
-                  <g
-                    key={node.nodeId}
-                    className={isInput ? undefined : 'neural-node-group'}
-                    onClick={isInput ? undefined : () => setSelected(node)}
-                    role={isInput ? undefined : 'button'}
-                    tabIndex={isInput ? undefined : 0}
-                    aria-label={isInput ? undefined : node.label}
-                    onKeyDown={
-                      isInput
-                        ? undefined
-                        : (event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault()
-                              setSelected(node)
-                            }
-                          }
-                    }
-                  >
-                    <circle
-                      cx={point.x}
-                      cy={point.y}
-                      r={isInput ? 7 : 10}
-                      className={nodeClassForTone(pathTone, onPath, selected?.index === node.index)}
-                    >
-                      <title>{node.label}</title>
-                    </circle>
-                  </g>
-                )
-              })}
-        </svg>
-      </div>
+          <NeuralNetGraph2D
+            layerWidths={meshLayerWidths}
+            layerLabels={layerIds}
+            nodes={replay.topology.nodes}
+            edges={replay.topology.edges}
+            detail={detail}
+            pathTone={pathTone}
+            activeNodeIndexes={[...activeNodeIds]}
+            activeEdgeParameterIndexes={[...activeEdgeParams]}
+            selectable
+            selectedNodeIndex={selected?.index ?? null}
+            onSelectNode={setSelected}
+            ariaLabel="Recorded neural network topology with thought-path coloring"
+          />
         </div>
       </div>
 

@@ -204,21 +204,42 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
 
     private static (string? Verdict, string? Feedback) ReadSelfCritique(JsonElement root)
     {
-        if (!root.TryGetProperty("selfCritique", out JsonElement critique)
-            || critique.ValueKind != JsonValueKind.Object)
-        {
+        if (!TryGetSelfCritiqueObject(root, out JsonElement critique))
             return (null, null);
-        }
 
-        string verdict = String(critique, "verdict").Trim().ToUpperInvariant();
-        if (!string.Equals(verdict, "LGTM", StringComparison.Ordinal)
-            && !string.Equals(verdict, "REVISE", StringComparison.Ordinal))
-        {
+        string rawVerdict = FirstString(critique, "verdict", "Verdict", "status", "result");
+        string? verdict = NeuralNetTrainingLlmModule.NormalizeVerdict(rawVerdict);
+        if (verdict is null)
             return (null, null);
-        }
 
-        string feedback = Truncate(String(critique, "feedback"), 600);
+        string feedback = Truncate(
+            FirstString(critique, "feedback", "Feedback", "notes", "reason", "comment"),
+            600);
         return (verdict, string.IsNullOrWhiteSpace(feedback) ? null : feedback);
+    }
+
+    private static bool TryGetSelfCritiqueObject(JsonElement root, out JsonElement critique)
+    {
+        foreach (string name in new[] { "selfCritique", "self_critique", "critique", "evaluation" })
+        {
+            if (root.TryGetProperty(name, out critique) && critique.ValueKind == JsonValueKind.Object)
+                return true;
+        }
+
+        critique = default;
+        return false;
+    }
+
+    private static string FirstString(JsonElement element, params string[] names)
+    {
+        foreach (string name in names)
+        {
+            string value = String(element, name);
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        return string.Empty;
     }
 
     private static List<SyntheticThreadMessage> ReadMessages(JsonElement source)

@@ -1189,9 +1189,10 @@ blobs reach tens of megabytes once layer frames accumulate, and selecting them e
 Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
 
 Synthetic training uses a **single multipurpose training LLM** (`INeuralNetTrainingLlmModule`) for
-scenario generation, embedded self-critique, and revision rewrites. The generation JSON includes
-`selfCritique` (`verdict` + `feedback`) in the same Ollama call — there is no independent second-model
-evaluator round-trip. A REVISE verdict never halts a session: `CollectBalancedGeneratorAuditAsync`
+scenario generation, embedded self-critique, and revision rewrites (generate+evaluate in one Ollama
+call). The generation JSON includes `selfCritique` (`verdict` + `feedback`); audits in the live feed
+surface that embedded verdict, or a structural accept when the model omits the field — never a
+separate second-model evaluator. A REVISE verdict never halts a session: `CollectBalancedGeneratorAuditAsync`
 republishes the `reeval` path tone (amber in the live mesh), folds the objection into the next
 training-LLM prompt via `INeuralNetTrainingLlmModule.GenerateScenarioAsync(..., revisionNotes, ...)`,
 and continues with whichever attempt survives. Live progress exposes the current evaluation payload,
