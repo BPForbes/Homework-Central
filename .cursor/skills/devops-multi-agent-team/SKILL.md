@@ -179,7 +179,7 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - Follow **CodeQL, Validation, and Publish Policy** exactly
   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
 - DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
-- Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, and TypeScript type checking do not substitute for required CodeQL analysis.
+- Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, TypeScript type checking, Clippy, rustfmt, and cargo check do not substitute for required CodeQL analysis.
 - If CodeQL cannot be executed when required: do not claim CodeQL passed, do not claim the change is CodeQL-clean, and do not automatically publish.
 - Prefer Buildkite MCP + `/buildkite-*`, Sonar `/sonar-*`, and browser `/browser-automation` over invented results. Sonar and smoke are additive.
 - Report failures to Coders with reproducible logs (and re-open review thread if code changes again).
@@ -283,6 +283,7 @@ On human interrupts (`Change X to Y`, `Use tool A`, `Add environment Z`, `Stop`,
 ### CodeQL (QA)
 - C# CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
 - TypeScript CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- Rust CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
 - New unresolved CodeQL findings: N
 - Publish gate: PASS / BLOCKED
 

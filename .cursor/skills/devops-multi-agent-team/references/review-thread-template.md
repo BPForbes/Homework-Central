@@ -58,6 +58,9 @@ Copy to `.cursor/reviews/<topic>.md` for each change set. Coder and Reviewers co
 - Frontend Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
 - C# CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
 - TypeScript CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- Rust CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- Rust Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
+- Rust Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
 - New unresolved CodeQL findings: N
 - Publish gate: PASS / BLOCKED
 - Result:

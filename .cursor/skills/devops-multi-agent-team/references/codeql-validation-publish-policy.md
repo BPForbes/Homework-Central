@@ -1,11 +1,12 @@
 # CodeQL, Validation, and Publish Policy
 
-This repository contains both .NET/C# and TypeScript/JavaScript code.
+This repository contains .NET/C#, TypeScript/JavaScript, and Rust code.
 
 GitHub Actions performs CodeQL analysis for:
 
 * C# / .NET
 * JavaScript / TypeScript
+* Rust
 
 Agents must treat CodeQL as a required security gate before publishing code.
 
@@ -23,7 +24,7 @@ DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT 
 
 If CodeQL cannot be executed when required, the change must not be automatically published.
 
-Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, and TypeScript type checking do not substitute for required CodeQL analysis.
+Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, TypeScript type checking, Clippy, rustfmt, and cargo check do not substitute for required CodeQL analysis.
 
 ---
 
@@ -63,6 +64,21 @@ npm test
 If the repository uses another package manager such as pnpm or yarn, use the repository’s existing package manager and scripts instead.
 
 Do not invent scripts that are not defined by the repository.
+
+---
+
+
+### Rust
+
+Run the repository-defined equivalents of:
+
+```
+cargo check --workspace --all-targets
+cargo test --workspace
+```
+
+If the repository pins a workspace path, use it (`rust/` in this repository).
+Do not invent cargo features, targets, or scripts that are not defined by the repository.
 
 ---
 
@@ -141,6 +157,40 @@ TypeScript source files are included in the JavaScript CodeQL database.
 
 ---
 
+### Rust CodeQL
+
+CodeQL analyzes Rust with language identifier `rust` and build-mode `none`.
+A `Cargo.toml` or `rust-project.json` must be present. rustup and cargo must
+be installed. Do not use `--command` / `build-mode: manual` / autobuild;
+Rust extraction ignores a traced cargo build.
+
+Create a fresh Rust CodeQL database:
+
+```
+rm -rf .codeql-db-rust
+codeql database create .codeql-db-rust \
+  --language=rust \
+  --build-mode=none
+```
+
+Analyze the database with the same suite GitHub Actions uses (`security-and-quality`):
+
+```
+codeql database analyze .codeql-db-rust \
+  codeql/rust-queries:codeql-suites/rust-security-and-quality.qls \
+  --format=sarifv2.1.0 \
+  --output=codeql-rust.sarif
+```
+
+Inspect:
+
+```
+codeql-rust.sarif
+```
+
+
+---
+
 ## GitHub Actions Parity
 
 The local CodeQL analysis should use the same query suite used by GitHub Actions whenever possible.
@@ -179,6 +229,15 @@ Run:
 - TypeScript validation
 - JavaScript/TypeScript CodeQL
 
+
+### Rust-Only Change
+
+If the change affects only Rust crates and cannot affect generated frontend code, shared contracts, or cross-stack behavior:
+
+Run:
+- Rust validation
+- Rust CodeQL
+
 ### Cross-Stack Change
 
 If the change affects both sides of the application or an integration boundary, run both:
@@ -186,8 +245,10 @@ If the change affects both sides of the application or an integration boundary, 
 Run:
 - .NET validation
 - TypeScript validation
+- Rust validation
 - C# CodeQL
 - JavaScript/TypeScript CodeQL
+- Rust CodeQL
 
 Cross-stack changes include, but are not limited to:
 
@@ -205,13 +266,15 @@ Cross-stack changes include, but are not limited to:
 
 ### Pre-Publish Rule
 
-Because GitHub Actions analyzes both C# and TypeScript upon push, the preferred final pre-publish validation is:
+Because GitHub Actions analyzes C#, TypeScript, and Rust upon push, the preferred final pre-publish validation is:
 
 C# CodeQL
 +
 JavaScript / TypeScript CodeQL
++
+Rust CodeQL
 
-Run both before publishing whenever the environment supports doing so.
+Run all three before publishing whenever the environment supports doing so.
 
 ---
 
@@ -329,11 +392,15 @@ TypeScript:
 type checking
 linting
 tests
+Rust:
+cargo check
+cargo test
 
 Run full CodeQL:
 
 * after a logical security-sensitive change set;
 * after substantial backend or frontend changes;
+* after substantial Rust changes;
 * before committing a substantial change when practical;
 * before opening or updating a pull request;
 * before merging;
@@ -392,8 +459,10 @@ The agent must not automatically publish when any applicable state is:
 
 C# CodeQL: FAIL
 TypeScript CodeQL: FAIL
+Rust CodeQL: FAIL
 C# CodeQL: NOT RUN when required
 TypeScript CodeQL: NOT RUN when required
+Rust CodeQL: NOT RUN when required
 CodeQL database creation: FAIL
 CodeQL analysis: INCOMPLETE
 CodeQL SARIF: NOT REVIEWED
@@ -411,8 +480,11 @@ For a full-stack or repository-wide validation, the desired state is:
 .NET Tests: PASS
 TypeScript Validation: PASS
 Frontend Tests: PASS
+Rust Validation: PASS
+Rust Tests: PASS
 C# CodeQL: PASS
 TypeScript CodeQL: PASS
+Rust CodeQL: PASS
 CodeQL SARIF Reviewed: YES
 New Unresolved CodeQL Findings: 0
 
@@ -420,7 +492,7 @@ For a language-specific change, an unaffected target may be marked:
 
 NOT APPLICABLE
 
-unless repository policy or the GitHub Actions configuration requires both targets before every publication.
+unless repository policy or the GitHub Actions configuration requires all applicable targets (C#, JavaScript/TypeScript, and Rust) before every publication.
 
 ---
 
@@ -442,6 +514,12 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] JavaScript/TypeScript CodeQL database creation succeeds
 [ ] JavaScript/TypeScript CodeQL analysis succeeds
 [ ] JavaScript/TypeScript SARIF results are reviewed
+[ ] Rust toolchain is valid
+[ ] cargo check succeeds
+[ ] cargo test succeeds
+[ ] Rust CodeQL database creation succeeds
+[ ] Rust CodeQL analysis succeeds
+[ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
 
 If any required item is incomplete or failing:
@@ -465,8 +543,11 @@ When reporting completion, include a concise validation summary:
 .NET Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
 TypeScript Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
 Frontend Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
+Rust Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
+Rust Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
 C# CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
 TypeScript CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+Rust CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
 New unresolved CodeQL findings: N
 Publish gate: PASS / BLOCKED
 

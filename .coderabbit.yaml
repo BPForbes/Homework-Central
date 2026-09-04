@@ -61,11 +61,12 @@ reviews:
           disabled, suppressed, excluded, or weakened merely to obtain a passing
           result. If CodeQL cannot be executed when required, do not treat the
           change as publish-ready. Compilation, tests, linters, formatters,
-          Roslyn analyzers, ESLint, and TypeScript type checking do not
-          substitute for required CodeQL analysis. Local analysis must match
+          Roslyn analyzers, ESLint, TypeScript type checking, Clippy, rustfmt,
+          and cargo check do not substitute for required CodeQL analysis. Local
+          analysis must match
           GitHub Actions (this repo: `.github/codeql/codeql-config.yml` suite
-          `security-and-quality`). Do not invent scripts that are not defined by
-          the repository.
+          `security-and-quality`, including Rust `build-mode: none`). Do not
+          invent scripts that are not defined by the repository.
         - Comments must explain project-specific intent, constraints, trust boundaries, state
           ownership, lifecycle behavior, or non-obvious implementation decisions.
         - Comments must not be self-referential and must not mention an AI agent, prompt,
