@@ -333,8 +333,21 @@ Lexical bins and store cosine execute in Rust through `rust/hc-kernels`
 (`libhc_kernels`) when the compile scripts have produced that library.
 `ChatMonitoringFeatureEncoder.EmbedText` and `VectorDocumentStore.Cosine`
 call it first and keep managed C# implementations as the fallback so the
-API Docker image and the C# CI job do not need `rustc`. The hashed MLP,
-Encode metadata, EF, SignalR, and the React app stay in C# / TypeScript.
+API Docker image and the C# CI job do not need `rustc`. Encode metadata,
+the hashed MLP, EF, SignalR, and the React app stay in C# / TypeScript.
+
+Further kernels that fit the same C ABI + C# fallback pattern (do not
+rewrite training, EF, or the SPA):
+
+| Next kernel | Current site | Why it fits |
+|---|---|---|
+| Column-major GEMV / `Wᵀδ` | `NeuralNetwork.MultiplyBias`, `MultiplyTranspose` | Inner loops on every `Forward` / backprop; Math.NET already documents column-major order. Silent training already has a LibTorch path; this would cover the in-process fallback. |
+| Batch store cosine + JSON float parse | `VectorDocumentStore.RetrieveSimilarAsync` | Up to 200 docs: deserialize `EmbeddingJson` then cosine each. A batch `hc_cosine` over packed `f32` would cut the per-row marshal. |
+| Expertise FNV-1a bins | `TutoringSubjectContextRouter.AddExpertiseHash` | Same FNV-1a as lexical bins; 32 slots, called per cascade forward. |
+| Offline `HashEmbed` | `LlmClient.HashEmbed` | 64-bin char histogram + L2 normalize when Ollama is down; same shape as lexical bins. |
+| Support-set cosine | `ChatMonitoringNeuralModelHashedMlp.Cosine` | Per-predict max over up to 512 examples. Contract clamps to `[0, 1]` — do not merge with store cosine. |
+
+TypeScript compute that is real but should stay client-side (or wasm later, not `libhc_kernels`): `frontend/src/components/neuralNet/meshProject.worker.ts` (`buildMesh` / `project`) and `NeuralNetGraph2D.tsx` `buildDenseGraphTopology`. Those are view-projection and SVG topology, not scoring. Bitmasks, Markdown, and captcha hashing stay in TypeScript.
 
 The stage-2 input layout is shared across both monitors:
 
