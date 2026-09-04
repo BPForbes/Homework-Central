@@ -589,12 +589,22 @@ public sealed class NeuralNetwork
         for (int column = 0; column < cols; column++)
         {
             float sourceValue = source[column];
-            if (sourceValue == 0f)
+            if (IsExactIeeeZero(sourceValue))
                 continue;
             int offset = column * rows;
             for (int row = 0; row < rows; row++)
                 destination[row] += weightsColumnMajor[offset + row] * sourceValue;
         }
+    }
+
+    /// <summary>
+    /// Exact IEEE +0/−0. The GEMV column skip must treat both as empty sources
+    /// the same way Rust `== 0.0` does, without a C# floating equality test.
+    /// </summary>
+    private static bool IsExactIeeeZero(float value)
+    {
+        int bits = BitConverter.SingleToInt32Bits(value);
+        return bits == 0 || bits == unchecked((int)0x8000_0000);
     }
 
     /// <summary>Managed Wᵀδ used when <c>libhc_kernels</c> is absent.</summary>
