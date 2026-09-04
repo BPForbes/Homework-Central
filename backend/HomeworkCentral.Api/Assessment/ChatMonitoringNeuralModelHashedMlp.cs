@@ -17,7 +17,13 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeuralModelTelemetry
 {
-    public const string RuntimeKind = "HashedMlpV8";
+    /// <summary>
+    /// Bumped from HashedMlpV8 when the semantic region widened the input from 86 to
+    /// <see cref="ChatMonitoringFeatureEncoder.FeatureCount"/>. NeuralNetCheckpointStore filters
+    /// on this, so older checkpoints stay in the table but are never restored into a network of a
+    /// different shape; the two lineages simply coexist.
+    /// </summary>
+    public const string RuntimeKind = "SemanticMlpV9";
     private const float LearningRate = .035f;
     private const float MomentumCoefficient = .9f;
     private const float MaxAbsGradient = 5f;
@@ -883,7 +889,8 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
             input.ThreadContinuity,
             input.PriorScore,
             snap,
-            context);
+            context,
+            input.TextEmbedding);
         return baseInput with
         {
             CommunityVote = input.CommunityVote,

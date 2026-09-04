@@ -63,12 +63,16 @@ public sealed class AssessmentPipelineService(
 
         TicketOptions ticketOptions = options.Value;
         IReadOnlyList<float> messageEmbedding = ChatMonitoringFeatureEncoder.EmbedText(job.Content);
+        // The model's text channel. LlmClient falls back to its own hashed vector when Ollama is
+        // unreachable, so this is never null and scoring never blocks on the embedder being up.
+        IReadOnlyList<float> semanticEmbedding = await llm.EmbedAsync(job.Content, ct);
         List<ChatMessage> recentMessages = await LoadRecentRoomMessagesAsync(job, ct);
         string contextSnapshot = BuildContextSnapshot(recentMessages, job.RoomId);
         MessageScoringContext scoringContext = new(
             job,
             ticketOptions,
             messageEmbedding,
+            semanticEmbedding,
             recentMessages,
             contextSnapshot);
 
@@ -205,7 +209,8 @@ public sealed class AssessmentPipelineService(
             communityVote: 0,
             threadContinuity: Math.Clamp(scoringContext.RecentMessages.Count / 5f, 0, 1),
             priorScore: (float)previousScore,
-            subjectSignals);
+            subjectSignals,
+            textEmbedding: scoringContext.SemanticEmbedding);
 
     private async Task<ReviewerEvaluationAttempt> InvokeOptionalReviewerAsync(
         MessageScoringContext scoringContext,
@@ -427,10 +432,16 @@ public sealed class AssessmentPipelineService(
             confidenceUpdate.ScoreDelta,
             confidenceUpdate.CurrentScore);
 
+    /// <summary>
+    /// <paramref name="MessageEmbedding"/> is the lexical vector used for evidence retrieval and
+    /// must stay at the width already persisted in the vector store.
+    /// <paramref name="SemanticEmbedding"/> is the sentence embedding the model reads.
+    /// </summary>
     private sealed record MessageScoringContext(
         AssessmentMessageJob Job,
         TicketOptions TicketOptions,
         IReadOnlyList<float> MessageEmbedding,
+        IReadOnlyList<float> SemanticEmbedding,
         IReadOnlyList<ChatMessage> RecentMessages,
         string ContextSnapshot);
 

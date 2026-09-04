@@ -53,7 +53,7 @@ public sealed class NeuralNetVisualizerModelDto
     public string CascadeComposition { get; set; } = "g(f(x))";
     public string ChainRuleSummary { get; set; } = "∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f)";
     /// <summary>Checkpoint/runtime lineage id; Math.NET-backed engine keeps HashedMlpV8 packing.</summary>
-    public string RuntimeKind { get; set; } = "HashedMlpV8";
+    public string RuntimeKind { get; set; } = HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelHashedMlp.RuntimeKind;
 }
 
 public sealed class NeuralNetVisualizerDto
