@@ -189,6 +189,7 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ModerationChatMonit
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.TutoringChatMonitorNeuralNet>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IChatMonitoringNeuralModelFactory, HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelFactory>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingProgressStore, HomeworkCentral.Api.Assessment.NeuralNetTrainingProgressStore>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAITrackingService, HomeworkCentral.Api.Assessment.AITrackingService>();
     builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
     builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
     builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingLlmModule, HomeworkCentral.Api.Assessment.NeuralNetTrainingLlmModule>();

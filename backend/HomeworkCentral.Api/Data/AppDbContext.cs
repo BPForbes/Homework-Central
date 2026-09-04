@@ -56,6 +56,8 @@ public partial class AppDbContext(
     public DbSet<CandidateCompetencyState> CandidateCompetencyStates => Set<CandidateCompetencyState>();
     public DbSet<CandidateDecision> CandidateDecisions => Set<CandidateDecision>();
     public DbSet<VectorDocument> VectorDocuments => Set<VectorDocument>();
+    public DbSet<AIModelLineage> AIModelLineages => Set<AIModelLineage>();
+    public DbSet<AICategory> AICategories => Set<AICategory>();
     public DbSet<AITrackingSession> AITrackingSessions => Set<AITrackingSession>();
     public DbSet<AITrackingCategoryWeight> AITrackingCategoryWeights => Set<AITrackingCategoryWeight>();
     public DbSet<AITrackingPrediction> AITrackingPredictions => Set<AITrackingPrediction>();
@@ -577,51 +579,94 @@ public partial class AppDbContext(
             e.HasIndex(i => i.ChannelId);
         });
 
+        mb.Entity<AIModelLineage>(e =>
+        {
+            e.HasKey(lineage => lineage.LineageId);
+            e.Property(lineage => lineage.LineageId).ValueGeneratedOnAdd();
+            e.Property(lineage => lineage.Slug).HasMaxLength(64).IsRequired();
+            e.Property(lineage => lineage.DisplayName).HasMaxLength(128).IsRequired();
+            e.Property(lineage => lineage.IsBuiltIn).HasDefaultValue(false);
+            e.HasIndex(lineage => lineage.Slug).IsUnique();
+            e.HasOne(lineage => lineage.Portal)
+                .WithMany()
+                .HasForeignKey(lineage => lineage.PortalChannelId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<AICategory>(e =>
+        {
+            e.HasKey(category => category.CategoryId);
+            e.Property(category => category.CategoryId).ValueGeneratedOnAdd();
+            e.Property(category => category.Slug).HasMaxLength(64).IsRequired();
+            e.Property(category => category.DisplayName).HasMaxLength(128).IsRequired();
+            e.HasOne(category => category.Lineage)
+                .WithMany(lineage => lineage.Categories)
+                .HasForeignKey(category => category.LineageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(category => new { category.LineageId, category.Slug }).IsUnique();
+        });
+
         mb.Entity<AITrackingSession>(e =>
         {
-            e.HasKey(a => a.Id);
-            e.Property(a => a.Id).ValueGeneratedOnAdd();
-            e.HasOne(a => a.Ticket)
+            e.HasKey(session => session.SessionId);
+            e.Property(session => session.SessionId).ValueGeneratedOnAdd();
+            e.Property(session => session.SourceKind).HasMaxLength(32).IsRequired();
+            e.Property(session => session.MessageIndex).IsRequired();
+            e.Property(session => session.ModelVersion).HasMaxLength(128).IsRequired();
+            e.Property(session => session.CreatedAtUtc).IsRequired();
+            e.HasOne(session => session.Lineage)
+                .WithMany(lineage => lineage.Sessions)
+                .HasForeignKey(session => session.LineageId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(session => session.Ticket)
                 .WithMany()
-                .HasForeignKey(a => a.TicketId)
+                .HasForeignKey(session => session.TicketId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.Property(a => a.MessageIndex).IsRequired();
-            e.Property(a => a.NeuralModelKind).HasMaxLength(32).IsRequired();
-            e.Property(a => a.ModelVersion).HasMaxLength(128).IsRequired();
-            e.Property(a => a.CreatedAtUtc).IsRequired();
-            e.HasIndex(a => new { a.TicketId, a.MessageIndex });
-            e.HasIndex(a => a.CreatedAtUtc);
+            e.HasIndex(session => new { session.TicketId, session.MessageIndex });
+            e.HasIndex(session => new { session.LineageId, session.CreatedAtUtc });
+            e.HasIndex(session => session.CreatedAtUtc);
         });
 
         mb.Entity<AITrackingCategoryWeight>(e =>
         {
-            e.HasKey(a => a.Id);
-            e.Property(a => a.Id).ValueGeneratedOnAdd();
-            e.HasOne(a => a.TrackingSession)
-                .WithMany(s => s.CategoryWeights)
-                .HasForeignKey(a => a.TrackingSessionId)
+            e.HasKey(weight => weight.CategoryWeightId);
+            e.Property(weight => weight.CategoryWeightId).ValueGeneratedOnAdd();
+            e.Property(weight => weight.Weight).IsRequired();
+            e.Property(weight => weight.IsHumanCorrected).HasDefaultValue(false);
+            e.HasOne(weight => weight.TrackingSession)
+                .WithMany(session => session.CategoryWeights)
+                .HasForeignKey(weight => weight.SessionId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.Property(a => a.CategoryName).HasMaxLength(64).IsRequired();
-            e.Property(a => a.Weight).IsRequired();
-            e.Property(a => a.IsHumanCorrected).HasDefaultValue(false);
-            e.Property(a => a.HumanCategoryOverride).HasMaxLength(64);
-            e.Property(a => a.HumanCorrectionAtUtc);
-            e.HasIndex(a => new { a.TrackingSessionId, a.CategoryName });
+            e.HasOne(weight => weight.Category)
+                .WithMany()
+                .HasForeignKey(weight => weight.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(weight => weight.HumanOverrideCategory)
+                .WithMany()
+                .HasForeignKey(weight => weight.HumanOverrideCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(weight => new { weight.SessionId, weight.CategoryId }).IsUnique();
         });
 
         mb.Entity<AITrackingPrediction>(e =>
         {
-            e.HasKey(a => a.Id);
-            e.Property(a => a.Id).ValueGeneratedOnAdd();
-            e.HasOne(a => a.TrackingSession)
-                .WithMany()
-                .HasForeignKey(a => a.TrackingSessionId)
+            e.HasKey(prediction => prediction.PredictionId);
+            e.Property(prediction => prediction.PredictionId).ValueGeneratedOnAdd();
+            e.Property(prediction => prediction.PredictedScore).IsRequired();
+            e.Property(prediction => prediction.CreatedAtUtc).IsRequired();
+            e.HasOne(prediction => prediction.TrackingSession)
+                .WithMany(session => session.Predictions)
+                .HasForeignKey(prediction => prediction.SessionId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.Property(a => a.PredictedCategory).HasMaxLength(64).IsRequired();
-            e.Property(a => a.PredictedScore).IsRequired();
-            e.Property(a => a.ActualOutcome).HasMaxLength(256);
-            e.Property(a => a.CreatedAtUtc).IsRequired();
-            e.HasIndex(a => a.TrackingSessionId);
+            e.HasOne(prediction => prediction.PredictedCategory)
+                .WithMany()
+                .HasForeignKey(prediction => prediction.PredictedCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(prediction => prediction.ActualCategory)
+                .WithMany()
+                .HasForeignKey(prediction => prediction.ActualCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(prediction => prediction.SessionId);
         });
 
         mb.ApplyScopedResourceFilters(this);
