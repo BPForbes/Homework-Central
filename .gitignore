@@ -27,6 +27,9 @@ appsettings.Local.json
 .code-review-graph/
 claude-mem/
 
+# Local DevOps agent thoughts (review threads, goals, repros). Do not commit.
+.cursor/reviews/*
+
 # Local CodeQL CLI databases and SARIF dumps
 .codeql-db-csharp/
 .codeql-db-javascript/

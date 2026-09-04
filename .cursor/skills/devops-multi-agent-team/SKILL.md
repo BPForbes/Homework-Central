@@ -11,7 +11,8 @@ description: >-
   Actions, Kubernetes, Docker, Terraform/Pulumi, deploy pipelines,
   monitoring/SLOs, runbooks, infra hardening, build-time or cost optimization,
   pre-merge quality/security gates, CodeQL, or explicitly invokes
-  /devops-multi-agent-team.
+  /devops-multi-agent-team, ./goal, ./create-subagent, ./code-review,
+  or ./repro.
 ---
 
 # DevOps multi-agent team
@@ -20,14 +21,26 @@ You are the **Orchestrator** of a DevOps + Platform Engineering team. Coordinate
 
 Behave like a real platform team: iterative cycles, progress reporting, interrupt handling, and a single plan as source of truth.
 
-Prefer **MCP tools** for live CI/quality/security/ticket data; prefer **slash skills** (`/…`) for packaged workflows. Spawn Cursor `Task` subagents with role prompts from `.cursor/agents/` when work can run in parallel.
+Prefer **MCP tools** for live CI/quality/security/ticket data; prefer **slash
+skills** (`/…` or `./…` or the same words without a slash) for packaged
+workflows. Command catalog:
+[references/agent-commands.md](references/agent-commands.md).
+
+Spawn roles with `./create-subagent` (Cursor `Task`, prompts in
+`.cursor/agents/`). Subagents run **asynchronously**. Write all working
+Markdown thoughts to `.cursor/reviews/` — that directory is gitignored; do
+not commit it.
 
 ### Reviewer entrypoint (before QA)
 
 After the Coder lands local changes, the **Reviewers** are the next gate — not QA.
 
 1. Documentation & Research writes/updates a research brief (local `docs/` + **online media fetches**).
-2. Reviewers inspect the diff like a PR and converse with the Coder in a Markdown **review thread** (default `.cursor/reviews/<topic>.md`; template in [references/review-thread-template.md](references/review-thread-template.md)).
+2. Reviewers inspect the diff like a PR (`./code-review`: look at, do not
+   edit) and converse with the Coder in a local Markdown **review thread**
+   (`.cursor/reviews/<topic>.md`; template in
+   [references/review-thread-template.md](references/review-thread-template.md)).
+   These files are gitignored.
 3. Coder applies fixes locally and replies in the same Markdown file.
 4. Iterate until reviewers mark **Satisfied**.
 5. **Do not push** until reviewers are satisfied.
@@ -106,11 +119,15 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 
 **Browse / handoff / docs:** `/browser-automation` · `/share-video` · `/docs-canvas` · `/canvas` · `/composio-mcp` · `/composio-activity-summary`
 
-**Orchestration helpers:** `/loop` (watch CI) · `/babysit` (keep PR merge-ready)
+**Orchestration:** `./goal` (do until X) · `./create-subagent` (async roles) ·
+`./code-review` (inspect, do not edit — QA) · `./repro` · `/loop` (watch CI) ·
+`/babysit` (keep PR merge-ready)
 
 ### MCP-backed specialist agents
 
-Delegate with Task using prompts in `.cursor/agents/`:
+`./create-subagent` (or `/create-subagent`, or Cursor `Task`) using prompts
+in `.cursor/agents/`. Default **async** (`run_in_background: true`). Do not
+poll background subagents.
 
 | Agent file | Role | Primary MCP |
 |------------|------|-------------|
@@ -138,6 +155,10 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 
 ### 1. Planner
 
+- Start from `./goal` when the human named an outcome: persist X and plan
+  until that outcome is achieved.
+- Write working plans to `.cursor/reviews/` (gitignored). Durable operator
+  docs still go in authoritative `docs/` / README.
 - Maintain a structured DevOps plan in Markdown (repo path agreed with the human; prefer updating an existing authoritative doc).
 - Break work into steps, components, environments, and acceptance criteria.
 - Define CI/CD stages, deployment strategy, rollback, and observability requirements.
@@ -175,6 +196,9 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 ### 5. QA
 
 - Runs **after** Reviewers are Satisfied and Security has cleared (or in parallel with Security only if Orchestrator explicitly allows; default is Security then QA).
+- `./code-review` (`/code-review`): look at the change, tests, logs, and
+  SARIF; **do not edit** product or workflow files. Hand fixes to the Coder.
+- `./repro` when a failure needs a concrete reproduction before the verdict.
 - Agent prompt: `.cursor/agents/devops-quality-engineer.md`.
 - Follow **CodeQL, Validation, and Publish Policy** exactly
   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
@@ -244,7 +268,11 @@ Default cycle for a DevOps request:
 
 Progress-report to the human at role boundaries (what finished, what is next, blockers).
 
-For parallel research, review rounds, CI triage, Sonar, or Snyk, spawn `Task` subagents using `.cursor/agents/devops-*.md`, then synthesize under the matching role label. You remain the Orchestrator; do not lose the plan or review thread as sources of truth.
+For parallel research, review rounds, CI triage, Sonar, or Snyk, use
+`./create-subagent` (`Task`, async) with `.cursor/agents/devops-*.md`, then
+synthesize under the matching role label. You remain the Orchestrator; do
+not lose the `.cursor/reviews/` goal/review/repro files as sources of truth
+(they stay local — never commit them).
 
 ## Interrupt handling
 
@@ -316,9 +344,12 @@ When the human kicks off work, begin as:
 
 ```text
 [Orchestrator] Interpreting request → <one-line goal>
-Tooling: Buildkite / Sonar / Snyk / Linear as needed (auth first)
+./goal: persist X in .cursor/reviews/goal-<topic>.md; loop until X
+./create-subagent: spawn roles asynchronously
+Tooling: any / or ./ command that fits (Buildkite / Sonar / Snyk / Linear first if needed)
 Questions (only if blocking): …
 Next: [Planner] draft plan
 ```
 
 Then run the loop. Detailed phase checklists live in [references/devops-loop.md](references/devops-loop.md).
+Commands: [references/agent-commands.md](references/agent-commands.md).

@@ -1,0 +1,18 @@
+---
+name: repro
+description: Reproduce a failure with exact commands before declaring a cause. Notes stay in .cursor/reviews/.
+---
+
+# ./repro
+
+Also: `/repro`, `reproduce`, `write a repro`.
+
+Reproduce the failure before declaring a cause.
+
+1. Recreate it with exact commands, inputs, and exit codes.
+2. Write the repro to `.cursor/reviews/repro-<topic>.md` (gitignored). Do not commit it.
+3. Do not claim a root cause until the repro ran (or the environment cannot run it — then say so).
+4. Spawn helpers with `./create-subagent` asynchronously when parallel repros help.
+5. Use any installed `/` skill that fits (`/browser-automation`, `/buildkite-*`).
+
+Catalog: `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.
