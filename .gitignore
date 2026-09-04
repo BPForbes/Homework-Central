@@ -27,6 +27,19 @@ appsettings.Local.json
 .code-review-graph/
 claude-mem/
 
+<<<<<<< HEAD
+=======
+# Local CodeQL CLI databases and SARIF dumps
+.codeql-db-csharp/
+.codeql-db-javascript/
+.codeql-db-javascript-typescript/
+.codeql-db-rust/
+codeql-*.sarif
+
+# Rust
+rust/target/
+
+>>>>>>> e75a8ec (Add Rust cargo check/test and CodeQL rust analysis)
 # OS
 .DS_Store
 Thumbs.db
