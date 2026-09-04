@@ -52,12 +52,16 @@ public static class ChatMonitoringFeatureEncoder
     /// Lexical-only vector for <c>VectorDocumentStore</c> retrieval. Deliberately still the
     /// structural width: stored rows are persisted JSON float arrays compared by cosine, so
     /// widening this would silently mismatch every document already in the table.
-    /// The portable twin is <c>rust/hc-feature-encode</c> (`embed_text`); keep both in lockstep.
+    /// Runtime prefers <c>libhc_kernels</c> (`hc_embed_text`). Managed bins stay
+    /// as the fallback when the native library is absent.
     /// </summary>
     public static IReadOnlyList<float> EmbedText(string text)
     {
         float[] values = new float[StructuralFeatureCount];
-        AddTokens(values, text, 1f);
+        if (RustKernels.TryEmbedText(text, values))
+            return values;
+
+        AddTokensManaged(values, text, 1f);
         return values;
     }
 
@@ -118,6 +122,14 @@ public static class ChatMonitoringFeatureEncoder
     }
 
     private static void AddTokens(float[] values, string text, float weight)
+    {
+        if (RustKernels.TryAddWeightedTokens(values, text, weight))
+            return;
+
+        AddTokensManaged(values, text, weight);
+    }
+
+    private static void AddTokensManaged(float[] values, string text, float weight)
     {
         string[] tokens = text.ToLowerInvariant().Split(
             [' ', '\r', '\n', '\t', '.', ',', '!', '?', ':', ';', '"', '\'', '(', ')', '[', ']', '{', '}', '/', '\\', '-', '_'],

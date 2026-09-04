@@ -663,10 +663,9 @@ function Ensure-FrontendDependencies([string]$FrontendDir) {
     }
 }
 
-# Lexical encoder and cosine crates in rust/ are lockstep twins of the C#
-# chat-monitor kernels. Compile them with the rest of the stack so a broken
-# crate fails locally the same way the CI Rust job does. Live scoring still
-# runs in C#; the API image does not need rustc.
+# Builds rust/ including libhc_kernels for EmbedText and store cosine.
+# The API loads that library at runtime; C# remains the fallback so the
+# Docker image does not need rustc.
 function Require-RustCargo {
     if (Get-Command cargo -ErrorAction SilentlyContinue) {
         return
@@ -694,8 +693,22 @@ function Build-RustWorkspace {
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build --workspace failed with exit code $LASTEXITCODE"
         }
+        Copy-HcKernelsNative
     } finally {
         Pop-Location
+    }
+}
+
+function Copy-HcKernelsNative {
+    $destination = Join-Path $script:RepoRoot 'backend/HomeworkCentral.Api/native'
+    $debugDirectory = Join-Path $script:RepoRoot 'rust/target/debug'
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    foreach ($name in @('libhc_kernels.so', 'hc_kernels.dll', 'libhc_kernels.dylib')) {
+        $source = Join-Path $debugDirectory $name
+        if (Test-Path $source) {
+            Copy-Item $source (Join-Path $destination $name) -Force
+            Write-Host "==> Copied $name into backend/HomeworkCentral.Api/native"
+        }
     }
 }
 

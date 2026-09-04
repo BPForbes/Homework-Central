@@ -567,10 +567,9 @@ release_dev_stack_postgres() {
   unregister_dev_stack_server
 }
 
-# Lexical encoder and cosine crates in rust/ are lockstep twins of the C#
-# chat-monitor kernels. Compile them with the rest of the stack so a broken
-# crate fails locally the same way the CI Rust job does. Live scoring still
-# runs in C#; the API image does not need rustc.
+# Builds rust/ including libhc_kernels for EmbedText and store cosine.
+# The API loads that library at runtime; C# remains the fallback so the
+# Docker image does not need rustc.
 # rustup puts cargo on PATH via ~/.cargo/bin after `source ~/.cargo/env` or a new shell.
 require_rust_cargo() {
   if command -v cargo >/dev/null 2>&1; then
@@ -596,5 +595,19 @@ build_rust_workspace() {
   require_rust_cargo || return 1
 
   printf '==> Building Rust workspace (cargo build --workspace)\n'
-  (cd "$DEV_STACK_REPO_ROOT/rust" && cargo build --workspace)
+  (cd "$DEV_STACK_REPO_ROOT/rust" && cargo build --workspace) || return 1
+  copy_hc_kernels_native
+}
+
+copy_hc_kernels_native() {
+  local dest="$DEV_STACK_REPO_ROOT/backend/HomeworkCentral.Api/native"
+  local debug_dir="$DEV_STACK_REPO_ROOT/rust/target/debug"
+  mkdir -p "$dest"
+  local name
+  for name in libhc_kernels.so hc_kernels.dll libhc_kernels.dylib; do
+    if [[ -f "$debug_dir/$name" ]]; then
+      cp "$debug_dir/$name" "$dest/$name"
+      printf '==> Copied %s into backend/HomeworkCentral.Api/native\n' "$name"
+    fi
+  done
 }

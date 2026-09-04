@@ -1,8 +1,7 @@
 //! Cosine similarity used by `VectorDocumentStore` retrieval.
 //!
-//! The C# store still loads candidate rows with EF. This crate scores
-//! already-fetched embeddings so a later bind can replace the in-process
-//! loop without changing persisted JSON float arrays.
+//! The C# store still loads candidate rows with EF. Cosine of already-fetched
+//! embeddings runs here through `hc-kernels` when `libhc_kernels` is present.
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RankedDocument<Id> {

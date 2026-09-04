@@ -102,6 +102,9 @@ public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
 
     internal static double Cosine(IReadOnlyList<float> a, IReadOnlyList<float> b)
     {
+        if (RustKernels.TryCosine(a, b, out double rustScore))
+            return rustScore;
+
         int n = Math.Min(a.Count, b.Count);
         if (n == 0)
             return 0;

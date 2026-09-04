@@ -38,6 +38,7 @@ codeql-*.sarif
 
 # Rust
 rust/target/
+backend/HomeworkCentral.Api/native/
 
 >>>>>>> e75a8ec (Add Rust cargo check/test and CodeQL rust analysis)
 # OS

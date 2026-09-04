@@ -125,6 +125,9 @@ closed, reopened, approved-decision, and deleted lifecycle states.
 - Use [Assessment ownership](#assessment-ownership) and
   [Neural monitors and Ollama blend](#neural-monitors-and-ollama-blend) before
   changing live scoring, reviewer fallback, or confidence movement.
+  Lexical bins and store cosine run in `libhc_kernels` when that library is
+  present (`rust/hc-kernels`). The C# methods stay as the fallback. Encode
+  metadata, the hashed MLP, and the rest of the API stay in C#.
 - The [Code behavior](#code-behavior) snippets show the transaction used to open
   a ticket, private room access-rule creation, intake answer dispatch, preface
   resolution, score persistence, monitor selection, training session enqueue,
@@ -325,6 +328,13 @@ flowchart LR
 |---|---|---|---|
 | Moderation cascade | Default for conduct, report, and filter tickets. | Concept-context router using reported moderation concept, related concept count, family one-hot values, and concept/family text matches. | Evidence, relevance, and `100` fine moderation concepts plus catch-all. |
 | Tutoring cascade | Tutor application and subject-help contexts detected from filter name, watch context, tracking instructions, or frozen template text. | Subject-context router using applied subjects, channel subject, exact/related/cross-subject support, and expertise hash bins. | Evidence, relevance, and tutoring subject/competency categories. |
+
+Lexical bins and store cosine execute in Rust through `rust/hc-kernels`
+(`libhc_kernels`) when the compile scripts have produced that library.
+`ChatMonitoringFeatureEncoder.EmbedText` and `VectorDocumentStore.Cosine`
+call it first and keep managed C# implementations as the fallback so the
+API Docker image and the C# CI job do not need `rustc`. The hashed MLP,
+Encode metadata, EF, SignalR, and the React app stay in C# / TypeScript.
 
 The stage-2 input layout is shared across both monitors:
 
