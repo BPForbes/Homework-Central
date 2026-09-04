@@ -52,5 +52,13 @@ Copy to `.cursor/reviews/<topic>.md` for each change set. Coder and Reviewers co
 
 ## QA handoff
 - Commands run:
+- .NET Build: PASS / FAIL / NOT RUN / NOT APPLICABLE
+- .NET Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
+- TypeScript Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
+- Frontend Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
+- C# CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- TypeScript CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- New unresolved CodeQL findings: N
+- Publish gate: PASS / BLOCKED
 - Result:
 ```

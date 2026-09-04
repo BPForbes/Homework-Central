@@ -27,6 +27,12 @@ appsettings.Local.json
 .code-review-graph/
 claude-mem/
 
+# Local CodeQL CLI databases and SARIF dumps
+.codeql-db-csharp/
+.codeql-db-javascript/
+.codeql-db-javascript-typescript/
+codeql-*.sarif
+
 # OS
 .DS_Store
 Thumbs.db

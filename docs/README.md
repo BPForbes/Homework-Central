@@ -13,7 +13,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 
 - [Comment Documentation Guide](./COMMENT_DOCUMENTATION_GUIDE.md) (`docs/COMMENT_DOCUMENTATION_GUIDE.md`)
   — includes [Analyzer and CI expectations](./COMMENT_DOCUMENTATION_GUIDE.md#analyzer-and-ci-expectations)
-  (GitHub CodeQL for C# + TypeScript, ESLint, raw SQL gate).
+  and [CodeQL, Validation, and Publish Policy](./COMMENT_DOCUMENTATION_GUIDE.md#codeql-validation-and-publish-policy).
 
 ## Feature-level architecture
 

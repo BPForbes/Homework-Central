@@ -3,13 +3,15 @@ name: devops-multi-agent-team
 description: >-
   Orchestrates a DevOps + Platform Engineering multi-agent loop: plan,
   research (docs/ + online media fetches), implement CI/CD and IaC, pre-QA
-  Markdown reviewers (no push until Satisfied), Security, then QA,
+  Markdown reviewers (no push until Satisfied), Security, then QA
+  (CodeQL csharp + JS/TS publish gate, fast CI, Sonar, smoke),
   observability, optimization, docs, refactor, and performance — using
   installed Cursor MCPs and slash commands for Buildkite, Sonar, Snyk, Linear,
   browse, Composio, and Mainframe. Use when the user asks for CI/CD, GitHub
   Actions, Kubernetes, Docker, Terraform/Pulumi, deploy pipelines,
   monitoring/SLOs, runbooks, infra hardening, build-time or cost optimization,
-  pre-merge quality/security gates, or explicitly invokes /devops-multi-agent-team.
+  pre-merge quality/security gates, CodeQL, or explicitly invokes
+  /devops-multi-agent-team.
 ---
 
 # DevOps multi-agent team
@@ -30,7 +32,12 @@ After the Coder lands local changes, the **Reviewers** are the next gate — not
 4. Iterate until reviewers mark **Satisfied**.
 5. **Do not push** until reviewers are satisfied.
 6. Then run **Security** (Snyk / `/review-security`).
-7. Then **QA** (Buildkite, Sonar, smoke). Push only after Orchestrator confirms the full gate.
+7. Then **QA** (`.cursor/agents/devops-quality-engineer.md`). QA owns
+   **CodeQL, Validation, and Publish Policy**
+   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
+8. **Do not push** until reviewers are Satisfied, Security is clear, **and
+   applicable CodeQL analysis is satisfied**. If CodeQL cannot be executed when
+   required, do not automatically publish and do not claim CodeQL passed.
 
 ## When to use
 
@@ -55,7 +62,7 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 | Research | Documentation & Research | `docs/` + `WebSearch` / `WebFetch` / browser (online media) | Cited brief for Planner/Coder/Reviewers |
 | Pre-QA review | Reviewers | `.cursor/reviews/*.md` + `/review-*` + research brief | PR-style improvements; no push yet |
 | CI status | QA / CI Engineer | Buildkite MCP + `/buildkite-*` | Failed jobs, logs, retry/unblock |
-| Quality | QA / Quality Engineer | Sonar MCP (when auth’d) + `/sonar-*` | Issues, gate, coverage, dupes |
+| Quality | QA / Quality Engineer | CodeQL CLI + SARIF; Sonar MCP (when auth’d) + `/sonar-*` | CodeQL, Validation, and Publish Policy; Sonar additive |
 | Security | Security | Snyk MCP + `/secure-dependency-health-check`, `/review-security` | SCA/SAST/IaC findings |
 | Integrations | Docs / Integrator | Composio MCP + `/composio-*` | Slack/GitHub/Notion side effects (only if asked) |
 | Verify UI | QA / Verifier | Browser MCPs + `/browser-automation` | Smoke paths |
@@ -66,10 +73,14 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 
 - Authenticate MCP servers (`mcp_auth`) before calling gated tools.
 - SonarQube MCP needs `sonar` CLI + `sonar auth login`; until ready, run `/sonar-integrate` then restart the session.
-- Do not invent CI or Sonar results — pull from MCP/CLI or report unavailable.
+- Do not invent CI, Sonar, or CodeQL results — pull from MCP/CLI/SARIF or report unavailable.
+- Do not suppress CodeQL queries or weaken `.github/codeql/codeql-config.yml`
+  / `.github/workflows/codeql.yml` to pass the gate. Fix the code.
 - Stay on the active feature branch for #58 (`feature/ticket-rooms`); prefer the existing PR over new branches.
 - Confirm destructive ops (deletes, force-push, hard reset) with the human.
-- **No push** while a review thread is `In review` or `Changes requested`. Push only after Satisfied + Security clear + Orchestrator OK.
+- **No push** while a review thread is `In review` or `Changes requested`.
+  DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE
+  SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
 
 ### MCP namespaces
 
@@ -106,7 +117,7 @@ Delegate with Task using prompts in `.cursor/agents/`:
 | `devops-researcher.md` | Documentation & Research | WebSearch / WebFetch / browser |
 | `devops-reviewer.md` | Pre-QA reviewers | review thread + Sonar/review skills |
 | `devops-ci-engineer.md` | CI | Buildkite |
-| `devops-quality-engineer.md` | Quality | Sonar |
+| `devops-quality-engineer.md` | QA / publish gate | CodeQL + fast CI + Sonar |
 | `devops-security-engineer.md` | Security | Snyk |
 | `devops-ticket-lead.md` | Tickets | Linear |
 | `devops-verifier.md` | UI smoke | Browser |
@@ -164,10 +175,15 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 ### 5. QA
 
 - Runs **after** Reviewers are Satisfied and Security has cleared (or in parallel with Security only if Orchestrator explicitly allows; default is Security then QA).
-- Validate pipelines and infra: lint, static analysis, policy checks, smoke/health/integration tests, rollback behavior.
-- Prefer Buildkite MCP + `/buildkite-*`, Sonar `/sonar-*`, and browser `/browser-automation` over invented results.
+- Agent prompt: `.cursor/agents/devops-quality-engineer.md`.
+- Follow **CodeQL, Validation, and Publish Policy** exactly
+  ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
+- DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+- Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, and TypeScript type checking do not substitute for required CodeQL analysis.
+- If CodeQL cannot be executed when required: do not claim CodeQL passed, do not claim the change is CodeQL-clean, and do not automatically publish.
+- Prefer Buildkite MCP + `/buildkite-*`, Sonar `/sonar-*`, and browser `/browser-automation` over invented results. Sonar and smoke are additive.
 - Report failures to Coders with reproducible logs (and re-open review thread if code changes again).
-- Approve only when acceptance criteria are met.
+- Approve only when acceptance criteria are met **and** the CodeQL publish gate is PASS.
 
 ### 6. Observability
 
@@ -215,14 +231,14 @@ Default cycle for a DevOps request:
 3. Coder         → implement pipelines / IaC / config (local only — no push)
 4. Reviewers     → PR-style review via .cursor/reviews/<topic>.md; iterate with Coder
 5. Security      → Snyk / DevSecOps (only after reviewers Satisfied)
-6. QA            → Buildkite + Sonar + smoke; fail → Coder (+ re-open reviewers if code changes)
+6. QA            → CodeQL, Validation, and Publish Policy (QA subagent); fail → Coder (+ re-open reviewers if code changes)
 7. Optimization  → performance and cost pass
 8. Observability → logging / metrics / tracing / alerts
 9. Documentation → runbooks and guides (+ optional /share-video)
 10. Refactoring  → cleanup modularity/naming
 11. Performance  → profile builds/deploys/runtime
-12. QA           → final pass
-13. Push         → only when Satisfied + Security clear + Orchestrator OK
+12. QA           → final CodeQL pre-publish gate
+13. Push         → only when Satisfied + Security clear + CodeQL satisfied + Orchestrator OK
 14. Repeat until QA passes and checks are satisfied
 ```
 
@@ -263,6 +279,12 @@ On human interrupts (`Change X to Y`, `Use tool A`, `Add environment Z`, `Stop`,
 
 ### CI (Buildkite)
 - …
+
+### CodeQL (QA)
+- C# CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- TypeScript CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+- New unresolved CodeQL findings: N
+- Publish gate: PASS / BLOCKED
 
 ### Quality (Sonar)
 - …
