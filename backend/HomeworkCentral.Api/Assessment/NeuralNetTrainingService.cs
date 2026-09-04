@@ -1429,10 +1429,17 @@ public sealed class NeuralNetTrainingService(
         int categoryIndex = ChatMonitoringTicketContext.CategoryIndex(
             messageContext.Ticket.Category,
             runContext.Run.ChatMonitoringKind);
+        // The teacher's soft label when it supplied one, otherwise the hard category. Unrecognised
+        // slugs are dropped by the taxonomy rather than folded into the general bucket, so a
+        // hallucinated category name costs its own weight and nothing else.
+        float[]? categoryDistribution = ChatMonitoringCategoryTaxonomy.BuildDistribution(
+            runContext.Run.ChatMonitoringKind,
+            messageContext.Message.TeacherCategoryWeights);
         ChatMonitoringNeuralModelTargets targets = new(
             (float)evaluation.TargetScore,
             (float)evaluation.TargetRelevance,
-            categoryIndex);
+            categoryIndex,
+            categoryDistribution);
         ChatMonitoringNeuralModelTrainingExample trainingExample = new(
             trainingInput,
             targets,

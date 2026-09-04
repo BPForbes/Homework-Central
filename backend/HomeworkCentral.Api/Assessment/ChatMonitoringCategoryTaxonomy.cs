@@ -58,6 +58,71 @@ public static class ChatMonitoringCategoryTaxonomy
         return labels.Count - 1;
     }
 
+    /// <summary>
+    /// Strict lookup. Unlike <see cref="IndexOf"/>, an unrecognised category reports failure rather
+    /// than falling back to the general bucket. That distinction matters for teacher-supplied
+    /// distributions: a hallucinated category name silently resolved to "general" would dump its
+    /// probability mass onto a real label, which is worse than dropping it.
+    /// </summary>
+    public static bool TryIndexOf(NeuralModelKindChatMonitoring kind, string? category, out int index)
+    {
+        index = -1;
+        if (string.IsNullOrWhiteSpace(category))
+            return false;
+
+        IReadOnlyList<string> labels = For(kind);
+        string normalized = NormalizeCategory(kind, category);
+        for (int i = 0; i < labels.Count; i++)
+        {
+            if (!string.Equals(labels[i], normalized, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            index = i;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Projects a sparse, name-keyed teacher distribution onto this taxonomy's axis, or returns
+    /// null when nothing usable survives.
+    ///
+    /// Name-keyed rather than positional because that is what an LLM can actually produce: the
+    /// moderation taxonomy has a hundred labels, and asking for a hundred-element array in order
+    /// invites silent misalignment, whereas naming the two or three categories that apply is a
+    /// request a model can satisfy reliably.
+    ///
+    /// Weights are left unnormalised here; the model normalises when it consumes them, so there is
+    /// exactly one place where that rule lives.
+    /// </summary>
+    public static float[]? BuildDistribution(
+        NeuralModelKindChatMonitoring kind,
+        IReadOnlyDictionary<string, double>? weights)
+    {
+        if (weights is null || weights.Count == 0)
+            return null;
+
+        float[] distribution = new float[For(kind).Count];
+        bool anyUsable = false;
+        foreach (KeyValuePair<string, double> weight in weights)
+        {
+            if (double.IsNaN(weight.Value) || double.IsInfinity(weight.Value) || weight.Value <= 0)
+                continue;
+
+            if (!TryIndexOf(kind, weight.Key, out int index))
+                continue;
+
+            // Summed rather than assigned: two aliases of one category (say "harassment" and a
+            // legacy spelling that normalises onto it) contribute together instead of one silently
+            // overwriting the other.
+            distribution[index] += (float)weight.Value;
+            anyUsable = true;
+        }
+
+        return anyUsable ? distribution : null;
+    }
+
     public static string Label(NeuralModelKindChatMonitoring kind, int index)
     {
         IReadOnlyList<string> labels = For(kind);
