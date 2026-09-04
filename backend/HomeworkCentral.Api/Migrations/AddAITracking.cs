@@ -1,6 +1,7 @@
 using HomeworkCentral.Api.Data;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -17,7 +18,7 @@ public class AddAITracking : Migration
             columns: table => new
             {
                 Id = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("Npgsql:ValueGenerationStrategy", Microsoft.EntityFrameworkCore.Metadata.SqlServerValueGenerationStrategy.IdentityColumn),
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                 TicketId = table.Column<Guid>(type: "uuid", nullable: false),
                 MessageIndex = table.Column<int>(type: "integer", nullable: false),
                 NeuralModelKind = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
@@ -31,7 +32,7 @@ public class AddAITracking : Migration
                     name: "FK_AITrackingSessions_Tickets_TicketId",
                     column: x => x.TicketId,
                     principalTable: "Tickets",
-                    principalColumn: "Id",
+                    principalColumn: "TicketId",
                     onDelete: ReferentialAction.Cascade);
             });
 
@@ -40,7 +41,7 @@ public class AddAITracking : Migration
             columns: table => new
             {
                 Id = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("Npgsql:ValueGenerationStrategy", Microsoft.EntityFrameworkCore.Metadata.SqlServerValueGenerationStrategy.IdentityColumn),
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                 TrackingSessionId = table.Column<long>(type: "bigint", nullable: false),
                 CategoryName = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 Weight = table.Column<double>(type: "double precision", nullable: false),
@@ -64,7 +65,7 @@ public class AddAITracking : Migration
             columns: table => new
             {
                 Id = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("Npgsql:ValueGenerationStrategy", Microsoft.EntityFrameworkCore.Metadata.SqlServerValueGenerationStrategy.IdentityColumn),
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                 TrackingSessionId = table.Column<long>(type: "bigint", nullable: false),
                 PredictedCategory = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 PredictedScore = table.Column<float>(type: "real", nullable: false),
