@@ -76,15 +76,32 @@ public sealed class NeuralNetCheckpointStore(AppDbContext db)
             .Select(x => x.Generation)
             .ToListAsync(ct);
 
+        if (superseded.Count == 0)
+            return;
+
+        // A generation this context has already added or loaded is still in its identity map, and
+        // attaching a second instance with the same key throws rather than replacing it. Reuse the
+        // tracked instance where there is one.
+        Dictionary<long, NeuralNetCanonicalCheckpoint> tracked = db.ChangeTracker
+            .Entries<NeuralNetCanonicalCheckpoint>()
+            .Select(entry => entry.Entity)
+            .Where(entity => entity.ChatMonitoringKind == chatMonitoringKind)
+            .ToDictionary(entity => entity.Generation);
+
         foreach (long generation in superseded)
         {
-            // Key-only stub: the composite primary key (ChatMonitoringKind, Generation) is all the
-            // DELETE needs, and there is no concurrency token to satisfy.
-            db.NeuralNetCanonicalCheckpoints.Remove(new NeuralNetCanonicalCheckpoint
+            if (!tracked.TryGetValue(generation, out NeuralNetCanonicalCheckpoint? doomed))
             {
-                ChatMonitoringKind = chatMonitoringKind,
-                Generation = generation,
-            });
+                // Key-only stub: the composite primary key (ChatMonitoringKind, Generation) is all
+                // the DELETE needs, and there is no concurrency token to satisfy.
+                doomed = new NeuralNetCanonicalCheckpoint
+                {
+                    ChatMonitoringKind = chatMonitoringKind,
+                    Generation = generation,
+                };
+            }
+
+            db.NeuralNetCanonicalCheckpoints.Remove(doomed);
         }
     }
 }
