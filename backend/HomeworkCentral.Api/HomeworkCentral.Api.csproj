@@ -60,6 +60,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="HomeworkCentral.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Canonical favicon lives in frontend/public; link it into Dev/ at build output. -->
     <Content Include="..\..\frontend\public\favicon.svg" Link="Dev\favicon.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

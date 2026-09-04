@@ -27,6 +27,7 @@ public interface IVectorDocumentStore
 /// <summary>
 /// Retrieval-only store. Embeddings are cosine-compared in process (JSON float arrays).
 /// Never returns or stores authoritative candidate quality scores.
+/// The portable cosine twin is <c>rust/hc-vector-cosine</c>; keep both in lockstep.
 /// </summary>
 public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
 {
@@ -99,7 +100,7 @@ public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
     private static float[] Parse(string json) =>
         JsonSerializer.Deserialize<float[]>(json) ?? [];
 
-    private static double Cosine(IReadOnlyList<float> a, IReadOnlyList<float> b)
+    internal static double Cosine(IReadOnlyList<float> a, IReadOnlyList<float> b)
     {
         int n = Math.Min(a.Count, b.Count);
         if (n == 0)
