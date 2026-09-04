@@ -32,11 +32,16 @@ services:
       # 128MB default -> 32MB. The dev dataset is a few MB; the OS page cache covers the rest.
       - -c
       - shared_buffers=32MB
-      # 100 default. Each backend process costs several MB even when idle. 30 is chosen to fit
-      # under mem_limit below in the worst case (30 backends + shared_buffers), and is far more
-      # than a single-instance dev API, a psql session and the health check ever open at once.
+      # Left at the stock 100. Lowering it was tempting and wrong: max_connections sizes a few
+      # shared-memory structures (proc array, lock table) for single-digit MB, while the real
+      # per-connection cost is the backend *process*, which only exists once a client actually
+      # connects. So the effective lever is the client-side pool, not this ceiling — see
+      # TenantConnectionResolver, which caps each tenant pool and expires idle connections after
+      # 60s. It also has to stay above the number of tenant pools alive at once: every tenant is
+      # a distinct Database= value, so Npgsql keys one pool per tenant, and a fresh run-dev
+      # provisions 70 dev persona databases.
       - -c
-      - max_connections=30
+      - max_connections=100
       - -c
       - work_mem=2MB
       - -c
@@ -64,7 +69,7 @@ services:
       - huge_pages=off
       - -c
       - track_activity_query_size=1024
-    mem_limit: "${POSTGRES_MEM_LIMIT:-256m}"
+    mem_limit: "${POSTGRES_MEM_LIMIT:-320m}"
     cpus: "${POSTGRES_CPUS:-1.0}"
     # Published for local dev (scripts/run-dev.*). Omit in production deployments.
     ports:

@@ -82,7 +82,22 @@ public sealed class ChatTypingTracker : IChatTypingTracker
         // check above and this removal, TryRemove below will simply no-op for that race (a rare,
         // low-stakes presence indicator, not correctness-critical state), and the new connection's
         // own SetTyping call already re-added a fresh entry that stays intact regardless.
-        return room.TryRemove(userId, out _);
+        bool removed = room.TryRemove(userId, out _);
+
+        // Drop the room bucket once its last typer is gone. Without this, _rooms only ever grows:
+        // an entry is added for every group key anyone types in and is never reclaimed for the
+        // life of the process. The identity-checked removal below only removes the exact
+        // dictionary instance observed empty, so a room another thread has since repopulated via
+        // GetOrAdd is left alone. The same benign race as above remains — a SetTyping that runs
+        // between the emptiness check and the removal loses its indicator — and is acceptable for
+        // the same reason.
+        if (room.IsEmpty)
+        {
+            ((ICollection<KeyValuePair<string, ConcurrentDictionary<Guid, TypingEntry>>>)_rooms)
+                .Remove(new KeyValuePair<string, ConcurrentDictionary<Guid, TypingEntry>>(groupKey, room));
+        }
+
+        return removed;
     }
 
     private sealed class TypingEntry(string username)
