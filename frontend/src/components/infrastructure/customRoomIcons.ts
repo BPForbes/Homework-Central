@@ -14,6 +14,7 @@ import {
   faLock,
   faPalette,
   faStar,
+  faTicket,
   faUsers,
   faWrench,
 } from '@fortawesome/free-solid-svg-icons'
@@ -44,6 +45,7 @@ export const CUSTOM_ROOM_ICON_OPTIONS: CustomRoomIconOption[] = [
   { id: 'fas:globe', label: 'Public', icon: faGlobe },
   { id: 'fas:lock', label: 'Private', icon: faLock },
   { id: 'fas:heart', label: 'Community', icon: faHeart },
+  { id: 'fas:ticket', label: 'Ticket', icon: faTicket },
   { id: 'fas:wrench', label: 'Tools', icon: faWrench },
 ]
 
@@ -55,6 +57,8 @@ export function defaultCustomRoomIcon(roomType: CustomRoomType): string {
       return 'fas:circle-info'
     case 'RoleClaim':
       return 'fas:id-badge'
+    case 'Ticket':
+      return 'fas:ticket'
     default:
       return 'fas:comments'
   }

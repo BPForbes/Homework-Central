@@ -51,18 +51,18 @@ public sealed class ChatRoomDetailService(
             };
         }
 
+        // The store is refreshed atomically after channel mutations, so this avoids a query
+        // every time an existing custom room is opened.
+        CustomChannelSnapshot? snapshot = channelStore.FindByRoomId(roomId);
+        if (snapshot is not null)
+            return MapSnapshot(snapshot, masks);
+
+        // Startup/recovery fallback in case the snapshot has not been warmed yet.
         CustomChannel? channel = await db.CustomChannels
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.RoomId == roomId && !c.IsArchived, ct);
-
         if (channel is null)
-        {
-            CustomChannelSnapshot? snapshot = channelStore.FindByRoomId(roomId);
-            if (snapshot is null)
-                return null;
-
-            return MapSnapshot(snapshot, masks);
-        }
+            return null;
 
         return MapChannel(channel, masks);
     }

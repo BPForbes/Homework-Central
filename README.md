@@ -78,15 +78,17 @@ After a successful run, these services are available:
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Frontend** | http://localhost:5173/login | React app (Vite dev server) |
-| **API** | http://localhost:5000 | ASP.NET Core backend |
-| **Health check** | http://localhost:5000/healthz | API readiness probe |
+| **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
+| **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
+| **Health check** | http://localhost:5000/healthz | Listen probe (`starting` while migrate/seed runs, then `healthy`) |
 | **Postgres** | `localhost:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |
 
 On **Windows**, the API and frontend each open in a **separate terminal window**. On **Linux/macOS**, both run in the current terminal (use `Ctrl+C` to stop).
 
 The browser opens automatically when servers are ready.
+
+The API uses **`dotnet watch`** by default so a `git pull` (or local edits) rebuilds/restarts without closing the terminal. That is process restart / .NET Hot Reload, not Vite-style HMR. Set `HC_API_WATCH=0` for a one-shot `dotnet run`. After pulling migrations, unset `HC_SKIP_DEV_WARMUP` (or restart once) so schema updates apply.
 
 ---
 
@@ -113,6 +115,130 @@ The browser opens automatically when servers are ready.
 | Windows | `.\scripts\stop-dev.ps1` (close API/frontend terminals manually) |
 | Linux / macOS | `./scripts/stop-dev.sh` or `Ctrl+C` in the run terminal |
 
+### Release Docker resources (Windows)
+
+Stopping the stack releases container CPU and RAM immediately; the `pgdata` volume is retained:
+
+```powershell
+.\scripts\stop-dev.ps1
+docker compose down
+```
+
+If Docker Desktop's WSL 2 VM still holds memory after the containers stop, quit Docker Desktop
+and run `wsl --shutdown`, then start Docker Desktop again. To reclaim unused build cache and
+images without deleting the database volume, run `docker system prune -af`. Do not add
+`--volumes` unless you intentionally want to delete local Postgres data.
+
+### Docker Compose profiles (8 GiB workstation)
+
+`docker-compose.yml` keeps the lightweight core below a 1.25 GiB container ceiling.
+Heavy services are opt-in profiles:
+
+| Service | Profile | CPU ceiling | RAM ceiling |
+|---|---|---:|---:|
+| PostgreSQL, FCaptcha, Redis, API, nginx | default | ~1.75 total | ~1.25 GiB total |
+| ClamAV | `antivirus` | 0.75 | 2,560 MiB |
+| Ollama | `ai` | 1.50 | 1,536 MiB |
+| MinIO (S3 API) | `object-storage` | 0.50 | 256 MiB |
+
+```powershell
+docker compose up -d                          # core only
+docker compose --profile antivirus up -d      # + attachment malware scanning
+docker compose --profile ai up -d             # + local AI reviewer
+docker compose --profile object-storage up -d # + free S3-compatible MinIO
+```
+
+Attachment bytes default to the local `uploads` volume (`Uploads:Backend=Local`).
+To use MinIO with the Compose API container, set `UPLOADS_BACKEND=S3` in `.env`
+(and start the `object-storage` profile). Downloads still go through the API so
+auth and malware caution gates are unchanged. The MinIO console is on port 9001.
+
+Do not enable `antivirus` and `ai` together on an 8 GiB machine. CPU values are
+ceilings rather than reservations. The default development scripts run the API and
+frontend on the host, so Docker limits do not cap those two host processes.
+Override individual ceilings with `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`,
+`LLM_MEMORY_LIMIT`, and related keys in `.env` when `docker stats` shows a need.
+
+**Connections are bounded client-side, not by `max_connections`.** Each tenant is a distinct
+`Database=` value, so Npgsql keys one pool *per tenant* — capping a pool's width does not cap
+how many pools exist. `TenantConnectionResolver` therefore also expires idle tenant connections
+after 60s, and one-shot provisioning (create/migrate/seed) runs unpooled so walking all 70 dev
+personas does not retain a server slot per persona. Tune with `Tenancy:MaxPoolSizePerTenant`
+and `Tenancy:ConnectionIdleLifetimeSeconds`.
+
+**FCaptcha rebuilds only when its image is missing.** It is pinned to upstream v1.12.0, so the
+dev scripts no longer wake BuildKit for a no-op rebuild on every start; set
+`HC_FCAPTCHA_REBUILD=1` to force one.
+
+**One container per service type.** Compose already defines a single `fcaptcha`,
+`postgres`, `redis`, `backend`, `frontend`, and (with profiles) `llm` / `minio` /
+`clamav`. Reuse that Ollama container for both ticket review and neural synthetic
+training (`Tickets:OllamaBaseUrl` and `Llm:BaseUrl` point at the same host). Do
+**not** also `docker compose up` the `backend`/`frontend` services while
+`scripts/run-dev*` is serving them on the host — that doubles RAM/CPU for the
+same roles. There is no separate API gateway or load-balancer container in
+Compose; frontend nginx is the only reverse proxy. Packaged nginx caches hashed
+`/assets/*` for a year (`Cache-Control: public, immutable`) while `index.html`
+stays `no-cache`. The API compresses large JSON responses (Brotli/gzip) and
+accepts compressed request bodies; neural-net session/feedback lists are cursor-
+paginated (`beforeUtc` + `limit`).
+
+### WSL caps (Windows Docker Desktop)
+
+Compose limits do not include the Linux kernel, Docker daemon, or filesystem cache.
+Copy [`deploy/windows/.wslconfig.example`](deploy/windows/.wslconfig.example) to
+`%USERPROFILE%\.wslconfig` (4 GiB memory, 4 processors, 2 GiB swap), run
+`wsl --shutdown`, and restart Docker Desktop. Sustained swapping means the active
+profile is too large; avoid running other WSL distributions alongside a heavy profile.
+
+### ClamAV notes
+
+ClamAV is profile-gated because the signature engine dominates RAM. The local image
+disables concurrent database reloads so scans pause briefly during signature update
+instead of holding two engines. Enable it in the script path with
+`HC_ENABLE_CLAMAV=1` before `scripts/run-dev.sh`, or use
+`docker compose --profile antivirus up -d`. An npm ClamAV package is only a client
+wrapper; the backend already streams to `clamd` via `nClam`. A native Windows
+`clamd` on port `3310` moves signature RAM outside the WSL cap but does not shrink
+it — the Docker antivirus profile remains the safer default on the documented
+workstation. Upload scan statuses and fail-open behavior are in
+[`docs/chat.md`](docs/chat.md).
+
+Ticket AI uses bounded per-message confidence changes with an auditable vector
+archive; see [`docs/tickets.md`](docs/tickets.md#neural-monitors-and-ollama-blend).
+
+### Documentation
+
+Architecture, trust boundaries, and engineering standards live under
+[`docs/`](docs/README.md):
+
+| Document | Topic |
+|----------|-------|
+| [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](docs/COMMENT_DOCUMENTATION_GUIDE.md) | Comment Documentation Guide (comments, naming, readability; CodeQL CI) |
+| [`docs/identity.md`](docs/identity.md) | Authentication, sessions, account classes, tenant visibility |
+| [`docs/chat.md`](docs/chat.md) | Chat categories, rooms, messages, attachments |
+| [`docs/tickets.md`](docs/tickets.md) | Ticket portals, Trial Tutor, votes, AI scoring |
+| [`design.md`](design.md) | UI design tokens and motion |
+| [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md) | Kubernetes deployment |
+
+### Fast repeat starts
+
+`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
+can bind without a duplicate build. It also starts the frontend before the API. The API exposes
+`/healthz` as soon as Kestrel listens (`status: starting` during migrate/seed, then `healthy`),
+so the Vite BackendGate can wait without flooding the proxy with connection-refused errors.
+
+After one successful initialization of the local database, you can skip development migrations
+and seed warmup on repeat starts:
+
+```powershell
+$env:HC_SKIP_DEV_WARMUP = '1'
+.\scripts\run-dev.ps1
+```
+
+Unset this variable and start normally after pulling migrations or authorization/seed changes, or
+after resetting the local database. Never use it for a fresh database.
+
 ### Build without starting servers
 
 | Platform | Command |
@@ -135,57 +261,13 @@ The browser opens automatically when servers are ready.
 Homework-Central/
 ├── backend/HomeworkCentral.Api/   # ASP.NET Core API
 ├── frontend/                      # React + Vite SPA
+├── docs/                          # Architecture and engineering standards
+├── deploy/                        # Kubernetes and Windows Docker helpers
 ├── scripts/                       # Dev orchestration (.ps1 / .sh)
-├── docker-compose.yml             # Postgres + FCaptcha; backend/frontend behind the `app` profile
+├── docker-compose.yml             # Core services; ClamAV / Ollama / MinIO behind profiles
 ├── HomeworkCentral.sln            # .NET solution
 └── global.json                    # Pinned .NET SDK version
 ```
-
----
-
-## Docker resource usage
-
-Docker is usually the largest single consumer of RAM on a dev machine, so the stack is
-deliberately sized down rather than left on stock defaults.
-
-**Only two containers run by default.** `scripts/run-dev.*` starts Postgres and FCaptcha and
-runs the API and the frontend natively — no container, no image build, no memory. The
-containerised `backend` and `frontend` services in `docker-compose.yml` sit behind the `app`
-Compose profile and are opt-in:
-
-```bash
-docker compose up -d                  # postgres + fcaptcha (what run-dev uses)
-docker compose --profile app up -d    # full containerised stack
-```
-
-**Every service is capped.** Each one declares a `mem_limit`, overridable from `.env`:
-
-| Service | Default cap | Notes |
-|---------|-------------|-------|
-| `postgres` | 320 MiB | Tuned for a dev-sized dataset: 32 MB shared buffers, no parallel workers, no JIT. |
-| `fcaptcha` | 128 MiB | Go runtime held to a 96 MiB soft heap limit (`GOMEMLIMIT`) with `GOGC=50`. |
-| `backend` | 512 MiB | Workstation GC instead of the ASP.NET default server GC (one heap, not one per core). |
-| `frontend` | 64 MiB | A single nginx worker serving static files. |
-
-`max_connections` is deliberately left at the stock 100. It sizes a few shared-memory
-structures for single-digit MB, while the real per-connection cost is the backend *process* —
-which only exists once a client connects. The effective lever is therefore the client-side pool:
-`TenantConnectionResolver` caps each tenant's pool and expires idle connections after 60s, and
-tenant provisioning runs unpooled so it doesn't pin one server slot per persona database.
-Those are tunable via `Tenancy:MaxPoolSizePerTenant` and `Tenancy:ConnectionIdleLifetimeSeconds`.
-
-See the "Docker memory budget" block in [`.env.example`](.env.example) for every knob. Check
-live usage against the caps with `docker stats`. If a service is being OOM-killed, raise its
-limit in `.env` rather than removing the cap.
-
-**Skip Docker entirely** when you already have Postgres on localhost:
-`./scripts/run-dev.sh --skip-docker` (or `-SkipDocker` on Windows).
-
-**Stop the containers when you are done** — `./scripts/stop-dev.sh` / `.\scripts\stop-dev.ps1`.
-The run scripts stop them on exit, but a crashed terminal can leave them resident.
-
-FCaptcha is now only rebuilt when its image is actually missing (it is pinned to upstream
-v1.12.0, which never changes between runs); `HC_FCAPTCHA_REBUILD=1` forces a rebuild.
 
 ---
 
@@ -194,6 +276,7 @@ v1.12.0, which never changes between runs); `HC_FCAPTCHA_REBUILD=1` forces a reb
 - **Docker not running** — Start Docker Desktop (or the Docker daemon) and retry.
 - **Port already in use** — Another Postgres install may own `5434` on localhost. The run scripts try to pick a free port and update `.env`; you can also set `POSTGRES_HOST_PORT` manually.
 - **Stale database volume** — Run the reset command above (`reset-dev-db` with `-Yes` / `--yes`), then `run-dev` again.
+- **`Network homework-central_default Resource is still in use`** — Harmless during reset. The `pgdata` volume was still removed; `run-dev` reuses the leftover Docker network. Optional: `docker network inspect homework-central_default` to see what is attached.
 - **Skip Docker** — If you already have Postgres on localhost: `.\scripts\run-dev.ps1 -SkipDocker` (Windows) or `./scripts/run-dev.sh --skip-docker` (Unix).
 
 ---

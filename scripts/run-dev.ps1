@@ -8,6 +8,7 @@
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
+#   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
 # Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
 [CmdletBinding()]
 param(
@@ -49,9 +50,13 @@ Options:
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Help         Show this help
 
+For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
+development migrations and seeds. Unset it after pulling migrations/catalog changes
+or after resetting the local database.
+
 After startup (each server opens in its own terminal window):
-  Frontend  http://localhost:5173
-  API       http://localhost:5000
+  Frontend  http://localhost:5173   (Vite HMR)
+  API       http://localhost:5000   (dotnet watch by default; set HC_API_WATCH=0 to disable)
   Health    http://localhost:5000/healthz
 
 Stop:
@@ -381,6 +386,19 @@ function Start-FCaptcha {
     Ensure-DevFCaptchaRunning -Port $port
 }
 
+function Start-ClamAv {
+    if (-not (Test-DevClamAvOptedIn)) {
+        Write-Step 'Skipping ClamAV (set HC_ENABLE_CLAMAV=1 to scan uploads; scans fail open without it)'
+        return
+    }
+
+    Write-Step "Starting ClamAV (Docker) on localhost:$($script:DevClamAvHostPort)"
+
+    Assert-DockerRunning
+
+    Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
+}
+
 function Build-PostgresHostCheck {
     dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
@@ -491,6 +509,13 @@ function Start-DevStack([hashtable]$EnvValues) {
 
     $env:HC_SKIP_BROWSER_OPEN = '1'
 
+    Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
+    $frontendArgs = @('-NoExit', '-File', $frontendStarter)
+    if (-not $SkipDocker) {
+        $frontendArgs += '-PreRegistered'
+    }
+    Start-DevStackPowerShellProcess -ArgumentList $frontendArgs -WorkingDirectory $RepoRoot
+
     if (-not $script:ApiBuildFailed) {
         Write-Step 'Starting API in a new terminal (http://localhost:5000)'
         $apiArgs = @('-NoExit', '-File', $apiStarter)
@@ -499,17 +524,23 @@ function Start-DevStack([hashtable]$EnvValues) {
         } else {
             $apiArgs += '-PreRegistered'
         }
-        Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
+
+        # The parent has just completed the API build, so avoid rebuilding it in the child
+        # process before Kestrel can bind. Preserve an explicitly supplied value afterwards.
+        $previousSkipDotnetBuild = $env:HC_SKIP_DOTNET_BUILD
+        $env:HC_SKIP_DOTNET_BUILD = '1'
+        try {
+            Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
+        } finally {
+            if ($null -eq $previousSkipDotnetBuild) {
+                Remove-Item Env:HC_SKIP_DOTNET_BUILD -ErrorAction SilentlyContinue
+            } else {
+                $env:HC_SKIP_DOTNET_BUILD = $previousSkipDotnetBuild
+            }
+        }
     } else {
         Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
-
-    Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
-    $frontendArgs = @('-NoExit', '-File', $frontendStarter)
-    if (-not $SkipDocker) {
-        $frontendArgs += '-PreRegistered'
-    }
-    Start-DevStackPowerShellProcess -ArgumentList $frontendArgs -WorkingDirectory $RepoRoot
 
     Write-Step 'Opening browser tabs when servers are ready'
     if (-not $script:ApiBuildFailed) {
@@ -545,6 +576,11 @@ function Start-DevStack([hashtable]$EnvValues) {
             $fcaptchaPort = $script:DevFCaptchaHostPort
         }
         Write-Host "  FCaptcha: localhost:$fcaptchaPort (Docker; stops when both terminals are closed)"
+        if (Test-DevClamAvOptedIn) {
+            Write-Host "  ClamAV:   localhost:$($script:DevClamAvHostPort) (Docker; upload scanning, fail-open while loading)"
+        } else {
+            Write-Host '  ClamAV:   off (uploads scan as NotScanned; set HC_ENABLE_CLAMAV=1 to enable)'
+        }
     }
     Write-Host 'Close both terminal windows to stop servers and free the Postgres port'
     Write-Host 'Or run: scripts/stop-dev.ps1'
@@ -561,8 +597,9 @@ function Start-RunPhase([hashtable]$EnvValues) {
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
         Start-FCaptcha -EnvValues $EnvValues
+        Start-ClamAv
     } else {
-        Write-Step 'Skipping Docker Postgres and FCaptcha (HC_SKIP_DOCKER / -SkipDocker)'
+        Write-Step 'Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / -SkipDocker)'
     }
 
     Start-DevStack -EnvValues $EnvValues

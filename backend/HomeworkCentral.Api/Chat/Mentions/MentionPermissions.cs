@@ -24,29 +24,16 @@ public static class MentionPermissions
         BitMask.HasBit(roleMask, PlatformRoles.Guest)
         && !HasAnyRoleAboveGuest(roleMask);
 
-    public static bool IsSeniorStaff(System.Collections.BitArray roleMask)
-    {
-        foreach (short bit in SeniorStaffRoleBits)
-        {
-            if (BitMask.HasBit(roleMask, bit))
-                return true;
-        }
-
-        return false;
-    }
+    public static bool IsSeniorStaff(System.Collections.BitArray roleMask) =>
+        SeniorStaffRoleBits.Any(bit => BitMask.HasBit(roleMask, bit));
 
     public static bool CanUseBroadcastMentions(System.Collections.BitArray roleMask) =>
         BitMask.HasBit(roleMask, PlatformRoles.Owner)
         || BitMask.HasBit(roleMask, PlatformRoles.Administrator);
 
-    private static bool HasAnyRoleAboveGuest(System.Collections.BitArray roleMask)
-    {
-        for (short bit = PlatformRoles.VerifiedUser; bit <= PlatformRoles.Founder; bit++)
-        {
-            if (bit < roleMask.Length && roleMask[bit])
-                return true;
-        }
-
-        return false;
-    }
+    private static bool HasAnyRoleAboveGuest(System.Collections.BitArray roleMask) =>
+        Enumerable.Range(
+                PlatformRoles.VerifiedUser,
+                PlatformRoles.TrialTutor - PlatformRoles.VerifiedUser + 1)
+            .Any(bit => bit < roleMask.Length && roleMask[bit]);
 }

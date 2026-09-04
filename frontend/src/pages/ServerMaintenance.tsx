@@ -11,7 +11,6 @@ import {
   RoomCategoryFields,
   RoomIconField,
   RoomPrivacyField,
-  RoomTypeField,
 } from '../components/infrastructure/RoomEditorFields'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import { defaultCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
@@ -45,7 +44,6 @@ export function ServerMaintenance() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
 
   const [displayName, setDisplayName] = useState('')
   const [iconName, setIconName] = useState(defaultCustomRoomIcon('Chat'))
@@ -108,17 +106,6 @@ export function ServerMaintenance() {
     [channels],
   )
 
-  const filteredChannels = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return channels
-    return channels.filter(
-      (c) =>
-        c.displayName.toLowerCase().includes(q) ||
-        c.categoryDisplayName.toLowerCase().includes(q) ||
-        c.roomId.toLowerCase().includes(q),
-    )
-  }, [channels, search])
-
   function resetForm() {
     setEditingId(null)
     setDisplayName('')
@@ -170,12 +157,13 @@ export function ServerMaintenance() {
   }
 
   function buildAccessRulesPayload(): CustomChannelAccessRuleInput[] {
-    const rules: CustomChannelAccessRuleInput[] = []
-    for (const rule of accessRules) {
-      if (rule.customRoleId) rules.push({ customRoleId: rule.customRoleId })
-      else if (rule.platformRoleBit != null) rules.push({ platformRoleBit: rule.platformRoleBit })
-    }
-    return rules
+    return accessRules.flatMap((rule): CustomChannelAccessRuleInput[] => {
+      if (rule.customRoleId)
+        return [{ customRoleId: rule.customRoleId }]
+      if (rule.platformRoleBit != null)
+        return [{ platformRoleBit: rule.platformRoleBit }]
+      return []
+    })
   }
 
   function buildPayload(password?: string): Record<string, unknown> {
@@ -264,7 +252,7 @@ export function ServerMaintenance() {
         <div className="sm-hero-copy">
           <h2>Server Maintenance</h2>
           <p className="server-page-subtitle">
-            Design custom chat, info, and role-claim rooms. Every room type opens via{' '}
+            Design custom chat, info, ticket, and role-claim rooms. Every room type opens via{' '}
             <code>/chat/&#123;roomId&#125;</code> in the sidebar.
           </p>
         </div>
@@ -314,16 +302,6 @@ export function ServerMaintenance() {
               />
             </div>
 
-            <RoomTypeField
-              roomType={roomType}
-              editing={Boolean(editingId)}
-              onChange={(nextRoomType, nextIconName) => {
-                setRoomType(nextRoomType)
-                setIconName(nextIconName)
-                setNavSection(roomTypeToServerSection(nextRoomType))
-              }}
-            />
-
             <RoomIconField
               iconName={iconName}
               onChange={setIconName}
@@ -351,6 +329,13 @@ export function ServerMaintenance() {
               <p className="dashboard-hint">
                 Info content is authored as dated entries after the room is created — open it from the list below
                 to add the first entry.
+              </p>
+            )}
+
+            {roomType === 'Ticket' && !editingId && (
+              <p className="dashboard-hint">
+                Ticket portal settings — intake questions, staff access, and tracking — are configured in Channel
+                Builder after the room is created.
               </p>
             )}
 
@@ -387,11 +372,8 @@ export function ServerMaintenance() {
 
         {serverSection === 'rooms' && (
           <CustomRoomList
-            channels={filteredChannels}
-            totalChannelCount={channels.length}
+            channels={channels}
             editingId={editingId}
-            search={search}
-            onSearchChange={setSearch}
             onEdit={startEdit}
             onArchive={(channelId) => void handleArchive(channelId)}
           />

@@ -37,6 +37,25 @@ public partial class AppDbContext(
     public DbSet<CustomChannel> CustomChannels => Set<CustomChannel>();
     public DbSet<CustomChannelAccessRule> CustomChannelAccessRules => Set<CustomChannelAccessRule>();
     public DbSet<InfoEntry> InfoEntries => Set<InfoEntry>();
+    public DbSet<TicketPortalConfig> TicketPortalConfigs => Set<TicketPortalConfig>();
+    public DbSet<Ticket> Tickets => Set<Ticket>();
+    public DbSet<TicketUserWatch> TicketUserWatches => Set<TicketUserWatch>();
+    public DbSet<TicketMessageScore> TicketMessageScores => Set<TicketMessageScore>();
+    public DbSet<TicketModelTrainingExample> TicketModelTrainingExamples => Set<TicketModelTrainingExample>();
+    public DbSet<NeuralNetTrainingSession> NeuralNetTrainingSessions => Set<NeuralNetTrainingSession>();
+    public DbSet<NeuralNetCanonicalCheckpoint> NeuralNetCanonicalCheckpoints => Set<NeuralNetCanonicalCheckpoint>();
+    public DbSet<NeuralNetTrainingPromotion> NeuralNetTrainingPromotions => Set<NeuralNetTrainingPromotion>();
+    public DbSet<ChatMonitoringNeuralModelRun> ChatMonitoringNeuralModelRuns => Set<ChatMonitoringNeuralModelRun>();
+    public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
+    public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
+    public DbSet<ChatMessageVote> ChatMessageVotes => Set<ChatMessageVote>();
+    public DbSet<ChatLinkPreview> ChatLinkPreviews => Set<ChatLinkPreview>();
+    public DbSet<CandidateApplication> CandidateApplications => Set<CandidateApplication>();
+    public DbSet<AssessmentEvent> AssessmentEvents => Set<AssessmentEvent>();
+    public DbSet<AssessmentCompetencyEvidence> AssessmentCompetencyEvidence => Set<AssessmentCompetencyEvidence>();
+    public DbSet<CandidateCompetencyState> CandidateCompetencyStates => Set<CandidateCompetencyState>();
+    public DbSet<CandidateDecision> CandidateDecisions => Set<CandidateDecision>();
+    public DbSet<VectorDocument> VectorDocuments => Set<VectorDocument>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -282,6 +301,262 @@ public partial class AppDbContext(
                 .HasForeignKey(r => r.CustomRoleId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => r.ChannelId);
+        });
+
+        mb.Entity<TicketPortalConfig>(e =>
+        {
+            e.HasKey(p => p.ChannelId);
+            e.Property(p => p.CtaLabel).HasMaxLength(128).IsRequired();
+            e.Property(p => p.Purpose).HasMaxLength(128).IsRequired();
+            e.Property(p => p.FilterName).HasMaxLength(64).IsRequired();
+            e.Property(p => p.TrackingMode).HasMaxLength(32).IsRequired();
+            e.Property(p => p.DecisionLabelsJson).IsRequired();
+            e.Property(p => p.MentionRoleRulesJson).IsRequired();
+            e.Property(p => p.StaffAccessRulesJson).IsRequired();
+            e.Property(p => p.IntakeSchemaJson).IsRequired();
+            e.Property(p => p.UpdatedAtUtc).IsRequired();
+            e.HasOne(p => p.Channel)
+                .WithOne()
+                .HasForeignKey<TicketPortalConfig>(p => p.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<Ticket>(e =>
+        {
+            e.HasKey(t => t.TicketId);
+            e.Property(t => t.TicketId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(t => t.RoomId).HasMaxLength(128).IsRequired();
+            e.Property(t => t.Purpose).HasMaxLength(128).IsRequired();
+            e.Property(t => t.FilterName).HasMaxLength(64).IsRequired();
+            e.Property(t => t.IntakeAnswersJson).IsRequired();
+            e.Property(t => t.ApprovedDecision).HasMaxLength(128);
+            e.HasIndex(t => t.RoomId).IsUnique();
+            e.HasIndex(t => new { t.PortalChannelId, t.DisplayNumber }).IsUnique();
+            e.HasOne(t => t.Portal)
+                .WithMany()
+                .HasForeignKey(t => t.PortalChannelId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(t => t.ChatChannel)
+                .WithOne()
+                .HasForeignKey<Ticket>(t => t.ChatChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<TicketUserWatch>(e =>
+        {
+            e.HasKey(w => w.WatchId);
+            e.Property(w => w.WatchId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(w => w.ContextLabel).HasMaxLength(128).IsRequired();
+            e.Property(w => w.Source).HasMaxLength(32).IsRequired();
+            e.HasOne(w => w.Ticket)
+                .WithMany(t => t.Watches)
+                .HasForeignKey(w => w.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(w => w.TicketId);
+            e.HasIndex(w => new { w.TrackedUserId, w.IsActive });
+        });
+
+        mb.Entity<TicketMessageScore>(e =>
+        {
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_TicketMessageScores_PreviousScore", "\"PreviousScore\" >= 0 AND \"PreviousScore\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_ScoreDelta", "\"ScoreDelta\" >= -1 AND \"ScoreDelta\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_CurrentScore", "\"CurrentScore\" >= 0 AND \"CurrentScore\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_EvidenceConfidence", "\"EvidenceConfidence\" >= 0 AND \"EvidenceConfidence\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_Relevance", "\"Relevance\" >= 0 AND \"Relevance\" <= 1");
+                t.HasCheckConstraint("CK_TicketMessageScores_Student", "\"StudentScore\" >= 0 AND \"StudentScore\" <= 1 AND \"StudentConfidence\" >= 0 AND \"StudentConfidence\" <= 1 AND \"StudentRelevance\" >= 0 AND \"StudentRelevance\" <= 1");
+            });
+            e.HasKey(s => s.ScoreEventId);
+            e.Property(s => s.ScoreEventId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(s => s.Reason).HasMaxLength(500).IsRequired();
+            e.Property(s => s.EvaluatorModelVersion).HasMaxLength(128).IsRequired();
+            e.Property(s => s.RawEvaluationJson).IsRequired();
+            e.Property(s => s.StudentCategory).HasMaxLength(64).IsRequired();
+            e.Property(s => s.StudentReasoning).HasMaxLength(500).IsRequired();
+            e.Property(s => s.ContextSnapshot).HasMaxLength(5000).IsRequired();
+            e.Property(s => s.ReviewerExplanation).HasMaxLength(500);
+            e.Property(s => s.ReviewerGuidance).HasMaxLength(500);
+            e.HasOne(s => s.Ticket)
+                .WithMany(t => t.MessageScores)
+                .HasForeignKey(s => s.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(s => new { s.TicketId, s.MessageId }).IsUnique();
+            e.HasIndex(s => new { s.TicketId, s.TrackedUserId, s.CreatedAtUtc });
+        });
+
+        mb.Entity<TicketModelTrainingExample>(e =>
+        {
+            e.ToTable(t => t.HasCheckConstraint("CK_TicketModelTrainingExamples_Targets", "\"TargetScore\" >= 0 AND \"TargetScore\" <= 1 AND \"TargetRelevance\" >= 0 AND \"TargetRelevance\" <= 1"));
+            e.HasKey(x => x.TrainingExampleId);
+            e.Property(x => x.TrainingExampleId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Requirement).HasMaxLength(4000).IsRequired();
+            e.Property(x => x.BootstrapMessage).HasMaxLength(4000);
+            e.Property(x => x.ContextSnapshot).HasMaxLength(5000);
+            e.Property(x => x.Category).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Source).HasMaxLength(32).IsRequired();
+            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16)
+                .HasDefaultValue(HomeworkCentral.Api.Assessment.NeuralModelKindChatMonitoring.Moderation).IsRequired();
+            e.HasOne<ChatMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<TicketMessageScore>().WithOne().HasForeignKey<TicketModelTrainingExample>(x => x.ScoreEventId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.MessageId);
+            e.HasIndex(x => x.ScoreEventId).IsUnique();
+            e.HasIndex(x => x.NeuralNetTrainingSessionId);
+            e.HasIndex(x => new { x.NeuralNetTrainingSessionId, x.ChatMonitoringKind });
+            e.HasIndex(x => x.CanonicalGenerationApplied);
+        });
+
+        mb.Entity<NeuralNetTrainingSession>(e =>
+        {
+            e.HasKey(x => x.SessionId);
+            e.Property(x => x.SessionId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Mode).HasConversion<string>().HasMaxLength(16)
+                .HasDefaultValue(HomeworkCentral.Api.Assessment.NeuralTrainingMode.Both).IsRequired();
+            e.Property(x => x.FailureReason).HasMaxLength(1000);
+            e.Property(x => x.ReportJson);
+            e.HasIndex(x => x.CreatedAtUtc);
+        });
+
+        mb.Entity<NeuralNetCanonicalCheckpoint>(e =>
+        {
+            e.HasKey(x => new { x.ChatMonitoringKind, x.Generation });
+            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            e.Property(x => x.ModelVersion).HasMaxLength(64).IsRequired();
+            e.Property(x => x.ArchitectureVersion).HasMaxLength(64).IsRequired();
+            e.Property(x => x.RuntimeKind).HasMaxLength(32).IsRequired();
+            e.Property(x => x.ParametersBase64).IsRequired();
+            e.Property(x => x.Checksum).HasMaxLength(64).IsRequired();
+        });
+
+        mb.Entity<NeuralNetTrainingPromotion>(e =>
+        {
+            e.HasKey(x => x.PromotionId);
+            e.Property(x => x.PromotionId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.FailureReason).HasMaxLength(1000);
+            e.HasIndex(x => new { x.ChatMonitoringKind, x.PromotionSequence }).IsUnique();
+            e.HasIndex(x => new { x.Status, x.LeaseExpiresAtUtc });
+            e.HasIndex(x => new { x.SessionId, x.ChatMonitoringKind }).IsUnique();
+        });
+
+        mb.Entity<ChatMonitoringNeuralModelRun>(e =>
+        {
+            e.HasKey(x => x.RunId);
+            e.Property(x => x.RunId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.ChatMonitoringKind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            e.Property(x => x.FailureReason).HasMaxLength(1000);
+            e.HasIndex(x => new { x.SessionId, x.ChatMonitoringKind }).IsUnique();
+            e.HasIndex(x => new { x.Status, x.CreatedAtUtc });
+        });
+
+        mb.Entity<ChatAttachment>(e =>
+        {
+            e.HasKey(a => a.AttachmentId);
+            e.Property(a => a.AttachmentId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(a => a.OriginalFileName).HasMaxLength(256).IsRequired();
+            e.Property(a => a.ContentType).HasMaxLength(128).IsRequired();
+            e.Property(a => a.StoragePath).HasMaxLength(512).IsRequired();
+            e.Property(a => a.InlinePreviewKind).HasMaxLength(16);
+            e.Property(a => a.ScanStatus)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .HasDefaultValue(HomeworkCentral.Api.Uploads.MalwareScanResult.Unknown)
+                .IsRequired();
+        });
+
+        mb.Entity<ChatMessageAttachment>(e =>
+        {
+            e.HasKey(x => new { x.MessageId, x.AttachmentId });
+            e.HasOne(x => x.Message).WithMany(m => m.Attachments).HasForeignKey(x => x.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Attachment).WithMany(a => a.MessageLinks).HasForeignKey(x => x.AttachmentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<ChatMessageVote>(e =>
+        {
+            e.HasKey(v => new { v.MessageId, v.UserId });
+            e.Property(v => v.Value).IsRequired();
+            e.HasOne(v => v.Message).WithMany(m => m.Votes).HasForeignKey(v => v.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(v => v.MessageId);
+        });
+
+        mb.Entity<ChatLinkPreview>(e =>
+        {
+            e.HasKey(p => p.PreviewId);
+            e.Property(p => p.PreviewId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(p => p.Url).HasMaxLength(2048).IsRequired();
+            e.Property(p => p.Title).HasMaxLength(512);
+            e.HasOne(p => p.Message).WithMany(m => m.LinkPreviews).HasForeignKey(p => p.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<CandidateApplication>(e =>
+        {
+            e.HasKey(a => a.CandidateApplicationId);
+            e.Property(a => a.CandidateApplicationId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(a => a.PositionId).HasMaxLength(64).IsRequired();
+            e.Property(a => a.Status).HasMaxLength(64).IsRequired();
+            e.HasIndex(a => new { a.UserId, a.PositionId, a.Status });
+            e.HasOne(a => a.Ticket).WithMany().HasForeignKey(a => a.TicketId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<AssessmentEvent>(e =>
+        {
+            e.HasKey(x => x.AssessmentEventId);
+            e.Property(x => x.AssessmentEventId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.RubricVersion).HasMaxLength(32).IsRequired();
+            e.Property(x => x.EvaluatorModelVersion).HasMaxLength(128).IsRequired();
+            e.Property(x => x.RawEvaluationJson).IsRequired();
+            e.HasOne(x => x.Application).WithMany(a => a.Events).HasForeignKey(x => x.CandidateApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.CandidateApplicationId);
+        });
+
+        mb.Entity<AssessmentCompetencyEvidence>(e =>
+        {
+            e.HasKey(x => new { x.AssessmentEventId, x.CompetencyId });
+            e.Property(x => x.CompetencyId).HasMaxLength(64).IsRequired();
+            e.HasOne(x => x.Event).WithMany(ev => ev.CompetencyEvidence).HasForeignKey(x => x.AssessmentEventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<CandidateCompetencyState>(e =>
+        {
+            e.HasKey(x => new { x.CandidateApplicationId, x.CompetencyId });
+            e.Property(x => x.CompetencyId).HasMaxLength(64).IsRequired();
+            e.HasOne(x => x.Application).WithMany(a => a.CompetencyStates)
+                .HasForeignKey(x => x.CandidateApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<CandidateDecision>(e =>
+        {
+            e.HasKey(x => x.CandidateDecisionId);
+            e.Property(x => x.CandidateDecisionId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Decision).HasMaxLength(64).IsRequired();
+            e.Property(x => x.TriggeredBy).HasMaxLength(64).IsRequired();
+            e.HasOne(x => x.Application).WithMany(a => a.Decisions)
+                .HasForeignKey(x => x.CandidateApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<VectorDocument>(e =>
+        {
+            e.HasKey(x => x.DocumentId);
+            e.Property(x => x.DocumentId).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Namespace).HasMaxLength(64).IsRequired();
+            e.Property(x => x.PositionId).HasMaxLength(64);
+            e.Property(x => x.MetadataJson).IsRequired();
+            e.Property(x => x.ContentText).IsRequired();
+            e.Property(x => x.EmbeddingJson).IsRequired();
+            e.HasIndex(x => x.Namespace);
+            e.HasIndex(x => x.CanonicalRecordId);
         });
 
         mb.Entity<InfoEntry>(e =>

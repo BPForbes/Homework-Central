@@ -9,6 +9,7 @@ import {
   faLayerGroup,
   faLock,
   faPlus,
+  faTicket,
   faUserShield,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
@@ -35,6 +36,7 @@ const ROOM_TYPES: RoomTypeOption[] = [
   { value: 'Chat', label: 'Chat', hint: 'Live messaging', icon: faComments },
   { value: 'Info', label: 'Info', hint: 'Static page', icon: faCircleInfo },
   { value: 'RoleClaim', label: 'Role claim', hint: 'Self-service roles', icon: faIdBadge },
+  { value: 'Ticket', label: 'Ticket', hint: 'Intake portal', icon: faTicket },
 ]
 
 export function RoomTypeField({

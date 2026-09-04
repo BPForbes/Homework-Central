@@ -52,20 +52,21 @@ public class TenantConnectionResolverTests
             new(resolver.BuildConnectionString("hc_tenant_science_doc_brown"));
 
         Assert.True(builder.Pooling);
-        Assert.Equal(10, builder.MaxPoolSize);
+        Assert.Equal(4, builder.MaxPoolSize);
         Assert.Equal(60, builder.ConnectionIdleLifetime);
+        Assert.Equal(16, builder.MaxAutoPrepare);
     }
 
     [Fact]
     public void Pool_bounds_are_configurable()
     {
         TenantConnectionResolver resolver = BuildResolver(
-            ("Tenancy:MaxPoolSizePerTenant", "4"),
+            ("Tenancy:MaxPoolSizePerTenant", "7"),
             ("Tenancy:ConnectionIdleLifetimeSeconds", "15"));
 
         NpgsqlConnectionStringBuilder builder = new(resolver.BuildConnectionString("hc_tenant_math_euclid"));
 
-        Assert.Equal(4, builder.MaxPoolSize);
+        Assert.Equal(7, builder.MaxPoolSize);
         Assert.Equal(15, builder.ConnectionIdleLifetime);
     }
 
@@ -82,7 +83,7 @@ public class TenantConnectionResolverTests
 
         NpgsqlConnectionStringBuilder builder = new(resolver.BuildConnectionString("hc_tenant_math_euclid"));
 
-        Assert.Equal(10, builder.MaxPoolSize);
+        Assert.Equal(4, builder.MaxPoolSize);
         Assert.Equal(60, builder.ConnectionIdleLifetime);
     }
 

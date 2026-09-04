@@ -35,4 +35,6 @@ public class CustomChannelAccessRule
     public Guid? CustomRoleId { get; set; }
     public Role? CustomRole { get; set; }
     public short? PlatformRoleBit { get; set; }
+    /// <summary>Grants a specific user access (e.g. ticket opener) without a role.</summary>
+    public Guid? AllowedUserId { get; set; }
 }

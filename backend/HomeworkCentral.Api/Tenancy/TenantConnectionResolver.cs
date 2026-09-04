@@ -7,9 +7,9 @@ public class TenantConnectionResolver : ITenantConnectionResolver
     // Per-tenant pool bounds. Every tenant is a distinct Database= value, so Npgsql keys one pool
     // per tenant rather than one pool for the server: the ceiling that matters is
     // (live tenants x MaxPoolSize), not Npgsql's default 100-per-pool. A small cap plus a short
-    // idle lifetime is what keeps the number of *actual* PostgreSQL backend processes — and their
+    // idle lifetime keeps the number of *actual* PostgreSQL backend processes — and their
     // memory — proportional to tenants in active use rather than tenants ever touched.
-    private const int DefaultMaxPoolSizePerTenant = 10;
+    private const int DefaultMaxPoolSizePerTenant = 4;
     private const int DefaultConnectionIdleLifetimeSeconds = 60;
 
     private readonly IConfiguration _config;
@@ -39,9 +39,13 @@ public class TenantConnectionResolver : ITenantConnectionResolver
         NpgsqlConnectionStringBuilder builder = new(_baseConnectionString)
         {
             Database = databaseName,
+            // Each tenant database has a distinct Npgsql pool. Keep those pools tiny or dozens
+            // of developer personas can retain more idle connections than PostgreSQL allows.
             MaxPoolSize = _maxPoolSizePerTenant,
-            // Npgsql's default is 300s. A tenant nobody has touched for a minute gives its
-            // connection back instead of pinning a server slot for five.
+            MaxAutoPrepare = 16,
+            // Capping each pool bounds its width but not how many pools exist. Npgsql's default
+            // idle lifetime is 300s, so a tenant touched once holds a server slot for five
+            // minutes; at 60s an idle tenant gives its connection back instead.
             ConnectionIdleLifetime = _connectionIdleLifetimeSeconds,
         };
         return builder.ConnectionString;
@@ -52,7 +56,10 @@ public class TenantConnectionResolver : ITenantConnectionResolver
         NpgsqlConnectionStringBuilder builder = new(_baseConnectionString)
         {
             Database = databaseName,
-            // See ITenantConnectionResolver for why this path must not pool.
+            // See ITenantConnectionResolver for why this path must not pool. MaxPoolSize alone
+            // cannot fix provisioning: it bounds each pool's width, but provisioning creates one
+            // pool per tenant and each retains a connection, so 70 personas still exhaust the
+            // server's slots however narrow the individual pools are.
             Pooling = false,
         };
         return builder.ConnectionString;
