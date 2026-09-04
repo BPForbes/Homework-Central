@@ -14,8 +14,11 @@ namespace HomeworkCentral.Api.Risk;
 public sealed class IdentityRiskProfileService(IMemoryCache cache, IOptions<RiskOptions> options) : IIdentityRiskProfileService
 {
     private const double NeutralTrust = 0.5;
-    private static readonly TimeSpan IdleExpiration = TimeSpan.FromDays(30);
     private static readonly ConcurrentDictionary<string, object> CreationLocks = new();
+
+    /// <summary>Idle retention, from <see cref="RiskOptions.ProfileRetentionDays"/>. Read per call
+    /// rather than cached in a static so the value stays configurable.</summary>
+    private TimeSpan IdleExpiration => TimeSpan.FromDays(Math.Max(1, options.Value.ProfileRetentionDays));
 
     public IdentityRiskProfile GetProfile(string identity)
     {
@@ -76,10 +79,11 @@ public sealed class IdentityRiskProfileService(IMemoryCache cache, IOptions<Risk
             if (cache.TryGetValue(cacheKey, out ProfileState? created) && created is not null)
                 return created;
 
+            TimeSpan idleExpiration = IdleExpiration;
             return cache.GetOrCreate(cacheKey, entry =>
             {
-                entry.SlidingExpiration = IdleExpiration;
-                entry.AbsoluteExpirationRelativeToNow = IdleExpiration;
+                entry.SlidingExpiration = idleExpiration;
+                entry.AbsoluteExpirationRelativeToNow = idleExpiration;
                 entry.RegisterPostEvictionCallback(static (_, _, _, state) =>
                 {
                     if (state is string identity)

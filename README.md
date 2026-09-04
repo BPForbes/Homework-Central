@@ -166,6 +166,15 @@ after 60s, and one-shot provisioning (create/migrate/seed) runs unpooled so walk
 personas does not retain a server slot per persona. Tune with `Tenancy:MaxPoolSizePerTenant`
 and `Tenancy:ConnectionIdleLifetimeSeconds`.
 
+**Disk is bounded too, not just memory.** Container logs use Docker's `json-file` driver, which
+is unbounded by default — every line any service writes stays on disk until the container is
+removed. Each service is capped at 10 MiB x 3 files, bounding the whole stack at roughly 240 MiB
+of logs. Postgres runs with `wal_compression=on` and `max_wal_size=512MB`, which cuts the bytes
+written to the SSD per checkpoint cycle and bounds `pg_wal`. Canonical neural checkpoints are
+trimmed to the newest `NeuralNetCheckpointStore.RetainedGenerations` (10) per lineage: only the
+newest is ever read, and each row holds a full base64-packed parameter snapshot, so an unbounded
+lineage turned every training publish into permanent disk.
+
 **FCaptcha rebuilds only when its image is missing.** It is pinned to upstream v1.12.0, so the
 dev scripts no longer wake BuildKit for a no-op rebuild on every start; set
 `HC_FCAPTCHA_REBUILD=1` to force one.
