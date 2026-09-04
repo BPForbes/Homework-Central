@@ -23,7 +23,7 @@ Install the following before running the project locally.
 | **Node.js** | 18+ | Includes **npm**, used for frontend dependencies. [Download Node.js](https://nodejs.org/). |
 | **PowerShell** | 7+ (`pwsh`) | **Windows only** — required by the `.ps1` scripts. [Install PowerShell](https://learn.microsoft.com/powershell/scripting/install/installing-powershell). |
 | **Bash** | Any recent shell | **Linux / macOS** — used by the `.sh` scripts. |
-| **Rust** | stable | Required by the core compile scripts (`scripts/run-dev.*`, `scripts/start-api-dev.*`, `scripts/build-rust.*`). They run `cargo build --workspace` in `rust/` (`hc-feature-encode`, `hc-vector-cosine`). Install with [rustup](https://rustup.rs/). Set `HC_SKIP_RUST_BUILD=1` to skip. |
+| **Rust** | stable | Required by the core compile scripts (`scripts/run-dev.*`, `scripts/start-api-dev.*`, `scripts/build-rust.*`). They run `cargo build --workspace` in `rust/` (`hc-feature-encode`, `hc-vector-cosine`, `hc-kernels`). Install with [rustup](https://rustup.rs/). Set `HC_SKIP_RUST_BUILD=1` to skip. |
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/docker/docker-original.svg" width="40" height="40" alt="Docker" />

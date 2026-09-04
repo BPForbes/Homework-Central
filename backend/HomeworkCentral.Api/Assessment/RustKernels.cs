@@ -35,13 +35,17 @@ internal static class RustKernels
         if (handle == 0)
             return;
 
-        if (!TryBind(handle, "hc_embed_text", out EmbedTextFn)
-            || !TryBind(handle, "hc_add_weighted_tokens", out AddWeightedTokensFn)
-            || !TryBind(handle, "hc_cosine", out CosineFn))
+        if (!TryBind(handle, "hc_embed_text", out EmbedTextNative? embedText)
+            || !TryBind(handle, "hc_add_weighted_tokens", out AddWeightedTokensNative? addTokens)
+            || !TryBind(handle, "hc_cosine", out CosineNative? cosine))
         {
+            NativeLibrary.Free(handle);
             return;
         }
 
+        EmbedTextFn = embedText;
+        AddWeightedTokensFn = addTokens;
+        CosineFn = cosine;
         IsLoaded = true;
     }
 
