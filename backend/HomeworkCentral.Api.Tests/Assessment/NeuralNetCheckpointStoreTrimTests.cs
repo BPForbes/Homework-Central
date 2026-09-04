@@ -1,6 +1,7 @@
 using HomeworkCentral.Api.Assessment;
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -41,31 +42,33 @@ public class NeuralNetCheckpointStoreTrimTests
     /// Probes the server via its <c>postgres</c> maintenance database rather than the isolated one
     /// — which does not exist until <c>MigrateAsync</c> creates it, so probing it directly would
     /// skip every test on a machine that does have Postgres.
+    ///
+    /// Failures go through <see cref="OperationalExceptionGuard"/> rather than a bare
+    /// <c>catch</c>: "no server here, skip the test" should only be concluded from an
+    /// infrastructure failure, and a bug in the probe itself must still surface as a test error.
     /// </summary>
-    private static bool CanConnect(string connectionString)
+    private static Task<bool> CanConnectAsync(string connectionString)
     {
         string maintenance = new NpgsqlConnectionStringBuilder(connectionString)
         {
             Database = "postgres",
         }.ConnectionString;
 
-        try
-        {
-            using NpgsqlConnection connection = new(maintenance);
-            connection.Open();
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        return OperationalExceptionGuard.RunAsync<bool>(
+            async () =>
+            {
+                await using NpgsqlConnection connection = new(maintenance);
+                await connection.OpenAsync();
+                return true;
+            },
+            _ => false);
     }
 
     [SkippableFact]
     public async Task Publishing_past_the_retention_bound_drops_only_the_oldest_generations()
     {
         string connectionString = ResolveConnectionString();
-        Skip.IfNot(CanConnect(connectionString), "Requires a reachable Postgres server.");
+        Skip.IfNot(await CanConnectAsync(connectionString), "Requires a reachable Postgres server.");
 
         await using AppDbContext db = await CreateMigratedDatabaseAsync(connectionString);
         NeuralNetCheckpointStore store = new(db);
@@ -98,7 +101,7 @@ public class NeuralNetCheckpointStoreTrimTests
     public async Task The_newest_generation_is_still_the_one_read_back_after_trimming()
     {
         string connectionString = ResolveConnectionString();
-        Skip.IfNot(CanConnect(connectionString), "Requires a reachable Postgres server.");
+        Skip.IfNot(await CanConnectAsync(connectionString), "Requires a reachable Postgres server.");
 
         await using AppDbContext db = await CreateMigratedDatabaseAsync(connectionString);
         NeuralNetCheckpointStore store = new(db);
@@ -126,7 +129,7 @@ public class NeuralNetCheckpointStoreTrimTests
     public async Task Trimming_is_scoped_to_one_lineage()
     {
         string connectionString = ResolveConnectionString();
-        Skip.IfNot(CanConnect(connectionString), "Requires a reachable Postgres server.");
+        Skip.IfNot(await CanConnectAsync(connectionString), "Requires a reachable Postgres server.");
 
         await using AppDbContext db = await CreateMigratedDatabaseAsync(connectionString);
         NeuralNetCheckpointStore store = new(db);
