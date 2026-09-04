@@ -39,7 +39,7 @@ Install the following before running the project locally.
 
 ## Install Rust
 
-The lexical encoder and cosine kernels live in [`rust/`](rust/). Live chat-monitor scoring still runs in C#; the crates are the portable lockstep twins and must compile with the rest of the stack. Install rustup from [rustup.rs](https://rustup.rs/) or [rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
+The lexical encoder and store cosine live in [`rust/`](rust/) (`hc-feature-encode`, `hc-vector-cosine`, `hc-kernels`). After `cargo build --workspace`, the API loads `libhc_kernels` for those two kernels only. The rest of the C# API and the TypeScript app stay as they are. Managed C# implementations run when the native library is absent (Docker publish, C# CI). Install rustup from [rustup.rs](https://rustup.rs/) or [rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
 
 **Where rustup installs**
 

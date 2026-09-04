@@ -5,6 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!--
       Memory. Microsoft.NET.Sdk.Web turns server GC on by default: one managed heap plus one
@@ -66,6 +67,7 @@
   <ItemGroup>
     <!-- Canonical favicon lives in frontend/public; link it into Dev/ at build output. -->
     <Content Include="..\..\frontend\public\favicon.svg" Link="Dev\favicon.svg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="native\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('native')" />
   </ItemGroup>
 
 </Project>

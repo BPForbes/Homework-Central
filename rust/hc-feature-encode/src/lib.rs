@@ -6,8 +6,8 @@
 //! JSON arrays remain cosine-comparable.
 //!
 //! Tokenization and FNV-1a hashing walk UTF-16 code units after invariant
-//! lowercasing so the bins match the C# `char` loop. Production scoring
-//! still runs in C#; this crate is the portable kernel and golden-test twin.
+//! lowercasing so the bins match the C# `char` loop. The API calls this
+//! through `hc-kernels` when `libhc_kernels` is present.
 
 pub const STRUCTURAL_FEATURE_COUNT: usize = 86;
 pub const HASH_BIN_COUNT: usize = 44;
@@ -25,11 +25,12 @@ const SEPARATORS: &[char] = &[
 /// Remaining structural slots stay zero, matching `EmbedText`.
 pub fn embed_text(text: &str) -> [f32; STRUCTURAL_FEATURE_COUNT] {
     let mut values = [0.0_f32; STRUCTURAL_FEATURE_COUNT];
-    add_tokens(&mut values, text, 1.0);
+    add_weighted_tokens(&mut values, text, 1.0);
     values
 }
 
-fn add_tokens(values: &mut [f32], text: &str, weight: f32) {
+/// Writes hashed unigram/bigram bins into `values` (same as C# `AddTokens`).
+pub fn add_weighted_tokens(values: &mut [f32], text: &str, weight: f32) {
     let tokens = tokenize(text);
     let mut previous = String::new();
     for token in tokens.into_iter().take(TOKEN_LIMIT) {

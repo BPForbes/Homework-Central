@@ -39,6 +39,7 @@ codeql-*.sarif
 
 # Rust
 rust/target/
+backend/HomeworkCentral.Api/native/
 
 # OS
 .DS_Store

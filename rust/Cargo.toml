@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "hc-feature-encode",
     "hc-vector-cosine",
+    "hc-kernels",
 ]
 
 [workspace.package]
