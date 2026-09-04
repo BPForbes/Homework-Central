@@ -31,7 +31,11 @@ claude-mem/
 .codeql-db-csharp/
 .codeql-db-javascript/
 .codeql-db-javascript-typescript/
+.codeql-db-rust/
 codeql-*.sarif
+
+# Rust
+rust/target/
 
 # OS
 .DS_Store
