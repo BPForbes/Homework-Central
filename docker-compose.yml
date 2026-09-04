@@ -18,10 +18,21 @@
 #
 # `scripts/run-dev.*` runs the API and frontend natively rather than in containers, so a normal
 # dev session pays for postgres, fcaptcha and redis only.
+# Container logs are capped rather than left on Docker's unbounded json-file default, where
+# every line any service ever writes stays on disk until the container is removed. 10m x 3 files
+# per service bounds the whole stack at ~240 MiB of logs instead of "until the SSD fills".
+# Raise max-size on a service that needs deeper history for debugging.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     # Local-development ceilings. Environment overrides make it possible to scale an
     # individual service without editing this file. These limits apply to ordinary
     # `docker compose up` (unlike Swarm-only deploy.resources limits).
@@ -50,6 +61,16 @@ services:
       - max_connections=50
       - -c
       - jit=off
+      # Full-page images dominate WAL volume, and they compress well. This trades a little CPU
+      # for a real reduction in bytes written to the SSD on every checkpoint cycle.
+      - -c
+      - wal_compression=on
+      # Default is 1GB, which is how large pg_wal is allowed to grow before a checkpoint is
+      # forced. A dev database never needs that much WAL in flight, and this bounds the volume's
+      # steady-state footprint. Not lower: shrinking it further forces more frequent checkpoints,
+      # and each checkpoint re-writes full pages, which would put the writes back.
+      - -c
+      - max_wal_size=512MB
       # Parallel query workers each fork a full backend process, and nothing at this data volume
       # is large enough for the planner to win by splitting it.
       - -c
@@ -91,6 +112,7 @@ services:
       context: https://github.com/WebDecoy/FCaptcha.git#v1.12.0
       dockerfile: docker/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${FCAPTCHA_CPUS:-0.25}"
     mem_limit: "${FCAPTCHA_MEMORY_LIMIT:-96m}"
     mem_reservation: 32m
@@ -121,6 +143,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${REDIS_CPUS:-0.25}"
     mem_limit: "${REDIS_MEMORY_LIMIT:-96m}"
     mem_reservation: 32m
@@ -152,6 +175,7 @@ services:
       dockerfile: Dockerfile
     image: homework-central-clamav:1.4-low-memory
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${CLAMAV_CPUS:-0.75}"
     # This derived image disables concurrent database reloads, so clamd briefly pauses
     # scans instead of retaining old and new signature engines simultaneously.
@@ -174,6 +198,7 @@ services:
     profiles: ["object-storage"]
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${MINIO_CPUS:-0.5}"
     mem_limit: "${MINIO_MEMORY_LIMIT:-256m}"
     mem_reservation: 96m
@@ -200,6 +225,7 @@ services:
       context: ./llm-service
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${LLM_CPUS:-1.5}"
     mem_limit: "${LLM_MEMORY_LIMIT:-1536m}"
     mem_reservation: 768m
@@ -214,6 +240,12 @@ services:
       OLLAMA_NUM_PARALLEL: "${OLLAMA_NUM_PARALLEL:-1}"
       OLLAMA_MAX_QUEUE: "${OLLAMA_MAX_QUEUE:-32}"
       OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-2m}"
+      # The KV cache is the part of inference memory that grows with context length, and at f16
+      # it is often larger than the 0.6B model itself. Quantizing it to q8_0 roughly halves that
+      # for a negligible quality change; it requires flash attention, hence both. Ollama falls
+      # back to f16 if a model or backend cannot honour it, so this is safe to leave on.
+      OLLAMA_FLASH_ATTENTION: "${OLLAMA_FLASH_ATTENTION:-1}"
+      OLLAMA_KV_CACHE_TYPE: "${OLLAMA_KV_CACHE_TYPE:-q8_0}"
     ports:
       - "${LLM_HOST_PORT:-11434}:11434"
     volumes:
@@ -233,6 +265,7 @@ services:
       context: .
       dockerfile: backend/HomeworkCentral.Api/backend.Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${BACKEND_CPUS:-1.0}"
     mem_limit: "${BACKEND_MEMORY_LIMIT:-512m}"
     mem_reservation: 192m
@@ -306,6 +339,7 @@ services:
       context: ./frontend
       dockerfile: frontend.Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     cpus: "${FRONTEND_CPUS:-0.25}"
     mem_limit: "${FRONTEND_MEMORY_LIMIT:-48m}"
     mem_reservation: 16m
