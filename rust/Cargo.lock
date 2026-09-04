@@ -7,10 +7,15 @@ name = "hc-feature-encode"
 version = "0.1.0"
 
 [[package]]
+name = "hc-gemv"
+version = "0.1.0"
+
+[[package]]
 name = "hc-kernels"
 version = "0.1.0"
 dependencies = [
  "hc-feature-encode",
+ "hc-gemv",
  "hc-vector-cosine",
 ]
 

@@ -12,6 +12,7 @@
 pub const STRUCTURAL_FEATURE_COUNT: usize = 86;
 pub const HASH_BIN_COUNT: usize = 44;
 pub const TOKEN_LIMIT: usize = 400;
+pub const HASH_EMBED_BINS: usize = 64;
 
 const FNV_OFFSET: u32 = 2_166_136_261;
 const FNV_PRIME: u32 = 16_777_619;
@@ -67,6 +68,58 @@ fn flush_token(current: &mut String, tokens: &mut Vec<String>) {
         tokens.push(trimmed.to_string());
     }
     current.clear();
+}
+
+/// Offline Ollama fallback: 64-bin UTF-16 histogram, then L2 normalize.
+/// Matches `LlmClient.HashEmbed` (`char` walk, float sum-of-squares, double divide).
+pub fn hash_embed(text: &str) -> [f32; HASH_EMBED_BINS] {
+    let mut vector = [0.0_f32; HASH_EMBED_BINS];
+    for unit in text.encode_utf16() {
+        let index = (unit as usize) % HASH_EMBED_BINS;
+        vector[index] += 1.0;
+    }
+
+    let sum_squares: f32 = vector.iter().map(|slot| slot * slot).sum();
+    let norm = f64::from(sum_squares).sqrt();
+    if norm > 0.0 {
+        for slot in &mut vector {
+            *slot = (*slot as f64 / norm) as f32;
+        }
+    }
+    vector
+}
+
+/// Tutoring stage-1 expertise slot. Walks UTF-16 after trim + lowercase, then
+/// saturates the hashed bin at 1 so many labels cannot drown the 32-wide region.
+pub fn add_expertise_hash(
+    values: &mut [f32],
+    label: &str,
+    base_input_size: usize,
+    bin_count: usize,
+) -> bool {
+    if bin_count == 0 {
+        return false;
+    }
+    let Some(required) = base_input_size.checked_add(bin_count) else {
+        return false;
+    };
+    if values.len() < required {
+        return false;
+    }
+
+    let key = label.trim().to_lowercase();
+    if key.is_empty() {
+        return true;
+    }
+
+    let mut hash = FNV_OFFSET;
+    for unit in key.encode_utf16() {
+        hash ^= u32::from(unit);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    let index = base_input_size + (hash as usize % bin_count);
+    values[index] = (values[index] + 1.0).clamp(0.0, 1.0);
+    true
 }
 
 fn add_feature(values: &mut [f32], value: &str, weight: f32) {
@@ -125,5 +178,36 @@ mod tests {
         assert_eq!(values[20], 4.0);
         assert_eq!(values[40], 4.0);
         assert!(values.iter().all(|slot| *slot <= 4.0 && *slot >= -4.0));
+    }
+
+    #[test]
+    fn hash_embed_empty_is_zeros() {
+        assert_eq!(hash_embed(""), [0.0; HASH_EMBED_BINS]);
+    }
+
+    #[test]
+    fn hash_embed_offline_is_unit_length() {
+        let values = hash_embed("offline");
+        let norm: f64 = values.iter().map(|slot| f64::from(*slot * *slot)).sum::<f64>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-6);
+        assert_eq!(values.len(), HASH_EMBED_BINS);
+    }
+
+    #[test]
+    fn expertise_hash_is_idempotent_at_one() {
+        let mut values = [0.0_f32; 62];
+        assert!(add_expertise_hash(&mut values, "  Rust  ", 30, 32));
+        let filled = values.iter().skip(30).filter(|slot| **slot != 0.0).count();
+        assert_eq!(filled, 1);
+        let first = values;
+        assert!(add_expertise_hash(&mut values, "rust", 30, 32));
+        assert_eq!(values, first);
+    }
+
+    #[test]
+    fn expertise_whitespace_is_noop() {
+        let mut values = [0.0_f32; 62];
+        assert!(add_expertise_hash(&mut values, "   ", 30, 32));
+        assert!(values.iter().all(|slot| *slot == 0.0));
     }
 }

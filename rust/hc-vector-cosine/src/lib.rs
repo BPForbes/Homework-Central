@@ -35,6 +35,80 @@ pub fn cosine(left: &[f32], right: &[f32]) -> f64 {
     }
 }
 
+/// Support-set cosine for the hashed MLP. Same float-then-widen product as
+/// store cosine, but the score is clamped to `[0, 1]` and a non-positive
+/// norm on either side is `0` (matches `ChatMonitoringNeuralModelHashedMlp.Cosine`).
+pub fn support_cosine(left: &[f32], right: &[f32]) -> f64 {
+    let count = left.len().min(right.len());
+    let mut dot = 0.0_f64;
+    let mut left_norm = 0.0_f64;
+    let mut right_norm = 0.0_f64;
+    for index in 0..count {
+        dot += f64::from(left[index] * right[index]);
+        left_norm += f64::from(left[index] * left[index]);
+        right_norm += f64::from(right[index] * right[index]);
+    }
+
+    if left_norm <= 0.0 || right_norm <= 0.0 {
+        return 0.0;
+    }
+
+    (dot / (left_norm * right_norm).sqrt()).clamp(0.0, 1.0)
+}
+
+/// Largest support cosine against `query`. `packed` is the concatenation of
+/// `lengths.len()` vectors (no zero-pad — widths may differ).
+pub fn max_support_cosine(query: &[f32], packed: &[f32], lengths: &[usize]) -> Option<f64> {
+    let expected = lengths.iter().try_fold(0usize, |total, length| total.checked_add(*length))?;
+    if expected != packed.len() {
+        return None;
+    }
+
+    let mut offset = 0usize;
+    let mut best = 0.0_f64;
+    for length in lengths {
+        let end = offset + *length;
+        let score = support_cosine(query, &packed[offset..end]);
+        if score > best {
+            best = score;
+        }
+        offset = end;
+    }
+    Some(best)
+}
+
+/// `System.Text.Json` float-array shape used for `VectorDocument.EmbeddingJson`.
+/// Any parse failure returns empty so cosine scores `0`, matching `Parse` + `?? []`.
+pub fn parse_f32_json_array(json: &str) -> Vec<f32> {
+    let trimmed = json.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return Vec::new();
+    }
+
+    let inner = trimmed[1..trimmed.len() - 1].trim();
+    if inner.is_empty() {
+        return Vec::new();
+    }
+
+    let mut values = Vec::new();
+    for part in inner.split(',') {
+        let token = part.trim();
+        match token.parse::<f32>() {
+            Ok(value) if value.is_finite() => values.push(value),
+            _ => return Vec::new(),
+        }
+    }
+    values
+}
+
+/// One store cosine per JSON embedding blob, in input order.
+pub fn batch_cosine_json(query: &[f32], json_blobs: &[&str]) -> Vec<f64> {
+    json_blobs
+        .iter()
+        .map(|json| cosine(query, &parse_f32_json_array(json)))
+        .collect()
+}
+
 /// Highest `take` documents by cosine, stable for equal scores (original order).
 pub fn top_k_cosine<Id: Clone>(
     query: &[f32],
@@ -131,5 +205,44 @@ mod tests {
         let query = [1.0_f32];
         let doc = [1.0_f32];
         assert!(top_k_cosine(&query, &[("a", doc.as_slice())], 0).is_empty());
+    }
+
+    #[test]
+    fn support_cosine_clamps_negative() {
+        let left = [1.0_f32, 0.0];
+        let right = [-1.0_f32, 0.0];
+        assert_eq!(support_cosine(&left, &right), 0.0);
+        assert!((cosine(&left, &right) + 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn support_cosine_zero_norm_is_zero() {
+        assert_eq!(support_cosine(&[0.0, 0.0], &[1.0, 2.0]), 0.0);
+    }
+
+    #[test]
+    fn max_support_cosine_picks_the_best() {
+        let query = [1.0_f32, 0.0];
+        let packed = [0.0_f32, 1.0, 1.0, 0.0];
+        let best = max_support_cosine(&query, &packed, &[2, 2]).unwrap();
+        assert!((best - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn parse_f32_json_array_reads_compact_stj() {
+        assert_eq!(parse_f32_json_array("[1,0,0.5]"), vec![1.0, 0.0, 0.5]);
+        assert_eq!(parse_f32_json_array(" [ 1e-1 , 2 ] "), vec![0.1, 2.0]);
+        assert!(parse_f32_json_array("[1,2,]").is_empty());
+        assert!(parse_f32_json_array("null").is_empty());
+        assert!(parse_f32_json_array("[]").is_empty());
+    }
+
+    #[test]
+    fn batch_cosine_json_scores_in_order() {
+        let query = [1.0_f32, 0.0];
+        let scores = batch_cosine_json(&query, &["[1,0]", "[0,1]", "nope"]);
+        assert!((scores[0] - 1.0).abs() < 1e-12);
+        assert!(scores[1].abs() < 1e-12);
+        assert_eq!(scores[2], 0.0);
     }
 }

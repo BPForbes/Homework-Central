@@ -4,13 +4,16 @@ using System.Text;
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
-/// Loads <c>libhc_kernels</c> for the lexical bins and store cosine only.
-/// Encode metadata, the hashed MLP, and the rest of the API stay in C#.
-/// The API image does not ship rustc; managed implementations run when
-/// the native library is missing (CI csharp job, Docker publish).
+/// Loads <c>libhc_kernels</c> for lexical bins, store cosine, GEMV,
+/// expertise hash, HashEmbed, JSON batch cosine, and support-set cosine.
+/// Encode metadata, hashed-MLP train/replay, and the rest of the API stay
+/// in C#. The API image does not ship rustc; managed implementations run
+/// when the native library is missing or a newer export is absent.
 /// </summary>
 internal static class RustKernels
 {
+    internal const int HashEmbedBinCount = 64;
+
     internal static string LibraryFileName
     {
         get
@@ -26,6 +29,13 @@ internal static class RustKernels
     private static readonly EmbedTextNative? EmbedTextFn;
     private static readonly AddWeightedTokensNative? AddWeightedTokensFn;
     private static readonly CosineNative? CosineFn;
+    private static readonly GemvBiasNative? GemvBiasFn;
+    private static readonly GemvTransposeNative? GemvTransposeFn;
+    private static readonly AddExpertiseHashNative? AddExpertiseHashFn;
+    private static readonly HashEmbedNative? HashEmbedFn;
+    private static readonly CosineNative? SupportCosineFn;
+    private static readonly SupportMaxCosineNative? SupportMaxCosineFn;
+    private static readonly BatchCosineJsonNative? BatchCosineJsonFn;
 
     internal static bool IsLoaded { get; }
 
@@ -46,6 +56,20 @@ internal static class RustKernels
         EmbedTextFn = embedText;
         AddWeightedTokensFn = addTokens;
         CosineFn = cosine;
+        TryBind(handle, "hc_gemv_bias", out GemvBiasNative? gemvBias);
+        TryBind(handle, "hc_gemv_transpose", out GemvTransposeNative? gemvTranspose);
+        TryBind(handle, "hc_add_expertise_hash", out AddExpertiseHashNative? addExpertise);
+        TryBind(handle, "hc_hash_embed", out HashEmbedNative? hashEmbed);
+        TryBind(handle, "hc_support_cosine", out CosineNative? supportCosine);
+        TryBind(handle, "hc_support_max_cosine", out SupportMaxCosineNative? supportMax);
+        TryBind(handle, "hc_batch_cosine_json", out BatchCosineJsonNative? batchCosine);
+        GemvBiasFn = gemvBias;
+        GemvTransposeFn = gemvTranspose;
+        AddExpertiseHashFn = addExpertise;
+        HashEmbedFn = hashEmbed;
+        SupportCosineFn = supportCosine;
+        SupportMaxCosineFn = supportMax;
+        BatchCosineJsonFn = batchCosine;
         IsLoaded = true;
     }
 
@@ -113,6 +137,269 @@ internal static class RustKernels
                 (nuint)rightArray.Length);
         }
 
+        return true;
+    }
+
+    internal static unsafe bool TryMultiplyBias(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] source,
+        float[] biases,
+        float[] destination)
+    {
+        if (GemvBiasFn is null || rows <= 0 || cols <= 0)
+            return false;
+
+        int weightCount;
+        try
+        {
+            weightCount = checked(rows * cols);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (weightsColumnMajor.Length < weightCount
+            || source.Length < cols
+            || biases.Length < rows
+            || destination.Length < rows)
+        {
+            return false;
+        }
+
+        fixed (float* weightsPointer = weightsColumnMajor)
+        fixed (float* sourcePointer = source)
+        fixed (float* biasPointer = biases)
+        fixed (float* destinationPointer = destination)
+        {
+            int status = GemvBiasFn(
+                weightsPointer,
+                (nuint)rows,
+                (nuint)cols,
+                sourcePointer,
+                biasPointer,
+                destinationPointer);
+            return status == 0;
+        }
+    }
+
+    internal static unsafe bool TryMultiplyTranspose(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] delta,
+        float[] destination)
+    {
+        if (GemvTransposeFn is null || rows <= 0 || cols <= 0)
+            return false;
+
+        int weightCount;
+        try
+        {
+            weightCount = checked(rows * cols);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (weightsColumnMajor.Length < weightCount
+            || delta.Length < rows
+            || destination.Length < cols)
+        {
+            return false;
+        }
+
+        fixed (float* weightsPointer = weightsColumnMajor)
+        fixed (float* deltaPointer = delta)
+        fixed (float* destinationPointer = destination)
+        {
+            int status = GemvTransposeFn(
+                weightsPointer,
+                (nuint)rows,
+                (nuint)cols,
+                deltaPointer,
+                destinationPointer);
+            return status == 0;
+        }
+    }
+
+    internal static unsafe bool TryAddExpertiseHash(
+        float[] values,
+        string label,
+        int baseInputSize,
+        int binCount)
+    {
+        if (AddExpertiseHashFn is null || values.Length == 0 || binCount <= 0 || baseInputSize < 0)
+            return false;
+
+        int required;
+        try
+        {
+            required = checked(baseInputSize + binCount);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+
+        if (values.Length < required)
+            return false;
+
+        byte[] utf8 = Encoding.UTF8.GetBytes(label);
+        fixed (float* valuesPointer = values)
+        fixed (byte* labelPointer = utf8)
+        {
+            int status = AddExpertiseHashFn(
+                valuesPointer,
+                (nuint)values.Length,
+                labelPointer,
+                (nuint)utf8.Length,
+                (nuint)baseInputSize,
+                (nuint)binCount);
+            return status == 0;
+        }
+    }
+
+    internal static unsafe bool TryHashEmbed(string text, out float[] vector)
+    {
+        vector = [];
+        if (HashEmbedFn is null)
+            return false;
+
+        float[] output = new float[HashEmbedBinCount];
+        byte[] utf8 = Encoding.UTF8.GetBytes(text);
+        fixed (byte* textPointer = utf8)
+        fixed (float* outputPointer = output)
+        {
+            int status = HashEmbedFn(
+                textPointer,
+                (nuint)utf8.Length,
+                outputPointer,
+                (nuint)output.Length);
+            if (status != 0)
+                return false;
+        }
+
+        vector = output;
+        return true;
+    }
+
+    internal static unsafe bool TrySupportCosine(IReadOnlyList<float> left, IReadOnlyList<float> right, out double score)
+    {
+        score = 0;
+        if (SupportCosineFn is null)
+            return false;
+
+        float[] leftArray = ToArray(left);
+        float[] rightArray = ToArray(right);
+        if (leftArray.Length == 0 || rightArray.Length == 0)
+            return true;
+
+        fixed (float* leftPointer = leftArray)
+        fixed (float* rightPointer = rightArray)
+        {
+            score = SupportCosineFn(
+                leftPointer,
+                (nuint)leftArray.Length,
+                rightPointer,
+                (nuint)rightArray.Length);
+        }
+
+        return true;
+    }
+
+    internal static unsafe bool TryMaxSupportCosine(
+        float[] query,
+        IEnumerable<float[]> supportVectors,
+        out double score)
+    {
+        score = 0;
+        if (SupportMaxCosineFn is null)
+            return false;
+
+        List<float[]> vectors = supportVectors as List<float[]> ?? supportVectors.ToList();
+        if (vectors.Count == 0 || query.Length == 0)
+            return true;
+
+        int packedCount = vectors.Sum(static vector => vector.Length);
+        float[] packed = new float[packedCount];
+        nuint[] lengths = new nuint[vectors.Count];
+        int offset = 0;
+        for (int index = 0; index < vectors.Count; index++)
+        {
+            float[] vector = vectors[index];
+            lengths[index] = (nuint)vector.Length;
+            Array.Copy(vector, 0, packed, offset, vector.Length);
+            offset += vector.Length;
+        }
+
+        fixed (float* queryPointer = query)
+        fixed (float* packedPointer = packed)
+        fixed (nuint* lengthsPointer = lengths)
+        {
+            score = SupportMaxCosineFn(
+                queryPointer,
+                (nuint)query.Length,
+                packedPointer,
+                (nuint)packed.Length,
+                lengthsPointer,
+                (nuint)vectors.Count);
+        }
+
+        return true;
+    }
+
+    internal static unsafe bool TryBatchCosineJson(
+        IReadOnlyList<float> query,
+        IEnumerable<string> embeddingJson,
+        out double[] scores)
+    {
+        scores = [];
+        if (BatchCosineJsonFn is null)
+            return false;
+
+        List<string> documents = embeddingJson as List<string> ?? embeddingJson.ToList();
+        if (documents.Count == 0)
+            return true;
+
+        float[] queryArray = ToArray(query);
+        byte[][] encoded = documents.Select(static json => Encoding.UTF8.GetBytes(json ?? "")).ToArray();
+        int totalBytes = encoded.Sum(static blob => blob.Length);
+        byte[] blob = new byte[totalBytes];
+        nuint[] lengths = new nuint[encoded.Length];
+        int offset = 0;
+        for (int index = 0; index < encoded.Length; index++)
+        {
+            byte[] part = encoded[index];
+            lengths[index] = (nuint)part.Length;
+            Buffer.BlockCopy(part, 0, blob, offset, part.Length);
+            offset += part.Length;
+        }
+
+        double[] nativeScores = new double[documents.Count];
+        fixed (float* queryPointer = queryArray)
+        fixed (byte* jsonPointer = blob)
+        fixed (nuint* lengthsPointer = lengths)
+        fixed (double* scoresPointer = nativeScores)
+        {
+            float* queryArgument = queryArray.Length == 0 ? null : queryPointer;
+            byte* jsonArgument = blob.Length == 0 ? null : jsonPointer;
+            int status = BatchCosineJsonFn(
+                queryArgument,
+                (nuint)queryArray.Length,
+                jsonArgument,
+                (nuint)blob.Length,
+                lengthsPointer,
+                (nuint)documents.Count,
+                scoresPointer);
+            if (status != 0)
+                return false;
+        }
+
+        scores = nativeScores;
         return true;
     }
 
@@ -217,4 +504,52 @@ internal static class RustKernels
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private unsafe delegate double CosineNative(float* left, nuint leftLength, float* right, nuint rightLength);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int GemvBiasNative(
+        float* weights,
+        nuint rows,
+        nuint cols,
+        float* source,
+        float* biases,
+        float* destination);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int GemvTransposeNative(
+        float* weights,
+        nuint rows,
+        nuint cols,
+        float* delta,
+        float* destination);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int AddExpertiseHashNative(
+        float* values,
+        nuint valuesLength,
+        byte* label,
+        nuint labelLength,
+        nuint baseInputSize,
+        nuint binCount);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int HashEmbedNative(byte* text, nuint textLength, float* output, nuint outputLength);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate double SupportMaxCosineNative(
+        float* query,
+        nuint queryLength,
+        float* packed,
+        nuint packedLength,
+        nuint* lengths,
+        nuint count);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int BatchCosineJsonNative(
+        float* query,
+        nuint queryLength,
+        byte* json,
+        nuint jsonLength,
+        nuint* lengths,
+        nuint documentCount,
+        double* scores);
 }

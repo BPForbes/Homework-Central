@@ -556,6 +556,35 @@ public sealed class NeuralNetwork
         float[] biases,
         float[] destination)
     {
+        if (RustKernels.TryMultiplyBias(weightsColumnMajor, rows, cols, source, biases, destination))
+            return;
+
+        MultiplyBiasManaged(weightsColumnMajor, rows, cols, source, biases, destination);
+    }
+
+    /// <summary>destination = Wᵀ delta with W stored column-major.</summary>
+    private static void MultiplyTranspose(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] delta,
+        float[] destination)
+    {
+        if (RustKernels.TryMultiplyTranspose(weightsColumnMajor, rows, cols, delta, destination))
+            return;
+
+        MultiplyTransposeManaged(weightsColumnMajor, rows, cols, delta, destination);
+    }
+
+    /// <summary>Managed GEMV used when <c>libhc_kernels</c> is absent.</summary>
+    internal static void MultiplyBiasManaged(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] source,
+        float[] biases,
+        float[] destination)
+    {
         Array.Copy(biases, destination, rows);
         for (int column = 0; column < cols; column++)
         {
@@ -568,8 +597,8 @@ public sealed class NeuralNetwork
         }
     }
 
-    /// <summary>destination = Wᵀ delta with W stored column-major.</summary>
-    private static void MultiplyTranspose(
+    /// <summary>Managed Wᵀδ used when <c>libhc_kernels</c> is absent.</summary>
+    internal static void MultiplyTransposeManaged(
         float[] weightsColumnMajor,
         int rows,
         int cols,

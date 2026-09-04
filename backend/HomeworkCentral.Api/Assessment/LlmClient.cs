@@ -226,9 +226,18 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
     }
 
     /// <summary>Deterministic fallback embedding when the LLM service is offline.</summary>
-    private static IReadOnlyList<float> HashEmbed(string text)
+    internal static IReadOnlyList<float> HashEmbed(string text)
     {
-        float[] vector = new float[64];
+        if (RustKernels.TryHashEmbed(text, out float[] rustVector))
+            return rustVector;
+
+        return HashEmbedManaged(text);
+    }
+
+    /// <summary>Managed 64-bin histogram used when <c>libhc_kernels</c> is absent.</summary>
+    internal static IReadOnlyList<float> HashEmbedManaged(string text)
+    {
+        float[] vector = new float[RustKernels.HashEmbedBinCount];
         foreach (char c in text)
             vector[c % vector.Length] += 1f;
         double norm = Math.Sqrt(vector.Sum(v => v * v));

@@ -567,7 +567,7 @@ release_dev_stack_postgres() {
   unregister_dev_stack_server
 }
 
-# Builds rust/ including libhc_kernels for EmbedText and store cosine.
+# Builds rust/ including libhc_kernels for EmbedText, store cosine, GEMV, and related kernels.
 # The API loads that library at runtime; C# remains the fallback so the
 # Docker image does not need rustc.
 # rustup puts cargo on PATH via ~/.cargo/bin after `source ~/.cargo/env` or a new shell.
