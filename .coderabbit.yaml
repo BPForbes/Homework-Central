@@ -43,8 +43,11 @@ reviews:
           (conventional `ct` / small loop indices are fine).
         - Prefer collection transforms when clearer than a hand-written for-loop:
           TypeScript `map`/`filter`/`reduce`; C# LINQ `Select()`/`Where()`/`Aggregate()`
-          (also `Sum()`/`ToDictionary()`/`ToHashSet()`). Use explicit loops for multi-step
-          side effects or tight kernels.
+          (also `Sum()`/`ToDictionary()`/`ToHashSet()`). When a loop should run only on a
+          subset, filter with `.Where(...)` / `.filter(...)` first — do not use
+          `if (!condition) continue;` or wrap the body in `if (condition)` as the filter
+          (CodeQL `cs/linq/missed-where`). Use explicit loops for multi-step side effects
+          on an already-filtered sequence, search-and-return, or tight kernels.
         - Comments must explain project-specific intent, constraints, trust boundaries, state
           ownership, lifecycle behavior, or non-obvious implementation decisions.
         - Comments must not be self-referential and must not mention an AI agent, prompt,

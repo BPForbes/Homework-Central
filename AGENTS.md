@@ -36,9 +36,11 @@ Hard rules:
   loop indices remain acceptable.
 - Prefer collection transforms over hand-written loops when clearer: TypeScript/Python-style
   `map` / `filter` / `reduce`, and the C# LINQ equivalents `Select()` / `Where()` /
-  `Aggregate()` (also `Sum()` / `ToDictionary()` / `ToHashSet()` where they fit). Use an
-  explicit loop for multi-step side effects, early exits that do not map cleanly, or
-  performance-critical inner kernels.
+  `Aggregate()` (also `Sum()` / `ToDictionary()` / `ToHashSet()` where they fit). When a
+  `foreach` should run only on a subset, filter with `.Where(...)` first — do not write
+  `if (!condition) continue;` or wrap the body in `if (condition)` as the filter
+  (CodeQL `cs/linq/missed-where`). Use an explicit loop for multi-step side effects on an
+  already-filtered sequence, search-and-return, or performance-critical inner kernels.
 - Comments must explain project-specific intent, constraints, trust boundaries, state
   ownership, lifecycle behavior, or non-obvious implementation decisions.
 - Comments must not be self-referential and must not mention an AI agent, prompt,
