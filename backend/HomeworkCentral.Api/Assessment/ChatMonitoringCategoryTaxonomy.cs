@@ -70,8 +70,12 @@ public static class ChatMonitoringCategoryTaxonomy
         if (string.IsNullOrWhiteSpace(category))
             return false;
 
+        if (!TryNormalizeCategory(kind, category, out string normalized))
+            return false;
+
+        // A recognised name can still belong to the other lineage's vocabulary, so confirm it
+        // actually sits on this axis before reporting an index.
         IReadOnlyList<string> labels = For(kind);
-        string normalized = NormalizeCategory(kind, category);
         for (int i = 0; i < labels.Count; i++)
         {
             if (!string.Equals(labels[i], normalized, StringComparison.OrdinalIgnoreCase))
@@ -134,30 +138,49 @@ public static class ChatMonitoringCategoryTaxonomy
     /// <summary>Maps free-text / legacy category strings onto the current softmax vocabulary.</summary>
     public static string NormalizeCategory(NeuralModelKindChatMonitoring kind, string category)
     {
-        string raw = category.Trim();
-        string value = raw.ToLowerInvariant();
-        return kind switch
-        {
-            NeuralModelKindChatMonitoring.Moderation => NormalizeModerationCategory(value),
-            _ => NormalizeTutoringCategory(raw, value),
-        };
+        TryNormalizeCategory(kind, category, out string normalized);
+        return normalized;
     }
 
-    private static string NormalizeTutoringCategory(string raw, string value) =>
-        (
-            TryNormalizeExactSubject(raw),
-            TryNormalizeTutoringAlias(value),
-            Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)) ? value : null,
-            TryFindSubjectSlugInText(value)
-        ) switch
+    /// <summary>
+    /// Normalization that reports whether the name was actually recognised. Both vocabularies end
+    /// in a catch-all, so normalization alone cannot distinguish "this is the general bucket" from
+    /// "nothing matched, here is the general bucket" — the recognition and the fallback are the
+    /// same string. Callers that must not treat an unknown name as a real label need the flag, so
+    /// it is produced here rather than reconstructed by comparing against the catch-all.
+    /// </summary>
+    private static bool TryNormalizeCategory(
+        NeuralModelKindChatMonitoring kind,
+        string category,
+        out string normalized)
+    {
+        string raw = category.Trim();
+        string value = raw.ToLowerInvariant();
+        if (kind == NeuralModelKindChatMonitoring.Moderation)
+            return TryNormalizeModerationCategory(value, out normalized);
+
+        return TryNormalizeTutoringCategory(raw, value, out normalized);
+    }
+
+    private static bool TryNormalizeTutoringCategory(string raw, string value, out string normalized)
+    {
+        string? recognized =
+            TryNormalizeExactSubject(raw)
+            ?? TryNormalizeTutoringAlias(value)
+            ?? (Tutoring.Any(label => string.Equals(label, value, StringComparison.Ordinal)) ? value : null)
+            ?? TryFindSubjectSlugInText(value);
+
+        if (recognized is not null)
         {
-            (string exactSubjectSlug, _, _, _) => exactSubjectSlug,
-            (null, string aliasSlug, _, _) => aliasSlug,
-            (null, null, string tutoringLabel, _) => tutoringLabel,
-            (null, null, null, string textSlug) => textSlug,
-            _ when value.StartsWith("tutoring-", StringComparison.Ordinal) => value,
-            _ => "tutoring-competency",
-        };
+            normalized = recognized;
+            return true;
+        }
+
+        // A "tutoring-" prefix is passed through unchanged for the lenient path, but it is a shape,
+        // not a match: the stem may name no subject at all, so it is not a recognition.
+        normalized = value.StartsWith("tutoring-", StringComparison.Ordinal) ? value : "tutoring-competency";
+        return false;
+    }
 
     private static string? TryNormalizeExactSubject(string raw) =>
         SubjectExpertiseCatalog.Categories
@@ -196,25 +219,44 @@ public static class ChatMonitoringCategoryTaxonomy
             .Select(candidate => candidate.Slug)
             .FirstOrDefault();
 
-    private static string NormalizeModerationCategory(string value)
+    private static bool TryNormalizeModerationCategory(string value, out string normalized)
     {
+        // Reaching the catch-all through a legacy alias ("general", "profanity") is a genuine
+        // match; reaching it at the end of this method is not.
         string mapped = ChatMonitoringModerationConcepts.MapLegacyBroadLabel(value);
         if (string.Equals(mapped, ChatMonitoringModerationConcepts.CatchAll, StringComparison.Ordinal))
-            return ChatMonitoringModerationConcepts.CatchAll;
+        {
+            normalized = ChatMonitoringModerationConcepts.CatchAll;
+            return true;
+        }
+
         if (ChatMonitoringModerationConcepts.TryGet(mapped, out _))
-            return mapped;
+        {
+            normalized = mapped;
+            return true;
+        }
 
         string? exactSlug = ChatMonitoringModerationConcepts.Slugs
             .FirstOrDefault(slug => string.Equals(slug, value, StringComparison.OrdinalIgnoreCase));
         if (exactSlug is not null)
-            return exactSlug;
+        {
+            normalized = exactSlug;
+            return true;
+        }
 
         // Prefer the longest embedded slug so "hate-speech-harassment" wins over "hate".
-        return ChatMonitoringModerationConcepts.Slugs
+        string? embeddedSlug = ChatMonitoringModerationConcepts.Slugs
             .Where(slug => value.Contains(slug, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(slug => slug.Length)
-            .FirstOrDefault()
-            ?? ChatMonitoringModerationConcepts.CatchAll;
+            .FirstOrDefault();
+        if (embeddedSlug is not null)
+        {
+            normalized = embeddedSlug;
+            return true;
+        }
+
+        normalized = ChatMonitoringModerationConcepts.CatchAll;
+        return false;
     }
 
     public static string SubjectToTutoringSlug(string subjectMaskName) => subjectMaskName switch
