@@ -12,7 +12,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// Worker candidates are diagnostic only; promotion retrains a fresh session-local
 /// hashed-MLP model from approved examples before replacing the canonical checkpoint.
 /// </summary>
-public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpointStore checkpoints)
+public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpointStore checkpoints, ILlmClient llm)
 {
     private const string StatusPending = "Pending";
     private const string StatusRetryPending = "RetryPending";
@@ -254,7 +254,7 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
             if (ChatMonitoringHoldout.IsHeldOut(example.TrainingExampleId))
                 continue;
 
-            model.Train(BuildModelInput(example), BuildTargets(example));
+            model.Train(await BuildModelInputAsync(example, ct), BuildTargets(example));
             trained++;
         }
 
@@ -377,13 +377,20 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
             .ToListAsync(ct);
 
         // Bucketing is a local hash of the id, so it cannot be pushed into SQL.
-        return approved
+        List<TicketModelTrainingExample> heldOut = approved
             .Where(example => ChatMonitoringHoldout.IsHeldOut(example.TrainingExampleId))
-            .Select(example => new ChatMonitoringEvaluationExample(
-                BuildModelInput(example),
-                (float)example.TargetScore,
-                (float)example.TargetRelevance))
             .ToList();
+
+        List<ChatMonitoringEvaluationExample> evaluationExamples = new(heldOut.Count);
+        foreach (TicketModelTrainingExample example in heldOut)
+        {
+            evaluationExamples.Add(new ChatMonitoringEvaluationExample(
+                await BuildModelInputAsync(example, ct),
+                (float)example.TargetScore,
+                (float)example.TargetRelevance));
+        }
+
+        return evaluationExamples;
     }
 
     /// <summary>
@@ -433,15 +440,26 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         await db.SaveChangesAsync(ct);
     }
 
-    private static ChatMonitoringNeuralModelInput BuildModelInput(TicketModelTrainingExample example) =>
-        new(
+    /// <summary>
+    /// Builds a training/scoring input, embedding the same field inference embeds (the message)
+    /// with the same client, so both paths land in one vector space. LlmClient falls back to its
+    /// own hashed vector when Ollama is unreachable, so this never returns a null embedding.
+    /// </summary>
+    private async Task<ChatMonitoringNeuralModelInput> BuildModelInputAsync(
+        TicketModelTrainingExample example,
+        CancellationToken ct)
+    {
+        string message = example.BootstrapMessage ?? string.Empty;
+        return new ChatMonitoringNeuralModelInput(
             example.Requirement,
             example.ContextSnapshot ?? string.Empty,
-            example.BootstrapMessage ?? string.Empty,
+            message,
             0,
             1,
             0,
-            .5f);
+            .5f,
+            TextEmbedding: await llm.EmbedAsync(message, ct));
+    }
 
     private static ChatMonitoringNeuralModelTargets BuildTargets(TicketModelTrainingExample example) =>
         new((float)example.TargetScore, (float)example.TargetRelevance);

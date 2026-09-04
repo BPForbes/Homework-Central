@@ -25,7 +25,12 @@ public sealed record ChatMonitoringNeuralModelInput(
     float CrossSubjectSupport = 0f,
     IReadOnlyList<float>? AppliedSubjectMultiHot = null,
     IReadOnlyList<float>? ChannelSubjectMultiHot = null,
-    IReadOnlyList<float>? CascadeContext = null)
+    IReadOnlyList<float>? CascadeContext = null,
+    /// <summary>
+    /// Sentence embedding of <see cref="Message"/>, from the same embedder in training and
+    /// inference so both occupy one vector space. Null leaves the model's semantic region zeroed.
+    /// </summary>
+    IReadOnlyList<float>? TextEmbedding = null)
 {
     public static ChatMonitoringNeuralModelInput Create(
         string requirement,
@@ -35,7 +40,8 @@ public sealed record ChatMonitoringNeuralModelInput(
         float threadContinuity,
         float priorScore,
         SubjectSignalSnapshot subjects,
-        IReadOnlyList<float>? cascadeContext = null) =>
+        IReadOnlyList<float>? cascadeContext = null,
+        IReadOnlyList<float>? textEmbedding = null) =>
         new(
             requirement,
             threadContext,
@@ -50,7 +56,8 @@ public sealed record ChatMonitoringNeuralModelInput(
             subjects.CrossSubjectSupport,
             ToMultiHot(subjects.AppliedGenerals),
             ToMultiHot(subjects.ChannelGeneral is null ? [] : [subjects.ChannelGeneral]),
-            cascadeContext);
+            cascadeContext,
+            textEmbedding);
 
     private static float[] ToMultiHot(IReadOnlyList<string> generals)
     {

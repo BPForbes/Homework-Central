@@ -130,7 +130,17 @@ public sealed class NeuralNetTrainingService(
             db.TicketModelTrainingExamples.Add(training);
             await db.SaveChangesAsync(ct);
             IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
-            model.Train(new ChatMonitoringNeuralModelInput(requirement, score.ContextSnapshot ?? string.Empty, message, 0, 1, 0, .5f),
+            // Trains the live shared model, so it must see the same vector space inference does.
+            model.Train(
+                new ChatMonitoringNeuralModelInput(
+                    requirement,
+                    score.ContextSnapshot ?? string.Empty,
+                    message,
+                    0,
+                    1,
+                    0,
+                    .5f,
+                    TextEmbedding: await llm.EmbedAsync(message, ct)),
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(VectorNamespaces.TicketTrainingExample, message, ChatMonitoringFeatureEncoder.EmbedText(message),
                 ChatMonitoringVectorKeys.LineagePositionId(chatMonitoringKind),
