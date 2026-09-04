@@ -52,6 +52,7 @@ public static class ChatMonitoringFeatureEncoder
     /// Lexical-only vector for <c>VectorDocumentStore</c> retrieval. Deliberately still the
     /// structural width: stored rows are persisted JSON float arrays compared by cosine, so
     /// widening this would silently mismatch every document already in the table.
+    /// The portable twin is <c>rust/hc-feature-encode</c> (`embed_text`); keep both in lockstep.
     /// </summary>
     public static IReadOnlyList<float> EmbedText(string text)
     {
