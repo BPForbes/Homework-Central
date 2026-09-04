@@ -442,6 +442,7 @@ function Build-Projects {
     Ensure-FrontendDependencies -FrontendDir $FrontendDir
 
     if ($env:HC_SKIP_RUST_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        Require-RustCargo
         $rustBuildJob = Start-Job -ScriptBlock {
             param($ScriptRoot)
             . (Join-Path $ScriptRoot 'dev-stack-lib.ps1')
@@ -501,13 +502,10 @@ function Build-Projects {
         }
 
         if ($null -ne $rustBuildJob) {
-            Wait-Job $rustBuildJob | Out-Null
             try {
-                Receive-Job $rustBuildJob -ErrorAction Stop | Out-Null
+                Wait-RustWorkspaceJob -Job $rustBuildJob
             } catch {
                 $rustBuildFailed = $true
-            } finally {
-                Remove-Job $rustBuildJob -Force
             }
         }
     }
@@ -554,7 +552,9 @@ function Start-DevStack([hashtable]$EnvValues) {
         # The parent has just completed the API build, so avoid rebuilding it in the child
         # process before Kestrel can bind. Preserve an explicitly supplied value afterwards.
         $previousSkipDotnetBuild = $env:HC_SKIP_DOTNET_BUILD
+        $previousSkipRustBuild = $env:HC_SKIP_RUST_BUILD
         $env:HC_SKIP_DOTNET_BUILD = '1'
+        $env:HC_SKIP_RUST_BUILD = '1'
         try {
             Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
         } finally {
@@ -562,6 +562,11 @@ function Start-DevStack([hashtable]$EnvValues) {
                 Remove-Item Env:HC_SKIP_DOTNET_BUILD -ErrorAction SilentlyContinue
             } else {
                 $env:HC_SKIP_DOTNET_BUILD = $previousSkipDotnetBuild
+            }
+            if ($null -eq $previousSkipRustBuild) {
+                Remove-Item Env:HC_SKIP_RUST_BUILD -ErrorAction SilentlyContinue
+            } else {
+                $env:HC_SKIP_RUST_BUILD = $previousSkipRustBuild
             }
         }
     } else {

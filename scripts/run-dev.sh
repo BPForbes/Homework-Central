@@ -435,6 +435,7 @@ build_projects() {
 
   local rust_build_pid=""
   if [[ "${HC_SKIP_RUST_BUILD:-}" != "1" && "${HC_SKIP_BUILD:-}" != "1" ]]; then
+    require_rust_cargo || fail "Rust cargo build --workspace failed"
     build_rust_workspace &
     rust_build_pid=$!
   fi
@@ -553,9 +554,9 @@ run_stack() {
   if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
     log "Starting API on http://localhost:5000"
     if [[ "$SKIP_DOCKER" == true ]]; then
-      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
     else
-      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
     fi
     BACKEND_PID=$!
     api_ready=1

@@ -13,6 +13,7 @@
 #   scripts/start-api-dev.ps1 -PreRegistered
 #
 # Set HC_SKIP_DEV_WARMUP=1 only for repeat starts against an already initialized local database.
+# Set HC_SKIP_RUST_BUILD=1 to skip cargo build --workspace in rust/ (run-dev sets this after its compile).
 [CmdletBinding()]
 param(
     [switch]$SkipDocker,
