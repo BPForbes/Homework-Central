@@ -283,11 +283,16 @@ services:
       FCaptcha__ServerUrl: "http://fcaptcha:3000"
       FCaptcha__PublicUrl: "http://localhost:${FCAPTCHA_HOST_PORT:-3010}"
       FCaptcha__Secret: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
-      Llm__BaseUrl: "http://llm:11434"
-      Llm__Enabled: "true"
+      # Default to the `llm` container, but allow pointing at an Ollama running on the host:
+      #   LLM_BASE_URL=http://host.docker.internal:11434
+      # A host Ollama gets real GPU acceleration (Metal on macOS, CUDA elsewhere), which Docker
+      # Desktop cannot pass through on macOS at all, and keeps 1.5 GiB out of the Docker VM.
+      # Then simply do not start the `ai` profile. Llm__Enabled=false disables the client outright.
+      Llm__BaseUrl: "${LLM_BASE_URL:-http://llm:11434}"
+      Llm__Enabled: "${LLM_ENABLED:-true}"
       Llm__ChatModel: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
       Llm__EmbeddingModel: "${LLM_EMBED_MODEL:-nomic-embed-text}"
-      Tickets__OllamaBaseUrl: "http://llm:11434"
+      Tickets__OllamaBaseUrl: "${LLM_BASE_URL:-http://llm:11434}"
       Tickets__ModelName: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
       Tickets__InitialConfidenceScore: "${TICKET_AI_INITIAL_SCORE:-0.5}"
       Tickets__MaxScoreDeltaPerMessage: "${TICKET_AI_MAX_DELTA:-0.15}"
@@ -305,7 +310,10 @@ services:
       Uploads__S3AccessKey: "${MINIO_ROOT_USER:-minioadmin}"
       Uploads__S3SecretKey: "${MINIO_ROOT_PASSWORD:-minioadmin}"
       Uploads__S3ForcePathStyle: "true"
-      ConnectionStrings__Redis: "redis:6379"
+      # Blank falls back to an in-process distributed cache (see Program.cs), which is all a
+      # single-instance deployment needs — Redis matters when more than one API instance has to
+      # share cache state. scripts/run-dev.* never starts it for that reason.
+      ConnectionStrings__Redis: "${REDIS_CONNECTION-redis:6379}"
       ClamAV__Host: "clamav"
       ClamAV__Port: "3310"
       ClamAV__Enabled: "true"
@@ -324,6 +332,10 @@ services:
       DOTNET_hostBuilder__reloadConfigOnChange: "false"
     ports:
       - "5000:8080"
+    # Resolves host.docker.internal on Linux, where (unlike Docker Desktop) it is not automatic.
+    # Lets LLM_BASE_URL / REDIS_CONNECTION point at a service running on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - uploads:/app/App_Data/uploads
     depends_on:
