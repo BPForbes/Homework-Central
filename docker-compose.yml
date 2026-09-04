@@ -1,3 +1,21 @@
+# Homework Central dev/prod-style stack.
+#
+# MEMORY BUDGET
+# -------------
+# Every service below is explicitly capped (`mem_limit`) and tuned to run small, because the
+# common case is a developer laptop where Docker Desktop's VM is the largest single consumer of
+# RAM on the machine. Defaults total ~1 GiB across all four services; each cap is overridable
+# from .env (see .env.example) if a workload genuinely needs more.
+#
+# `mem_limit` / `cpus` are the legacy top-level keys rather than `deploy.resources.limits`
+# because Compose applies these unconditionally to `docker compose up` in non-swarm mode.
+#
+# Only `postgres` and `fcaptcha` start by default — `scripts/run-dev.*` runs the API and the
+# frontend natively (no container, no build), which is both faster and far cheaper on RAM.
+# The containerised backend/frontend sit behind the `app` profile:
+#
+#   docker compose up -d                  # postgres + fcaptcha only (what run-dev uses)
+#   docker compose --profile app up -d    # full containerised stack
 services:
   postgres:
     image: postgres:16-alpine
@@ -6,6 +24,48 @@ services:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+    # Low-memory server tuning. Stock postgres.conf is sized for a dedicated database host and
+    # reserves far more than a dev workload ever touches; these values keep the resident set in
+    # the tens of MB. Raise them (or drop this block) for a production deployment on real hardware.
+    command:
+      - postgres
+      # 128MB default -> 32MB. The dev dataset is a few MB; the OS page cache covers the rest.
+      - -c
+      - shared_buffers=32MB
+      # 100 default. Each backend process costs several MB even when idle. 30 is chosen to fit
+      # under mem_limit below in the worst case (30 backends + shared_buffers), and is far more
+      # than a single-instance dev API, a psql session and the health check ever open at once.
+      - -c
+      - max_connections=30
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      # Advisory only (planner hint) — no memory is allocated for it.
+      - -c
+      - effective_cache_size=128MB
+      # Parallel query workers each fork a full backend process. Pointless at this data volume.
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - max_parallel_maintenance_workers=0
+      - -c
+      - max_parallel_workers=0
+      - -c
+      - max_worker_processes=2
+      - -c
+      - autovacuum_max_workers=1
+      # LLVM JIT compilation allocates aggressively and never pays off on small queries.
+      - -c
+      - jit=off
+      - -c
+      - wal_buffers=1MB
+      - -c
+      - huge_pages=off
+      - -c
+      - track_activity_query_size=1024
+    mem_limit: "${POSTGRES_MEM_LIMIT:-256m}"
+    cpus: "${POSTGRES_CPUS:-1.0}"
     # Published for local dev (scripts/run-dev.*). Omit in production deployments.
     ports:
       - "${POSTGRES_HOST_PORT:-5434}:5432"
@@ -13,15 +73,24 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      interval: 10s
+      # Steady-state probing is 30s rather than 10s: every probe forks a process inside the
+      # container, and nothing reacts fast enough to a Postgres outage to justify three times the
+      # churn. start_interval keeps the *startup* probe fast, so `depends_on: service_healthy`
+      # still releases the backend within a couple of seconds. (Requires Docker Engine 25+;
+      # older daemons ignore it and simply fall back to `interval` during startup.)
+      start_interval: 2s
+      interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
   # Self-hosted "I'm not a robot" check (https://github.com/WebDecoy/FCaptcha) — replaces the old
   # in-house mouse/keyboard behavioral scoring as the first-tier verification on every captcha
   # attempt. FCAPTCHA_SECRET must match backend's FCaptcha__Secret below.
   # Built from the upstream v1.12.0 tag (GHCR anonymous pulls are unreliable); local tag only.
+  # The build only runs when homework-central-fcaptcha:1.12.0 is missing locally — the dev
+  # scripts no longer pass `--build` on every start, which kept re-waking BuildKit (and its
+  # daemon's cache) for a source tree that never changes between runs.
   fcaptcha:
     image: homework-central-fcaptcha:1.12.0
     build:
@@ -33,16 +102,30 @@ services:
       # Upstream Dockerfile copies client JS to /app/static/fcaptcha.js but the Go server
       # probes ./client/fcaptcha.js by default — without this, /fcaptcha.js 404s in the browser.
       FCAPTCHA_CLIENT_PATH: /app/static/fcaptcha.js
+      # Go's default GC only collects once the live heap doubles and never returns memory
+      # promptly. A soft limit makes the runtime collect against a ceiling instead, and the low
+      # GOGC keeps the steady-state heap close to the live set. Both are soft — no OOM risk.
+      GOMEMLIMIT: "${FCAPTCHA_GO_MEM_LIMIT:-96MiB}"
+      GOGC: "${FCAPTCHA_GOGC:-50}"
+      # One OS thread per core is wasted on a service this small.
+      GOMAXPROCS: "${FCAPTCHA_GOMAXPROCS:-2}"
+    mem_limit: "${FCAPTCHA_MEM_LIMIT:-128m}"
+    cpus: "${FCAPTCHA_CPUS:-1.0}"
     ports:
       - "${FCAPTCHA_HOST_PORT:-3010}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/fcaptcha.js || exit 1"]
-      interval: 10s
+      # See the postgres healthcheck above for why interval/start_interval are split.
+      start_interval: 2s
+      interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
+  # Not started by default — `scripts/run-dev.*` runs the API natively. Opt in with
+  # `docker compose --profile app up -d`.
   backend:
+    profiles: ["app"]
     build:
       context: ./backend/HomeworkCentral.Api
       dockerfile: backend.Dockerfile
@@ -60,6 +143,22 @@ services:
       FCaptcha__ServerUrl: "http://fcaptcha:3000"
       FCaptcha__PublicUrl: "http://localhost:${FCAPTCHA_HOST_PORT:-3010}"
       FCaptcha__Secret: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
+      # --- Runtime memory tuning (see also the csproj's GC properties, which set the same
+      # defaults for `dotnet run`; these env vars keep them in force if the csproj changes).
+      # Workstation GC: server GC reserves a separate heap and background thread per core, which
+      # on an 8-16 core dev machine costs hundreds of MB of RSS for an app this size.
+      DOTNET_gcServer: "0"
+      DOTNET_gcConcurrent: "0"
+      # Return freed segments to the OS rather than holding them for reuse.
+      DOTNET_GCConserveMemory: "5"
+      # No profiler/debugger attaches to a compose container; this drops the diagnostics IPC
+      # listener thread and its memory-mapped files.
+      DOTNET_EnableDiagnostics: "0"
+      # Stops the host from watching every appsettings file for changes (inotify + a thread).
+      DOTNET_hostBuilder__reloadConfigOnChange: "false"
+      # .NET reads the cgroup limit below and sizes its heap hard limit from it automatically.
+    mem_limit: "${BACKEND_MEM_LIMIT:-512m}"
+    cpus: "${BACKEND_CPUS:-2.0}"
     ports:
       - "5000:8080"
     depends_on:
@@ -68,11 +167,16 @@ services:
       fcaptcha:
         condition: service_healthy
 
+  # Not started by default — see the `backend` note above.
   frontend:
+    profiles: ["app"]
     build:
       context: ./frontend
       dockerfile: frontend.Dockerfile
     restart: unless-stopped
+    # Static files served by a single nginx worker; 64m is generous.
+    mem_limit: "${FRONTEND_MEM_LIMIT:-64m}"
+    cpus: "${FRONTEND_CPUS:-0.5}"
     ports:
       - "5173:8080"
     depends_on:

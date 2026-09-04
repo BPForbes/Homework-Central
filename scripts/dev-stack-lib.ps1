@@ -14,6 +14,8 @@ $script:DevStackEnvFile = Join-Path $script:RepoRoot '.env'
 $script:DevPostgresPassword = 'postgres'
 $script:DevPostgresHostPort = '5434'
 $script:DevFCaptchaHostPort = '3010'
+# Must match docker-compose.yml's `fcaptcha` service image tag.
+$script:DevFCaptchaImage = 'homework-central-fcaptcha:1.12.0'
 $script:DevStackServerRegistered = $false
 
 function New-DevRandomSecret {
@@ -304,7 +306,17 @@ function Start-DevStackFCaptchaContainer([string]$Port, [switch]$ForceRecreate) 
     }
 
     $env:FCAPTCHA_HOST_PORT = $Port
-    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d', '--build')
+    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d')
+
+    # '--build' used to be passed on every start. The build context is a pinned upstream tag that
+    # never changes between runs, so that woke BuildKit — and the memory its daemon holds for the
+    # build graph and cache — for a no-op rebuild each time the dev stack came up. Build only when
+    # the image really is missing, or when HC_FCAPTCHA_REBUILD=1 forces it.
+    docker image inspect $script:DevFCaptchaImage *> $null
+    if ($LASTEXITCODE -ne 0 -or $env:HC_FCAPTCHA_REBUILD -eq '1') {
+        $composeArgs += '--build'
+    }
+
     if ($ForceRecreate) {
         $composeArgs += '--force-recreate'
     }

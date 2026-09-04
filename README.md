@@ -136,10 +136,49 @@ Homework-Central/
 ├── backend/HomeworkCentral.Api/   # ASP.NET Core API
 ├── frontend/                      # React + Vite SPA
 ├── scripts/                       # Dev orchestration (.ps1 / .sh)
-├── docker-compose.yml             # Postgres, FCaptcha, and production-style services
+├── docker-compose.yml             # Postgres + FCaptcha; backend/frontend behind the `app` profile
 ├── HomeworkCentral.sln            # .NET solution
 └── global.json                    # Pinned .NET SDK version
 ```
+
+---
+
+## Docker resource usage
+
+Docker is usually the largest single consumer of RAM on a dev machine, so the stack is
+deliberately sized down rather than left on stock defaults.
+
+**Only two containers run by default.** `scripts/run-dev.*` starts Postgres and FCaptcha and
+runs the API and the frontend natively — no container, no image build, no memory. The
+containerised `backend` and `frontend` services in `docker-compose.yml` sit behind the `app`
+Compose profile and are opt-in:
+
+```bash
+docker compose up -d                  # postgres + fcaptcha (what run-dev uses)
+docker compose --profile app up -d    # full containerised stack
+```
+
+**Every service is capped.** Each one declares a `mem_limit`, overridable from `.env`:
+
+| Service | Default cap | Notes |
+|---------|-------------|-------|
+| `postgres` | 256 MiB | Tuned for a dev-sized dataset: 32 MB shared buffers, 30 max connections, no parallel workers, no JIT. |
+| `fcaptcha` | 128 MiB | Go runtime held to a 96 MiB soft heap limit (`GOMEMLIMIT`) with `GOGC=50`. |
+| `backend` | 512 MiB | Workstation GC instead of the ASP.NET default server GC (one heap, not one per core). |
+| `frontend` | 64 MiB | A single nginx worker serving static files. |
+
+See the "Docker memory budget" block in [`.env.example`](.env.example) for every knob. Check
+live usage against the caps with `docker stats`. If a service is being OOM-killed, raise its
+limit in `.env` rather than removing the cap.
+
+**Skip Docker entirely** when you already have Postgres on localhost:
+`./scripts/run-dev.sh --skip-docker` (or `-SkipDocker` on Windows).
+
+**Stop the containers when you are done** — `./scripts/stop-dev.sh` / `.\scripts\stop-dev.ps1`.
+The run scripts stop them on exit, but a crashed terminal can leave them resident.
+
+FCaptcha is now only rebuilt when its image is actually missing (it is pinned to upstream
+v1.12.0, which never changes between runs); `HC_FCAPTCHA_REBUILD=1` forces a rebuild.
 
 ---
 
