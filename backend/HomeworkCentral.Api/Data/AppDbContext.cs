@@ -56,6 +56,9 @@ public partial class AppDbContext(
     public DbSet<CandidateCompetencyState> CandidateCompetencyStates => Set<CandidateCompetencyState>();
     public DbSet<CandidateDecision> CandidateDecisions => Set<CandidateDecision>();
     public DbSet<VectorDocument> VectorDocuments => Set<VectorDocument>();
+    public DbSet<AITrackingSession> AITrackingSessions => Set<AITrackingSession>();
+    public DbSet<AITrackingCategoryWeight> AITrackingCategoryWeights => Set<AITrackingCategoryWeight>();
+    public DbSet<AITrackingPrediction> AITrackingPredictions => Set<AITrackingPrediction>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -572,6 +575,53 @@ public partial class AppDbContext(
                 .HasForeignKey(i => i.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(i => i.ChannelId);
+        });
+
+        mb.Entity<AITrackingSession>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.Id).ValueGeneratedOnAdd();
+            e.HasOne(a => a.Ticket)
+                .WithMany()
+                .HasForeignKey(a => a.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Property(a => a.MessageIndex).IsRequired();
+            e.Property(a => a.NeuralModelKind).HasMaxLength(32).IsRequired();
+            e.Property(a => a.ModelVersion).HasMaxLength(128).IsRequired();
+            e.Property(a => a.CreatedAtUtc).IsRequired();
+            e.HasIndex(a => new { a.TicketId, a.MessageIndex });
+            e.HasIndex(a => a.CreatedAtUtc);
+        });
+
+        mb.Entity<AITrackingCategoryWeight>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.Id).ValueGeneratedOnAdd();
+            e.HasOne(a => a.TrackingSession)
+                .WithMany(s => s.CategoryWeights)
+                .HasForeignKey(a => a.TrackingSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Property(a => a.CategoryName).HasMaxLength(64).IsRequired();
+            e.Property(a => a.Weight).IsRequired();
+            e.Property(a => a.IsHumanCorrected).HasDefaultValue(false);
+            e.Property(a => a.HumanCategoryOverride).HasMaxLength(64);
+            e.Property(a => a.HumanCorrectionAtUtc);
+            e.HasIndex(a => new { a.TrackingSessionId, a.CategoryName });
+        });
+
+        mb.Entity<AITrackingPrediction>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.Id).ValueGeneratedOnAdd();
+            e.HasOne(a => a.TrackingSession)
+                .WithMany()
+                .HasForeignKey(a => a.TrackingSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Property(a => a.PredictedCategory).HasMaxLength(64).IsRequired();
+            e.Property(a => a.PredictedScore).IsRequired();
+            e.Property(a => a.ActualOutcome).HasMaxLength(256);
+            e.Property(a => a.CreatedAtUtc).IsRequired();
+            e.HasIndex(a => a.TrackingSessionId);
         });
 
         mb.ApplyScopedResourceFilters(this);
