@@ -1,0 +1,63 @@
+using System.Collections.Concurrent;
+
+namespace HomeworkCentral.Api.Assessment;
+
+/// <summary>Live mid-run training progress for the Server Neural Net UI (in-process only).</summary>
+public sealed record NeuralNetTrainingLiveProgress(
+    Guid SessionId,
+    string Phase,
+    int TicketsRequested,
+    int TicketsGenerated,
+    int TicketsProcessed,
+    int MessagesProcessed,
+    int ExamplesPersisted,
+    int AuditsCompleted,
+    string? ActiveChatMonitoringKind,
+    /// <summary>Latest training-LLM scenario summary (generation / revision).</summary>
+    string? LatestTrainingLlmSummary,
+    /// <summary>Latest self-critique / audit line from the same training LLM.</summary>
+    string? LatestAuditFeedback,
+    string? LatestLossSummary,
+    IReadOnlyList<string> GeneratorHints,
+    /// <summary>Full audit feed for the current session instance (newest last).</summary>
+    IReadOnlyList<string> AuditFeedbackFeed,
+    /// <summary>Ticket/message currently under evaluation / training.</summary>
+    string? CurrentEvaluationData,
+    /// <summary>Per-node weight-update lines for the current mini-batch step.</summary>
+    IReadOnlyList<string> WeightUpdateFeed,
+    /// <summary>forward | reeval | backprop | accepted | revision | idle</summary>
+    string PathTone,
+    IReadOnlyList<int> LayerWidths,
+    IReadOnlyList<string> LayerLabels,
+    IReadOnlyList<int> ActiveNodeIndexes,
+    IReadOnlyList<int> ActiveEdgeParameterIndexes,
+    DateTime UpdatedAtUtc,
+    /// <summary>Destination layer of the current one-layer step; null when no layer walk is active.</summary>
+    int? ActiveLayerIndex = null)
+{
+    /// <summary>Compatibility alias for older UI bindings that still read LLM-1 naming.</summary>
+    public string? LatestLlm1Summary => LatestTrainingLlmSummary;
+
+    /// <summary>Compatibility alias for older UI bindings that still read LLM-2 naming.</summary>
+    public string? LatestLlm2Feedback => LatestAuditFeedback;
+}
+
+public interface INeuralNetTrainingProgressStore
+{
+    void Upsert(NeuralNetTrainingLiveProgress progress);
+    NeuralNetTrainingLiveProgress? Get(Guid sessionId);
+    void Clear(Guid sessionId);
+}
+
+public sealed class NeuralNetTrainingProgressStore : INeuralNetTrainingProgressStore
+{
+    private readonly ConcurrentDictionary<Guid, NeuralNetTrainingLiveProgress> _bySession = new();
+
+    public void Upsert(NeuralNetTrainingLiveProgress progress) =>
+        _bySession[progress.SessionId] = progress with { UpdatedAtUtc = DateTime.UtcNow };
+
+    public NeuralNetTrainingLiveProgress? Get(Guid sessionId) =>
+        _bySession.TryGetValue(sessionId, out NeuralNetTrainingLiveProgress? progress) ? progress : null;
+
+    public void Clear(Guid sessionId) => _bySession.TryRemove(sessionId, out _);
+}

@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using HomeworkCentral.Api.Authorization;
 using HomeworkCentral.Api.Captcha;
 using HomeworkCentral.Api.Captcha.FCaptcha;
@@ -30,9 +31,11 @@ public class ApiIntegrationTests(IntegrationTestFixture fixture)
     HttpResponseMessage response = await client.GetAsync("/healthz");
 
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    Dictionary<string, string>? body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-    Assert.NotNull(body);
-    Assert.Equal("healthy", body["status"]);
+    // /healthz returns mixed JSON types (string status, bool ready); parse explicitly.
+    using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    Assert.Equal(JsonValueKind.Object, body.RootElement.ValueKind);
+    Assert.Equal("healthy", body.RootElement.GetProperty("status").GetString());
+    Assert.True(body.RootElement.GetProperty("ready").GetBoolean());
   }
 
   [SkippableFact]
@@ -218,7 +221,12 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
     SkipReason = "Integration tests require Postgres at TEST_DATABASE_URL.";
   }
 
-  public HttpClient RequireClient() => _client ??= CreateClient();
+  public HttpClient RequireClient()
+  {
+    _client ??= CreateClient();
+    WaitForReady(_client);
+    return _client;
+  }
 
   protected override void ConfigureWebHost(IWebHostBuilder builder)
   {
@@ -237,6 +245,56 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
     });
   }
 
+  /// <summary>
+  /// Migrate/seed now runs in a BackgroundService after listen; wait until /healthz is healthy
+  /// so tests do not race the warmup window.
+  /// </summary>
+  private static void WaitForReady(HttpClient client)
+  {
+    DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+    while (DateTime.UtcNow < deadline)
+    {
+      try
+      {
+        HttpResponseMessage response = client.GetAsync("/healthz").GetAwaiter().GetResult();
+        if (!response.IsSuccessStatusCode)
+        {
+          Thread.Sleep(100);
+          continue;
+        }
+
+        using JsonDocument body = JsonDocument.Parse(
+          response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+        if (body.RootElement.TryGetProperty("status", out JsonElement status)
+            && status.ValueKind == JsonValueKind.String
+            && string.Equals(status.GetString(), "healthy", StringComparison.Ordinal))
+        {
+          return;
+        }
+      }
+      catch (HttpRequestException)
+      {
+        // Host not accepting connections yet during warmup.
+      }
+      catch (TaskCanceledException)
+      {
+        // Transient probe timeout while the host is still binding.
+      }
+      catch (JsonException)
+      {
+        // Incomplete or transitional health payload during startup.
+      }
+      catch (IOException)
+      {
+        // Connection reset while Kestrel is coming up.
+      }
+
+      Thread.Sleep(100);
+    }
+
+    throw new TimeoutException("Timed out waiting for /healthz to report healthy after host start.");
+  }
+
   private static bool CanConnectToDatabase(string connectionString)
   {
     try
@@ -245,7 +303,15 @@ public sealed class IntegrationTestFixture : WebApplicationFactory<Program>
       connection.Open();
       return true;
     }
-    catch
+    catch (NpgsqlException)
+    {
+      return false;
+    }
+    catch (TimeoutException)
+    {
+      return false;
+    }
+    catch (IOException)
     {
       return false;
     }

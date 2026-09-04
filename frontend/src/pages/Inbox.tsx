@@ -7,6 +7,7 @@ import { RichContent } from '../richtext/RichContent'
 import { byPrefixAndName } from '../icons/byPrefixAndName'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { LoadingBars } from '../components/LoadingBars'
+import { TicketInboxItem } from '../components/inbox/TicketInboxItem'
 import { notifyInboxUpdated } from '../utils/inboxEvents'
 import { formatUtcTimestamp } from '../utils/formatUtcTimestamp'
 import type { ChatInboxItem } from '../types/inbox'
@@ -220,6 +221,7 @@ export function Inbox() {
       <ul className="inbox-list">
         {items.map((item) => {
           const isSelected = selectedIds.has(item.notificationId)
+          const isTicketItem = item.mentionKind === 'Ticket' || item.mentionKind === 'TicketDecision'
 
           return (
             <li
@@ -234,31 +236,35 @@ export function Inbox() {
                   aria-label={`Select inbox item from ${item.senderUsername}`}
                 />
               </label>
-              <Link
-                to={`/chat/${encodeURIComponent(item.roomId)}`}
-                className="inbox-item-link"
-                onClick={() => void handleOpen(item)}
-              >
-                <div className="inbox-item-meta">
-                  <span className="inbox-item-category">{item.categoryDisplayName}</span>
-                  <time dateTime={item.createdAtUtc}>{formatUtcTimestamp(item.createdAtUtc)}</time>
-                </div>
-                <div className="inbox-item-room">#{item.roomDisplayName}</div>
-                <div className="inbox-item-sender">
-                  {item.mentionKind === 'Reply' ? (
-                    <span className="inbox-item-kind inbox-item-kind--reply">
-                      <FontAwesomeIcon icon={faReply} /> {item.senderUsername} replied to you
-                    </span>
-                  ) : (
-                    <span className="inbox-item-kind inbox-item-kind--mention">
-                      <FontAwesomeIcon icon={faAt} /> From {item.senderUsername}
-                    </span>
-                  )}
-                </div>
-                <div className="inbox-item-message">
-                  <RichContent content={item.messageContent} />
-                </div>
-              </Link>
+              {isTicketItem ? (
+                <TicketInboxItem item={item} onOpen={(entry) => void handleOpen(entry)} />
+              ) : (
+                <Link
+                  to={`/chat/${encodeURIComponent(item.roomId)}`}
+                  className="inbox-item-link"
+                  onClick={() => void handleOpen(item)}
+                >
+                  <div className="inbox-item-meta">
+                    <span className="inbox-item-category">{item.categoryDisplayName}</span>
+                    <time dateTime={item.createdAtUtc}>{formatUtcTimestamp(item.createdAtUtc)}</time>
+                  </div>
+                  <div className="inbox-item-room">#{item.roomDisplayName}</div>
+                  <div className="inbox-item-sender">
+                    {item.mentionKind === 'Reply' ? (
+                      <span className="inbox-item-kind inbox-item-kind--reply">
+                        <FontAwesomeIcon icon={faReply} /> {item.senderUsername} replied to you
+                      </span>
+                    ) : (
+                      <span className="inbox-item-kind inbox-item-kind--mention">
+                        <FontAwesomeIcon icon={faAt} /> From {item.senderUsername}
+                      </span>
+                    )}
+                  </div>
+                  <div className="inbox-item-message">
+                    <RichContent content={item.messageContent} />
+                  </div>
+                </Link>
+              )}
             </li>
           )
         })}

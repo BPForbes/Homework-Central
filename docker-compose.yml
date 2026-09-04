@@ -2,54 +2,56 @@
 #
 # MEMORY BUDGET
 # -------------
-# Every service below is explicitly capped (`mem_limit`) and tuned to run small, because the
-# common case is a developer laptop where Docker Desktop's VM is the largest single consumer of
-# RAM on the machine. Defaults total ~1 GiB across all four services; each cap is overridable
-# from .env (see .env.example) if a workload genuinely needs more.
+# Every service is explicitly capped (`cpus` / `mem_limit` / `mem_reservation` / `pids_limit`),
+# because the common case is a developer laptop where Docker's VM is the largest single consumer
+# of RAM on the machine. Each cap is overridable from .env — see .env.example.
 #
-# `mem_limit` / `cpus` are the legacy top-level keys rather than `deploy.resources.limits`
-# because Compose applies these unconditionally to `docker compose up` in non-swarm mode.
+# These are the legacy top-level keys rather than `deploy.resources.limits` because Compose
+# applies them unconditionally to `docker compose up` in non-swarm mode.
 #
-# Only `postgres` and `fcaptcha` start by default — `scripts/run-dev.*` runs the API and the
-# frontend natively (no container, no build), which is both faster and far cheaper on RAM.
-# The containerised backend/frontend sit behind the `app` profile:
+# The heavy optional services are behind profiles and cost nothing until asked for:
 #
-#   docker compose up -d                  # postgres + fcaptcha only (what run-dev uses)
-#   docker compose --profile app up -d    # full containerised stack
+#   docker compose up -d                          # postgres, fcaptcha, redis, backend, frontend
+#   docker compose --profile ai up -d             # + ollama          (~1.5 GiB)
+#   docker compose --profile antivirus up -d      # + clamav          (~2.5 GiB)
+#   docker compose --profile object-storage up -d # + minio           (~256 MiB)
+#
+# `scripts/run-dev.*` runs the API and frontend natively rather than in containers, so a normal
+# dev session pays for postgres, fcaptcha and redis only.
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
-    # Low-memory server tuning. Stock postgres.conf is sized for a dedicated database host and
-    # reserves far more than a dev workload ever touches; these values keep the resident set in
-    # the tens of MB. Raise them (or drop this block) for a production deployment on real hardware.
+    # Local-development ceilings. Environment overrides make it possible to scale an
+    # individual service without editing this file. These limits apply to ordinary
+    # `docker compose up` (unlike Swarm-only deploy.resources limits).
+    cpus: "${POSTGRES_CPUS:-1.0}"
+    mem_limit: "${POSTGRES_MEMORY_LIMIT:-512m}"
+    mem_reservation: 192m
+    pids_limit: 128
+    # PostgreSQL uses its own shared buffer cache plus dynamic shared-memory segments.
+    # Keep /dev/shm explicit and bounded instead of Docker's small implicit default.
+    shm_size: "192m"
     command:
       - postgres
-      # 128MB default -> 32MB. The dev dataset is a few MB; the OS page cache covers the rest.
       - -c
-      - shared_buffers=32MB
-      # Left at the stock 100. Lowering it was tempting and wrong: max_connections sizes a few
-      # shared-memory structures (proc array, lock table) for single-digit MB, while the real
-      # per-connection cost is the backend *process*, which only exists once a client actually
-      # connects. So the effective lever is the client-side pool, not this ceiling — see
-      # TenantConnectionResolver, which caps each tenant pool and expires idle connections after
-      # 60s. It also has to stay above the number of tenant pools alive at once: every tenant is
-      # a distinct Database= value, so Npgsql keys one pool per tenant, and a fresh run-dev
-      # provisions 70 dev persona databases.
-      - -c
-      - max_connections=100
+      - shared_buffers=128MB
       - -c
       - work_mem=2MB
       - -c
       - maintenance_work_mem=32MB
-      # Advisory only (planner hint) — no memory is allocated for it.
       - -c
-      - effective_cache_size=128MB
-      # Parallel query workers each fork a full backend process. Pointless at this data volume.
+      - effective_cache_size=320MB
+      - -c
+      # Left at 50 deliberately. Provisioning no longer retains a connection per tenant (see
+      # TenantConnectionResolver.BuildProvisioningConnectionString, which disables pooling for
+      # the one-shot migrate/seed path), so walking all 70 dev personas no longer walks this
+      # ceiling up with it.
+      - max_connections=50
+      - -c
+      - jit=off
+      # Parallel query workers each fork a full backend process, and nothing at this data volume
+      # is large enough for the planner to win by splitting it.
       - -c
       - max_parallel_workers_per_gather=0
       - -c
@@ -57,20 +59,11 @@ services:
       - -c
       - max_parallel_workers=0
       - -c
-      - max_worker_processes=2
-      - -c
       - autovacuum_max_workers=1
-      # LLVM JIT compilation allocates aggressively and never pays off on small queries.
-      - -c
-      - jit=off
-      - -c
-      - wal_buffers=1MB
-      - -c
-      - huge_pages=off
-      - -c
-      - track_activity_query_size=1024
-    mem_limit: "${POSTGRES_MEM_LIMIT:-320m}"
-    cpus: "${POSTGRES_CPUS:-1.0}"
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
     # Published for local dev (scripts/run-dev.*). Omit in production deployments.
     ports:
       - "${POSTGRES_HOST_PORT:-5434}:5432"
@@ -78,11 +71,10 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      # Steady-state probing is 30s rather than 10s: every probe forks a process inside the
-      # container, and nothing reacts fast enough to a Postgres outage to justify three times the
-      # churn. start_interval keeps the *startup* probe fast, so `depends_on: service_healthy`
-      # still releases the backend within a couple of seconds. (Requires Docker Engine 25+;
-      # older daemons ignore it and simply fall back to `interval` during startup.)
+      # Steady-state probing at 30s rather than 10s: every probe forks a process inside the
+      # container. start_interval keeps the *startup* probe fast, so `depends_on:
+      # service_healthy` still releases dependents within a couple of seconds. (Requires Docker
+      # Engine 25+; older daemons ignore it and fall back to `interval` during startup.)
       start_interval: 2s
       interval: 30s
       timeout: 5s
@@ -93,29 +85,28 @@ services:
   # in-house mouse/keyboard behavioral scoring as the first-tier verification on every captcha
   # attempt. FCAPTCHA_SECRET must match backend's FCaptcha__Secret below.
   # Built from the upstream v1.12.0 tag (GHCR anonymous pulls are unreliable); local tag only.
-  # The build only runs when homework-central-fcaptcha:1.12.0 is missing locally — the dev
-  # scripts no longer pass `--build` on every start, which kept re-waking BuildKit (and its
-  # daemon's cache) for a source tree that never changes between runs.
   fcaptcha:
     image: homework-central-fcaptcha:1.12.0
     build:
       context: https://github.com/WebDecoy/FCaptcha.git#v1.12.0
       dockerfile: docker/Dockerfile
     restart: unless-stopped
+    cpus: "${FCAPTCHA_CPUS:-0.25}"
+    mem_limit: "${FCAPTCHA_MEMORY_LIMIT:-96m}"
+    mem_reservation: 32m
+    pids_limit: 64
     environment:
       FCAPTCHA_SECRET: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
       # Upstream Dockerfile copies client JS to /app/static/fcaptcha.js but the Go server
       # probes ./client/fcaptcha.js by default — without this, /fcaptcha.js 404s in the browser.
       FCAPTCHA_CLIENT_PATH: /app/static/fcaptcha.js
-      # Go's default GC only collects once the live heap doubles and never returns memory
-      # promptly. A soft limit makes the runtime collect against a ceiling instead, and the low
-      # GOGC keeps the steady-state heap close to the live set. Both are soft — no OOM risk.
-      GOMEMLIMIT: "${FCAPTCHA_GO_MEM_LIMIT:-96MiB}"
+      # Go's GC only collects once the live heap doubles and is slow to return memory. GOMEMLIMIT
+      # is a soft ceiling it collects against instead; it sits well under mem_limit above because
+      # the Go runtime's non-heap memory (stacks, mmap'd code) also counts toward the cgroup.
+      GOMEMLIMIT: "${FCAPTCHA_GO_MEM_LIMIT:-64MiB}"
       GOGC: "${FCAPTCHA_GOGC:-50}"
       # One OS thread per core is wasted on a service this small.
       GOMAXPROCS: "${FCAPTCHA_GOMAXPROCS:-2}"
-    mem_limit: "${FCAPTCHA_MEM_LIMIT:-128m}"
-    cpus: "${FCAPTCHA_CPUS:-1.0}"
     ports:
       - "${FCAPTCHA_HOST_PORT:-3010}:3000"
     healthcheck:
@@ -127,14 +118,125 @@ services:
       retries: 5
       start_period: 30s
 
-  # Not started by default — `scripts/run-dev.*` runs the API natively. Opt in with
-  # `docker compose --profile app up -d`.
-  backend:
-    profiles: ["app"]
-    build:
-      context: ./backend/HomeworkCentral.Api
-      dockerfile: backend.Dockerfile
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
+    cpus: "${REDIS_CPUS:-0.25}"
+    mem_limit: "${REDIS_MEMORY_LIMIT:-96m}"
+    mem_reservation: 32m
+    pids_limit: 64
+    # Redis is only a disposable distributed cache in this stack. Bounding its own
+    # allocator gives it room below the cgroup limit and avoids OOM-kill restarts.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - "48mb"
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  clamav:
+    profiles: ["antivirus"]
+    build:
+      context: ./deploy/clamav
+      dockerfile: Dockerfile
+    image: homework-central-clamav:1.4-low-memory
+    restart: unless-stopped
+    cpus: "${CLAMAV_CPUS:-0.75}"
+    # This derived image disables concurrent database reloads, so clamd briefly pauses
+    # scans instead of retaining old and new signature engines simultaneously.
+    mem_limit: "${CLAMAV_MEMORY_LIMIT:-2560m}"
+    mem_reservation: 1536m
+    pids_limit: 128
+    ports:
+      - "${CLAMAV_HOST_PORT:-3310}:3310"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # Free S3-compatible object store for chat/ticket attachment bytes.
+  # Opt-in: docker compose --profile object-storage up -d
+  # Console UI on MINIO_CONSOLE_HOST_PORT (default 9001).
+  minio:
+    profiles: ["object-storage"]
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    cpus: "${MINIO_CPUS:-0.5}"
+    mem_limit: "${MINIO_MEMORY_LIMIT:-256m}"
+    mem_reservation: 96m
+    pids_limit: 128
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    ports:
+      - "${MINIO_API_HOST_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  llm:
+    profiles: ["ai"]
+    build:
+      context: ./llm-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    cpus: "${LLM_CPUS:-1.5}"
+    mem_limit: "${LLM_MEMORY_LIMIT:-1536m}"
+    mem_reservation: 768m
+    pids_limit: 256
+    environment:
+      LLM_CHAT_MODEL: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      # Matches LlmOptions.EmbeddingModel / entrypoint default so compose --profile ai
+      # does not leave the API on HashEmbed when the chat model alone was pulled.
+      LLM_EMBED_MODEL: "${LLM_EMBED_MODEL:-nomic-embed-text}"
+      # Keep CPU inference predictable on memory-constrained developer machines.
+      OLLAMA_MAX_LOADED_MODELS: "${OLLAMA_MAX_LOADED_MODELS:-1}"
+      OLLAMA_NUM_PARALLEL: "${OLLAMA_NUM_PARALLEL:-1}"
+      OLLAMA_MAX_QUEUE: "${OLLAMA_MAX_QUEUE:-32}"
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-2m}"
+    ports:
+      - "${LLM_HOST_PORT:-11434}:11434"
+    volumes:
+      - llmdata:/root/.ollama
+    # Official ollama image has no curl; use the CLI (same as llm-service HEALTHCHECK).
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  backend:
+    build:
+      # The API project links the canonical favicon from frontend/public, so its build
+      # context must include both source trees. The root .dockerignore keeps this small.
+      context: .
+      dockerfile: backend/HomeworkCentral.Api/backend.Dockerfile
+    restart: unless-stopped
+    cpus: "${BACKEND_CPUS:-1.0}"
+    mem_limit: "${BACKEND_MEMORY_LIMIT:-512m}"
+    mem_reservation: 192m
+    pids_limit: 192
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__MasterConnection: >
@@ -148,40 +250,66 @@ services:
       FCaptcha__ServerUrl: "http://fcaptcha:3000"
       FCaptcha__PublicUrl: "http://localhost:${FCAPTCHA_HOST_PORT:-3010}"
       FCaptcha__Secret: "${FCAPTCHA_SECRET:?FCAPTCHA_SECRET must be set}"
-      # --- Runtime memory tuning (see also the csproj's GC properties, which set the same
-      # defaults for `dotnet run`; these env vars keep them in force if the csproj changes).
-      # Workstation GC: server GC reserves a separate heap and background thread per core, which
-      # on an 8-16 core dev machine costs hundreds of MB of RSS for an app this size.
+      Llm__BaseUrl: "http://llm:11434"
+      Llm__Enabled: "true"
+      Llm__ChatModel: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      Llm__EmbeddingModel: "${LLM_EMBED_MODEL:-nomic-embed-text}"
+      Tickets__OllamaBaseUrl: "http://llm:11434"
+      Tickets__ModelName: "${LLM_CHAT_MODEL:-qwen3:0.6b}"
+      Tickets__InitialConfidenceScore: "${TICKET_AI_INITIAL_SCORE:-0.5}"
+      Tickets__MaxScoreDeltaPerMessage: "${TICKET_AI_MAX_DELTA:-0.15}"
+      Tickets__MaxMessageCharacters: "${TICKET_AI_MAX_MESSAGE_CHARACTERS:-2000}"
+      Tickets__StudentEnabled: "true"
+      Tickets__StudentConfidenceThreshold: "${TICKET_STUDENT_CONFIDENCE_THRESHOLD:-0.75}"
+      Tickets__ReviewerAuditRate: "${TICKET_REVIEWER_AUDIT_RATE:-0.10}"
+      Tickets__ReviewerBlendWeight: "${TICKET_REVIEWER_BLEND_WEIGHT:-0.70}"
+      Uploads__RootPath: "/app/App_Data/uploads"
+      # Set Uploads__Backend=S3 (and start --profile object-storage) to store attachment
+      # bytes in MinIO. Default Local keeps the uploads volume for low-memory hosts.
+      Uploads__Backend: "${UPLOADS_BACKEND:-Local}"
+      Uploads__S3ServiceUrl: "${UPLOADS_S3_SERVICE_URL:-http://minio:9000}"
+      Uploads__S3Bucket: "${UPLOADS_S3_BUCKET:-homework-central-uploads}"
+      Uploads__S3AccessKey: "${MINIO_ROOT_USER:-minioadmin}"
+      Uploads__S3SecretKey: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      Uploads__S3ForcePathStyle: "true"
+      ConnectionStrings__Redis: "redis:6379"
+      ClamAV__Host: "clamav"
+      ClamAV__Port: "3310"
+      ClamAV__Enabled: "true"
+      # --- Runtime memory tuning. The csproj sets the same GC choices in runtimeconfig.json so
+      # `dotnet run` benefits too; these keep them in force for a plain `docker run` of the image.
+      # Server GC reserves a separate heap and background thread per core — on an 8-16 core dev
+      # machine that is hundreds of MB of RSS for an app this size.
       DOTNET_gcServer: "0"
       DOTNET_gcConcurrent: "0"
       # Return freed segments to the OS rather than holding them for reuse.
       DOTNET_GCConserveMemory: "5"
-      # No profiler/debugger attaches to a compose container; this drops the diagnostics IPC
+      # No profiler or debugger attaches to a compose container; drops the diagnostics IPC
       # listener thread and its memory-mapped files.
       DOTNET_EnableDiagnostics: "0"
-      # Stops the host from watching every appsettings file for changes (inotify + a thread).
+      # Stops the host watching every appsettings file for changes (an inotify watch per file).
       DOTNET_hostBuilder__reloadConfigOnChange: "false"
-      # .NET reads the cgroup limit below and sizes its heap hard limit from it automatically.
-    mem_limit: "${BACKEND_MEM_LIMIT:-512m}"
-    cpus: "${BACKEND_CPUS:-2.0}"
     ports:
       - "5000:8080"
+    volumes:
+      - uploads:/app/App_Data/uploads
     depends_on:
       postgres:
         condition: service_healthy
       fcaptcha:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  # Not started by default — see the `backend` note above.
   frontend:
-    profiles: ["app"]
     build:
       context: ./frontend
       dockerfile: frontend.Dockerfile
     restart: unless-stopped
-    # Static files served by a single nginx worker; 64m is generous.
-    mem_limit: "${FRONTEND_MEM_LIMIT:-64m}"
-    cpus: "${FRONTEND_CPUS:-0.5}"
+    cpus: "${FRONTEND_CPUS:-0.25}"
+    mem_limit: "${FRONTEND_MEMORY_LIMIT:-48m}"
+    mem_reservation: 16m
+    pids_limit: 64
     ports:
       - "5173:8080"
     depends_on:
@@ -192,3 +320,6 @@ volumes:
   # Use `docker compose down` (no -v) or scripts/stop-dev.sh to keep this data.
   # Only `docker compose down -v` or scripts/reset-dev-db.sh wipes it.
   pgdata:
+  llmdata:
+  uploads:
+  miniodata:

@@ -96,6 +96,7 @@ public class CustomChannelAccessRuleDto
     public string? CustomRoleName { get; set; }
     public short? PlatformRoleBit { get; set; }
     public string? PlatformRoleName { get; set; }
+    public Guid? AllowedUserId { get; set; }
 }
 
 public class CustomChannelDto
@@ -117,6 +118,8 @@ public class CustomChannelDto
     public DateTime UpdatedAtUtc { get; set; }
     public List<CustomChannelAccessRuleDto> AccessRules { get; set; } = [];
     public bool CanEditInfo { get; set; }
+    /// <summary>True for system-seeded channels (e.g. default ticket portals).</summary>
+    public bool IsPreconfigured { get; set; }
 }
 
 public class CreateCustomChannelRequest
@@ -156,6 +159,7 @@ public class CustomChannelAccessRuleInput
 {
     public Guid? CustomRoleId { get; set; }
     public short? PlatformRoleBit { get; set; }
+    public Guid? AllowedUserId { get; set; }
 }
 
 public class ClaimableCustomRoleDto

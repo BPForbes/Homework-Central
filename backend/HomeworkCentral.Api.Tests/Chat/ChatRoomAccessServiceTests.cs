@@ -10,13 +10,14 @@ namespace HomeworkCentral.Api.Tests.Chat;
 public class ChatRoomAccessServiceTests
 {
     private readonly ChatRoomAccessService _service = new(new EmptyCustomChannelStore(), new FixedAccessScopeAccessor());
+    private static readonly Guid UserId = Guid.Empty;
 
     [Fact]
     public void General_room_is_public_and_visible_without_role_or_expertise()
     {
         EffectiveMaskDto masks = CreateMasks();
 
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         ChatNavCategoryDto general = Assert.Single(nav.Categories);
         Assert.Equal(ChatRoomBlueprint.GeneralCategoryKey, general.Key);
@@ -39,7 +40,7 @@ public class ChatRoomAccessServiceTests
         Assert.Equal(ChatCategoryKind.Staff, moderatorsRoom.CategoryKind);
 
         EffectiveMaskDto masks = CreateMasks(roles: [PlatformRoles.Moderator]);
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         ChatNavCategoryDto staff = nav.Categories.Single(c => c.Key == ChatRoomCatalog.StaffCategoryKey);
         Assert.True(staff.IsPrivateCategory);
@@ -56,7 +57,7 @@ public class ChatRoomAccessServiceTests
                 [SubjectMaskNames.Science] = [ScienceExpertise.Biology],
             });
 
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         ChatNavCategoryDto? science = nav.Categories.SingleOrDefault(c => c.Key == SubjectMaskNames.Science);
         Assert.NotNull(science);
@@ -76,7 +77,7 @@ public class ChatRoomAccessServiceTests
                 [SubjectMaskNames.Mathematics] = [MathematicsExpertise.Calculus],
             });
 
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         ChatNavCategoryDto mathematics = nav.Categories.Single(c => c.Key == SubjectMaskNames.Mathematics);
         Assert.Equal("Mathematics", mathematics.Name);
@@ -87,7 +88,7 @@ public class ChatRoomAccessServiceTests
     [Fact]
     public void No_expertise_bits_shows_general_but_no_subject_categories()
     {
-        ChatNavDto nav = _service.GetAccessibleNav(CreateMasks());
+        ChatNavDto nav = _service.GetAccessibleNav(CreateMasks(), UserId);
 
         Assert.Contains(nav.Categories, c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
         Assert.DoesNotContain(nav.Categories, c =>
@@ -99,7 +100,7 @@ public class ChatRoomAccessServiceTests
     {
         EffectiveMaskDto masks = CreateMasks(roles: [PlatformRoles.Tutor]);
 
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         ChatNavCategoryDto staff = nav.Categories.Single(c => c.Key == ChatRoomCatalog.StaffCategoryKey);
         Assert.Equal("Staff", staff.Name);
@@ -111,7 +112,7 @@ public class ChatRoomAccessServiceTests
     {
         EffectiveMaskDto masks = CreateMasks(roles: [PlatformRoles.Owner]);
 
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         Assert.True(_service.CanAccessAllRooms(masks));
         Assert.True(nav.Categories.Count > ChatRoomCatalog.StaffRooms.Count);
@@ -126,7 +127,7 @@ public class ChatRoomAccessServiceTests
         EffectiveMaskDto masks = CreateMasks(roles: [PlatformRoles.Administrator]);
 
         Assert.True(_service.CanAccessAllRooms(masks));
-        Assert.True(_service.GetAccessibleNav(masks).Categories.Count > 1);
+        Assert.True(_service.GetAccessibleNav(masks, UserId).Categories.Count > 1);
     }
 
     [Fact]
@@ -134,7 +135,7 @@ public class ChatRoomAccessServiceTests
     {
         EffectiveMaskDto masks = CreateMasks(generalSubjects: [GeneralSubjects.Science]);
 
-        ChatNavDto nav = _service.GetAccessibleNav(masks);
+        ChatNavDto nav = _service.GetAccessibleNav(masks, UserId);
 
         ChatNavCategoryDto science = nav.Categories.Single(c => c.Key == SubjectMaskNames.Science);
         Assert.Equal("Science", science.Name);
@@ -168,7 +169,7 @@ public class ChatRoomAccessServiceTests
             AccessRules: []);
 
         ChatRoomAccessService service = new(new FixedCustomChannelStore(customGeneral), new FixedAccessScopeAccessor());
-        ChatNavDto nav = service.GetAccessibleNav(CreateMasks());
+        ChatNavDto nav = service.GetAccessibleNav(CreateMasks(), UserId);
 
         ChatNavCategoryDto general = nav.Categories.Single(c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
         Assert.Equal(3, general.Rooms.Count);
@@ -176,6 +177,54 @@ public class ChatRoomAccessServiceTests
         Assert.Contains(general.Rooms, room => room.Name == "General");
         Assert.Contains(general.Rooms, room => room.Name == "Get Roles");
     }
+
+    [Fact]
+    public void Developer_viewer_sees_developer_ticket_portals_but_not_real_ones()
+    {
+        Guid realId = Guid.NewGuid();
+        Guid devId = Guid.NewGuid();
+        CustomChannelSnapshot realPortal = TicketPortalSnapshot(
+            realId,
+            "Notify Mods",
+            AccountClass.RealAccount);
+        CustomChannelSnapshot devPortal = TicketPortalSnapshot(
+            devId,
+            "Notify Mods",
+            AccountClass.DeveloperAccount);
+
+        ChatRoomAccessService service = new(
+            new FixedCustomChannelStore(realPortal, devPortal),
+            new FixedAccessScopeAccessor(AccountClass.DeveloperAccount));
+
+        ChatNavDto nav = service.GetAccessibleNav(CreateMasks(), UserId);
+
+        ChatNavCategoryDto general = nav.Categories.Single(c => c.Key == ChatRoomBlueprint.GeneralCategoryKey);
+        Assert.Contains(general.Rooms, room => room.Id == $"custom:{devId:N}" && room.RoomType == "Ticket");
+        Assert.DoesNotContain(general.Rooms, room => room.Id == $"custom:{realId:N}");
+    }
+
+    private static CustomChannelSnapshot TicketPortalSnapshot(
+        Guid channelId,
+        string displayName,
+        AccountClass ownerAccountClass) =>
+        new(
+            channelId,
+            $"custom:{channelId:N}",
+            displayName,
+            "ticket",
+            ChatRoomBlueprint.GeneralCategoryKey,
+            ChatRoomBlueprint.GeneralCategoryDisplayName,
+            CustomRoomType.Ticket,
+            IsPrivate: false,
+            InfoContent: null,
+            CreatedAtUtc: DateTime.UtcNow,
+            UpdatedAtUtc: DateTime.UtcNow,
+            OwnerAccountClass: ownerAccountClass,
+            TieType: ChannelTieType.None,
+            TieSubjectMask: null,
+            TieSubjectBitIndex: null,
+            TiePlatformRoleBit: null,
+            AccessRules: []);
 
     private static EffectiveMaskDto CreateMasks(
         IEnumerable<short>? roles = null,

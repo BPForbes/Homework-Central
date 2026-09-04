@@ -68,7 +68,11 @@ public class DevAuthController(
             available = true,
             personasProvisioned = PersonaProvisioner.ProvisionedCount,
             personasTotal = PersonaProvisioner.TotalPersonaCount,
-            personasReady = PersonaProvisioner.ProvisionedCount >= PersonaProvisioner.TotalPersonaCount,
+            // "Ready" means no pending background sweep. In on-demand mode (the default) every
+            // persona is selectable immediately — each provisions at its first dev login — so
+            // the login page must not wait on a count that only the eager sweep advances.
+            personasReady = !DevPersonaEagerProvisioning.IsEnabled(config)
+                || PersonaProvisioner.ProvisionedCount >= PersonaProvisioner.TotalPersonaCount,
         });
     }
 
