@@ -43,4 +43,11 @@ public sealed record SyntheticThreadMessage(
     float? TeacherEvidence = null,
     float? TeacherRelevance = null,
     float? TeacherApprovalEstimate = null,
-    float? TeacherConfidence = null);
+    float? TeacherConfidence = null,
+    /// <summary>
+    /// Sparse category-name to weight map from the training LLM — the soft label for this message.
+    /// Naming a few categories is a request a model can satisfy reliably, unlike emitting a
+    /// hundred-element array in taxonomy order. Null means the teacher offered no distribution and
+    /// the hard category is used instead.
+    /// </summary>
+    IReadOnlyDictionary<string, double>? TeacherCategoryWeights = null);
