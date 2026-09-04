@@ -45,10 +45,10 @@ The lexical encoder and cosine kernels live in [`rust/`](rust/). Live chat-monit
 
 | Platform | Installer | Default directories |
 |----------|-----------|---------------------|
-| Linux / macOS | `https://sh.rustup.rs` | `~/.cargo` (toolchain + `cargo` on `PATH` via `~/.cargo/env`) and `~/.rustup` |
-| Windows | `rustup-init.exe` from [rustup.rs](https://rustup.rs/) | `%USERPROFILE%\.cargo` and `%USERPROFILE%\.rustup` |
+| Linux / macOS / WSL | `https://sh.rustup.rs` | `~/.cargo` + `~/.rustup`; `cargo` on `PATH` via `~/.cargo/bin` (`source ~/.cargo/env`) |
+| Windows | [rustup-init.exe (x64)](https://win.rustup.rs/x86_64) or [Arm](https://win.rustup.rs/aarch64) | `%USERPROFILE%\.cargo` (`bin` on `PATH`) and `%USERPROFILE%\.rustup` |
 
-### Linux / macOS
+### Linux / macOS / WSL
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -64,8 +64,8 @@ cargo -V
 
 ### Windows
 
-1. Open [https://rustup.rs/](https://rustup.rs/) and download `rustup-init.exe`.
-2. Run the installer (default host is `x86_64-pc-windows-msvc`; Visual C++ Build Tools if prompted).
+1. Download [rustup-init.exe](https://win.rustup.rs/x86_64) (or the [Arm build](https://win.rustup.rs/aarch64)).
+2. Run the installer (default host is `*-pc-windows-msvc`; Visual C++ Build Tools if prompted).
 3. Open a new PowerShell 7+ window and run:
 
 ```powershell
