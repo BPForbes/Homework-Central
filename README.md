@@ -39,7 +39,7 @@ Install the following before running the project locally.
 
 ## Install Rust
 
-The lexical encoder and cosine kernels live in [`rust/`](rust/). Live chat-monitor scoring still runs in C#; the crates are the portable lockstep twins and must compile with the rest of the stack.
+The lexical encoder and cosine kernels live in [`rust/`](rust/). Live chat-monitor scoring still runs in C#; the crates are the portable lockstep twins and must compile with the rest of the stack. Install rustup from [rustup.rs](https://rustup.rs/) or [rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
 
 **Where rustup installs**
 
