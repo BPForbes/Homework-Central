@@ -125,9 +125,10 @@ closed, reopened, approved-decision, and deleted lifecycle states.
 - Use [Assessment ownership](#assessment-ownership) and
   [Neural monitors and Ollama blend](#neural-monitors-and-ollama-blend) before
   changing live scoring, reviewer fallback, or confidence movement.
-  Lexical bins and store cosine run in `libhc_kernels` when that library is
-  present (`rust/hc-kernels`). The C# methods stay as the fallback. Encode
-  metadata, the hashed MLP, and the rest of the API stay in C#.
+  Lexical bins, store cosine, column-major GEMV, expertise FNV-1a, HashEmbed,
+  JSON batch cosine, and support-set cosine run in `libhc_kernels` when that
+  library is present (`rust/hc-kernels`). The C# methods stay as the fallback.
+  Encode metadata, hashed-MLP train/replay, and the rest of the API stay in C#.
 - The [Code behavior](#code-behavior) snippets show the transaction used to open
   a ticket, private room access-rule creation, intake answer dispatch, preface
   resolution, score persistence, monitor selection, training session enqueue,
@@ -329,23 +330,25 @@ flowchart LR
 | Moderation cascade | Default for conduct, report, and filter tickets. | Concept-context router using reported moderation concept, related concept count, family one-hot values, and concept/family text matches. | Evidence, relevance, and `100` fine moderation concepts plus catch-all. |
 | Tutoring cascade | Tutor application and subject-help contexts detected from filter name, watch context, tracking instructions, or frozen template text. | Subject-context router using applied subjects, channel subject, exact/related/cross-subject support, and expertise hash bins. | Evidence, relevance, and tutoring subject/competency categories. |
 
-Lexical bins and store cosine execute in Rust through `rust/hc-kernels`
-(`libhc_kernels`) when the compile scripts have produced that library.
-`ChatMonitoringFeatureEncoder.EmbedText` and `VectorDocumentStore.Cosine`
-call it first and keep managed C# implementations as the fallback so the
-API Docker image and the C# CI job do not need `rustc`. Encode metadata,
-the hashed MLP, EF, SignalR, and the React app stay in C# / TypeScript.
+Lexical bins, store cosine, column-major GEMV / `Wᵀδ`, expertise FNV-1a,
+offline HashEmbed, JSON batch cosine, and support-set cosine execute in
+Rust through `rust/hc-kernels` (`libhc_kernels`) when the compile scripts
+have produced that library. Call sites try the native export first and
+keep managed C# implementations as the fallback so the API Docker image
+and the C# CI job do not need `rustc`. New exports bind optionally: a
+stale `libhc_kernels` still serves lexical bins and store cosine.
+Encode metadata, hashed-MLP train/replay, EF, SignalR, and the React app
+stay in C# / TypeScript.
 
-Further kernels that fit the same C ABI + C# fallback pattern (do not
-rewrite training, EF, or the SPA):
-
-| Next kernel | Current site | Why it fits |
+| Kernel | Call site | Contract |
 |---|---|---|
-| Column-major GEMV / `Wᵀδ` | `NeuralNetwork.MultiplyBias`, `MultiplyTranspose` | Inner loops on every `Forward` / backprop; Math.NET already documents column-major order. Silent training already has a LibTorch path; this would cover the in-process fallback. |
-| Batch store cosine + JSON float parse | `VectorDocumentStore.RetrieveSimilarAsync` | Up to 200 docs: deserialize `EmbeddingJson` then cosine each. A batch `hc_cosine` over packed `f32` would cut the per-row marshal. |
-| Expertise FNV-1a bins | `TutoringSubjectContextRouter.AddExpertiseHash` | Same FNV-1a as lexical bins; 32 slots, called per cascade forward. |
-| Offline `HashEmbed` | `LlmClient.HashEmbed` | 64-bin char histogram + L2 normalize when Ollama is down; same shape as lexical bins. |
-| Support-set cosine | `ChatMonitoringNeuralModelHashedMlp.Cosine` | Per-predict max over up to 512 examples. Contract clamps to `[0, 1]` — do not merge with store cosine. |
+| Lexical bins | `ChatMonitoringFeatureEncoder.EmbedText` / `AddTokens` | 86-float FNV-1a unigram/bigram bins. |
+| Store cosine | `VectorDocumentStore.Cosine` | Overlapping prefix; empty or zero-norm is `0`; may be negative. |
+| Column-major GEMV / `Wᵀδ` | `NeuralNetwork.MultiplyBias`, `MultiplyTranspose` | Math.NET column-major (`rows` = targets). Silent training still has a LibTorch path. |
+| Batch store cosine + JSON float parse | `VectorDocumentStore.RetrieveSimilarAsync` | Up to 200 `EmbeddingJson` arrays in one marshal; invalid JSON scores `0`. |
+| Expertise FNV-1a bins | `TutoringSubjectContextRouter.AddExpertiseHash` | Same FNV-1a as lexical bins; 32 slots, saturate at 1. |
+| Offline `HashEmbed` | `LlmClient.HashEmbed` | 64-bin UTF-16 histogram + L2 when Ollama is down. |
+| Support-set cosine | `ChatMonitoringNeuralModelHashedMlp.Cosine` | Max over the support queue. Clamped to `[0, 1]` — do not merge with store cosine. |
 
 TypeScript compute that is real but should stay client-side (or wasm later, not `libhc_kernels`): `frontend/src/components/neuralNet/meshProject.worker.ts` (`buildMesh` / `project`) and `NeuralNetGraph2D.tsx` `buildDenseGraphTopology`. Those are view-projection and SVG topology, not scoring. Bitmasks, Markdown, and captcha hashing stay in TypeScript.
 

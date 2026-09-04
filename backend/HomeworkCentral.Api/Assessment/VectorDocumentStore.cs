@@ -27,7 +27,8 @@ public interface IVectorDocumentStore
 /// <summary>
 /// Retrieval-only store. Embeddings are cosine-compared in process (JSON float arrays).
 /// Never returns or stores authoritative candidate quality scores.
-/// The portable cosine twin is <c>rust/hc-vector-cosine</c>; keep both in lockstep.
+/// Portable twins live in <c>rust/hc-vector-cosine</c> (single and batch JSON);
+/// keep both in lockstep.
 /// </summary>
 public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
 {
@@ -89,6 +90,20 @@ public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
             query = query.Where(d => d.PositionId == positionId);
 
         List<VectorDocument> docs = await query.Take(200).ToListAsync(ct);
+        if (RustKernels.TryBatchCosineJson(
+                queryEmbedding,
+                docs.Select(static document => document.EmbeddingJson),
+                out double[] rustScores)
+            && rustScores.Length == docs.Count)
+        {
+            return docs
+                .Select((document, index) => (Doc: document, Score: rustScores[index]))
+                .OrderByDescending(pair => pair.Score)
+                .Take(take)
+                .Select(pair => pair.Doc)
+                .ToList();
+        }
+
         return docs
             .Select(d => (Doc: d, Score: Cosine(queryEmbedding, Parse(d.EmbeddingJson))))
             .OrderByDescending(x => x.Score)

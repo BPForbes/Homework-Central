@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "C ABI for lexical bins and store cosine; loaded by the API when present"
+description = "C ABI for chat-monitor kernels; loaded by the API when present"
 
 [lib]
 name = "hc_kernels"
@@ -14,3 +14,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 hc-feature-encode = { path = "../hc-feature-encode" }
 hc-vector-cosine = { path = "../hc-vector-cosine" }
+hc-gemv = { path = "../hc-gemv" }

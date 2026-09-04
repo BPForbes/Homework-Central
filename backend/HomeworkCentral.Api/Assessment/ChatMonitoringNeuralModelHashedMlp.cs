@@ -522,7 +522,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         int categoryIndex = network.ArgMaxCategory(cache.Activations[^1]);
         float categoryConfidence = cache.Activations[^1][2 + categoryIndex];
         string category = CategoryLabels[categoryIndex];
-        double supportSimilarity = support.Count == 0 ? 0 : support.Max(item => Cosine(features, item.Features));
+        double supportSimilarity = MaxSupportSimilarity(features);
         double separation = Math.Abs(evidence - .5f) * 2;
         float confidence = (float)Math.Clamp(
             separation * (.25 + .45 * supportSimilarity + .30 * categoryConfidence),
@@ -535,7 +535,28 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             cache.Trace!);
     }
 
-    private static double Cosine(float[] left, float[] right)
+    private double MaxSupportSimilarity(float[] features)
+    {
+        if (support.Count == 0)
+            return 0;
+        if (RustKernels.TryMaxSupportCosine(features, support.Select(static item => item.Features), out double rustScore))
+            return rustScore;
+
+        return support.Max(item => Cosine(features, item.Features));
+    }
+
+    /// <summary>
+    /// Support-set cosine. Clamped to <c>[0, 1]</c> — not the store cosine contract.
+    /// </summary>
+    internal static double Cosine(float[] left, float[] right)
+    {
+        if (RustKernels.TrySupportCosine(left, right, out double rustScore))
+            return rustScore;
+
+        return CosineManaged(left, right);
+    }
+
+    internal static double CosineManaged(float[] left, float[] right)
     {
         double dot = 0, leftNorm = 0, rightNorm = 0;
         int length = Math.Min(left.Length, right.Length);

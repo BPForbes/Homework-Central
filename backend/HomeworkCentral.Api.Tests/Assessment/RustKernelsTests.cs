@@ -72,5 +72,83 @@ public class RustKernelsTests
 
         Assert.True(RustKernels.TryCosine([1f, 0f], [1f, 0f], out double score));
         Assert.Equal(1d, score, 12);
+
+        float[] weights = [1f, 3f, 2f, 4f];
+        float[] source = [1f, 0f];
+        float[] biases = [0.5f, -0.5f];
+        float[] rustDestination = new float[2];
+        float[] managedDestination = new float[2];
+        Assert.True(RustKernels.TryMultiplyBias(weights, 2, 2, source, biases, rustDestination));
+        NeuralNetwork.MultiplyBiasManaged(weights, 2, 2, source, biases, managedDestination);
+        Assert.Equal(managedDestination, rustDestination);
+
+        float[] rustTranspose = new float[2];
+        float[] managedTranspose = new float[2];
+        Assert.True(RustKernels.TryMultiplyTranspose(weights, 2, 2, [1f, 1f], rustTranspose));
+        NeuralNetwork.MultiplyTransposeManaged(weights, 2, 2, [1f, 1f], managedTranspose);
+        Assert.Equal(managedTranspose, rustTranspose);
+
+        Assert.True(RustKernels.TryHashEmbed("offline", out float[] rustEmbed));
+        Assert.Equal(LlmClient.HashEmbedManaged("offline"), rustEmbed);
+
+        float[] rustExpertise = new float[TutoringSubjectContextRouter.InputSize];
+        float[] managedExpertise = new float[TutoringSubjectContextRouter.InputSize];
+        Assert.True(RustKernels.TryAddExpertiseHash(
+            rustExpertise,
+            "  Rust  ",
+            TutoringSubjectContextRouter.BaseInputSize,
+            TutoringSubjectContextRouter.ExpertiseHashBins));
+        TutoringSubjectContextRouter.AddExpertiseHashManaged(managedExpertise, "  Rust  ");
+        Assert.Equal(managedExpertise, rustExpertise);
+
+        Assert.True(RustKernels.TrySupportCosine([1f, 0f], [-1f, 0f], out double supportScore));
+        Assert.Equal(0d, supportScore);
+        Assert.Equal(-1d, VectorDocumentStore.Cosine([1f, 0f], [-1f, 0f]), 12);
+
+        Assert.True(RustKernels.TryBatchCosineJson(
+            [1f, 0f],
+            ["[1,0]", "[0,1]", "null"],
+            out double[] batchScores));
+        Assert.Equal(3, batchScores.Length);
+        Assert.Equal(1d, batchScores[0], 12);
+        Assert.Equal(0d, batchScores[1], 12);
+        Assert.Equal(0d, batchScores[2], 12);
+    }
+
+    [Fact]
+    public void Hash_embed_and_expertise_match_managed()
+    {
+        Assert.Equal(LlmClient.HashEmbedManaged("offline"), LlmClient.HashEmbed("offline"));
+        Assert.Equal(LlmClient.HashEmbedManaged(""), LlmClient.HashEmbed(""));
+
+        float[] viaManaged = new float[TutoringSubjectContextRouter.InputSize];
+        TutoringSubjectContextRouter.AddExpertiseHashManaged(viaManaged, "biology");
+        SubjectSignalSnapshot snapshot = ChatMonitoringSubjectSignals.Resolve(
+            [],
+            channelGeneral: null,
+            appliedExpertise: ["biology"]);
+        float[] viaPublic = TutoringSubjectContextRouter.BuildRouterInput(snapshot);
+        Assert.Equal(
+            viaManaged.AsSpan(TutoringSubjectContextRouter.BaseInputSize).ToArray(),
+            viaPublic.AsSpan(TutoringSubjectContextRouter.BaseInputSize).ToArray());
+    }
+
+    [Fact]
+    public void Support_cosine_clamps_and_does_not_match_store_cosine()
+    {
+        float[] left = [1f, 0f];
+        float[] right = [-1f, 0f];
+        Assert.Equal(0d, ChatMonitoringNeuralModelHashedMlp.CosineManaged(left, right));
+        Assert.Equal(0d, ChatMonitoringNeuralModelHashedMlp.Cosine(left, right));
+        Assert.Equal(-1d, VectorDocumentStore.Cosine(left, right), 12);
+    }
+
+    [Fact]
+    public void Gemv_managed_skips_zero_sources()
+    {
+        float[] weights = [1f, 3f, 2f, 4f];
+        float[] destination = new float[2];
+        NeuralNetwork.MultiplyBiasManaged(weights, 2, 2, [1f, 0f], [0.5f, -0.5f], destination);
+        Assert.Equal([1.5f, 2.5f], destination);
     }
 }
