@@ -192,6 +192,39 @@ stays `no-cache`. The API compresses large JSON responses (Brotli/gzip) and
 accepts compressed request bodies; neural-net session/feedback lists are cursor-
 paginated (`beforeUtc` + `limit`).
 
+### Running services outside Docker
+
+Docker is a convenience for these services, not a requirement. Anything moved to the host stops
+counting against the Docker VM's memory entirely.
+
+**Ollama is the one worth moving.** It is the largest service in the stack at 1,536 MiB, and a
+host install also gets real GPU acceleration — Metal on macOS, CUDA elsewhere — which Docker
+Desktop cannot pass through on macOS at all, so the container is both the biggest and the slowest
+option. Install Ollama natively, `ollama pull qwen3:0.6b && ollama pull nomic-embed-text`, and
+then just never start the `ai` profile:
+
+- `scripts/run-dev.*` needs no configuration at all: `Llm:BaseUrl` and `Tickets:OllamaBaseUrl`
+  already default to `http://localhost:11434` in `appsettings.json`.
+- For the Compose API container, set `LLM_BASE_URL=http://host.docker.internal:11434` in `.env`.
+
+The API degrades gracefully when no Ollama is reachable — embeddings fall back to a local hash
+embedding and ticket review falls back to the reviewer — so this is safe to try.
+
+**Postgres** can already be skipped with `./scripts/run-dev.sh --skip-docker` (`-SkipDocker` on
+Windows) when you have a local server on `localhost`.
+
+**Redis is optional.** With no `ConnectionStrings:Redis` the API registers an in-process
+distributed cache instead, which is all a single instance needs — Redis matters when several API
+instances have to share cache state. `scripts/run-dev.*` never starts it. To drop it from the
+Compose stack too, set `REDIS_CONNECTION=` (empty) in `.env`.
+
+**Keep FCaptcha and MinIO in Docker.** FCaptcha has no released binary and is built from an
+upstream tag, so a container is the simpler distribution; MinIO is profile-gated and off by
+default, since uploads default to the local `uploads` volume. For ClamAV see the notes below —
+a native `clamd` moves its signature memory out of the WSL cap but does not shrink it.
+
+---
+
 ### WSL caps (Windows Docker Desktop)
 
 Compose limits do not include the Linux kernel, Docker daemon, or filesystem cache.
