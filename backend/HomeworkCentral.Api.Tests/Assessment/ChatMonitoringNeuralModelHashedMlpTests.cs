@@ -64,7 +64,7 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         ChatMonitoringNeuralModelPrediction prediction = tutoring.Predict(input);
         Assert.False(string.IsNullOrWhiteSpace(prediction.Category));
         Assert.True(prediction.Evidence > .4f);
-        Assert.Equal(86, tutoring.GetStateSnapshot().LayerWidths[0]);
+        Assert.Equal(ChatMonitoringFeatureEncoder.FeatureCount, tutoring.GetStateSnapshot().LayerWidths[0]);
         Assert.Contains(tutoring.GetTopologySnapshot().Nodes, node => node.Label == "cascade-context-0");
     }
 
@@ -149,10 +149,14 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using TutoringChatMonitorNeuralNet tutoring = new();
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
-        // Moderation evidence: 86+48+72+64+56+103 = 429
-        // Tutoring evidence: 86+40+56+48+40+16 = 286
-        Assert.Equal(429, moderationTopology.Nodes.Count);
-        Assert.Equal(286, tutoringTopology.Nodes.Count);
+        // Input + hidden + output. Expressed against FeatureCount rather than a literal so that
+        // tuning ChatMonitoringFeatureEncoder.TextVectorSize does not silently invalidate these.
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 48 + 72 + 64 + 56 + 103,
+            moderationTopology.Nodes.Count);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 40 + 56 + 48 + 40 + 16,
+            tutoringTopology.Nodes.Count);
         Assert.Equal("hc-chat-monitoring-moderation-evidence-v8", moderationTopology.ModelVersion);
         Assert.Equal("hc-chat-monitoring-tutoring-evidence-v8", tutoringTopology.ModelVersion);
         Assert.Equal(100, ChatMonitoringModerationConcepts.Slugs.Count);
@@ -163,13 +167,21 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-history");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-computer-science");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-business");
-        Assert.Equal([86, 48, 72, 64, 56, 103], moderation.GetStateSnapshot().LayerWidths);
-        Assert.Equal([86, 40, 56, 48, 40, 16], tutoring.GetStateSnapshot().LayerWidths);
+        Assert.Equal(
+            [ChatMonitoringFeatureEncoder.FeatureCount, 48, 72, 64, 56, 103],
+            moderation.GetStateSnapshot().LayerWidths);
+        Assert.Equal(
+            [ChatMonitoringFeatureEncoder.FeatureCount, 40, 56, 48, 40, 16],
+            tutoring.GetStateSnapshot().LayerWidths);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Moderation.Length + 2, moderation.GetStateSnapshot().LayerWidths[^1]);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Tutoring.Length + 2, tutoring.GetStateSnapshot().LayerWidths[^1]);
         Assert.True(moderationTopology.Edges.Count > tutoringTopology.Edges.Count);
-        // Dense MLP edges exceed the old student-model cap (4096); keep within cascade-aware V2 limits.
-        Assert.Equal(21544, moderationTopology.Edges.Count);
+        // Dense MLP edges exceed the old student-model cap (4096); keep within cascade-aware V2
+        // limits. The semantic region dominates this now: the input-to-first-hidden product alone
+        // is FeatureCount x 48, which is why widening the text vector is a real cost, not free.
+        Assert.Equal(
+            (ChatMonitoringFeatureEncoder.FeatureCount * 48) + (48 * 72) + (72 * 64) + (64 * 56) + (56 * 103),
+            moderationTopology.Edges.Count);
         Assert.Equal(10928, tutoringTopology.Edges.Count);
         Assert.True(moderationTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
         Assert.True(tutoringTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
@@ -276,8 +288,12 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
         Assert.Equal(2, trace.Iterations.Count);
-        Assert.Equal(286, tutoringTopology.Nodes.Count);
-        Assert.Equal(429, moderationTopology.Nodes.Count);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 40 + 56 + 48 + 40 + 16,
+            tutoringTopology.Nodes.Count);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 48 + 72 + 64 + 56 + 103,
+            moderationTopology.Nodes.Count);
         Assert.Contains(tutoringTopology.Nodes, node => node.LayerId == "learning-thread-history");
         Assert.Contains(moderationTopology.Nodes, node => node.LayerId == "behavior-history");
         Assert.All(trace.Iterations, iteration => Assert.NotEmpty(iteration.Update.Parameters));
