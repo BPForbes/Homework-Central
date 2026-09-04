@@ -140,27 +140,68 @@ internal static class RustKernels
 
     private static nint TryOpenLibrary()
     {
-        foreach (string path in CandidateLibraryPaths())
+        List<string> existingPaths = CandidateLibraryPaths()
+            .Where(static path => File.Exists(path))
+            .ToList();
+
+        for (int index = 0; index < existingPaths.Count; index++)
         {
-            if (File.Exists(path) && NativeLibrary.TryLoad(path, out nint handle))
+            if (NativeLibrary.TryLoad(existingPaths[index], out nint handle))
                 return handle;
         }
 
         return 0;
     }
 
-    private static IEnumerable<string> CandidateLibraryPaths()
+    internal static IEnumerable<string> CandidateLibraryPaths()
     {
-        yield return Path.Combine(AppContext.BaseDirectory, LibraryFileName);
-        yield return Path.Combine(AppContext.BaseDirectory, "native", LibraryFileName);
+        string baseDirectory = AppContext.BaseDirectory;
+        if (string.IsNullOrEmpty(baseDirectory))
+            yield break;
 
-        string? directory = AppContext.BaseDirectory;
+        string besideApp = JoinLibraryPath(baseDirectory, LibraryFileName);
+        if (besideApp.Length > 0)
+            yield return besideApp;
+
+        string nativeBesideApp = JoinLibraryPath(baseDirectory, "native", LibraryFileName);
+        if (nativeBesideApp.Length > 0)
+            yield return nativeBesideApp;
+
+        string? directory = baseDirectory;
         for (int depth = 0; depth < 8 && directory is not null; depth++)
         {
-            yield return Path.Combine(directory, "rust", "target", "debug", LibraryFileName);
-            yield return Path.Combine(directory, "rust", "target", "release", LibraryFileName);
+            string debugPath = JoinLibraryPath(directory, "rust", "target", "debug", LibraryFileName);
+            if (debugPath.Length > 0)
+                yield return debugPath;
+
+            string releasePath = JoinLibraryPath(directory, "rust", "target", "release", LibraryFileName);
+            if (releasePath.Length > 0)
+                yield return releasePath;
+
             directory = Directory.GetParent(directory)?.FullName;
         }
+    }
+
+    /// <summary>
+    /// Appends relative kernel-library segments under a search root.
+    /// <see cref="Path.Combine"/> discards earlier segments when a later
+    /// argument is rooted; the native probe must keep the walked prefix.
+    /// </summary>
+    internal static string JoinLibraryPath(string root, params string[] relativeSegments)
+    {
+        if (string.IsNullOrEmpty(root))
+            return string.Empty;
+
+        string path = root;
+        foreach (string segment in relativeSegments)
+        {
+            if (string.IsNullOrEmpty(segment) || Path.IsPathRooted(segment))
+                return string.Empty;
+
+            path = Path.Join(path, segment);
+        }
+
+        return path;
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
