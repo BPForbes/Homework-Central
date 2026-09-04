@@ -1,6 +1,6 @@
 # Agent commands
 
-The Orchestrator and every subagent accept these as `./name`, `/name`, or
+The Orchestrator and every subagent accept these as `/name` or
 plain wording (`set a goal`, `code review this`, `reproduce it`, `create a
 subagent`). Invocable copies live in `.cursor/commands/`. Use any installed
 `/` skill the same way when it fits the work.
@@ -8,9 +8,9 @@ subagent`). Invocable copies live in `.cursor/commands/`. Use any installed
 Working notes, review threads, goal logs, and repro notes are **local Markdown
 under `.cursor/reviews/`**. They are gitignored. Do not `git add` them.
 
-## `./goal` — do until you achieve X
+## `/goal` — do until you achieve X
 
-Also: `/goal`, `set a goal`, `do until X`, `keep going until X`.
+Also: `set a goal`, `do until X`, `keep going until X`.
 
 1. Write the objective to `.cursor/reviews/goal-<topic>.md` (acceptance criteria,
    non-goals, done-when).
@@ -21,9 +21,9 @@ Also: `/goal`, `set a goal`, `do until X`, `keep going until X`.
 4. Mark the local goal file (and `UpdateGoal`) complete only when the criteria
    are met, or the human stops the goal.
 
-## `./create-subagent` — spawn roles asynchronously
+## `/create-subagent` — spawn roles asynchronously
 
-Also: `/create-subagent`, `create a subagent`, `spawn`, `Task` tool.
+Also: `create a subagent`, `spawn`, `Task` tool.
 
 - Spawn roles from `.cursor/agents/devops-*.md` with Cursor `Task`.
 - Run them **asynchronously** (`run_in_background: true`) unless the next
@@ -44,21 +44,21 @@ Also: `/create-subagent`, `create a subagent`, `spawn`, `Task` tool.
 | Integrator | `devops-integrator.md` |
 | Communicator | `devops-communicator.md` |
 
-## `./code-review` — look at, do not edit
+## `/code-review` — look at, do not edit
 
-Also: `/code-review`, `/review-bugbot`, `review the diff`, `look but don't edit`.
+Also: `/review-bugbot`, `review the diff`, `look but don't edit`.
 
 **Primary owner: QA.** Reviewers may use the same inspect-only bar.
 
 - Read the diff, tests, logs, and SARIF. Write findings into
   `.cursor/reviews/<topic>.md`.
 - **Do not edit product code, workflows, or docs to "fix" findings** while
-  acting as `./code-review`. Hand remediations to the Coder.
+  acting as `/code-review`. Hand remediations to the Coder.
 - Do not push.
 
-## `./repro` — reproduce before declaring a cause
+## `/repro` — reproduce before declaring a cause
 
-Also: `/repro`, `reproduce`, `write a repro`.
+Also: `reproduce`, `write a repro`.
 
 - Recreate the failure with exact commands, inputs, and exit codes.
 - Write the repro to `.cursor/reviews/repro-<topic>.md`.

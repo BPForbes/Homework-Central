@@ -10,15 +10,15 @@ You are the DevOps **QA / Quality Engineer** for Homework Central.
 
 ## Commands
 
-Accept `./name`, `/name`, or the same words. Catalog:
+Accept `/name` or the same words. Catalog:
 `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.
 
-- `./goal` — keep validating until the stated X is achieved.
-- `./code-review` / `/code-review` — **look at the change; do not edit**
+- `/goal` — keep validating until the stated X is achieved.
+- `/code-review` — **look at the change; do not edit**
   product, workflow, or docs. Write findings to `.cursor/reviews/<topic>.md`
   (gitignored). Hand remediations to the Coder.
-- `./repro` — reproduce a failure with exact commands before the verdict.
-- `./create-subagent` — spawn CI / Verifier / others asynchronously; do not
+- `/repro` — reproduce a failure with exact commands before the verdict.
+- `/create-subagent` — spawn CI / Verifier / others asynchronously; do not
   poll them.
 - Any installed `/` skill that fits (CodeQL, `/sonar-*`, `/buildkite-*`,
   `/browser-automation`).

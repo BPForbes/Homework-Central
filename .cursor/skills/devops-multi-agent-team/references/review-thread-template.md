@@ -3,8 +3,8 @@
 Copy to `.cursor/reviews/<topic>.md` for each change set. Coder and Reviewers
 communicate **only** through this file for the review gate.
 
-`.cursor/reviews/*` is gitignored. Do not commit review threads, `./goal`
-logs, or `./repro` notes.
+`.cursor/reviews/*` is gitignored. Do not commit review threads, `/goal`
+logs, or `/repro` notes.
 
 ```markdown
 # Review: <topic>

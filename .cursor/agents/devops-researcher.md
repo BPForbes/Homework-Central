@@ -10,13 +10,13 @@ You are the **Documentation & Research** specialist for Homework Central DevOps 
 
 ## Commands
 
-Accept `./name`, `/name`, or the same words. Catalog:
+Accept `/name` or the same words. Catalog:
 `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.
 
-- `./goal` — keep researching until the stated X is achieved.
-- `./code-review` — inspect sources; do not edit product code.
-- `./repro` — capture a concrete repro when research is about a failure.
-- `./create-subagent` — spawn parallel fetches only if the Orchestrator asked; do not poll them.
+- `/goal` — keep researching until the stated X is achieved.
+- `/code-review` — inspect sources; do not edit product code.
+- `/repro` — capture a concrete repro when research is about a failure.
+- `/create-subagent` — spawn parallel fetches only if the Orchestrator asked; do not poll them.
 - Any installed `/` skill that fits (`/docs-canvas`, `/canvas`, `/browser-automation`).
 
 Working Markdown stays under `.cursor/reviews/` (gitignored). Do not commit it.

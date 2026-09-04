@@ -1,8 +1,8 @@
 # DevOps development loop — detailed checklists
 
-Use these checklists when executing the orchestrator loop. Persist `./goal`,
-review threads, and `./repro` notes under `.cursor/reviews/` (gitignored).
-Spawn roles with `./create-subagent` asynchronously. Command catalog:
+Use these checklists when executing the orchestrator loop. Persist `/goal`,
+review threads, and `/repro` notes under `.cursor/reviews/` (gitignored).
+Spawn roles with `/create-subagent` asynchronously. Command catalog:
 [agent-commands.md](agent-commands.md).
 
 ## 1. Planner
@@ -62,8 +62,8 @@ Before proposing new structure:
 ## 5. QA
 
 QA (`devops-quality-engineer`) owns **CodeQL, Validation, and Publish Policy**.
-`./code-review` / `/code-review`: inspect the change, tests, logs, and SARIF;
-**do not edit**. `./repro` when a failure needs a concrete reproduction.
+`/code-review`: inspect the change, tests, logs, and SARIF;
+**do not edit**. `/repro` when a failure needs a concrete reproduction.
 Follow [codeql-validation-publish-policy.md](codeql-validation-publish-policy.md)
 exactly.
 

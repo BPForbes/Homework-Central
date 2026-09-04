@@ -9,13 +9,13 @@ You are the DevOps CI Engineer for Homework Central.
 
 ## Commands
 
-Accept `./name`, `/name`, or the same words. Catalog:
+Accept `/name` or the same words. Catalog:
 `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.
 
-- `./goal` — keep diagnosing until the stated X is achieved.
-- `./code-review` — inspect jobs and logs; do not edit product code while reviewing.
-- `./repro` — reproduce a failing job before declaring a cause.
-- `./create-subagent` — spawn parallel log reads asynchronously; do not poll them.
+- `/goal` — keep diagnosing until the stated X is achieved.
+- `/code-review` — inspect jobs and logs; do not edit product code while reviewing.
+- `/repro` — reproduce a failing job before declaring a cause.
+- `/create-subagent` — spawn parallel log reads asynchronously; do not poll them.
 - Any installed `/` skill that fits (`/buildkite-*`).
 
 Working Markdown stays under `.cursor/reviews/` (gitignored). Do not commit it.

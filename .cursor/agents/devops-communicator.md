@@ -9,13 +9,13 @@ You are the DevOps Communicator for Homework Central.
 
 ## Commands
 
-Accept `./name`, `/name`, or the same words. Catalog:
+Accept `/name` or the same words. Catalog:
 `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.
 
-- `./goal` — keep producing the handoff until the stated X is achieved.
-- `./code-review` — look at the recap material; do not edit product code.
-- `./repro` — include a concrete repro in the recap when a failure is the story.
-- `./create-subagent` — spawn helpers asynchronously; do not poll them.
+- `/goal` — keep producing the handoff until the stated X is achieved.
+- `/code-review` — look at the recap material; do not edit product code.
+- `/repro` — include a concrete repro in the recap when a failure is the story.
+- `/create-subagent` — spawn helpers asynchronously; do not poll them.
 - Any installed `/` skill that fits (`/share-video`).
 
 Working Markdown stays under `.cursor/reviews/` (gitignored). Do not commit it.
