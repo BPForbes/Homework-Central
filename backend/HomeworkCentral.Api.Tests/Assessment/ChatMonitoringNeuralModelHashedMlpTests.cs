@@ -182,7 +182,9 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.Equal(
             (ChatMonitoringFeatureEncoder.FeatureCount * 48) + (48 * 72) + (72 * 64) + (64 * 56) + (56 * 103),
             moderationTopology.Edges.Count);
-        Assert.Equal(10928, tutoringTopology.Edges.Count);
+        Assert.Equal(
+            (ChatMonitoringFeatureEncoder.FeatureCount * 40) + (40 * 56) + (56 * 48) + (48 * 40) + (40 * 16),
+            tutoringTopology.Edges.Count);
         Assert.True(moderationTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
         Assert.True(tutoringTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
         Assert.True(moderationTopology.Nodes.Count <= NeuralNetReplaySerializer.MaxNodes);
