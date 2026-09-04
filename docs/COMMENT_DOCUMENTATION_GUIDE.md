@@ -234,6 +234,13 @@ manual accumulation loop.
 Use an explicit `for` / `foreach` when the body has multi-step side effects, early
 exits that do not map cleanly, or a performance-critical inner kernel.
 
+When the loop should run only on a subset of the sequence, filter first with
+`.Where(...)` (C#) or `.filter(...)` (TypeScript). Do not write
+`if (!condition) continue;` or wrap the body in `if (condition)` as a substitute
+for that filter. CodeQL `cs/linq/missed-where` flags those implicit filters.
+A `foreach` over the already-filtered sequence is still correct for side effects.
+Search-and-return loops (find an index, then `return`) are not that pattern.
+
 ## Collection naming
 
 Collection names must be plural or otherwise indicate multiplicity.

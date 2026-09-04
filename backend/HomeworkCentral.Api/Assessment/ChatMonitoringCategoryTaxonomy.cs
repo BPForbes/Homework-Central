@@ -109,22 +109,38 @@ public static class ChatMonitoringCategoryTaxonomy
 
         float[] distribution = new float[For(kind).Count];
         bool anyUsable = false;
-        foreach (KeyValuePair<string, double> weight in weights)
+        foreach ((int index, float value) in ProjectUsableTeacherWeights(kind, weights))
         {
-            if (double.IsNaN(weight.Value) || double.IsInfinity(weight.Value) || weight.Value <= 0)
-                continue;
-
-            if (!TryIndexOf(kind, weight.Key, out int index))
-                continue;
-
             // Summed rather than assigned: two aliases of one category (say "harassment" and a
             // legacy spelling that normalises onto it) contribute together instead of one silently
             // overwriting the other.
-            distribution[index] += (float)weight.Value;
+            distribution[index] += value;
             anyUsable = true;
         }
 
         return anyUsable ? distribution : null;
+    }
+
+    private static IEnumerable<(int Index, float Value)> ProjectUsableTeacherWeights(
+        NeuralModelKindChatMonitoring kind,
+        IReadOnlyDictionary<string, double> weights) =>
+        weights
+            .Where(weight => TeacherWeightIsUsable(weight.Value))
+            .Select(weight => TryProjectTeacherWeight(kind, weight))
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!.Value);
+
+    private static bool TeacherWeightIsUsable(double value) =>
+        !double.IsNaN(value) && !double.IsInfinity(value) && value > 0;
+
+    private static (int Index, float Value)? TryProjectTeacherWeight(
+        NeuralModelKindChatMonitoring kind,
+        KeyValuePair<string, double> weight)
+    {
+        if (!TryIndexOf(kind, weight.Key, out int index))
+            return null;
+
+        return (index, (float)weight.Value);
     }
 
     public static string Label(NeuralModelKindChatMonitoring kind, int index)
