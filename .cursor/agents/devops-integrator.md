@@ -20,6 +20,12 @@ Accept `/name` or the same words. Catalog:
 
 Working Markdown stays under `.cursor/reviews/` (gitignored). Do not commit it.
 
+**Only QA may give the OK to push.** Anyone who changes code (Coder /
+primary developers) must run applicable CodeQL on those changes. That
+run does not authorize a push. QA re-checks CodeQL and is the only role
+that may mark the publish gate PASS. External side effects are not a
+publish authorization.
+
 ## Allowed MCP
 
 `plugin-composio-composio`

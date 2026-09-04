@@ -8,6 +8,11 @@ subagent`). Invocable copies live in `.cursor/commands/`. Use any installed
 Working notes, review threads, goal logs, and repro notes are **local Markdown
 under `.cursor/reviews/`**. They are gitignored. Do not `git add` them.
 
+**Only QA may give the OK to push.** Anyone who changes code (Coder /
+primary developers) must run applicable CodeQL first; that run does not
+authorize a push. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST,
+MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
+
 ## `/goal` — do until you achieve X
 
 Also: `set a goal`, `do until X`, `keep going until X`.
@@ -31,6 +36,7 @@ Also: `create a subagent`, `spawn`, `Task` tool.
 - Do not poll a background subagent. Continue other work or end the turn;
   the completion notification is enough.
 - The Orchestrator synthesizes. Subagents do not push or open PRs.
+  The Orchestrator may push only after **QA gives the OK**.
 
 | Role | Agent file |
 |------|------------|
@@ -54,7 +60,7 @@ Also: `/review-bugbot`, `review the diff`, `look but don't edit`.
   `.cursor/reviews/<topic>.md`.
 - **Do not edit product code, workflows, or docs to "fix" findings** while
   acting as `/code-review`. Hand remediations to the Coder.
-- Do not push.
+- Do not push. **Only QA may give the OK to push.**
 
 ## `/repro` — reproduce before declaring a cause
 

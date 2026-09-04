@@ -20,6 +20,14 @@ Accept `/name` or the same words. Catalog:
 
 Working Markdown stays under `.cursor/reviews/` (gitignored). Do not commit it.
 
+**Only QA may give the OK to push.** Anyone who changes code (Coder /
+primary developers) must run applicable CodeQL on those changes. That
+run does not authorize a push. QA re-checks CodeQL and is the only role
+that may mark the publish gate PASS. A Security Clear verdict does
+not authorize a push by itself. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A
+PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE
+PUBLISH GATE PASS.
+
 ## Allowed MCP
 
 `plugin-snyk-secure-development-Snyk`

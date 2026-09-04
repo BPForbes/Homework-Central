@@ -1169,7 +1169,16 @@ Agents must treat CodeQL as a required security gate before publishing code.
 
 ### Core Rule
 
-DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+**Never push until CodeQL is satisfied.** Review Satisfied, Security
+Clear, compilation, tests, and developer CodeQL do not authorize a push
+by themselves.
+
+**Only QA may give the OK to push.** Anyone who changes code (Coder /
+primary developers) must run applicable CodeQL on those changes. QA
+re-checks CodeQL and is the only role that may mark the publish gate
+PASS.
+
+DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 “CodeQL is satisfied” means:
 

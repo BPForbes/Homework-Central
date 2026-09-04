@@ -22,6 +22,12 @@ Accept `/name` or the same words. Catalog:
 Working Markdown stays under `.cursor/reviews/` (gitignored). Do not commit it.
 Durable operator docs still go in `docs/`.
 
+**Only QA may give the OK to push.** Anyone who changes code (Coder /
+primary developers) must run applicable CodeQL on those changes. That
+run does not authorize a push. QA re-checks CodeQL and is the only role
+that may mark the publish gate PASS. Research complete is not a publish
+authorization.
+
 ## Responsibilities
 
 1. Inventory **local** sources: `docs/`, `README.md`, `SETUP.md`, `AGENTS.md`, `CLAUDE.md`, `design.md`, deploy/runbooks, and any plan Markdown the Planner owns.

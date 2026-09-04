@@ -3,14 +3,16 @@ name: devops-multi-agent-team
 description: >-
   Orchestrates a DevOps + Platform Engineering multi-agent loop: plan,
   research (docs/ + online media fetches), implement CI/CD and IaC, pre-QA
-  Markdown reviewers (no push until Satisfied), Security, then QA
-  (CodeQL csharp + JS/TS publish gate, fast CI, Sonar, smoke),
-  observability, optimization, docs, refactor, and performance — using
-  installed Cursor MCPs and slash commands for Buildkite, Sonar, Snyk, Linear,
-  browse, Composio, and Mainframe. Use when the user asks for CI/CD, GitHub
-  Actions, Kubernetes, Docker, Terraform/Pulumi, deploy pipelines,
-  monitoring/SLOs, runbooks, infra hardening, build-time or cost optimization,
-  pre-merge quality/security gates, CodeQL, or explicitly invokes
+  Markdown reviewers, Security, then QA. Only QA may give the OK to
+  push. Anyone who changes code (Coder / primary developers) must run
+  applicable CodeQL first; that run does not authorize a push. Also
+  covers observability, optimization, docs, refactor, and
+  performance — using installed Cursor MCPs and slash commands for
+  Buildkite, Sonar, Snyk, Linear, browse, Composio, and Mainframe. Use
+  when the user asks for CI/CD, GitHub Actions, Kubernetes, Docker,
+  Terraform/Pulumi, deploy pipelines, monitoring/SLOs, runbooks, infra
+  hardening, build-time or cost optimization, pre-merge
+  quality/security gates, CodeQL, or explicitly invokes
   /devops-multi-agent-team, /goal, /create-subagent, /code-review,
   or /repro.
 ---
@@ -31,6 +33,20 @@ Spawn roles with `/create-subagent` (Cursor `Task`, prompts in
 linear one-at-a-time queue. Write all working Markdown thoughts to
 `.cursor/reviews/` — that directory is gitignored; do not commit it.
 
+**Only QA may give the OK to push.** Review Satisfied, Security Clear,
+the Orchestrator, and developer CodeQL do not authorize a push.
+
+**Developer CodeQL:** anyone who changes product, pipeline, or infra
+code (Coder / primary developers) must run applicable CodeQL on those
+changes before handing to Reviewers. QA re-checks CodeQL and is the
+only role that may mark the publish gate PASS.
+
+**Never push until CodeQL is satisfied and QA has given the OK.** DO
+NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE
+SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS. If CodeQL cannot be
+executed when required, do not automatically publish and do not claim
+CodeQL passed.
+
 ### Reviewer entrypoint (before QA)
 
 After the Coder lands local changes, the **Reviewers** are the next gate — not QA.
@@ -43,14 +59,18 @@ After the Coder lands local changes, the **Reviewers** are the next gate — not
    These files are gitignored.
 3. Coder applies fixes locally and replies in the same Markdown file.
 4. Iterate until reviewers mark **Satisfied**.
-5. **Do not push** until reviewers are satisfied.
+5. **Do not push** when reviewers are unsatisfied. Satisfied still does
+   **not** authorize a push.
 6. Then run **Security** (Snyk / `/review-security`).
 7. Then **QA** (`.cursor/agents/devops-quality-engineer.md`). QA owns
    **CodeQL, Validation, and Publish Policy**
-   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
-8. **Do not push** until reviewers are Satisfied, Security is clear, **and
-   applicable CodeQL analysis is satisfied**. If CodeQL cannot be executed when
-   required, do not automatically publish and do not claim CodeQL passed.
+   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md))
+   and is the **only** role that may give the OK to push.
+8. **Never push until QA gives the OK.** Do not push until reviewers
+   are Satisfied, Security is clear, **applicable CodeQL analysis is
+   satisfied**, and QA marks the publish gate PASS. If CodeQL cannot be
+   executed when required, do not automatically publish and do not claim
+   CodeQL passed.
 
 ## When to use
 
@@ -92,8 +112,10 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 - Stay on the active feature branch for #58 (`feature/ticket-rooms`); prefer the existing PR over new branches.
 - Confirm destructive ops (deletes, force-push, hard reset) with the human.
 - **No push** while a review thread is `In review` or `Changes requested`.
-  DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE
-  SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+- **Only QA may give the OK to push.** Review Satisfied + Security
+  Clear + developer CodeQL are not enough. DO NOT PUSH, PUBLISH, OPEN
+  OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA
+  MARKS THE PUBLISH GATE PASS.
 
 ### MCP namespaces
 
@@ -143,7 +165,7 @@ poll background subagents.
 
 ### Playbooks that combine tools
 
-**A. Pre-merge gate (#58 / feature work)** — Ticket Lead (criteria) → Research brief → Coder → **Reviewers (MD thread, no push)** → Security → CI/Quality/Verifier → Orchestrator report → Communicator optional.
+**A. Pre-merge gate (#58 / feature work)** — Ticket Lead (criteria) → Research brief → Coder (**runs CodeQL on their own changes**) → **Reviewers (MD thread, no push)** → Security → QA (**only role that may give the OK to push**) → Orchestrator report → Communicator optional. **Never push until QA gives the OK.**
 
 **B. Red CI** — CI Engineer: `list_builds` → failed `list_jobs` → `tail_logs` / `search_logs` → load `/buildkite-preflight` or `/buildkite-cli` → fix → retry/rebuild.
 
@@ -183,14 +205,20 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - Produce clean, production-ready DevOps artifacts (YAML, HCL, shell, etc.).
 - Follow architecture; reuse existing structures; ask when blocked.
 - Prefer fail-first scripts, parameterized secrets, and idempotent operations.
-- Keep changes **local** until Reviewers are Satisfied; reply in the review thread Markdown when addressing feedback.
+- Run applicable CodeQL on every code change before handing to Reviewers.
+  Developer CodeQL does **not** authorize a push.
+- Keep changes **local** until QA gives the OK to push. Reply in the
+  review thread Markdown when addressing feedback. **Never push until QA
+  gives the OK.**
 
 ### 4. Reviewers (entrypoint before QA)
 
 - PR-style review of local diffs: correctness, security, performance, operability, tests, scope.
 - Communicate with the Coder **only via the review thread Markdown** (`.cursor/reviews/<topic>.md`).
 - Ground asks in the research brief, `docs/`, and fetched online media (not gut feel alone).
-- Request improvements until Satisfied; **block push** until then.
+- Request improvements until Satisfied; **block push** while unsatisfied.
+  Satisfied still does **not** authorize a push — **only QA may give the
+  OK to push.**
 - Agent prompt: `.cursor/agents/devops-reviewer.md`.
 
 ### 5. QA
@@ -202,12 +230,14 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - Agent prompt: `.cursor/agents/devops-quality-engineer.md`.
 - Follow **CodeQL, Validation, and Publish Policy** exactly
   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
-- DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+- DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 - Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, TypeScript type checking, Clippy, rustfmt, and cargo check do not substitute for required CodeQL analysis.
 - If CodeQL cannot be executed when required: do not claim CodeQL passed, do not claim the change is CodeQL-clean, and do not automatically publish.
 - Prefer Buildkite MCP + `/buildkite-*`, Sonar `/sonar-*`, and browser `/browser-automation` over invented results. Sonar and smoke are additive.
 - Report failures to Coders with reproducible logs (and re-open review thread if code changes again).
-- Approve only when acceptance criteria are met **and** the CodeQL publish gate is PASS.
+- **Only QA may give the OK to push.** Approve (publish gate PASS) only
+  when acceptance criteria are met **and** applicable CodeQL is satisfied.
+  No other role may authorize a push.
 
 ### 6. Observability
 
@@ -260,8 +290,9 @@ poll background subagents. Synthesize when a pod completes.
 | **qa** | QA, CI Engineer, Verifier | Security clear (or Orchestrator allows overlap with security) |
 | **docs** | Documentation, Communicator | Implementation is stable enough to document |
 
-Gates still apply across pods: no push while review is open; Security before
-publish; applicable CodeQL must be satisfied.
+Gates still apply across pods: no push while review is open; Security
+before publish; Coder must run CodeQL on code changes; **only QA may
+give the OK to push.**
 
 ```text
 research pod   → plan + docs/ + online media (parallel)
@@ -270,8 +301,9 @@ review pod     → /code-review in .cursor/reviews/<topic>.md (inspect, do not e
 security pod   → Snyk / /review-security
 qa pod         → /repro + CodeQL publish gate + CI logs + smoke
 docs pod       → runbooks + optional /share-video
-push           → only when Satisfied + Security clear + CodeQL satisfied
-repeat pods    → until QA passes
+push           → NEVER until QA gives the OK
+                 (Satisfied + Security Clear + developer CodeQL ≠ push)
+repeat pods    → until QA marks the publish gate PASS
 ```
 
 You remain the Orchestrator. `.cursor/reviews/` goal/review/repro files stay
@@ -285,6 +317,8 @@ On human interrupts (`Change X to Y`, `Use tool A`, `Add environment Z`, `Stop`,
 2. Route to the correct role.
 3. Update plan / architecture / code / tests.
 4. Resume from the appropriate step.
+5. An interrupt does **not** authorize a push. **Only QA may give the
+   OK to push.**
 
 ## Output rules
 
@@ -296,6 +330,9 @@ On human interrupts (`Change X to Y`, `Use tool A`, `Add environment Z`, `Stop`,
 - When Optimization / Observability / Docs / Security / Performance act, show their concrete outputs.
 - Keep work deterministic and traceable (paths, commands, environments).
 - Never invent requirements; ask the human.
+- **Only QA may give the OK to push.** Coders must still run CodeQL on
+  their own changes. Compilation, tests, and review Satisfied do not
+  substitute for applicable CodeQL and do not authorize a push.
 
 ### Gate report template
 

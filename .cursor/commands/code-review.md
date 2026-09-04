@@ -14,7 +14,8 @@ Primary owner: **QA** (`.cursor/agents/devops-quality-engineer.md`). Reviewers m
 1. Read the diff, tests, logs, and SARIF.
 2. Write findings into `.cursor/reviews/<topic>.md` (gitignored). Do not commit that file.
 3. **Do not edit** product code, workflows, or docs to "fix" findings while acting as `/code-review`. Hand remediations to the Coder.
-4. Do not push.
+4. Do not push. **Only QA may give the OK to push.** Review findings
+   and passing tests do not authorize a push.
 5. Use any installed `/` skill that fits (`/review-bugbot`, `/review-security`, `/sonar-analyze`).
 
 Catalog: `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.

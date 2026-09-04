@@ -39,7 +39,12 @@ Before proposing new structure:
 - Make scripts non-interactive for agents (`--yes`, flags, env vars).
 - Prefer idempotent apply/deploy paths and dry-run where available.
 - Show file paths and diffs.
-- **Do not push** until Reviewers are Satisfied (communicate in `.cursor/reviews/<topic>.md`).
+- Run applicable CodeQL on every code change before handing to Reviewers.
+  Developer CodeQL does **not** authorize a push.
+- Keep changes local until **QA gives the OK to push** (communicate in
+  `.cursor/reviews/<topic>.md`). Only QA may authorize a push.
+  DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR
+  OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 ## 3b. Documentation & Research (online media)
 
@@ -53,12 +58,16 @@ Before proposing new structure:
 - Converse with Coder **in the review thread Markdown** only.
 - Cite research brief, `docs/`, and fetched URLs on each request-change.
 - Iterate until all reviewers mark Satisfied → then Security → then QA.
+- Satisfied does **not** authorize a push. **Only QA may give the OK to
+  push.**
 - Template: [review-thread-template.md](review-thread-template.md).
 
 ## 4. Security (after Satisfied)
 
 - Snyk / secret scan / `/review-security` on the change surface.
 - Record verdict in the review thread before QA proceeds.
+- Security Clear does **not** authorize a push. **Only QA may give the
+  OK to push.**
 
 ## 5. QA
 
@@ -79,7 +88,9 @@ Minimum validation set:
 - Record exact commands and exit codes
 - Report the Definition of Done summary (PASS / FAIL / NOT RUN / NOT APPLICABLE)
 
-DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+**Only QA may give the OK to push.** Coders must still have run applicable
+CodeQL on their own changes. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL
+REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 If CodeQL cannot be executed when required: do not claim CodeQL passed and do
 not automatically publish.
@@ -150,7 +161,8 @@ Capture before/after where possible:
 | Tighten secrets | Security → Coder → QA |
 | Reduce build time | Performance + Optimization → Coder → QA |
 | Explain strategy | Researcher (Orchestrator summarizes) |
-| Stop | Orchestrator: halt loop; leave plan/code consistent |
+| Stop | Orchestrator: halt loop; leave plan/code consistent; do not push |
+| Push / open PR | Blocked until **QA gives the OK** (Satisfied + Security Clear + developer CodeQL are not enough) |
 
 ## Progress report template
 

@@ -11,7 +11,10 @@ logs, or `/repro` notes.
 
 **Branch:** feature/ticket-rooms (#58)
 **Status:** In review | Changes requested | Satisfied — ready for security | Closed
-**Push policy:** No push until Status is Satisfied and Security has cleared.
+**Push policy:** Only QA may give the OK to push. Coders must run
+applicable CodeQL on their own changes. No push, publish, PR
+open/update, or merge until Status is Satisfied, Security has cleared,
+applicable CodeQL is satisfied, **and QA marks the publish gate PASS**.
 
 ## Research brief
 <!-- Documentation & Research subagent -->
