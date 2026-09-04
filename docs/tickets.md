@@ -17,7 +17,8 @@ This document owns the feature-level behavior for:
 - assessment ownership between deterministic application code, neural monitors,
   Ollama review, PostgreSQL, and vector retrieval;
 - training examples, reviewer corrections, neural promotion, and retrieval
-  archives.
+  archives;
+- AI tracking lookup/junction/entity storage for built-in and custom ticket ANIs.
 
 Room visibility, tenant scope, and upload scanning stay with their feature docs:
 
@@ -1131,6 +1132,37 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 }
 ```
 
+### AI tracking catalog (lineage, category, session)
+
+Teacher labels and predictions are stored as a 3NF catalog, not as free-text
+names on fact rows:
+
+| Kind | Table | Role |
+|---|---|---|
+| Lookup | `AIModelLineages` | One trainable ANI. Built-in slugs are `moderation` and `tutoring`. Additional rows can bind to a custom ticket portal (`PortalChannelId`). |
+| Lookup | `AICategories` | Category slugs for that lineage. Built-in rows are seeded from `ChatMonitoringCategoryTaxonomy`. |
+| Entity | `AITrackingSessions` | One labeling pass (ticket + message index + model version + lineage). `TicketId` is nullable so a future non-ticket source can reuse the table. |
+| Junction | `AITrackingCategoryWeights` | Session × category teacher weight, plus optional human override onto another category row. |
+| Entity | `AITrackingPredictions` | Trained-model prediction linked to the same category lookups. |
+
+Built-in lineages are upserted at startup from the in-code taxonomies. Custom
+lineages are registered through `POST /api/ai-tracking/lineages` so a custom
+ticket portal can store and later train against its own vocabulary without
+extending `NeuralModelKindChatMonitoring`.
+
+Infrastructure admins query and delete through `/api/ai-tracking`:
+
+- `GET /api/ai-tracking/sessions?lineageSlug=&ticketId=&createdByUserId=&beforeUtc=&limit=`
+- `GET /api/ai-tracking/sessions/{sessionId}`
+- `DELETE /api/ai-tracking/sessions/{sessionId}`
+- `DELETE /api/ai-tracking/tickets/{ticketId}/sessions`
+- `DELETE /api/ai-tracking/lineages/{slug}/sessions`
+- `DELETE /api/ai-tracking/lineages/{slug}` (custom lineages only; built-in rows stay)
+
+Deleting a ticket still cascades its tracking sessions. Deleting a lineage is
+restricted while sessions exist unless the lineage-session purge (or custom
+lineage delete, which purges first) runs.
+
 ## Implementation files
 
 ### Ticket portals, lifecycle, and preface checks
@@ -1228,6 +1260,11 @@ the destination layer (forward frames run input-to-output, backward frames outpu
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs) | Finite numeric guards for traces and parameters. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs) | Vector lineage position ids. |
 | [backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs](../backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs) | Retrieval mirror storage and similarity lookup. |
+| [backend/HomeworkCentral.Api/Assessment/AITrackingCatalog.cs](../backend/HomeworkCentral.Api/Assessment/AITrackingCatalog.cs) | Built-in lineage slug mapping. |
+| [backend/HomeworkCentral.Api/Assessment/AITrackingCatalogSeedData.cs](../backend/HomeworkCentral.Api/Assessment/AITrackingCatalogSeedData.cs) | Upserts moderation/tutoring lookup rows from the in-code taxonomies. |
+| [backend/HomeworkCentral.Api/Assessment/AITrackingService.cs](../backend/HomeworkCentral.Api/Assessment/AITrackingService.cs) | Record, query, and delete AI tracking sessions. |
+| [backend/HomeworkCentral.Api/Models/AITracking.cs](../backend/HomeworkCentral.Api/Models/AITracking.cs) | Lineage, category, session, weight, and prediction entities. |
+| [backend/HomeworkCentral.Api/Migrations/AddAITracking.cs](../backend/HomeworkCentral.Api/Migrations/AddAITracking.cs) | AI tracking lookup, junction, and entity tables. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticConceptCoverageSampler.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticConceptCoverageSampler.cs) | Least-covered picker over the full moderation/tutoring filterable taxonomies for synthetic tickets. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs) | Synthetic ticket/thread scenario generation with forced target concepts and taxonomy-aware fallbacks. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs) | Synthetic scenario, message, and training report models. |
@@ -1244,6 +1281,7 @@ the destination layer (forward frames run input-to-output, backward frames outpu
 |---|---|
 | [backend/HomeworkCentral.Api/Controllers/TicketsController.cs](../backend/HomeworkCentral.Api/Controllers/TicketsController.cs) | Ticket HTTP API. |
 | [backend/HomeworkCentral.Api/Controllers/NeuralNetController.cs](../backend/HomeworkCentral.Api/Controllers/NeuralNetController.cs) | Neural administration HTTP API. |
+| [backend/HomeworkCentral.Api/Controllers/AITrackingController.cs](../backend/HomeworkCentral.Api/Controllers/AITrackingController.cs) | AI tracking lineage, session query, and delete API. |
 | [backend/HomeworkCentral.Api/Controllers/ChatController.cs](../backend/HomeworkCentral.Api/Controllers/ChatController.cs) | Chat, attachment, vote, user search, and inbox API used by tickets and messages. |
 | [backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs](../backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs) | Custom channel and portal administration API. |
 | [backend/HomeworkCentral.Api/Data/AppDbContext.cs](../backend/HomeworkCentral.Api/Data/AppDbContext.cs) | EF sets, constraints, relationships, and indexes for ticket/neural tables. |
@@ -1283,6 +1321,8 @@ the destination layer (forward frames run input-to-output, backward frames outpu
 | [frontend/src/utils/neuralNetReplay.ts](../frontend/src/utils/neuralNetReplay.ts) | Replay schema, topology, frame, and size validation. |
 | [frontend/src/pages/ChatRoom.tsx](../frontend/src/pages/ChatRoom.tsx) | Room metadata loading and chat/custom-room panel routing. |
 | [frontend/src/pages/NeuralNet.tsx](../frontend/src/pages/NeuralNet.tsx) | Server Maintenance neural page. |
+| [frontend/src/components/neuralNet/AITrackingDataPanel.tsx](../frontend/src/components/neuralNet/AITrackingDataPanel.tsx) | Query and delete AI tracking lineages and sessions. |
+| [frontend/src/api/aiTrackingApi.ts](../frontend/src/api/aiTrackingApi.ts) | AI tracking HTTP client. |
 | [frontend/src/hooks/useChatRoom.ts](../frontend/src/hooks/useChatRoom.ts) | Message loading, SignalR connection, send, vote, and typing behavior. |
 | [frontend/src/components/neuralNet/ReplayViewer.tsx](../frontend/src/components/neuralNet/ReplayViewer.tsx) | V2 replay visualization and frame inspector. |
 | [frontend/src/components/neuralNet/NeuralNetMesh3D.tsx](../frontend/src/components/neuralNet/NeuralNetMesh3D.tsx) | Architecture-scaled 3D mesh with volume/2D-slice modes (top-down or side) and slice navigation. |

@@ -83,6 +83,7 @@ public static class ApplicationStartupWarmup
         await TicketPortalSeedData.SeedAsync(seedDb, AccountClass.RealAccount, startupLogger);
         await TicketPortalSeedData.SeedAsync(seedDb, AccountClass.DeveloperAccount, startupLogger);
         await Assessment.ScoringReferenceSeedData.SeedAsync(seedDb, startupLogger);
+        await Assessment.AITrackingCatalogSeedData.SeedAsync(seedDb);
 
         ICustomChannelStore channelStore = sp.GetRequiredService<ICustomChannelStore>();
         await channelStore.RefreshAsync(ct);
