@@ -19,7 +19,7 @@ public class AddAITrackingMigrationTests
         List<AddColumnOperation> identityColumns = new AddAITracking().UpOperations
             .OfType<CreateTableOperation>()
             .SelectMany(table => table.Columns)
-            .Where(column => column.IsNullable == false && HasIdentityAnnotation(column))
+            .Where(column => !column.IsNullable && HasIdentityAnnotation(column))
             .ToList();
 
         Assert.True(identityColumns.Count >= 5);
