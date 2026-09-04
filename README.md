@@ -162,10 +162,17 @@ docker compose --profile app up -d    # full containerised stack
 
 | Service | Default cap | Notes |
 |---------|-------------|-------|
-| `postgres` | 256 MiB | Tuned for a dev-sized dataset: 32 MB shared buffers, 30 max connections, no parallel workers, no JIT. |
+| `postgres` | 320 MiB | Tuned for a dev-sized dataset: 32 MB shared buffers, no parallel workers, no JIT. |
 | `fcaptcha` | 128 MiB | Go runtime held to a 96 MiB soft heap limit (`GOMEMLIMIT`) with `GOGC=50`. |
 | `backend` | 512 MiB | Workstation GC instead of the ASP.NET default server GC (one heap, not one per core). |
 | `frontend` | 64 MiB | A single nginx worker serving static files. |
+
+`max_connections` is deliberately left at the stock 100. It sizes a few shared-memory
+structures for single-digit MB, while the real per-connection cost is the backend *process* —
+which only exists once a client connects. The effective lever is therefore the client-side pool:
+`TenantConnectionResolver` caps each tenant's pool and expires idle connections after 60s, and
+tenant provisioning runs unpooled so it doesn't pin one server slot per persona database.
+Those are tunable via `Tenancy:MaxPoolSizePerTenant` and `Tenancy:ConnectionIdleLifetimeSeconds`.
 
 See the "Docker memory budget" block in [`.env.example`](.env.example) for every knob. Check
 live usage against the caps with `docker stats`. If a service is being OOM-killed, raise its
