@@ -143,6 +143,9 @@ jobs:
         with:
           workspaces: rust -> target
 
+      - name: Build
+        run: cargo build --workspace
+
       - name: Check
         run: cargo check --workspace --all-targets
 

@@ -663,6 +663,32 @@ function Ensure-FrontendDependencies([string]$FrontendDir) {
     }
 }
 
+# Lexical encoder and cosine crates in rust/ are lockstep twins of the C#
+# chat-monitor kernels. Compile them with the rest of the stack so a broken
+# crate fails locally the same way the CI Rust job does. Live scoring still
+# runs in C#; the API image does not need rustc.
+function Build-RustWorkspace {
+    if ($env:HC_SKIP_RUST_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1') {
+        Write-Host '==> Skipping Rust build (HC_SKIP_RUST_BUILD=1)'
+        return
+    }
+
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        throw 'cargo is required to compile rust/. Install rustup from https://rustup.rs/ (Windows installer writes %USERPROFILE%\.cargo and %USERPROFILE%\.rustup), then: rustup default stable. Set HC_SKIP_RUST_BUILD=1 to skip cargo build.'
+    }
+
+    Write-Host '==> Building Rust workspace (cargo build --workspace)'
+    Push-Location (Join-Path $script:RepoRoot 'rust')
+    try {
+        cargo build --workspace
+        if ($LASTEXITCODE -ne 0) {
+            throw "cargo build --workspace failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 function Wait-FrontendTypecheckJob($Job) {
     Wait-Job $Job | Out-Null
     if ($Job.State -eq 'Failed') {

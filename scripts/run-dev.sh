@@ -8,6 +8,7 @@
 #
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
+#   HC_SKIP_RUST_BUILD=1    Skip cargo build --workspace in rust/
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 #   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
 #   HC_DEV_BYPASS=1         Set for the API child process (enables /devlogin backend)
@@ -63,7 +64,7 @@ Stop:
   scripts/stop-dev.sh
   Ctrl+C in this terminal also stops Docker Postgres and frees its port.
 
-Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+
+Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, Rust stable (rustup; cargo build --workspace)
 EOF
 }
 
@@ -432,11 +433,17 @@ build_projects() {
     log "Frontend dependencies already installed"
   fi
 
+  local rust_build_pid=""
+  if [[ "${HC_SKIP_RUST_BUILD:-}" != "1" && "${HC_SKIP_BUILD:-}" != "1" ]]; then
+    build_rust_workspace &
+    rust_build_pid=$!
+  fi
+
   local api_build_pid=""
   local api_build_log=""
   if [[ "$skip_dotnet" == false ]]; then
     require_cmd dotnet
-    log "Building API (parallel with frontend typecheck)"
+    log "Building API (parallel with frontend typecheck and Rust)"
     api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
     dotnet build "$API_PROJECT" -c Debug >"$api_build_log" 2>&1 &
     api_build_pid=$!
@@ -471,8 +478,19 @@ build_projects() {
     fi
   fi
 
+  local rust_build_failed=false
+  if [[ -n "$rust_build_pid" ]]; then
+    if ! wait "$rust_build_pid"; then
+      rust_build_failed=true
+    fi
+  fi
+
   if [[ "$frontend_typecheck_failed" == true ]]; then
     fail "frontend typecheck failed"
+  fi
+
+  if [[ "$rust_build_failed" == true ]]; then
+    fail "Rust cargo build --workspace failed"
   fi
 
   if [[ "$postgres_host_check_failed" == true ]]; then

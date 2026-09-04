@@ -1,6 +1,10 @@
 # DevOps development loop — detailed checklists
 
-Use these checklists when executing the orchestrator loop. Keep the Markdown plan as the source of truth.
+Use these checklists when executing the orchestrator loop. Persist `/goal`,
+review threads, and `/repro` notes under `.cursor/reviews/` (gitignored).
+Spawn roles with `/create-subagent` asynchronously **in pods** (research,
+review, security, qa), not a linear queue. Command catalog:
+[agent-commands.md](agent-commands.md).
 
 ## 1. Planner
 
@@ -58,13 +62,27 @@ Before proposing new structure:
 
 ## 5. QA
 
-Minimum validation set (adapt to stack):
+QA (`devops-quality-engineer`) owns **CodeQL, Validation, and Publish Policy**.
+`/code-review`: inspect the change, tests, logs, and SARIF;
+**do not edit**. `/repro` when a failure needs a concrete reproduction.
+Follow [codeql-validation-publish-policy.md](codeql-validation-publish-policy.md)
+exactly.
 
+Minimum validation set:
+
+- Repository-appropriate .NET / TypeScript fast validation (do not invent scripts)
+- Applicable CodeQL database create + analyze + SARIF inspect
 - Workflow / chart / Terraform lint or validate
 - Policy / secret scanning if available in repo CI
 - Smoke: health endpoints or `kubectl`/`compose` readiness
 - Rollback drill notes (or actual rollback dry-run)
 - Record exact commands and exit codes
+- Report the Definition of Done summary (PASS / FAIL / NOT RUN / NOT APPLICABLE)
+
+DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+
+If CodeQL cannot be executed when required: do not claim CodeQL passed and do
+not automatically publish.
 
 Fail → feedback list for Coder → retest (re-open reviewers if code changes).
 
