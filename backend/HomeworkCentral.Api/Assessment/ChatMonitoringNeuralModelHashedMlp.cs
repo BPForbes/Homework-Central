@@ -176,6 +176,10 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 float[][] encoded = batch.Select(example => ChatMonitoringFeatureEncoder.Encode(example.Input)).ToArray();
                 int[] categoryIndices = batch.Select(ResolveCategoryIndex).ToArray();
+                List<float[]?> categoryDistributions = batch.Select(ResolveCategoryDistribution).ToList();
+                // NeuralTorchMixedHeadBatch takes hard class indices, so a batch carrying any soft
+                // target takes the in-process path rather than silently losing the distribution.
+                bool anySoftTarget = categoryDistributions.Any(distribution => distribution is not null);
                 lastEncoded = encoded;
                 lastCategoryIndices = categoryIndices;
 
@@ -188,7 +192,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 bool torchEpoch = false;
                 NeuralTorchMixedHeadBatch.BatchGradientResult torchResult = default;
-                if (preferTorch)
+                if (preferTorch && !anySoftTarget)
                 {
                     torchEpoch = NeuralTorchMixedHeadBatch.TryAccumulate(
                         network,
@@ -230,17 +234,27 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                             relevanceLogitSum += cache.PreActivations[^1][1];
                             evidenceLossSum += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
                             relevanceLossSum += NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
-                            categoryLossSum += network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
+                            categoryLossSum += categoryDistributions[i] is float[] softLoss
+                                ? network.CategoricalCrossEntropy(cache.Activations[^1], softLoss)
+                                : network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
                         }
 
                         ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
-                        inputGradients[i] = network.AccumulateMixedHeadGradients(
-                            cache,
-                            targets.Evidence,
-                            targets.Relevance,
-                            targets.CategoryIndex,
-                            gradients,
-                            trackGradient);
+                        inputGradients[i] = categoryDistributions[i] is float[] softTarget
+                            ? network.AccumulateMixedHeadGradients(
+                                cache,
+                                targets.Evidence,
+                                targets.Relevance,
+                                softTarget,
+                                gradients,
+                                trackGradient)
+                            : network.AccumulateMixedHeadGradients(
+                                cache,
+                                targets.Evidence,
+                                targets.Relevance,
+                                targets.CategoryIndex,
+                                gradients,
+                                trackGradient);
                     }
                 }
 
@@ -442,6 +456,44 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     }
 
     public void Dispose() { }
+
+    /// <summary>
+    /// Normalises a supplied teacher distribution onto this model's category axis, or returns null
+    /// when there isn't a usable one so the caller falls back to the hard label.
+    ///
+    /// Teacher output is not trusted to be well-formed: a distribution can arrive shorter or longer
+    /// than the taxonomy, carry negatives, or not sum to one. Negatives are clamped away and the
+    /// rest is rescaled to sum to one, because the gradient (prediction - target) only behaves like
+    /// a probability comparison when the target is one. An all-zero or negative vector carries no
+    /// information at all, so it is rejected rather than trained on.
+    /// </summary>
+    private float[]? ResolveCategoryDistribution(ChatMonitoringNeuralModelTrainingExample example)
+    {
+        IReadOnlyList<float>? supplied = example.Targets.CategoryDistribution;
+        if (supplied is null || CategoryLabels.Count == 0)
+            return null;
+
+        float[] distribution = new float[CategoryLabels.Count];
+        float total = 0f;
+        int count = Math.Min(CategoryLabels.Count, supplied.Count);
+        for (int category = 0; category < count; category++)
+        {
+            float weight = supplied[category];
+            if (weight <= 0f || !float.IsFinite(weight))
+                continue;
+
+            distribution[category] = weight;
+            total += weight;
+        }
+
+        if (total <= 0f)
+            return null;
+
+        for (int category = 0; category < distribution.Length; category++)
+            distribution[category] /= total;
+
+        return distribution;
+    }
 
     private int ResolveCategoryIndex(ChatMonitoringNeuralModelTrainingExample example)
     {

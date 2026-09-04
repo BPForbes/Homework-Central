@@ -231,6 +231,41 @@ public sealed class NeuralNetwork
     }
 
     /// <summary>
+    /// Mixed-head backprop against a soft category distribution. Softmax cross-entropy's output
+    /// gradient is (prediction - target) whatever the target is, so this is the same arithmetic as
+    /// the index overload with the one-hot replaced by the caller's distribution.
+    ///
+    /// The distribution is used as given: callers normalise. An unnormalised target still produces
+    /// a finite gradient, but one whose magnitude no longer corresponds to a probability, which
+    /// would quietly scale the category head's learning rate.
+    /// </summary>
+    public float[] AccumulateMixedHeadGradients(
+        NeuralNetworkForwardState state,
+        float evidenceTarget,
+        float relevanceTarget,
+        ReadOnlySpan<float> categoryDistribution,
+        NeuralNetworkGradientBuffers gradients,
+        Action<float>? trackGradient = null)
+    {
+        if (_layers[^1].Activation != NeuralLayerActivation.MixedEvidenceRelevanceSoftmax)
+            throw new InvalidOperationException("Mixed-head backprop requires a MixedEvidenceRelevanceSoftmax output layer.");
+
+        float[] output = state.Activations[^1];
+        float[][] activationGradients = new float[state.Activations.Length][];
+        float[] outputGrad = new float[output.Length];
+        outputGrad[0] = output[0] - Math.Clamp(evidenceTarget, 0f, 1f);
+        outputGrad[1] = output[1] - Math.Clamp(relevanceTarget, 0f, 1f);
+        for (int category = 0; category < _categoryLabels.Length; category++)
+        {
+            float target = category < categoryDistribution.Length ? categoryDistribution[category] : 0f;
+            outputGrad[2 + category] = output[2 + category] - target;
+        }
+
+        activationGradients[^1] = outputGrad;
+        return Backpropagate(state, activationGradients, gradients, trackGradient);
+    }
+
+    /// <summary>
     /// Tanh-network backprop from an upstream output gradient (cascade chain rule into f).
     /// </summary>
     public float[] AccumulateFromOutputGradient(
@@ -414,6 +449,32 @@ public sealed class NeuralNetwork
         int index = Math.Clamp(categoryIndex, 0, _categoryLabels.Length - 1);
         float probability = Math.Clamp(activations[2 + index], .000001f, .999999f);
         return -MathF.Log(probability);
+    }
+
+    /// <summary>
+    /// Cross-entropy against a full target distribution: -sum(q_i * log p_i). The single-index
+    /// overload above is the q = one-hot case of this, and both agree to floating-point error.
+    /// Zero-probability categories contribute nothing, so a sparse teacher distribution costs
+    /// only the categories it actually names.
+    /// </summary>
+    public float CategoricalCrossEntropy(ReadOnlySpan<float> activations, ReadOnlySpan<float> targetDistribution)
+    {
+        if (_categoryLabels.Length == 0)
+            return 0f;
+
+        float loss = 0f;
+        int count = Math.Min(_categoryLabels.Length, targetDistribution.Length);
+        for (int category = 0; category < count; category++)
+        {
+            float target = targetDistribution[category];
+            if (target <= 0f)
+                continue;
+
+            float probability = Math.Clamp(activations[2 + category], .000001f, .999999f);
+            loss -= target * MathF.Log(probability);
+        }
+
+        return loss;
     }
 
     public int ArgMaxCategory(ReadOnlySpan<float> activations)
