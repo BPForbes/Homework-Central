@@ -9,6 +9,8 @@ DEV_STACK_ENV_FILE="$DEV_STACK_REPO_ROOT/.env"
 DEV_STACK_POSTGRES_PASSWORD="postgres"
 DEV_STACK_POSTGRES_HOST_PORT="5434"
 DEV_STACK_FCAPTCHA_HOST_PORT="3010"
+# Must match docker-compose.yml's `fcaptcha` service image tag.
+DEV_STACK_FCAPTCHA_IMAGE="homework-central-fcaptcha:1.12.0"
 DEV_STACK_SERVER_REGISTERED=0
 
 trim_dev_env_whitespace() {
@@ -272,7 +274,15 @@ start_dev_stack_fcaptcha_container() {
   docker info >/dev/null 2>&1 || return 1
 
   export FCAPTCHA_HOST_PORT="$port"
-  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d --build)
+  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d)
+  # `--build` used to be passed on every start. The build context is a pinned upstream tag that
+  # never changes between runs, so that woke BuildKit — and the memory its daemon holds for the
+  # build graph and cache — for a no-op rebuild each time the dev stack came up. Build only when
+  # the image really is missing, or when HC_FCAPTCHA_REBUILD=1 forces it.
+  if [[ "${HC_FCAPTCHA_REBUILD:-0}" == "1" ]] \
+    || ! docker image inspect "$DEV_STACK_FCAPTCHA_IMAGE" >/dev/null 2>&1; then
+    compose_args+=(--build)
+  fi
   if [[ "$force_recreate" == "1" ]]; then
     compose_args+=(--force-recreate)
   fi
