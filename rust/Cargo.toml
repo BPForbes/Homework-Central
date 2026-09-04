@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "hc-feature-encode",
+    "hc-vector-cosine",
+]
+
+[workspace.package]
+edition = "2021"
+license = "UNLICENSED"
+publish = false
