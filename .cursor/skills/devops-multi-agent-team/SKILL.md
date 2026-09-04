@@ -27,9 +27,9 @@ workflows. Command catalog:
 [references/agent-commands.md](references/agent-commands.md).
 
 Spawn roles with `/create-subagent` (Cursor `Task`, prompts in
-`.cursor/agents/`). Subagents run **asynchronously**. Write all working
-Markdown thoughts to `.cursor/reviews/` — that directory is gitignored; do
-not commit it.
+`.cursor/agents/`). Subagents run **asynchronously in pods** — never a
+linear one-at-a-time queue. Write all working Markdown thoughts to
+`.cursor/reviews/` — that directory is gitignored; do not commit it.
 
 ### Reviewer entrypoint (before QA)
 
@@ -245,34 +245,37 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - Identify slow builds, long deploys, and runtime hotspots.
 - Provide metrics-backed insights for Coders and Architects.
 
-## Orchestrator loop
+## Orchestrator loop (async pods)
 
-Default cycle for a DevOps request:
+Do **not** run roles as a linear 1→14 queue. Fan out `/create-subagent`
+(`Task`, `run_in_background: true`) so each **pod** starts together. Do not
+poll background subagents. Synthesize when a pod completes.
+
+| Pod | Roles (spawn together) | Starts when |
+|-----|------------------------|-------------|
+| **research** | Planner, Researcher, Ticket Lead | Immediately |
+| **implement** | Coder (orchestrator or a coder subagent) | Research brief exists *or* the change surface is already known |
+| **review** | Two or more Reviewers | Coder has a local diff |
+| **security** | Security | Reviewers mark Satisfied |
+| **qa** | QA, CI Engineer, Verifier | Security clear (or Orchestrator allows overlap with security) |
+| **docs** | Documentation, Communicator | Implementation is stable enough to document |
+
+Gates still apply across pods: no push while review is open; Security before
+publish; applicable CodeQL must be satisfied.
 
 ```text
-1. Planner       → create/update DevOps plan (+ Ticket Lead / Linear if issue-linked)
-2. Researcher    → architecture + docs/ inventory + online media fetches (research brief)
-3. Coder         → implement pipelines / IaC / config (local only — no push)
-4. Reviewers     → PR-style review via .cursor/reviews/<topic>.md; iterate with Coder
-5. Security      → Snyk / DevSecOps (only after reviewers Satisfied)
-6. QA            → CodeQL, Validation, and Publish Policy (QA subagent); fail → Coder (+ re-open reviewers if code changes)
-7. Optimization  → performance and cost pass
-8. Observability → logging / metrics / tracing / alerts
-9. Documentation → runbooks and guides (+ optional /share-video)
-10. Refactoring  → cleanup modularity/naming
-11. Performance  → profile builds/deploys/runtime
-12. QA           → final CodeQL pre-publish gate
-13. Push         → only when Satisfied + Security clear + CodeQL satisfied + Orchestrator OK
-14. Repeat until QA passes and checks are satisfied
+research pod   → plan + docs/ + online media (parallel)
+implement pod  → pipelines / IaC / config (local only)
+review pod     → /code-review in .cursor/reviews/<topic>.md (inspect, do not edit)
+security pod   → Snyk / /review-security
+qa pod         → /repro + CodeQL publish gate + CI logs + smoke
+docs pod       → runbooks + optional /share-video
+push           → only when Satisfied + Security clear + CodeQL satisfied
+repeat pods    → until QA passes
 ```
 
-Progress-report to the human at role boundaries (what finished, what is next, blockers).
-
-For parallel research, review rounds, CI triage, Sonar, or Snyk, use
-`/create-subagent` (`Task`, async) with `.cursor/agents/devops-*.md`, then
-synthesize under the matching role label. You remain the Orchestrator; do
-not lose the `.cursor/reviews/` goal/review/repro files as sources of truth
-(they stay local — never commit them).
+You remain the Orchestrator. `.cursor/reviews/` goal/review/repro files stay
+local — never commit them.
 
 ## Interrupt handling
 

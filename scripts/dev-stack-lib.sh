@@ -566,3 +566,23 @@ _unregister_dev_stack_server_impl() {
 release_dev_stack_postgres() {
   unregister_dev_stack_server
 }
+
+# Lexical encoder and cosine crates in rust/ are lockstep twins of the C#
+# chat-monitor kernels. Compile them with the rest of the stack so a broken
+# crate fails locally the same way the CI Rust job does. Live scoring still
+# runs in C#; the API image does not need rustc.
+build_rust_workspace() {
+  if [[ "${HC_SKIP_RUST_BUILD:-}" == "1" || "${HC_SKIP_BUILD:-}" == "1" ]]; then
+    printf '==> Skipping Rust build (HC_SKIP_RUST_BUILD=1)\n'
+    return 0
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    printf 'error: cargo is required to compile rust/. Install rustup from https://rustup.rs/ (Unix installer writes ~/.cargo and ~/.rustup), then: rustup default stable\n' >&2
+    printf 'error: set HC_SKIP_RUST_BUILD=1 to skip cargo build\n' >&2
+    return 1
+  fi
+
+  printf '==> Building Rust workspace (cargo build --workspace)\n'
+  (cd "$DEV_STACK_REPO_ROOT/rust" && cargo build --workspace)
+}

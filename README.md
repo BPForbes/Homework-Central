@@ -23,7 +23,7 @@ Install the following before running the project locally.
 | **Node.js** | 18+ | Includes **npm**, used for frontend dependencies. [Download Node.js](https://nodejs.org/). |
 | **PowerShell** | 7+ (`pwsh`) | **Windows only** — required by the `.ps1` scripts. [Install PowerShell](https://learn.microsoft.com/powershell/scripting/install/installing-powershell). |
 | **Bash** | Any recent shell | **Linux / macOS** — used by the `.sh` scripts. |
-| **Rust** (optional) | stable | Needed only to work on `rust/` (`hc-feature-encode`, `hc-vector-cosine`). CI runs `cargo check` and `cargo test`. [Install rustup](https://rustup.rs/). |
+| **Rust** | stable | Required by the core compile scripts (`scripts/run-dev.*`, `scripts/start-api-dev.*`, `scripts/build-rust.*`). They run `cargo build --workspace` in `rust/` (`hc-feature-encode`, `hc-vector-cosine`). Install with [rustup](https://rustup.rs/). Set `HC_SKIP_RUST_BUILD=1` to skip. |
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/docker/docker-original.svg" width="40" height="40" alt="Docker" />
@@ -34,6 +34,65 @@ Install the following before running the project locally.
 </p>
 
 > **First-time setup:** Clone the repository, ensure Docker is running, then use one of the run commands below. The scripts create a `.env` file automatically with generated secrets.
+
+---
+
+## Install Rust
+
+The lexical encoder and cosine kernels live in [`rust/`](rust/). Live chat-monitor scoring still runs in C#; the crates are the portable lockstep twins and must compile with the rest of the stack.
+
+**Where rustup installs**
+
+| Platform | Installer | Default directories |
+|----------|-----------|---------------------|
+| Linux / macOS | `https://sh.rustup.rs` | `~/.cargo` (toolchain + `cargo` on `PATH` via `~/.cargo/env`) and `~/.rustup` |
+| Windows | `rustup-init.exe` from [rustup.rs](https://rustup.rs/) | `%USERPROFILE%\.cargo` and `%USERPROFILE%\.rustup` |
+
+### Linux / macOS
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Restart the shell, or `source "$HOME/.cargo/env"`. Then pin stable and confirm:
+
+```bash
+rustup default stable
+rustc -V
+cargo -V
+```
+
+### Windows
+
+1. Open [https://rustup.rs/](https://rustup.rs/) and download `rustup-init.exe`.
+2. Run the installer (default host is `x86_64-pc-windows-msvc`; Visual C++ Build Tools if prompted).
+3. Open a new PowerShell 7+ window and run:
+
+```powershell
+rustup default stable
+rustc -V
+cargo -V
+```
+
+### Compile the workspace
+
+From the repository root, the same command the compile scripts run:
+
+```bash
+./scripts/build-rust.sh
+```
+
+```powershell
+.\scripts\build-rust.ps1
+```
+
+Equivalent manual invoke:
+
+```bash
+cd rust && cargo build --workspace
+```
+
+`scripts/run-dev.sh`, `scripts/run-dev.ps1`, `scripts/start-api-dev.sh`, and `scripts/start-api-dev.ps1` call that `cargo build --workspace` during the normal compile path. Skip with `HC_SKIP_RUST_BUILD=1`.
 
 ---
 

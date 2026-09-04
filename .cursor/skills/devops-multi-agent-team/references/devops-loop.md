@@ -2,7 +2,8 @@
 
 Use these checklists when executing the orchestrator loop. Persist `/goal`,
 review threads, and `/repro` notes under `.cursor/reviews/` (gitignored).
-Spawn roles with `/create-subagent` asynchronously. Command catalog:
+Spawn roles with `/create-subagent` asynchronously **in pods** (research,
+review, security, qa), not a linear queue. Command catalog:
 [agent-commands.md](agent-commands.md).
 
 ## 1. Planner

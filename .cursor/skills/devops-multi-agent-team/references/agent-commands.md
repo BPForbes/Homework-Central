@@ -26,8 +26,8 @@ Also: `set a goal`, `do until X`, `keep going until X`.
 Also: `create a subagent`, `spawn`, `Task` tool.
 
 - Spawn roles from `.cursor/agents/devops-*.md` with Cursor `Task`.
-- Run them **asynchronously** (`run_in_background: true`) unless the next
-  step is blocked on that one result and there is no other work.
+- Run them **asynchronously in pods** (`run_in_background: true`). Launch
+  a whole group in one turn; do not queue roles one-by-one.
 - Do not poll a background subagent. Continue other work or end the turn;
   the completion notification is enough.
 - The Orchestrator synthesizes. Subagents do not push or open PRs.

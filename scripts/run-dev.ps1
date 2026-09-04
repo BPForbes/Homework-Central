@@ -7,6 +7,7 @@
 #
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
+#   HC_SKIP_RUST_BUILD=1    Skip cargo build --workspace in rust/
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 #   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
 # Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
@@ -64,7 +65,7 @@ Stop:
   Closing both API and frontend terminals stops Docker Postgres and frees its port.
   Restarting the API alone will auto-start Postgres if needed.
 
-Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, PowerShell 7+ (pwsh)
+Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, Rust stable (rustup; cargo build --workspace), PowerShell 7+ (pwsh)
 '@ | Write-Output
 }
 
@@ -436,13 +437,22 @@ function Build-Projects {
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
     $apiBuildJob = $null
+    $rustBuildJob = $null
 
     Ensure-FrontendDependencies -FrontendDir $FrontendDir
+
+    if ($env:HC_SKIP_RUST_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        $rustBuildJob = Start-Job -ScriptBlock {
+            param($ScriptRoot)
+            . (Join-Path $ScriptRoot 'dev-stack-lib.ps1')
+            Build-RustWorkspace
+        } -ArgumentList $PSScriptRoot
+    }
 
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
     } else {
-        Write-Step 'Building API (parallel with frontend typecheck)'
+        Write-Step 'Building API (parallel with frontend typecheck and Rust)'
         $apiBuildJob = Start-Job -ScriptBlock {
             param($Project, $Log)
             dotnet build $Project -c Debug 2>&1 | Tee-Object -FilePath $Log
@@ -458,6 +468,7 @@ function Build-Projects {
     # drains Wait-FrontendTypecheckJob before the API build job wait/cleanup below runs.
     $hostCheckFailed = $false
     $frontendTypecheckFailed = $false
+    $rustBuildFailed = $false
     try {
         try {
             Build-PostgresHostCheckIfNeeded
@@ -488,10 +499,25 @@ function Build-Projects {
                 Remove-Job $apiBuildJob -Force
             }
         }
+
+        if ($null -ne $rustBuildJob) {
+            Wait-Job $rustBuildJob | Out-Null
+            try {
+                Receive-Job $rustBuildJob -ErrorAction Stop | Out-Null
+            } catch {
+                $rustBuildFailed = $true
+            } finally {
+                Remove-Job $rustBuildJob -Force
+            }
+        }
     }
 
     if ($frontendTypecheckFailed) {
         throw 'Frontend typecheck failed'
+    }
+
+    if ($rustBuildFailed) {
+        throw 'Rust cargo build --workspace failed'
     }
 
     if ($hostCheckFailed) {

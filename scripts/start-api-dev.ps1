@@ -87,6 +87,10 @@ try {
     $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
     if (Test-Path $errorLog) { Remove-Item $errorLog -Force }
 
+    if ($env:HC_SKIP_RUST_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        Build-RustWorkspace
+    }
+
     if (-not $useWatch -and $env:HC_SKIP_DOTNET_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
         Write-Host '==> Building API' -ForegroundColor DarkGray
         dotnet build $ApiProject -c Debug -v q
