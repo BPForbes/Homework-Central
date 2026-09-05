@@ -468,10 +468,10 @@ Training sessions:
   about to fill (70% of `GCMemoryInfo.TotalAvailableMemoryBytes`), write
   the latest weights/bias snapshot to
   `ChatMonitoringNeuralModelRun.WorkerReplayJson` as
-  `spill-checkpoint-v1`, empty replay traces, and reload that snapshot
-  so continuous or finite training can continue. The same persist-and-empty
-  happens on Stop / pause and when a finite run completes. Mid-run SQL
-  is otherwise still persist-on-stop only. Rust `hc_heap_should_spill`
+  `spill-checkpoint-v1` and empty replay traces. Same-process continue
+  keeps the live net; resume or process restart reloads the checkpoint.
+  The same persist-and-empty happens on Stop / pause and when a finite
+  run completes. Mid-run SQL is otherwise still persist-on-stop only. Rust `hc_heap_should_spill`
   and `hc_heap_top_k_abs` own the watermark and bounded mesh top-K;
   C# still samples `GC.GetGCMemoryInfo()` because the native library
   cannot see the CLR heap. After `OutOfMemoryException`, training spills
