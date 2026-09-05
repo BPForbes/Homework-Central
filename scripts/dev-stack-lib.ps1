@@ -666,12 +666,30 @@ function Ensure-FrontendDependencies([string]$FrontendDir) {
 # Builds rust/ including libhc_kernels for EmbedText, store cosine, GEMV, and related kernels.
 # The API loads that library at runtime; C# remains the fallback so the
 # Docker image does not need rustc.
-function Require-RustCargo {
-    if (Get-Command cargo -ErrorAction SilentlyContinue) {
+function Add-RustupBinToPath {
+    $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+    if (-not (Test-Path $cargoBin)) {
         return
     }
 
-    throw 'cargo is required to compile rust/. Install rustup from https://rustup.rs/, then: rustup default stable. Add %USERPROFILE%\.cargo\bin to PATH (open a new PowerShell window). Set HC_SKIP_RUST_BUILD=1 to skip cargo build.'
+    $pathEntries = $env:Path -split ';'
+    if ($pathEntries -contains $cargoBin) {
+        return
+    }
+
+    $env:Path = "$cargoBin;$env:Path"
+}
+
+function Require-RustCargo {
+    Add-RustupBinToPath
+
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        throw 'cargo is required to compile rust/. Install rustup from https://rustup.rs/, then: rustup default stable. Add %USERPROFILE%\.cargo\bin to PATH (open a new PowerShell window). Set HC_SKIP_RUST_BUILD=1 to skip cargo build.'
+    }
+
+    if (-not (Get-Command rustc -ErrorAction SilentlyContinue)) {
+        throw 'rustc is required to compile rust/. cargo is on PATH but rustc is not — run: rustup default stable. Windows also needs the MSVC linker (Visual Studio Build Tools, Desktop development with C++). Set HC_SKIP_RUST_BUILD=1 to skip cargo build.'
+    }
 }
 
 function Build-RustWorkspace {
@@ -684,14 +702,24 @@ function Build-RustWorkspace {
         return
     }
 
+    # Start-Job runspaces do not always inherit rustup PATH; cargo also writes
+    # progress to stderr, which some pwsh hosts treat as a terminating error.
+    if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+
     Require-RustCargo
 
     Write-Host '==> Building Rust workspace (cargo build --workspace)'
     Push-Location (Join-Path $script:RepoRoot 'rust')
     try {
-        cargo build --workspace
-        if ($LASTEXITCODE -ne 0) {
-            throw "cargo build --workspace failed with exit code $LASTEXITCODE"
+        & cargo build --workspace
+        $cargoExitCode = $LASTEXITCODE
+        if ($null -eq $cargoExitCode) {
+            if ($?) { $cargoExitCode = 0 } else { $cargoExitCode = 1 }
+        }
+        if ($cargoExitCode -ne 0) {
+            throw "cargo build --workspace failed with exit code $cargoExitCode"
         }
         Copy-HcKernelsNative
     } finally {
@@ -712,19 +740,30 @@ function Copy-HcKernelsNative {
     }
 }
 
+function Write-BackgroundJobStreams($Job) {
+    $jobErrors = @()
+    $output = Receive-Job $Job -ErrorAction SilentlyContinue -ErrorVariable jobErrors
+    foreach ($item in @($output)) {
+        if ($null -ne $item) {
+            Write-Host $item
+        }
+    }
+    foreach ($errorRecord in $jobErrors) {
+        Write-Host $errorRecord.ToString()
+        if ($null -ne $errorRecord.Exception -and $errorRecord.Exception.Message) {
+            Write-Host $errorRecord.Exception.Message
+        }
+    }
+}
+
 function Wait-RustWorkspaceJob($Job) {
     Wait-Job $Job | Out-Null
-    if ($Job.State -eq 'Failed') {
-        $output = Receive-Job $Job
-        Remove-Job $Job -Force
-        if ($output) {
-            $output | Write-Host
-        }
+    $failed = $Job.State -eq 'Failed'
+    Write-BackgroundJobStreams -Job $Job
+    Remove-Job $Job -Force
+    if ($failed) {
         throw 'Rust cargo build --workspace failed'
     }
-
-    Receive-Job $Job | Out-Null
-    Remove-Job $Job -Force
 }
 
 function Wait-FrontendTypecheckJob($Job) {

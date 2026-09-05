@@ -444,10 +444,11 @@ function Build-Projects {
     if ($env:HC_SKIP_RUST_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
         Require-RustCargo
         $rustBuildJob = Start-Job -ScriptBlock {
-            param($ScriptRoot)
+            param($ScriptRoot, $Path)
+            $env:Path = $Path
             . (Join-Path $ScriptRoot 'dev-stack-lib.ps1')
             Build-RustWorkspace
-        } -ArgumentList $PSScriptRoot
+        } -ArgumentList $PSScriptRoot, $env:Path
     }
 
     if ($skipDotnet) {
@@ -505,6 +506,7 @@ function Build-Projects {
             try {
                 Wait-RustWorkspaceJob -Job $rustBuildJob
             } catch {
+                Write-Host $_.Exception.Message
                 $rustBuildFailed = $true
             }
         }
