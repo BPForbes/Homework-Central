@@ -141,7 +141,7 @@ After a successful run, these services are available:
 | **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
 | **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
 | **Health check** | http://localhost:5000/healthz | Listen probe (`starting` while migrate/seed runs, then `healthy`) |
-| **Postgres** | `localhost:5434` (default) | Docker container; port configurable via `.env` |
+| **Postgres** | `127.0.0.1:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |
 
 On **Windows**, the API and frontend each open in a **separate terminal window**. On **Linux/macOS**, both run in the current terminal (use `Ctrl+C` to stop).
@@ -378,7 +378,7 @@ Homework-Central/
 ## Troubleshooting
 
 - **Docker not running** — Start Docker Desktop (or the Docker daemon) and retry.
-- **Port already in use** — Another Postgres install may own `5434` on localhost. The run scripts try to pick a free port and update `.env`; you can also set `POSTGRES_HOST_PORT` manually.
+- **Port already in use** — Another Postgres install may own `5434`. The run scripts detect any listener (not only `127.0.0.1`), skip this project's own Docker publish, pick the next free port in `5434–5450`, and write `.env`. They connect as `127.0.0.1` so Windows does not time out on IPv6 `localhost`. You can also set `POSTGRES_HOST_PORT` yourself to a free port — not the one that just failed.
 - **Stale database volume** — Run the reset command above (`reset-dev-db` with `-Yes` / `--yes`), then `run-dev` again.
 - **`Network homework-central_default Resource is still in use`** — Harmless during reset. The `pgdata` volume was still removed; `run-dev` reuses the leftover Docker network. Optional: `docker network inspect homework-central_default` to see what is attached.
 - **Skip Docker** — If you already have Postgres on localhost: `.\scripts\run-dev.ps1 -SkipDocker` (Windows) or `./scripts/run-dev.sh --skip-docker` (Unix).

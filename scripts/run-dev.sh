@@ -28,6 +28,7 @@ DEV_POSTGRES_PASSWORD="postgres"
 DEV_POSTGRES_HOST_PORT="5434"
 DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
+DEV_POSTGRES_CONNECT_HOST="127.0.0.1"
 # Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
 # FCaptcha:ServerUrl override.
 FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
@@ -136,34 +137,44 @@ ensure_env_file() {
   resolve_postgres_host_port
 }
 
-loopback_port_in_use() {
+host_port_in_use() {
   local port="$1"
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | grep -E ":${port}([[:space:]]|$)" >/dev/null && return 0
+    return 1
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  fi
 
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
       if command -v powershell.exe >/dev/null 2>&1; then
         powershell.exe -NoProfile -Command "
           \$c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-            Where-Object { \$_.LocalAddress -in @('127.0.0.1', '::1') } |
             Select-Object -First 1
           if (\$null -ne \$c) { exit 0 } else { exit 1 }
         " >/dev/null 2>&1
         return $?
       fi
-      netstat -ano 2>/dev/null | grep LISTENING | grep -E "127\.0\.0\.1:${port}[[:space:]]" >/dev/null && return 0
-      netstat -ano 2>/dev/null | grep LISTENING | grep -E "\[::1\]:${port}[[:space:]]" >/dev/null && return 0
-      return 1
-      ;;
-    *)
+      netstat -ano 2>/dev/null | grep LISTENING | grep -E ":${port}[[:space:]]" >/dev/null && return 0
       return 1
       ;;
   esac
+
+  return 1
 }
 
 find_free_postgres_host_port() {
   local port
+  local exclude_port="${1:-}"
   for ((port = DEV_POSTGRES_HOST_PORT_MIN; port <= DEV_POSTGRES_HOST_PORT_MAX; port++)); do
-    if loopback_port_in_use "$port"; then
+    if [[ -n "$exclude_port" && "$port" == "$exclude_port" ]]; then
+      continue
+    fi
+    if host_port_in_use "$port"; then
       continue
     fi
     printf '%s' "$port"
@@ -172,14 +183,39 @@ find_free_postgres_host_port() {
   return 1
 }
 
+suggested_postgres_host_port() {
+  local failed_port="$1"
+  local free_port
+  free_port="$(find_free_postgres_host_port "$failed_port" || true)"
+  if [[ -n "$free_port" ]]; then
+    printf '%s' "$free_port"
+    return 0
+  fi
+  if (( failed_port < DEV_POSTGRES_HOST_PORT_MAX )); then
+    printf '%s' "$((failed_port + 1))"
+  else
+    printf '%s' "$DEV_POSTGRES_HOST_PORT_MIN"
+  fi
+}
+
+our_postgres_published_on() {
+  local published
+  published="$(get_postgres_published_port || true)"
+  [[ -n "$published" && "$published" == "$1" ]]
+}
+
 resolve_postgres_host_port() {
-  if ! loopback_port_in_use "$POSTGRES_HOST_PORT"; then
+  if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  if ! host_port_in_use "$POSTGRES_HOST_PORT"; then
     return 0
   fi
 
   local free_port
-  log "Port ${POSTGRES_HOST_PORT} is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
-  free_port="$(find_free_postgres_host_port || true)"
+  log "Port ${POSTGRES_HOST_PORT} is already in use on this machine (${DEV_POSTGRES_CONNECT_HOST} would not reach Docker)"
+  free_port="$(find_free_postgres_host_port "$POSTGRES_HOST_PORT" || true)"
   [[ -n "$free_port" ]] || fail "No free Postgres host port found between ${DEV_POSTGRES_HOST_PORT_MIN} and ${DEV_POSTGRES_HOST_PORT_MAX}"
 
   log "Using POSTGRES_HOST_PORT=${free_port} instead"
@@ -218,7 +254,7 @@ test_postgres_host_connection() {
 
   published="$(get_postgres_published_port || true)"
   if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
-    log "Docker Postgres is not published on localhost:${POSTGRES_HOST_PORT} (container maps to ${published})"
+    log "Docker Postgres is not published on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} (container maps to ${published})"
     return 1
   fi
 
@@ -227,7 +263,7 @@ test_postgres_host_connection() {
   fi
 
   for ((attempt = 1; attempt <= 10; attempt++)); do
-    output="$(dotnet "$POSTGRES_HOST_CHECK_DLL" "$POSTGRES_HOST_PORT" 2>&1)"
+    output="$(dotnet "$POSTGRES_HOST_CHECK_DLL" "$POSTGRES_HOST_PORT" "$DEV_POSTGRES_CONNECT_HOST" 2>&1)"
     status=$?
     if [[ $status -eq 0 ]]; then
       return 0
@@ -235,7 +271,7 @@ test_postgres_host_connection() {
     sleep 1
   done
 
-  log "Cannot connect to homework_central_master on localhost:${POSTGRES_HOST_PORT} from the host"
+  log "Cannot connect to homework_central_master on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} from the host"
   if [[ -n "$output" ]]; then
     printf '       %s\n' "$output"
   fi
@@ -285,11 +321,12 @@ prepare_homework_central_master_database() {
 }
 
 start_postgres_container() {
+  local force_recreate="${1:-0}"
   local published
   published="$(get_postgres_published_port || true)"
 
-  if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
-    log "Recreating Postgres container for localhost:${POSTGRES_HOST_PORT}"
+  if [[ "$force_recreate" == "1" || ( -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ) ]]; then
+    log "Recreating Postgres container for ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}"
     docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d --force-recreate postgres
   else
     docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
@@ -332,7 +369,57 @@ ensure_postgres_ready() {
   fi
 
   if ! test_postgres_host_connection; then
-    fail "Failed to reach homework_central_master on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh"
+    repair_postgres_host_reachability
+  fi
+}
+
+postgres_host_failure_message() {
+  local port="$1"
+  local example
+  local hint=""
+  example="$(suggested_postgres_host_port "$port")"
+  if our_postgres_published_on "$port"; then
+    hint=" Docker published ${DEV_POSTGRES_CONNECT_HOST}:${port} but the host still cannot open homework_central_master."
+  elif host_port_in_use "$port"; then
+    hint=" Port ${port} is already in use on this machine, so ${DEV_POSTGRES_CONNECT_HOST} does not reach the Docker container."
+  fi
+  printf 'Failed to reach homework_central_master on %s:%s.%s Pick a free port in .env (for example POSTGRES_HOST_PORT=%s), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh' \
+    "$DEV_POSTGRES_CONNECT_HOST" "$port" "$hint" "$example"
+}
+
+repair_postgres_host_reachability() {
+  if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
+    start_postgres_container 1
+    log "Waiting for Postgres to accept connections"
+    wait_for_postgres
+    if ! prepare_homework_central_master_database; then
+      fail "Failed to prepare homework_central_master after recreating Docker Postgres"
+    fi
+    if test_postgres_host_connection; then
+      return 0
+    fi
+  fi
+
+  local failed_port="$POSTGRES_HOST_PORT"
+  local free_port
+  free_port="$(find_free_postgres_host_port "$failed_port" || true)"
+  if [[ -z "$free_port" ]]; then
+    fail "$(postgres_host_failure_message "$failed_port")"
+  fi
+
+  log "Host cannot reach homework_central_master on ${DEV_POSTGRES_CONNECT_HOST}:${failed_port}. Using POSTGRES_HOST_PORT=${free_port} instead"
+  POSTGRES_HOST_PORT="$free_port"
+  set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
+  set_compose_env
+  start_postgres_container 1
+  log "Waiting for Postgres to accept connections"
+  wait_for_postgres
+  if ! prepare_homework_central_master_database; then
+    fail "Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT"
+  fi
+  if ! test_postgres_host_connection; then
+    fail "$(postgres_host_failure_message "$POSTGRES_HOST_PORT")"
   fi
 }
 
@@ -355,7 +442,7 @@ start_postgres() {
     fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
   fi
 
-  log "Starting Postgres (Docker) on localhost:${POSTGRES_HOST_PORT}"
+  log "Starting Postgres (Docker) on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}"
   ensure_postgres_ready
 }
 
@@ -592,7 +679,7 @@ run_stack() {
     log "  API:      unavailable (check API Build Errors or API terminal output)"
   fi
   if [[ "$SKIP_DOCKER" == false ]]; then
-    log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
+    log "  Postgres: ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
     log "  FCaptcha: localhost:${FCAPTCHA_HOST_PORT} (Docker; stops on exit)"
   fi
   log "Press Ctrl+C to stop servers and free the Postgres port"

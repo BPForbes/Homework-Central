@@ -183,11 +183,20 @@ function Get-PostgresHostCheckDll {
 
 function Build-PostgresHostCheckIfNeeded {
     $dll = Get-PostgresHostCheckDll
-    if (Test-Path $dll) {
+    $project = Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
+    $projectDir = Split-Path $project -Parent
+    $needsBuild = -not (Test-Path $dll)
+    if (-not $needsBuild) {
+        $built = Get-Item $dll
+        $sourceFiles = @(Get-Item $project) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
+        $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        $needsBuild = $built.LastWriteTimeUtc -lt $newestSource.LastWriteTimeUtc
+    }
+
+    if (-not $needsBuild) {
         return
     }
 
-    $project = Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
     dotnet build $project -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'PostgresHostCheck build failed'
@@ -201,7 +210,7 @@ function Test-DevPostgresConnection([string]$Port) {
         return $false
     }
 
-    dotnet $dll $Port *> $null
+    dotnet $dll $Port '127.0.0.1' *> $null
     return $LASTEXITCODE -eq 0
 }
 
@@ -231,7 +240,7 @@ function Wait-DevPostgresReady([string]$Port) {
         Start-Sleep -Seconds 1
     }
 
-    throw "Postgres did not become ready on localhost:$Port within 30s"
+    throw "Postgres did not become ready on 127.0.0.1:$Port within 30s"
 }
 
 function Join-DevStackIfManaged([string]$Port) {
@@ -262,7 +271,7 @@ function Ensure-DevPostgresRunning([string]$Port) {
         return
     }
 
-    Write-Host "==> Starting Docker Postgres on localhost:$Port" -ForegroundColor DarkGray
+    Write-Host "==> Starting Docker Postgres on 127.0.0.1:$Port" -ForegroundColor DarkGray
     Start-DevStackPostgresContainer $Port
     Wait-DevPostgresReady $Port
 

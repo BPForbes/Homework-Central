@@ -34,8 +34,8 @@ $DevPostgresPassword = 'postgres'
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
 $envValues = Ensure-DevEnvFile
-$connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
-$adminConnectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
+$connectionString = "Host=127.0.0.1;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
+$adminConnectionString = "Host=127.0.0.1;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
@@ -54,7 +54,7 @@ $env:DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER = '1'
 $useWatch = $env:HC_API_WATCH -ne '0'
 
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
-Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
+Write-Host "Using Postgres user $DevPostgresUser on 127.0.0.1:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
 if ($useWatch) {
     Write-Host 'API watch enabled (dotnet watch). File changes / git pull rebuild or hot-reload the process.' -ForegroundColor DarkGray
     Write-Host 'Set HC_API_WATCH=0 for a one-shot run without watching.' -ForegroundColor DarkGray

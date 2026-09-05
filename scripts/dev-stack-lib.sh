@@ -224,13 +224,15 @@ postgres_host_check_dll() {
 }
 
 build_postgres_host_check_if_needed() {
-  local dll project
+  local dll project project_dir
   dll="$(postgres_host_check_dll)"
-  if [[ -f "$dll" ]]; then
+  project="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
+  project_dir="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck"
+
+  if [[ -f "$dll" ]] && ! find "$project_dir" \( -name '*.cs' -o -name '*.csproj' \) -newer "$dll" | grep -q .; then
     return 0
   fi
 
-  project="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
   dotnet build "$project" -c Debug -v q >/dev/null
 }
 
@@ -240,7 +242,7 @@ test_dev_postgres_connection() {
   build_postgres_host_check_if_needed
   dll="$(postgres_host_check_dll)"
   [[ -f "$dll" ]] || return 1
-  dotnet "$dll" "$port" >/dev/null 2>&1
+  dotnet "$dll" "$port" "127.0.0.1" >/dev/null 2>&1
 }
 
 start_dev_stack_postgres_container() {
@@ -466,7 +468,7 @@ ensure_dev_postgres_running() {
     return 0
   fi
 
-  printf '==> Starting Docker Postgres on localhost:%s\n' "$port"
+  printf '==> Starting Docker Postgres on 127.0.0.1:%s\n' "$port"
   start_dev_stack_postgres_container "$port" || return 1
   wait_dev_postgres_ready "$port" || return 1
 
