@@ -227,23 +227,11 @@ public sealed class NeuralNetTrainingService(
         // Continuous = train until Stop. Prefer the flag; TicketCount <= 0 is also continuous
         // so a dropped `continuous` boolean still cannot collapse into a one-shot finite run.
         bool continuous = ResolveContinuousTraining(request.Continuous, request.TicketCount);
-        if (progressStore.HasActiveTraining() && TrainingHeapPressure.ShouldSkipTraces())
+        if (TrainingPersistencePolicy.IsTrainingStartBlocked(
+            progressStore.HasActiveTraining(),
+            TrainingHeapPressure.ShouldSkipTraces()))
         {
-            NeuralNetTrainingSession blocked = new()
-            {
-                SessionId = Guid.NewGuid(),
-                StartedByUserId = actorUserId,
-                RequestedTicketCount = continuous ? 0 : Math.Clamp(request.TicketCount, 1, 10),
-                MaxPassesPerTicket = continuous ? 1 : Math.Clamp(request.MaxPassesPerTicket, 1, 6),
-                Mode = request.Mode,
-                Status = "Failed",
-                CreatedAtUtc = DateTime.UtcNow,
-                CompletedAtUtc = DateTime.UtcNow,
-                FailureReason = "The training heap is elevated. Stop the running session before starting another.",
-            };
-            db.NeuralNetTrainingSessions.Add(blocked);
-            await db.SaveChangesAsync(ct);
-            return MapSession(blocked);
+            throw new InvalidOperationException(TrainingPersistencePolicy.HeapElevatedMessage);
         }
 
         NeuralNetTrainingSession session = new()
@@ -295,6 +283,13 @@ public sealed class NeuralNetTrainingService(
         if (!TrainingPersistencePolicy.CanResumeContinuousTraining(session.Status, session.RequestedTicketCount))
         {
             throw new InvalidOperationException("Only a cancelled continuous training session can be resumed.");
+        }
+
+        if (TrainingPersistencePolicy.IsTrainingStartBlocked(
+            progressStore.HasActiveTraining(),
+            TrainingHeapPressure.ShouldSkipTraces()))
+        {
+            throw new InvalidOperationException(TrainingPersistencePolicy.HeapElevatedMessage);
         }
 
         List<ChatMonitoringNeuralModelRun> runs = await db.ChatMonitoringNeuralModelRuns
@@ -606,7 +601,8 @@ public sealed class NeuralNetTrainingService(
     /// <summary>
     /// Trains one synthetic ticket (single message) at a time until Stop cancels the session token.
     /// Generator failures and train-step exceptions never complete or fail the session.
-    /// SQL and replay JSON are written only on stop, complete, or fail so the auth pool stays free.
+    /// SQL is persist-on-stop except for a weights-only heap spill. Replay JSON is not
+    /// written mid-run; continuous Stop keeps <c>spill-checkpoint-v1</c>.
     /// </summary>
     private async Task RunContinuousSyntheticSessionAsync(
         NeuralNetTrainingSession session,
@@ -627,8 +623,8 @@ public sealed class NeuralNetTrainingService(
             IChatMonitoringNeuralModelTelemetry telemetry = ResolveChatMonitoringTelemetry(run);
             run.Status = "Running";
             run.StartedAtUtc = DateTime.UtcNow;
-            ReplayBuilder replay = new(session, telemetry);
             RestoreSpillCheckpoint(run, telemetry);
+            ReplayBuilder replay = new(session, telemetry);
             contexts.Add(new ChatMonitoringRunContext(
                 session,
                 run,
@@ -660,10 +656,13 @@ public sealed class NeuralNetTrainingService(
                 ticketIndex++;
                 try
                 {
-                    if (TrainingHeapPressure.ShouldSpill())
+                    if (TrainingHeapPressure.ShouldAttemptSpill())
                     {
-                        await TrySpillTrainingHeapAsync(
+                        bool spilled = await TrySpillTrainingHeapAsync(
                             session, contexts, persistenceGate, timings, ticketIndex, ct);
+                        if (TrainingHeapSpill.AfterProactiveAttempt(spilled) == TrainingStepAfterSpill.Stop)
+                            throw new TrainingHeapSpillFailedException(
+                                "Training heap spill failed; waiting for Stop.");
                     }
 
                     await RunContinuousTrainingStepAsync(
@@ -694,10 +693,8 @@ public sealed class NeuralNetTrainingService(
                         session.SessionId);
                     bool spilled = await TrySpillTrainingHeapAsync(
                         session, contexts, persistenceGate, timings, ticketIndex, CancellationToken.None);
-                    if (!spilled)
-                    {
+                    if (TrainingHeapSpill.AfterOutOfMemory(spilled) == TrainingStepAfterSpill.Stop)
                         throw;
-                    }
 
                     PublishProgress(session, progress => progress with
                     {
@@ -705,10 +702,14 @@ public sealed class NeuralNetTrainingService(
                         TicketsRequested = ticketIndex,
                         TicketsGenerated = ticketIndex,
                         LatestTrainingLlmSummary = Truncate(
-                            $"Ticket {ticketIndex}: heap spilled to the database; weights reloaded.", 280),
+                            $"Ticket {ticketIndex}: heap spilled to the database; continuing without retrying that step.", 280),
                         GeneratorHints = feedback.Hints.ToList(),
                     });
                     await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                }
+                catch (TrainingHeapSpillFailedException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -737,15 +738,20 @@ public sealed class NeuralNetTrainingService(
                 await OperationalExceptionGuard.RunAsync(
                     async () =>
                     {
-                        await FlushPendingTrainingAsync(runContext, CancellationToken.None);
-                        await runContext.Batch.FlushAsync(CancellationToken.None);
+                        runContext.PendingTrain.Clear();
                         runContext.Run.Status = "Cancelled";
                         runContext.Run.CompletedAtUtc = DateTime.UtcNow;
                         runContext.Run.FailureReason ??= "Training cancelled.";
-                        WriteSpillCheckpoint(session, runContext, ticketIndex);
-                        // Keep spill-checkpoint-v1 on continuous cancel so resume reloads weights.
-                        // Full V2 replay is the serialize that OOM'd after ~170 tickets.
-                        runContext.Replay.ReleaseAccumulatedHeap();
+                        // Release traces first so GetParameterSnapshot can allocate on a dying heap.
+                        if (!WriteSpillCheckpoint(session, runContext, ticketIndex, releaseHeapFirst: true))
+                        {
+                            logger.LogWarning(
+                                "Stop-path spill checkpoint was not written for run {Kind}.",
+                                runContext.Run.ChatMonitoringKind);
+                        }
+
+                        if (!TrainingHeapPressure.ShouldSkipTraces())
+                            await runContext.Batch.FlushAsync(CancellationToken.None);
                     },
                     ex =>
                     {
@@ -819,33 +825,24 @@ public sealed class NeuralNetTrainingService(
             GeneratorHints = feedback.Hints.ToList(),
         });
 
-        List<Task> trainTasks = contexts
+        List<ChatMonitoringRunContext> selected = contexts
             .Where(runContext => ShouldTrainContinuousTicket(
                 session.SessionId,
                 ticketIndex,
                 runContext.Run.ChatMonitoringKind,
                 singleMessageTicket.Category))
-            .Select(async runContext =>
-            {
-                ct.ThrowIfCancellationRequested();
-                ChatMonitoringNeuralModelStateSnapshot topologyState =
-                    runContext.Telemetry.GetStateSnapshot();
-                PublishProgress(session, progress => progress with
-                {
-                    Phase = $"Continuous · {runContext.Run.ChatMonitoringKind}",
-                    ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
-                    PathTone = "forward",
-                    LayerWidths = topologyState.LayerWidths,
-                    LayerLabels = topologyState.LayerLabels,
-                });
-
-                await ProcessSyntheticTicketAsync(
-                    runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
-                await FlushPendingTrainingAsync(runContext, ct);
-            })
             .ToList();
 
-        await Task.WhenAll(trainTasks);
+        if (TrainingHeapPressure.ShouldSkipTraces())
+        {
+            foreach (ChatMonitoringRunContext runContext in selected)
+                await TrainContinuousContextAsync(session, runContext, ticketIndex, singleMessageTicket, ct);
+        }
+        else
+        {
+            await Task.WhenAll(selected.Select(runContext =>
+                TrainContinuousContextAsync(session, runContext, ticketIndex, singleMessageTicket, ct)));
+        }
 
         PublishProgress(session, progress => progress with
         {
@@ -857,6 +854,38 @@ public sealed class NeuralNetTrainingService(
             ExamplesPersisted = timings.ExamplesPersisted,
             GeneratorHints = feedback.Hints.ToList(),
         });
+    }
+
+    private async Task TrainContinuousContextAsync(
+        NeuralNetTrainingSession session,
+        ChatMonitoringRunContext runContext,
+        int ticketIndex,
+        SyntheticTicket singleMessageTicket,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        NeuralNetTrainingLiveProgress? existing = progressStore.Get(session.SessionId);
+        IReadOnlyList<int> layerWidths = existing?.LayerWidths ?? [];
+        IReadOnlyList<string> layerLabels = existing?.LayerLabels ?? [];
+        if (layerWidths.Count == 0)
+        {
+            ChatMonitoringNeuralModelStateSnapshot topologyState = runContext.Telemetry.GetStateSnapshot();
+            layerWidths = topologyState.LayerWidths;
+            layerLabels = topologyState.LayerLabels;
+        }
+
+        PublishProgress(session, progress => progress with
+        {
+            Phase = $"Continuous · {runContext.Run.ChatMonitoringKind}",
+            ActiveChatMonitoringKind = runContext.Run.ChatMonitoringKind.ToString(),
+            PathTone = "forward",
+            LayerWidths = layerWidths,
+            LayerLabels = layerLabels,
+        });
+
+        await ProcessSyntheticTicketAsync(
+            runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
+        await FlushPendingTrainingAsync(runContext, ct);
     }
 
     private bool ShouldTrainContinuousTicket(
@@ -1170,10 +1199,19 @@ public sealed class NeuralNetTrainingService(
             .OrderBy(x => x.ChatMonitoringKind)
             .ToListAsync(ct);
         using SemaphoreSlim persistenceGate = new(1, 1);
-        List<Task> runTasks = runs
-            .Select(run => RunChatMonitoringModelAsync(session, run, tickets, persistenceGate, timings, feedback, ct))
-            .ToList();
-        await Task.WhenAll(runTasks);
+        if (TrainingHeapPressure.ShouldSkipTraces())
+        {
+            foreach (ChatMonitoringNeuralModelRun run in runs)
+            {
+                await RunChatMonitoringModelAsync(
+                    session, run, tickets, persistenceGate, timings, feedback, ct);
+            }
+        }
+        else
+        {
+            await Task.WhenAll(runs.Select(run =>
+                RunChatMonitoringModelAsync(session, run, tickets, persistenceGate, timings, feedback, ct)));
+        }
     }
 
     private async Task CompleteSyntheticSessionAsync(
@@ -1217,6 +1255,7 @@ public sealed class NeuralNetTrainingService(
         }
 
         await db.SaveChangesAsync(CancellationToken.None);
+        PublishProgress(session, TrainingHeapSpill.BoundAfterCancel);
     }
 
     private async Task FailSyntheticSessionAsync(
@@ -1259,6 +1298,7 @@ public sealed class NeuralNetTrainingService(
         CancellationToken ct)
     {
         IChatMonitoringNeuralModelTelemetry telemetry = ResolveChatMonitoringTelemetry(run);
+        RestoreSpillCheckpoint(run, telemetry);
         ReplayBuilder replay = new(session, telemetry);
         run.Status = "Running";
         run.StartedAtUtc = DateTime.UtcNow;
@@ -1272,7 +1312,6 @@ public sealed class NeuralNetTrainingService(
             LayerLabels = topologyState.LayerLabels,
         });
 
-        RestoreSpillCheckpoint(run, telemetry);
         PersistenceBatch batch = new(db, vectors, persistenceGate, Options.PersistenceBatchSize, timings);
         List<PendingTrainItem> pendingTrain = [];
         ChatMonitoringRunContext runContext = new(
@@ -1292,21 +1331,26 @@ public sealed class NeuralNetTrainingService(
                     foreach ((int ticketIndex, SyntheticTicket generated) in selected)
                     {
                         ct.ThrowIfCancellationRequested();
-                        if (TrainingHeapPressure.ShouldSpill())
+                        if (TrainingHeapPressure.ShouldAttemptSpill())
                         {
-                            await TrySpillTrainingHeapAsync(
+                            bool spilled = await TrySpillTrainingHeapAsync(
                                 session,
                                 [runContext],
                                 persistenceGate,
                                 timings,
                                 ticketIndex,
                                 ct);
+                            if (TrainingHeapSpill.AfterProactiveAttempt(spilled) == TrainingStepAfterSpill.Stop)
+                                throw new TrainingHeapSpillFailedException(
+                                    "Training heap spill failed; stopping the finite run.");
                         }
 
+                        bool ticketCompleted = false;
                         try
                         {
                             await ProcessSyntheticTicketAsync(
                                 runContext, ticketIndex, generated, miniBatchSize, ct);
+                            ticketCompleted = true;
                         }
                         catch (OutOfMemoryException)
                         {
@@ -1317,17 +1361,21 @@ public sealed class NeuralNetTrainingService(
                                 timings,
                                 ticketIndex,
                                 CancellationToken.None);
-                            if (!spilled)
+                            if (TrainingHeapSpill.AfterOutOfMemory(spilled) == TrainingStepAfterSpill.Stop)
                                 throw;
+                            await Task.Delay(TimeSpan.FromSeconds(2), ct);
                         }
 
-                        PublishProgress(session, progress => progress with
+                        if (ticketCompleted)
                         {
-                            Phase = $"Training {run.ChatMonitoringKind}",
-                            ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
-                            TicketsProcessed = progress.TicketsProcessed + 1,
-                            MessagesProcessed = progress.MessagesProcessed + generated.Messages.Count,
-                        });
+                            PublishProgress(session, progress => progress with
+                            {
+                                Phase = $"Training {run.ChatMonitoringKind}",
+                                ActiveChatMonitoringKind = run.ChatMonitoringKind.ToString(),
+                                TicketsProcessed = progress.TicketsProcessed + 1,
+                                MessagesProcessed = progress.MessagesProcessed + generated.Messages.Count,
+                            });
+                        }
                     }
 
                     await FlushPendingTrainingAsync(runContext, ct);
@@ -1606,17 +1654,22 @@ public sealed class NeuralNetTrainingService(
         await runContext.Batch.FlushAsync(ct);
         runContext.Run.Status = "Completed";
         runContext.Run.CompletedAtUtc = DateTime.UtcNow;
-        WriteSpillCheckpoint(runContext.Session, runContext, progressStore.Get(runContext.Session.SessionId)?.TicketsProcessed ?? 0);
-        string? completedJson = TryBuildReplayJson(
-            runContext,
-            ReplayCompletionStatus.Completed,
-            failure: null);
-        if (completedJson is not null)
-            runContext.Run.WorkerReplayJson = completedJson;
-        else
-            logger.LogWarning(
-                "Skipped completed replay serialize for run {Kind} (insufficient memory).",
-                runContext.Run.ChatMonitoringKind);
+        int ticketsProcessed = progressStore.Get(runContext.Session.SessionId)?.TicketsProcessed ?? 0;
+        bool wroteSpill = WriteSpillCheckpoint(runContext.Session, runContext, ticketsProcessed, releaseHeapFirst: true);
+        if (!wroteSpill && !TrainingHeapSpill.ShouldKeepSpillCheckpoint(runContext.Run.WorkerReplayJson))
+        {
+            string? completedJson = TryBuildReplayJson(
+                runContext,
+                ReplayCompletionStatus.Completed,
+                failure: null);
+            if (completedJson is not null)
+                runContext.Run.WorkerReplayJson = completedJson;
+            else
+                logger.LogWarning(
+                    "Skipped completed replay serialize for run {Kind} (insufficient memory).",
+                    runContext.Run.ChatMonitoringKind);
+        }
+
         runContext.Replay.ReleaseAccumulatedHeap();
     }
 
@@ -1648,16 +1701,21 @@ public sealed class NeuralNetTrainingService(
         await OperationalExceptionGuard.RunAsync(
             () =>
             {
-                WriteSpillCheckpoint(
+                bool wroteSpill = WriteSpillCheckpoint(
                     runContext.Session,
                     runContext,
-                    progressStore.Get(runContext.Session.SessionId)?.TicketsProcessed ?? 0);
-                string? failedJson = TryBuildReplayJson(
-                    runContext,
-                    ReplayCompletionStatus.Failed,
-                    new("training", "unhandled", Truncate(ex.Message, 1000)));
-                if (failedJson is not null)
-                    runContext.Run.WorkerReplayJson = failedJson;
+                    progressStore.Get(runContext.Session.SessionId)?.TicketsProcessed ?? 0,
+                    releaseHeapFirst: true);
+                if (!wroteSpill && !TrainingHeapSpill.ShouldKeepSpillCheckpoint(runContext.Run.WorkerReplayJson))
+                {
+                    string? failedJson = TryBuildReplayJson(
+                        runContext,
+                        ReplayCompletionStatus.Failed,
+                        new("training", "unhandled", Truncate(ex.Message, 1000)));
+                    if (failedJson is not null)
+                        runContext.Run.WorkerReplayJson = failedJson;
+                }
+
                 runContext.Replay.ReleaseAccumulatedHeap();
                 return Task.CompletedTask;
             },
@@ -1827,16 +1885,24 @@ public sealed class NeuralNetTrainingService(
         BackpropagationTrace? backward,
         int? layerIndex = null)
     {
-        ChatMonitoringNeuralModelStateSnapshot state = telemetry.GetStateSnapshot();
+        IReadOnlyList<int> layerWidths = progress.LayerWidths;
+        IReadOnlyList<string> layerLabels = progress.LayerLabels;
+        if (layerWidths.Count == 0)
+        {
+            ChatMonitoringNeuralModelStateSnapshot state = telemetry.GetStateSnapshot();
+            layerWidths = state.LayerWidths;
+            layerLabels = state.LayerLabels;
+        }
+
         (IReadOnlyList<int> activeNodes, IReadOnlyList<int> activeEdges) = layerIndex is int layer
-            ? NeuralMeshFrameExtractor.ExtractLayer(forward, backward, state.LayerWidths, layer)
+            ? NeuralMeshFrameExtractor.ExtractLayer(forward, backward, layerWidths, layer)
             : NeuralMeshFrameExtractor.Extract(forward, backward);
 
         return progress with
         {
             PathTone = pathTone,
-            LayerWidths = state.LayerWidths,
-            LayerLabels = state.LayerLabels,
+            LayerWidths = layerWidths,
+            LayerLabels = layerLabels,
             ActiveNodeIndexes = activeNodes,
             ActiveEdgeParameterIndexes = activeEdges,
             ActiveLayerIndex = layerIndex,
@@ -1869,7 +1935,9 @@ public sealed class NeuralNetTrainingService(
             return;
         }
 
-        IReadOnlyList<int> layerWidths = runContext.Telemetry.GetStateSnapshot().LayerWidths;
+        IReadOnlyList<int> layerWidths = progressStore.Get(session.SessionId)?.LayerWidths ?? [];
+        if (layerWidths.Count == 0)
+            layerWidths = runContext.Telemetry.GetStateSnapshot().LayerWidths;
         if (layerWidths.Count < 2)
         {
             PublishProgress(session, progress => WithMeshFrame(
@@ -1949,9 +2017,10 @@ public sealed class NeuralNetTrainingService(
     }
 
     /// <summary>
-    /// Writes the latest weights/bias snapshot, flushes pending examples, empties the
-    /// in-memory replay/trace heap, then reloads the snapshot so training continues
-    /// from the persisted net. Mid-run SQL is allowed only on this path.
+    /// Weights-only mid-run persist: empty traces first, write
+    /// <c>spill-checkpoint-v1</c>, then <see cref="PersistAsync"/>. Does not
+    /// flush pending examples or vector upserts. The live net already holds
+    /// the weights, so this path does not call <c>LoadParameterSnapshot</c>.
     /// </summary>
     private async Task<bool> TrySpillTrainingHeapAsync(
         NeuralNetTrainingSession session,
@@ -1963,34 +2032,38 @@ public sealed class NeuralNetTrainingService(
     {
         try
         {
+            bool allWritten = true;
             foreach (ChatMonitoringRunContext runContext in contexts)
             {
-                await FlushPendingTrainingAsync(runContext, ct);
-                await runContext.Batch.FlushAsync(ct);
-                WriteSpillCheckpoint(session, runContext, ticketsProcessed);
-                if (TrainingSpillCheckpoint.TryParse(runContext.Run.WorkerReplayJson, out TrainingSpillCheckpoint? checkpoint)
-                    && checkpoint is not null)
+                runContext.PendingTrain.Clear();
+                TrainingHeapSpillPrepareResult prepared = TrainingHeapSpill.TryPrepare(
+                    runContext.Replay.ReleaseAccumulatedHeap,
+                    () => TryGetParameterSnapshot(runContext.Telemetry, out NeuralNetParameterSnapshot? snapshot)
+                        ? snapshot
+                        : null,
+                    session.SessionId,
+                    runContext.Run.ChatMonitoringKind,
+                    ticketsProcessed);
+                if (prepared.Succeeded && prepared.Json is not null && prepared.Snapshot is not null)
                 {
-                    runContext.Telemetry.LoadParameterSnapshot(checkpoint.Parameters);
+                    runContext.Run.WorkerReplayJson = prepared.Json;
+                    runContext.Replay.AdoptParameterSnapshot(prepared.Snapshot);
                 }
+                else
+                {
+                    allWritten = false;
+                }
+            }
 
-                runContext.Replay.ReleaseAccumulatedHeap();
+            if (!allWritten)
+            {
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                return false;
             }
 
             await PersistAsync(persistenceGate, timings, ct);
-            PublishProgress(session, progress => progress with
-            {
-                Phase = "Heap spill · checkpoint written",
-                TicketsRequested = Math.Max(progress.TicketsRequested, ticketsProcessed),
-                LatestTrainingLlmSummary = Truncate(
-                    $"Heap spilled after ticket {ticketsProcessed}; latest weights reloaded.", 280),
-                WeightUpdateFeed = [],
-                ActiveNodeIndexes = [],
-                ActiveEdgeParameterIndexes = [],
-                ActiveLayerIndex = null,
-                AuditFeedbackFeed = TrimFeed(progress.AuditFeedbackFeed),
-                GeneratorHints = TrimFeed(progress.GeneratorHints),
-            });
+            TrainingHeapPressure.NoteSuccessfulSpill();
+            PublishProgress(session, progress => TrainingHeapSpill.BoundAfterSpill(progress, ticketsProcessed));
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             return true;
         }
@@ -2004,36 +2077,35 @@ public sealed class NeuralNetTrainingService(
         }
     }
 
-    private void WriteSpillCheckpoint(
+    private bool WriteSpillCheckpoint(
         NeuralNetTrainingSession session,
         ChatMonitoringRunContext runContext,
-        int ticketsProcessed)
+        int ticketsProcessed,
+        bool releaseHeapFirst)
     {
-        if (!TryGetParameterSnapshot(runContext.Telemetry, out NeuralNetParameterSnapshot? snapshot)
-            || snapshot is null)
-        {
-            return;
-        }
-
-        runContext.Run.WorkerReplayJson = TrainingSpillCheckpoint.Serialize(
+        Action release = releaseHeapFirst
+            ? runContext.Replay.ReleaseAccumulatedHeap
+            : static () => { };
+        TrainingHeapSpillPrepareResult prepared = TrainingHeapSpill.TryPrepare(
+            release,
+            () => TryGetParameterSnapshot(runContext.Telemetry, out NeuralNetParameterSnapshot? snapshot)
+                ? snapshot
+                : null,
             session.SessionId,
             runContext.Run.ChatMonitoringKind,
-            ticketsProcessed,
-            snapshot);
+            ticketsProcessed);
+        if (!prepared.Succeeded || prepared.Json is null || prepared.Snapshot is null)
+            return false;
+
+        runContext.Run.WorkerReplayJson = prepared.Json;
+        runContext.Replay.AdoptParameterSnapshot(prepared.Snapshot);
+        return true;
     }
 
     private static void RestoreSpillCheckpoint(
         ChatMonitoringNeuralModelRun run,
-        IChatMonitoringNeuralModelTelemetry telemetry)
-    {
-        if (!TrainingSpillCheckpoint.TryParse(run.WorkerReplayJson, out TrainingSpillCheckpoint? checkpoint)
-            || checkpoint is null)
-        {
-            return;
-        }
-
-        telemetry.LoadParameterSnapshot(checkpoint.Parameters);
-    }
+        IChatMonitoringNeuralModelTelemetry telemetry) =>
+        TrainingHeapSpill.TryRestore(run.WorkerReplayJson, telemetry.LoadParameterSnapshot);
 
     private string? TryBuildReplayJson(
         ChatMonitoringRunContext runContext,
@@ -2055,7 +2127,7 @@ public sealed class NeuralNetTrainingService(
         }
     }
 
-    private static bool TryGetParameterSnapshot(
+    private bool TryGetParameterSnapshot(
         IChatMonitoringNeuralModelTelemetry telemetry,
         out NeuralNetParameterSnapshot? snapshot)
     {
@@ -2065,20 +2137,15 @@ public sealed class NeuralNetTrainingService(
             snapshot = telemetry.GetParameterSnapshot(null, 0);
             return true;
         }
-        catch (OutOfMemoryException)
+        catch (OutOfMemoryException ex)
         {
+            logger.LogWarning(ex, "Parameter snapshot allocation failed; spill checkpoint was not written.");
             return false;
         }
     }
 
-    private static List<string> TrimFeed(IReadOnlyList<string>? feed)
-    {
-        if (feed is null || feed.Count == 0)
-            return [];
-
-        const int keep = 8;
-        return feed.Count <= keep ? [.. feed] : [.. feed.Skip(feed.Count - keep)];
-    }
+    private static List<string> TrimFeed(IReadOnlyList<string>? feed) =>
+        TrainingHeapSpill.TrimFeed(feed);
 
     private async Task DetachCancelledWritesIfSessionResumedAsync(CancellationToken ct)
     {
@@ -2642,7 +2709,7 @@ public sealed class NeuralNetTrainingService(
             }
         }
 
-        return lines;
+        return TrainingHeapSpill.CapFeed(lines);
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -2669,7 +2736,8 @@ public sealed class NeuralNetTrainingService(
         private readonly List<SyntheticVoteGenerationTrace> voteGeneration = [];
         private readonly List<SyntheticVoteEvaluationTrace> voteEvaluation = [];
         private readonly List<SyntheticVoteSamplingTrace> voteSampling = [];
-        private readonly NeuralNetParameterSnapshot initial;
+        private NeuralNetParameterSnapshot initial;
+        internal NeuralNetParameterSnapshot InitialSnapshot => initial;
         private long sequence;
         private int localRevision;
 
@@ -2727,8 +2795,16 @@ public sealed class NeuralNetTrainingService(
         }
 
         /// <summary>
+        /// After a spill, adopt the persisted snapshot so later compact replay
+        /// matches the reloaded weights instead of the pre-restore singleton.
+        /// </summary>
+        public void AdoptParameterSnapshot(NeuralNetParameterSnapshot snapshot) =>
+            initial = snapshot;
+
+        /// <summary>
         /// Drops accumulated traces, frames, and interned strings after a DB spill or stop.
-        /// Weights stay on the live model; <see cref="initial"/> is kept for a later compact replay.
+        /// Weights stay on the live model; <see cref="initial"/> is replaced via
+        /// <see cref="AdoptParameterSnapshot"/> when a spill checkpoint is written.
         /// </summary>
         public void ReleaseAccumulatedHeap()
         {

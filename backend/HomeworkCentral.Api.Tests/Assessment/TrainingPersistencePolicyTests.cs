@@ -40,4 +40,27 @@ public sealed class TrainingPersistencePolicyTests
     {
         Assert.Equal(expected, TrainingPersistencePolicy.IsActiveLivePhase(phase));
     }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void AllowsMidRunSql_only_for_emergency_heap_spill(bool isEmergencyHeapSpill, bool expected)
+    {
+        Assert.Equal(expected, TrainingPersistencePolicy.AllowsMidRunSql(isEmergencyHeapSpill));
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, false)]
+    public void IsTrainingStartBlocked_requires_active_phase_and_elevated_heap(
+        bool hasActiveTraining,
+        bool heapElevated,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            TrainingPersistencePolicy.IsTrainingStartBlocked(hasActiveTraining, heapElevated));
+    }
 }

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.Globalization;
 
 namespace HomeworkCentral.Api.Assessment;
 
@@ -15,14 +15,44 @@ public static class TrainingHeapPressure
     /// <summary>Persist weights and empty in-memory traces at this fraction of available memory.</summary>
     public const double SpillRatio = 0.70;
 
+    private const int SampleCacheMs = 250;
+
+    private static int awaitingRelief;
+    private static TrainingHeapSample cachedSample;
+    private static long cachedAtMs = long.MinValue;
+
     public static TrainingHeapSample Sample()
+    {
+        long now = Environment.TickCount64;
+        if (cachedAtMs != long.MinValue && now - cachedAtMs >= 0 && now - cachedAtMs < SampleCacheMs)
+            return cachedSample;
+
+        TrainingHeapSample sample = SampleUncached();
+        cachedSample = sample;
+        cachedAtMs = now;
+        return sample;
+    }
+
+    internal static TrainingHeapSample SampleUncached()
     {
         GCMemoryInfo info = GC.GetGCMemoryInfo();
         long heap = Math.Max(info.HeapSizeBytes, GC.GetTotalMemory(forceFullCollection: false));
         long limit = info.TotalAvailableMemoryBytes;
-        long rss = 0;
-        using (Process process = Process.GetCurrentProcess())
-            rss = process.WorkingSet64;
+        long rss = Math.Max(0, Environment.WorkingSet);
+
+        if (TryParseHeapHardLimit(Environment.GetEnvironmentVariable("DOTNET_GCHeapHardLimit"), out long hardLimit)
+            && (limit <= 0 || hardLimit < limit))
+        {
+            limit = hardLimit;
+        }
+
+        if (limit <= 0)
+        {
+            _ = GC.GetTotalMemory(forceFullCollection: true);
+            info = GC.GetGCMemoryInfo();
+            heap = Math.Max(info.HeapSizeBytes, GC.GetTotalMemory(forceFullCollection: false));
+            limit = info.TotalAvailableMemoryBytes;
+        }
 
         if (info.MemoryLoadBytes > 0 && info.HighMemoryLoadThresholdBytes > 0
             && info.MemoryLoadBytes >= info.HighMemoryLoadThresholdBytes
@@ -34,8 +64,31 @@ public static class TrainingHeapPressure
         return new TrainingHeapSample(
             heap,
             HighWatermarkBytes(limit),
-            Math.Max(0, rss),
+            rss,
             Math.Max(0, limit));
+    }
+
+    /// <summary>
+    /// <c>DOTNET_GCHeapHardLimit</c> may be decimal or hex (optional <c>0x</c> prefix).
+    /// </summary>
+    internal static bool TryParseHeapHardLimit(string? raw, out long bytes)
+    {
+        bytes = 0;
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        ReadOnlySpan<char> text = raw.AsSpan().Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return long.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes)
+                && bytes > 0;
+        }
+
+        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out bytes) && bytes > 0)
+            return true;
+
+        return long.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes)
+            && bytes > 0;
     }
 
     public static long HighWatermarkBytes(long limitBytes) =>
@@ -44,6 +97,34 @@ public static class TrainingHeapPressure
     public static bool ShouldSpill() => ShouldSpill(Sample());
 
     public static bool ShouldSkipTraces() => ShouldSkipTraces(Sample());
+
+    /// <summary>
+    /// Edge-triggered spill: after a successful persist, wait until the heap falls
+    /// below the skip-trace line so mid-run SQL happens once per pressure wave.
+    /// </summary>
+    public static bool ShouldAttemptSpill() => ShouldAttemptSpill(Sample());
+
+    public static bool ShouldAttemptSpill(TrainingHeapSample sample)
+    {
+        if (Volatile.Read(ref awaitingRelief) != 0)
+        {
+            if (!ShouldSkipTraces(sample))
+                Volatile.Write(ref awaitingRelief, 0);
+            else
+                return false;
+        }
+
+        return ShouldSpill(sample);
+    }
+
+    public static void NoteSuccessfulSpill() => Volatile.Write(ref awaitingRelief, 1);
+
+    internal static void ResetForTests()
+    {
+        Volatile.Write(ref awaitingRelief, 0);
+        cachedAtMs = long.MinValue;
+        cachedSample = default;
+    }
 
     public static bool ShouldSpill(TrainingHeapSample sample)
     {
