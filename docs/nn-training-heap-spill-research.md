@@ -53,10 +53,15 @@ same watermark and a `PriorityQueue` top-K.
 
 1. Sample CLR + RSS; Rust decides spill at 70% of available memory; skip
    traces at 55%.
-2. On spill, pause, or finite-run completion: persist latest weights/bias,
-   empty the in-memory replay/trace heap, reload the snapshot, continue.
+2. On spill: **empty traces first**, then persist compact weights/bias
+   (`spill-checkpoint-v1` only — no example/vector flush). Same-process
+   continue keeps the live net (no `LoadParameterSnapshot`). Resume or
+   process restart reloads the session checkpoint before `ReplayBuilder`
+   captures `initial`. Finite complete/fail keep the spill row and do not
+   overwrite it with V2 replay.
 3. On `OutOfMemoryException`: spill once; if spill fails, stop. Do not
-   tight-loop the allocating step.
+   retry the allocating step. After a successful spill, wait until the
+   heap falls below the 55% skip-trace line before another mid-run SQL.
 4. Refuse starting a second session while a run is live **and** the heap is
    already elevated.
 5. Do not publish a canonical checkpoint on spill (promotion stays outside

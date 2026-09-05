@@ -34,6 +34,19 @@ public sealed class NeuralNetTrainingProgressStoreTests
         Assert.Empty(store.GetAll());
     }
 
+    [Fact]
+    public void HasActiveTraining_is_false_after_bound_cancel_phase()
+    {
+        NeuralNetTrainingProgressStore store = new();
+        Guid sessionId = Guid.NewGuid();
+        store.Upsert(Progress(sessionId, "Continuous training"));
+        store.Upsert(TrainingHeapSpill.BoundAfterCancel(store.Get(sessionId)!));
+
+        Assert.False(store.HasActiveTraining());
+        Assert.Equal("Cancelled", store.Get(sessionId)?.Phase);
+        Assert.Empty(store.Get(sessionId)!.WeightUpdateFeed);
+    }
+
     private static NeuralNetTrainingLiveProgress Progress(Guid sessionId, string phase) =>
         new(
             sessionId,

@@ -49,7 +49,14 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
     {
         Guid? userId = GetUserId();
         if (userId is null) return Unauthorized();
-        return Accepted(await training.StartSyntheticSessionAsync(request, userId.Value, ct));
+        try
+        {
+            return Accepted(await training.StartSyntheticSessionAsync(request, userId.Value, ct));
+        }
+        catch (InvalidOperationException ex) when (ex.Message == TrainingPersistencePolicy.HeapElevatedMessage)
+        {
+            return Conflict(new { message = ex.Message });
+        }
     }
 
     [HttpGet("training")]
@@ -104,6 +111,10 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         catch (KeyNotFoundException)
         {
             return NotFound(new { message = "Training session was not found." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == TrainingPersistencePolicy.HeapElevatedMessage)
+        {
+            return Conflict(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

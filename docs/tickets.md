@@ -1258,9 +1258,13 @@ admin list cannot strand an unstoppable row.
 `GET /api/neural-net/training` projects replay presence flags rather than the JSON payloads: those
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
 Worker replay is not snapshotted every N steps. Persist-on-stop is the default; mid-run SQL is
-an emergency heap spill (`spill-checkpoint-v1` on the run row). In-memory replay is bounded by
-`ReplayBuilder.MaxFrames` and compact trace sampling; `TrySerialize` skips a V2 blob when the
-heap cannot allocate it.
+an emergency heap spill (`spill-checkpoint-v1` on the run row) that writes **weights only**
+(no example `AddRange` / vector upsert). Traces are emptied before the compact snapshot so
+the GC can reclaim them. After a successful spill the loop waits until the heap falls below
+the 55% skip-trace line before another mid-run persist. Finite complete/fail keep
+`spill-checkpoint-v1` instead of overwriting it with V2 replay. Resume reloads that
+checkpoint before reconstructing replay state. In-memory replay is bounded by
+`ReplayBuilder.MaxFrames` and compact trace sampling.
 
 Synthetic training uses a **single multipurpose training LLM** (`INeuralNetTrainingLlmModule`) for
 scenario generation, embedded self-critique, and revision rewrites (generate+evaluate in one Ollama
