@@ -329,6 +329,8 @@ Architecture, trust boundaries, and engineering standards live under
 can bind without a duplicate build. It also starts the frontend before the API. The API exposes
 `/healthz` as soon as Kestrel listens (`status: starting` during migrate/seed, then `healthy`),
 so the Vite BackendGate can wait without flooding the proxy with connection-refused errors.
+`http://localhost:5000/` is an intentional 403 landing page, not the app — use
+`http://localhost:5173/login` and keep that tab open until `/healthz` reports `healthy`.
 
 After one successful initialization of the local database, you can skip development migrations
 and seed warmup on repeat starts:
@@ -381,6 +383,7 @@ Homework-Central/
 - **`Network homework-central_default Resource is still in use`** — Harmless during reset. The `pgdata` volume was still removed; `run-dev` reuses the leftover Docker network. Optional: `docker network inspect homework-central_default` to see what is attached.
 - **Skip Docker** — If you already have Postgres on localhost: `.\scripts\run-dev.ps1 -SkipDocker` (Windows) or `./scripts/run-dev.sh --skip-docker` (Unix).
 - **Rust cargo build --workspace failed** — `run-dev` compiles `rust/` (`libhc_kernels`). Run `cd rust; cargo build --workspace` to see the compiler/linker message. Typical Windows miss: `rustup default stable` plus Visual Studio Build Tools with **Desktop development with C++** (`link.exe`). `cargo` on PATH is not enough if `rustc` or the MSVC linker is missing. Skip with `HC_SKIP_RUST_BUILD=1` (API uses the C# fallback).
+- **403 on http://localhost:5000/** — Expected. That tab is the API, not the React app. Use `http://localhost:5173/login`. Confirm `http://localhost:5000/healthz` returns JSON (`starting` while migrate/seed runs, then `healthy`). First-run EF logs about missing `__EF*MigrationsHistory` or `NeuralNetCanonicalCheckpoints` are normal until the log says the API is ready; reload the frontend after that line if the gate still says it cannot connect.
 
 ---
 

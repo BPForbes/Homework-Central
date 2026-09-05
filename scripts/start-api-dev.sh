@@ -77,7 +77,7 @@ if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
 fi
 
 if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then
-  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/healthz" "API" 300 &
   BROWSER_WAIT_PID=$!
 fi
 

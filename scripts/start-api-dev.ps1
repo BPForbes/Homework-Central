@@ -79,7 +79,7 @@ try {
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
         $browserProcess = Start-DevStackPowerShellProcess -WindowStyle Hidden -PassThru -ArgumentList @(
             '-File', (Join-Path $ScriptRoot 'wait-and-open-browser.ps1'),
-            '-Url', 'http://localhost:5000/',
+            '-Url', 'http://localhost:5000/healthz',
             '-Label', 'API',
             '-MaxAttempts', '300'
         ) -WorkingDirectory $RepoRoot

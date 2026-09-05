@@ -575,15 +575,7 @@ function Start-DevStack([hashtable]$EnvValues) {
         Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
 
-    Write-Step 'Opening browser tabs when servers are ready'
-    if (-not $script:ApiBuildFailed) {
-        Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
-            '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
-            '-Url', 'http://localhost:5000/',
-            '-Label', 'API',
-            '-MaxAttempts', '300'
-        ) -WorkingDirectory $RepoRoot
-    }
+    Write-Step 'Opening the frontend when Vite is ready (API root is a 403 landing page, not the app)'
     Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
         '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
         '-Url', 'http://localhost:5173/login',

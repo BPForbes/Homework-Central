@@ -1,5 +1,6 @@
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +14,7 @@ namespace HomeworkCentral.Api.Assessment;
 public sealed class ChatMonitoringNeuralModelWarmupService(
     IServiceScopeFactory scopeFactory,
     IChatMonitoringNeuralModelFactory chatMonitoringModels,
+    IApplicationReadiness readiness,
     ILogger<ChatMonitoringNeuralModelWarmupService> logger) : BackgroundService
 {
     // Seed rows historically used 100 epochs × Full replay; that OuterProduct + FlattenParameters path OOMs on modest hosts.
@@ -27,6 +29,9 @@ public sealed class ChatMonitoringNeuralModelWarmupService(
 
         try
         {
+            if (!await readiness.WaitUntilReadyAsync(stoppingToken))
+                return;
+
             await OperationalExceptionGuard.RunAsync(
                 () => LoadApprovedExamplesAsync(stoppingToken),
                 ex =>
