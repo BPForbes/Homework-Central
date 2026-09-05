@@ -46,6 +46,8 @@ public interface INeuralNetTrainingProgressStore
 {
     void Upsert(NeuralNetTrainingLiveProgress progress);
     NeuralNetTrainingLiveProgress? Get(Guid sessionId);
+    IReadOnlyList<NeuralNetTrainingLiveProgress> GetAll();
+    bool HasActiveTraining();
     void Clear(Guid sessionId);
 }
 
@@ -58,6 +60,12 @@ public sealed class NeuralNetTrainingProgressStore : INeuralNetTrainingProgressS
 
     public NeuralNetTrainingLiveProgress? Get(Guid sessionId) =>
         _bySession.TryGetValue(sessionId, out NeuralNetTrainingLiveProgress? progress) ? progress : null;
+
+    public IReadOnlyList<NeuralNetTrainingLiveProgress> GetAll() =>
+        _bySession.Values.ToArray();
+
+    public bool HasActiveTraining() =>
+        _bySession.Values.Any(static progress => TrainingPersistencePolicy.IsActiveLivePhase(progress.Phase));
 
     public void Clear(Guid sessionId) => _bySession.TryRemove(sessionId, out _);
 }

@@ -31,6 +31,8 @@ public interface INeuralNetTrainingService
     Task<NeuralNetDataManagementDto> GetDataManagementAsync(CancellationToken ct = default);
     Task<NeuralNetVisualizerDto> GetVisualizerAsync(CancellationToken ct = default);
     Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default);
+    Task<NeuralNetTrainingSessionDto> ResumeTrainingSessionAsync(Guid sessionId, CancellationToken ct = default);
+    Task<IReadOnlyList<NeuralNetTrainingLiveProgressDto>> GetLiveProgressAsync(CancellationToken ct = default);
     Task<PagedResultDto<NeuralNetTrainingSessionDto>> GetTrainingSessionsAsync(
         DateTime? beforeUtc = null,
         int limit = 50,
@@ -263,6 +265,65 @@ public sealed class NeuralNetTrainingService(
             if (!stillQueued) queue.TryRemove(session.SessionId);
         }
         return MapSession(session);
+    }
+
+    public async Task<NeuralNetTrainingSessionDto> ResumeTrainingSessionAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        NeuralNetTrainingSession session = await db.NeuralNetTrainingSessions
+            .FirstOrDefaultAsync(x => x.SessionId == sessionId, ct)
+            ?? throw new KeyNotFoundException($"Training session {sessionId} was not found.");
+
+        if (!TrainingPersistencePolicy.CanResumeContinuousTraining(session.Status, session.RequestedTicketCount))
+        {
+            throw new InvalidOperationException("Only a cancelled continuous training session can be resumed.");
+        }
+
+        List<ChatMonitoringNeuralModelRun> runs = await db.ChatMonitoringNeuralModelRuns
+            .Where(x => x.SessionId == sessionId)
+            .ToListAsync(ct);
+
+        session.Status = "Queued";
+        session.FailureReason = null;
+        session.CompletedAtUtc = null;
+        session.StartedAtUtc = null;
+        foreach (ChatMonitoringNeuralModelRun run in runs)
+        {
+            run.Status = "Queued";
+            run.FailureReason = null;
+            run.CompletedAtUtc = null;
+            run.StartedAtUtc = null;
+        }
+
+        if (!queue.TryEnqueue(session.SessionId))
+        {
+            session.Status = "Failed";
+            session.FailureReason = "The training queue is full. Retry after an in-flight session finishes.";
+            session.CompletedAtUtc = DateTime.UtcNow;
+            foreach (ChatMonitoringNeuralModelRun run in runs)
+            {
+                run.Status = "Failed";
+                run.FailureReason = session.FailureReason;
+                run.CompletedAtUtc = session.CompletedAtUtc;
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+        if (session.Status == "Failed")
+        {
+            throw new InvalidOperationException(session.FailureReason ?? "The training queue is full.");
+        }
+
+        return MapSession(session, runs);
+    }
+
+    public Task<IReadOnlyList<NeuralNetTrainingLiveProgressDto>> GetLiveProgressAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        IReadOnlyList<NeuralNetTrainingLiveProgressDto> live = progressStore.GetAll()
+            .Select(MapLiveProgress)
+            .OfType<NeuralNetTrainingLiveProgressDto>()
+            .ToList();
+        return Task.FromResult(live);
     }
 
     /// <summary>
@@ -523,13 +584,10 @@ public sealed class NeuralNetTrainingService(
         return true;
     }
 
-    /// <summary>Continuous steps between worker-replay snapshots; the JSON is far too large to rewrite per step.</summary>
-    private const int ContinuousReplaySnapshotInterval = 10;
-
     /// <summary>
     /// Trains one synthetic ticket (single message) at a time until Stop cancels the session token.
-    /// Generator failures, train-step exceptions, and snapshot OOM never complete or fail the session.
-    /// Worker replay JSON is snapshotted periodically (and on stop) so downloads work mid-session.
+    /// Generator failures and train-step exceptions never complete or fail the session.
+    /// SQL and replay JSON are written only on stop, complete, or fail so the auth pool stays free.
     /// </summary>
     private async Task RunContinuousSyntheticSessionAsync(
         NeuralNetTrainingSession session,
@@ -561,7 +619,6 @@ public sealed class NeuralNetTrainingService(
                 feedback));
         }
 
-        await PersistAsync(persistenceGate, timings, ct);
         PublishProgress(session, progress => progress with
         {
             Phase = "Continuous training",
@@ -733,26 +790,10 @@ public sealed class NeuralNetTrainingService(
                 await ProcessSyntheticTicketAsync(
                     runContext, ticketIndex, singleMessageTicket, miniBatchSize: 1, ct);
                 await FlushPendingTrainingAsync(runContext, ct);
-                await runContext.Batch.FlushAsync(ct);
-
-                // Replay JSON grows into the megabytes; rewriting it every step saturates the
-                // DB connection, so snapshot periodically and always on stop/completion.
-                if (ticketIndex % ContinuousReplaySnapshotInterval == 0)
-                {
-                    string? snapshotJson = NeuralNetReplaySerializer.TrySerialize(
-                        runContext.Replay.Build(ReplayCompletionStatus.Partial, epochs: Options.LocalEpochs));
-                    if (snapshotJson is not null)
-                        runContext.Run.WorkerReplayJson = snapshotJson;
-                    else
-                        logger.LogWarning(
-                            "Skipped continuous replay snapshot for session {SessionId} (insufficient memory).",
-                            session.SessionId);
-                }
             })
             .ToList();
 
         await Task.WhenAll(trainTasks);
-        await PersistAsync(persistenceGate, timings, ct);
 
         PublishProgress(session, progress => progress with
         {
@@ -1169,7 +1210,6 @@ public sealed class NeuralNetTrainingService(
         ReplayBuilder replay = new(session, telemetry);
         run.Status = "Running";
         run.StartedAtUtc = DateTime.UtcNow;
-        await PersistAsync(persistenceGate, timings, ct);
         ChatMonitoringNeuralModelStateSnapshot topologyState = telemetry.GetStateSnapshot();
         PublishProgress(session, progress => progress with
         {
@@ -1790,12 +1830,43 @@ public sealed class NeuralNetTrainingService(
         await persistenceGate.WaitAsync(ct);
         try
         {
+            await DetachCancelledWritesIfSessionResumedAsync(ct);
             System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
             await db.SaveChangesAsync(ct);
             watch.Stop();
             timings.AddDb(watch.ElapsedMilliseconds);
         }
         finally { persistenceGate.Release(); }
+    }
+
+    private async Task DetachCancelledWritesIfSessionResumedAsync(CancellationToken ct)
+    {
+        HashSet<Guid> cancelledSessionIds = db.ChangeTracker.Entries<NeuralNetTrainingSession>()
+            .Where(entry => entry.Entity.Status == "Cancelled")
+            .Select(entry => entry.Entity.SessionId)
+            .ToHashSet();
+        if (cancelledSessionIds.Count == 0)
+            return;
+
+        HashSet<Guid> resumed = (await db.NeuralNetTrainingSessions
+            .AsNoTracking()
+            .Where(session => cancelledSessionIds.Contains(session.SessionId) && session.Status == "Queued")
+            .Select(session => session.SessionId)
+            .ToListAsync(ct)).ToHashSet();
+        if (resumed.Count == 0)
+            return;
+
+        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<NeuralNetTrainingSession> entry in db.ChangeTracker.Entries<NeuralNetTrainingSession>())
+        {
+            if (resumed.Contains(entry.Entity.SessionId))
+                entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
+        }
+
+        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<ChatMonitoringNeuralModelRun> entry in db.ChangeTracker.Entries<ChatMonitoringNeuralModelRun>())
+        {
+            if (resumed.Contains(entry.Entity.SessionId))
+                entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
+        }
     }
 
     private bool ShouldCaptureFullTrace(Guid sessionId, int ticketIndex, int messageIndex, NeuralModelKindChatMonitoring kind)
@@ -2233,6 +2304,7 @@ public sealed class NeuralNetTrainingService(
             ? null
             : new NeuralNetTrainingLiveProgressDto
             {
+                SessionId = live.SessionId,
                 Phase = live.Phase,
                 TicketsRequested = live.TicketsRequested,
                 TicketsGenerated = live.TicketsGenerated,
@@ -2478,8 +2550,6 @@ public sealed class NeuralNetTrainingService(
             // Embeddings are computed on flush so a whole batch can hash in parallel.
             pendingVectors.Add((content, positionId, record.TrainingExampleId,
                 new { record.TrainingExampleId, record.Category, record.TargetScore, record.TargetRelevance, record.Source, record.ChatMonitoringKind }));
-            if (examples.Count >= Math.Clamp(batchSize, 1, 500))
-                await FlushAsync(ct);
         }
 
         public async Task FlushAsync(CancellationToken ct)

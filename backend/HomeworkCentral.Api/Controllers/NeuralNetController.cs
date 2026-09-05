@@ -59,6 +59,11 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         CancellationToken ct = default) =>
         Ok(await training.GetTrainingSessionsAsync(beforeUtc, limit, ct));
 
+    [HttpGet("training/live")]
+    public async Task<ActionResult<IReadOnlyList<NeuralNetTrainingLiveProgressDto>>> GetLiveProgress(
+        CancellationToken ct = default) =>
+        Ok(await training.GetLiveProgressAsync(ct));
+
     [HttpDelete("training/{sessionId:guid}")]
     public async Task<IActionResult> RemoveTrainingSession(Guid sessionId, CancellationToken ct)
     {
@@ -83,6 +88,27 @@ public sealed class NeuralNetController(INeuralNetTrainingService training) : Co
         return stopped
             ? Accepted(new { message = "Stop requested." })
             : NotFound(new { message = "No queued or running training session found to stop." });
+    }
+
+    /// <summary>
+    /// Resumes a cancelled continuous session on the same session id. Finite sessions start new
+    /// runs instead of resuming.
+    /// </summary>
+    [HttpPost("training/{sessionId:guid}/resume")]
+    public async Task<ActionResult<NeuralNetTrainingSessionDto>> ResumeTrainingSession(Guid sessionId, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await training.ResumeTrainingSessionAsync(sessionId, ct));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { message = "Training session was not found." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     /// <summary>
