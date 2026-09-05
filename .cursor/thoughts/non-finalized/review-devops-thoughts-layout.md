@@ -1,7 +1,7 @@
 # Review: DevOps thoughts layout and async roles
 
 **Branch:** feature/devops-thoughts-layout-3665
-**Status:** Changes requested
+**Status:** In review
 **Push policy:** Only QA may give the OK to push.
 
 ## Research brief
