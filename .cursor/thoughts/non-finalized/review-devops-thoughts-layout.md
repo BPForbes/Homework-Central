@@ -187,6 +187,71 @@ Grounding: local [thoughts-layout.md](../../skills/devops-multi-agent-team/refer
   - Sent back because: n/a
   - Ask: n/a
 
+## QA (publish gate)
+
+`/code-review` at HEAD `986b33c` (`ca98e00..HEAD`). Inspected only. Did not edit product, workflow, skill, agent, gitignore, or durable `docs/` files. Did not push.
+
+### Scope
+- Skill / agents / commands / gitignore / docs-index / thought Markdown only.
+- `git diff --name-only ca98e00..HEAD` has no `backend/`, `frontend/`, `rust/`, `.github/`, or `deploy/` paths and no `.cs`/`.ts`/`.tsx`/`.rs`/`.yml` files.
+- Reviewers Satisfied. Security Clear (Snyk `snyk_auth` timed out / UNAVAILABLE; Security Review no medium+; no secrets in the Markdown/gitignore diff). CodeQL workflow files unchanged.
+
+### Acceptance checklist
+| # | Check | Result | Evidence |
+|---|-------|--------|----------|
+| 1 | `.cursor/thoughts/non-finalized/` committed; keepfile stays after finalize | **Pass** | Tracked empty `.cursor/thoughts/non-finalized/.gitkeep` (blob `e69de29`, mode 100644). `git check-ignore` silent (exit 1). Eight `*devops-thoughts-layout*` Markdown files also tracked. |
+| 2 | `.cursor/thoughts/finalized/*` gitignored | **Pass** | `.gitignore` line 31. `git check-ignore -v` matches that rule for `finalized/foo.md` and `finalized/.gitkeep`. `git ls-files -- .cursor/thoughts/finalized/` empty. |
+| 3 | Former `docs/dev-postgres-host-port.md` and `docs/nn-training-*-research.md` deleted from `docs/` | **Pass** | Not tracked; absent on disk. `docs/README.md` no longer indexes the NN research dumps. |
+| 4 | Durable `docs/tickets.md`, `identity.md`, `chat.md`, Comment Documentation Guide remain | **Pass** | All four tracked and present on disk. |
+| 5 | Every `.cursor/agents/devops-*.md` has `is_background: true` | **Pass** | All 9 agent files: frontmatter line 2 is `is_background: true`. |
+| 6 | Ask-paths and Client side-sprint policy present | **Pass** | [role-identity.md](../../skills/devops-multi-agent-team/references/role-identity.md) `## Ask paths (main)` + `## Human interrupt (side sprint)`; [SKILL.md](../../skills/devops-multi-agent-team/SKILL.md) `## Questions` + `## Interrupt handling (The Client)`. |
+| 7 | After PASS, Orchestrator moves the eight layout thoughts and keeps `.gitkeep` | **Instruct** | See thought-files list below. Do not `git add` `finalized/`. |
+
+### Validation summary (policy)
+- .NET Build: NOT APPLICABLE
+- .NET Tests: NOT APPLICABLE
+- TypeScript Validation: NOT APPLICABLE
+- Frontend Tests: NOT APPLICABLE
+- Rust Validation: NOT APPLICABLE
+- Rust Tests: NOT APPLICABLE
+- C# CodeQL: NOT APPLICABLE
+- TypeScript CodeQL: NOT APPLICABLE
+- Rust CodeQL: NOT APPLICABLE
+- New unresolved CodeQL findings: 0
+- CodeQL SARIF Reviewed: NOT APPLICABLE (no C#/TS/Rust CodeQL run; do not claim those targets passed)
+- Publish gate: **PASS**
+
+### Thought files to finalize (Orchestrator)
+Move (delete from git, local copy under `.cursor/thoughts/finalized/`) these eight files so they are **not** in the last authorized push. Keep `.cursor/thoughts/non-finalized/.gitkeep` tracked. Do not `git add` finalized.
+
+- `.cursor/thoughts/non-finalized/goal-devops-thoughts-layout.md`
+- `.cursor/thoughts/non-finalized/goal-coder-devops-thoughts-layout.md`
+- `.cursor/thoughts/non-finalized/goal-reviewer-devops-thoughts-layout.md`
+- `.cursor/thoughts/non-finalized/goal-qa-devops-thoughts-layout.md`
+- `.cursor/thoughts/non-finalized/goal-researcher-devops-thoughts-layout.md`
+- `.cursor/thoughts/non-finalized/goal-security-devops-thoughts-layout.md`
+- `.cursor/thoughts/non-finalized/devops-thoughts-layout-research.md`
+- `.cursor/thoughts/non-finalized/review-devops-thoughts-layout.md`
+
 ## QA handoff
-- Publish gate: BLOCKED
-- Thought files to finalize: (after PASS) the eight `*devops-thoughts-layout*` Markdown files listed in reviewer-2 round-2 Questions; keep `.gitkeep`
+- Commands run: `git diff --stat/--name-status ca98e00..HEAD`; `git ls-files` thoughts + docs; `git check-ignore` keepfile vs `finalized/*`; `ls` former dumps + durable docs; `head` of all `.cursor/agents/devops-*.md`; `rg` ask-path / side-sprint headings
+- .NET Build: NOT APPLICABLE
+- .NET Tests: NOT APPLICABLE
+- TypeScript Validation: NOT APPLICABLE
+- Frontend Tests: NOT APPLICABLE
+- Rust Validation: NOT APPLICABLE
+- Rust Tests: NOT APPLICABLE
+- C# CodeQL: NOT APPLICABLE
+- TypeScript CodeQL: NOT APPLICABLE
+- Rust CodeQL: NOT APPLICABLE
+- New unresolved CodeQL findings: 0
+- Publish gate: PASS
+- Thought files to finalize: the eight `*devops-thoughts-layout*` Markdown files listed above; keep `.gitkeep`
+- Result: OK to push after Orchestrator completes the finalize move. QA did not push.
+
+## Handoff
+- From: QA
+- To: Orchestrator
+- Pass-along: Publish gate **PASS**. Reviewers Satisfied. Security Clear. C# / TypeScript / Rust CodeQL are **NOT APPLICABLE** (skill/agents/gitignore/docs-index only; do not claim those CodeQL targets passed). Before the authorized push, move the eight `*devops-thoughts-layout*` Markdown files to `.cursor/thoughts/finalized/` (gitignored) and leave `.cursor/thoughts/non-finalized/.gitkeep` tracked. Do not `git add` finalized. Only QA may give the OK to push — that OK is now given. QA did not push.
+- Sent back because: n/a
+- Ask: n/a
