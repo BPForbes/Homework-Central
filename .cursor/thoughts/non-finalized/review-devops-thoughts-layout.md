@@ -1,7 +1,7 @@
 # Review: DevOps thoughts layout and async roles
 
 **Branch:** feature/devops-thoughts-layout-3665
-**Status:** In review
+**Status:** Satisfied — ready for security
 **Push policy:** Only QA may give the OK to push.
 
 ## Research brief
@@ -65,7 +65,7 @@ Grounding: local [thoughts-layout.md](../../skills/devops-multi-agent-team/refer
 | Reviewer | Verdict | Notes |
 |----------|---------|-------|
 | reviewer-1 | Changes requested | Postgres dump missing from finalized (wrong file occupies that name) + leftover `.cursor/reviews/` landmine. Agree with reviewer-2 keepfile. Layout, gitignore swap, async flags, ask-paths, side sprints, and Handoff identity otherwise match. Satisfied does **not** authorize a push. |
-| reviewer-2 | Changes requested | Keepfile + layout note required before Satisfied. Other focus checks passed. |
+| reviewer-2 | Satisfied | Keepfile contract holds at HEAD `536a8bf` (`99b3b7b` added the keepfile + layout note). Other focus checks still pass. Satisfied does **not** authorize a push. |
 
 ## Coder response (round 1)
 - **reviewer-2 keepfile:** added committed `.cursor/thoughts/non-finalized/.gitkeep` (empty). Documented in `thoughts-layout.md`. `git check-ignore` is silent on that keepfile. Did not add a keepfile under `finalized/`.
@@ -88,9 +88,98 @@ Grounding: local [thoughts-layout.md](../../skills/devops-multi-agent-team/refer
 - Sent back because: former `docs/dev-postgres-host-port.md` was not copied into finalized (the review thread occupies that name), and leftover `.cursor/reviews/` is untracked and no longer ignored, so a blanket add would re-bloat the repo.
 - Ask: n/a
 
+## Review round 2 (Reviewers)
+
+Inspected `git show HEAD` (`536a8bf`, Status flip only) and `git diff 7cfcfeb..HEAD` (Coder round-1 is `99b3b7b`). Did not edit product/skill files. Did not push.
+
+### Request changes
+- [x] **reviewer-1:** Restore original `docs/dev-postgres-host-port.md` dump into finalized under a distinct name. **Verified.** Local `.cursor/thoughts/finalized/dev-postgres-host-port-research.md` is 2666 bytes; `head` is `# Dev Postgres host port (Windows Docker Desktop)`; `cmp` identical to `feat/memory-optimization:docs/dev-postgres-host-port.md`. Old review thread remains at `finalized/dev-postgres-host-port.md` (3737 bytes, title “Review: Dev Postgres host port after Windows reset”). Both paths match `.gitignore` line 31 (`.cursor/thoughts/finalized/*`); `git ls-files .cursor/thoughts/finalized/` is empty (not staged).
+- [x] **reviewer-1:** Delete leftover untracked `.cursor/reviews/`. **Verified.** `ls .cursor/reviews` → No such file or directory. `git ls-files` has no leftover reviews path. Working tree clean.
+- [x] **reviewer-2 keepfile (reviewer-1 re-check):** **Verified.** Empty `.cursor/thoughts/non-finalized/.gitkeep` is tracked (`99b3b7b`, mode 100644, blob `e69de29`). `git check-ignore` silent (committed, not ignored). [thoughts-layout.md](../../skills/devops-multi-agent-team/references/thoughts-layout.md) lines 19–20: “Keep `.cursor/thoughts/non-finalized/.gitkeep` so the open-thoughts directory still exists after a QA move empties it.” No `finalized/.gitkeep` added.
+
+### Questions
+- **reviewer-1:** None. No Orchestrator call needed for these three items.
+
+### Suggestions (non-blocking)
+- **reviewer-1:** Round-1 optional notes still stand and are not re-opened: add the [cursor.com/docs/subagents](https://cursor.com/docs/subagents) row to this thread’s research brief (Researcher’s `devops-thoughts-layout-research.md` already cites it; `is_background` is the official custom-agent field). `.gitignore` `.cursor/thoughts/finalized/*` still will not match a later nested file; directory form is safer if subfolders appear.
+
+### Reviewer-1 round-2 evidence
+| Check | Result | Evidence |
+|-------|--------|----------|
+| Postgres dump restored under a new name | Pass | `finalized/dev-postgres-host-port-research.md` 2666 bytes; first line matches; identical to `feat/memory-optimization:docs/dev-postgres-host-port.md` |
+| Old review thread kept | Pass | `finalized/dev-postgres-host-port.md` still the Satisfied review thread (3737 bytes) |
+| Finalized not git-added | Pass | `git ls-files .cursor/thoughts/finalized/` empty; both files ignored by `.gitignore:31` |
+| Leftover `.cursor/reviews/` gone | Pass | Directory absent; no tracked leftover |
+| Keepfile committed + documented | Pass | Tracked empty keepfile + thoughts-layout.md keepfile sentence |
+| `7cfcfeb..HEAD` scope | Pass | Skill layout note, keepfile, extra role/research thoughts, this thread. No product/pipeline code. No finalized files. |
+
+Grounding: [thoughts-layout.md](../../skills/devops-multi-agent-team/references/thoughts-layout.md) (commit open thoughts; gitignore finalized; do not `git add` leftover reviews; keepfile), research brief + [devops-thoughts-layout-research.md](devops-thoughts-layout-research.md), https://cursor.com/docs/subagents (`is_background`).
+
+### Reviewer sign-off
+| Reviewer | Verdict | Notes |
+|----------|---------|-------|
+| reviewer-1 | Satisfied | Round-1 request-changes closed. Keepfile check also passes. Satisfied does **not** authorize a push. |
+| reviewer-2 | Satisfied | Keepfile contract holds at HEAD `536a8bf`. See reviewer-2 re-check below. Satisfied does **not** authorize a push. |
+
+## Handoff
+- From: reviewer-1
+- To: Orchestrator
+- Pass-along: reviewer-1 is **Satisfied**. Postgres dump, leftover-reviews delete, and keepfile all check out on `99b3b7b` / `536a8bf`. Wait for reviewer-2 Satisfied, then Security → QA. Satisfied does **not** authorize a push. After QA PASS, move this concept’s `*devops-thoughts-layout*` notes to finalized (do not `git add` finalized).
+- Sent back because: n/a
+- Ask: n/a
+
+## Review round 2 (reviewer-2 re-check)
+
+Re-checked against current HEAD `536a8bf` (`99b3b7b` “Keep the open-thoughts directory after QA moves”). Working tree clean. Inspected only; no product/pipeline/skill edits. Did not push.
+
+### Request changes
+- None. Round-1 keepfile blocker is closed.
+
+### Questions
+- **reviewer-2 (for Orchestrator / QA, not a Coder block):** After publish-gate PASS, *move* (delete from git, local copy under `finalized/`) every `*devops-thoughts-layout*` Markdown now in `non-finalized/` so they are **not** in the last authorized push. Leave `.cursor/thoughts/non-finalized/.gitkeep` tracked. Expanded set vs round 1:
+  - `.cursor/thoughts/non-finalized/goal-devops-thoughts-layout.md`
+  - `.cursor/thoughts/non-finalized/goal-coder-devops-thoughts-layout.md`
+  - `.cursor/thoughts/non-finalized/goal-reviewer-devops-thoughts-layout.md`
+  - `.cursor/thoughts/non-finalized/goal-qa-devops-thoughts-layout.md`
+  - `.cursor/thoughts/non-finalized/goal-researcher-devops-thoughts-layout.md`
+  - `.cursor/thoughts/non-finalized/goal-security-devops-thoughts-layout.md`
+  - `.cursor/thoughts/non-finalized/devops-thoughts-layout-research.md`
+  - `.cursor/thoughts/non-finalized/review-devops-thoughts-layout.md`
+  Leave them in `non-finalized/` until PASS.
+
+### Suggestions (non-blocking)
+- **reviewer-2:** Leftover-reviews ignore stays a suggestion only. Coder correctly did **not** re-add `.cursor/reviews/*` to `.gitignore` (Client asked to replace that rule). `.gitignore` line 31 is still only `.cursor/thoughts/finalized/*`; `git grep reviews -- .gitignore` is empty. `.cursor/reviews/` is gone on disk. Optional belt-and-suspenders ignore is still acceptable later if leftovers reappear; do not treat it as a request-change.
+
+### Reviewer-2 checklist (round 2)
+| Check | Result | Evidence |
+|-------|--------|----------|
+| `non-finalized/.gitkeep` tracked | **Pass** | `git ls-files -- .cursor/thoughts/non-finalized/.gitkeep` → `.cursor/thoughts/non-finalized/.gitkeep` (empty blob `e69de29`, mode 100644, from `99b3b7b`) |
+| `thoughts-layout.md` documents the keepfile | **Pass** | [thoughts-layout.md](../../skills/devops-multi-agent-team/references/thoughts-layout.md) lines 19–20: “Keep `.cursor/thoughts/non-finalized/.gitkeep` so the open-thoughts directory still exists after a QA move empties it.” |
+| `git check-ignore` silent on keepfile | **Pass** | `git check-ignore -v -- .cursor/thoughts/non-finalized/.gitkeep` prints nothing, exit 1 (not ignored) |
+| No swallowed `finalized/` keepfile | **Pass** | `ls .cursor/thoughts/finalized/.gitkeep` → no such file. Hypothetical path *would* match `/.gitignore:31:.cursor/thoughts/finalized/*` (`git check-ignore` exit 0). Do not add one. |
+| Coder did not re-add `.cursor/reviews/*` | **Pass** | `git grep reviews -- .gitignore` empty. Only ignore for thoughts is line 31 `.cursor/thoughts/finalized/*`. Tracked `.cursor/reviews` strings remain historical notes in `thoughts-layout.md` (replacement sentence) plus this thread / research brief. |
+| Gitignore polarity | Pass | `finalized/foo.md` ignored. `non-finalized/review-devops-thoughts-layout.md` and `non-finalized/.gitkeep` not ignored. `git ls-files -- .cursor/thoughts/finalized/` empty |
+| Durable `docs/` still present | Pass | Tracked: `docs/tickets.md`, `docs/identity.md`, `docs/chat.md`, `docs/COMMENT_DOCUMENTATION_GUIDE.md`. No `docs/*research*` / `docs/dev-postgres*` / `docs/nn-training*` tracked |
+| `is_background: true` on every `.cursor/agents/devops-*.md` | Pass | All 9 agent files: frontmatter line 2 is `is_background: true` |
+| Leftover `.cursor/reviews` write-path / directory | Pass | Directory absent. No `.cursor/reviews/*` gitignore rule (Client replace honored) |
+
+Grounding: local [thoughts-layout.md](../../skills/devops-multi-agent-team/references/thoughts-layout.md) (commit open thoughts + keepfile; gitignore finalized; do not `git add` leftover reviews), [role-identity.md](../../skills/devops-multi-agent-team/references/role-identity.md), research brief [devops-thoughts-layout-research.md](devops-thoughts-layout-research.md), fetched https://cursor.com/docs/subagents.md (`is_background` on custom agents). Coder response (round 1) matches HEAD.
+
+### Reviewer sign-off (round 2)
+| Reviewer | Verdict | Notes |
+|----------|---------|-------|
+| reviewer-2 | Satisfied | Keepfile contract holds. Leftover-reviews ignore remains a suggestion only. Satisfied does **not** authorize a push. reviewer-1 already Satisfied on the same HEAD. |
+
+## Handoff
+- From: reviewer-2
+- To: Orchestrator
+- Pass-along: **Both reviewers Satisfied** at HEAD `536a8bf`. reviewer-2 keepfile contract holds; leftover-reviews ignore stays a suggestion only (Coder did not re-add `.cursor/reviews/*`). Next gate: Security → QA. After PASS, move the eight `*devops-thoughts-layout*` Markdown files listed in round-2 Questions; keep `.cursor/thoughts/non-finalized/.gitkeep` tracked. Satisfied does **not** authorize a push. Only QA may give the OK to push.
+- Sent back because: n/a
+- Ask: n/a
+
 ## Security (after Satisfied)
 - Verdict:
 
 ## QA handoff
 - Publish gate: BLOCKED
-- Thought files to finalize: (after PASS) the four `*devops-thoughts-layout*` files listed in reviewer-2 Questions
+- Thought files to finalize: (after PASS) the eight `*devops-thoughts-layout*` Markdown files listed in reviewer-2 round-2 Questions; keep `.gitkeep`
