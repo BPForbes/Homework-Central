@@ -380,6 +380,7 @@ Homework-Central/
 - **Stale database volume** — Run the reset command above (`reset-dev-db` with `-Yes` / `--yes`), then `run-dev` again.
 - **`Network homework-central_default Resource is still in use`** — Harmless during reset. The `pgdata` volume was still removed; `run-dev` reuses the leftover Docker network. Optional: `docker network inspect homework-central_default` to see what is attached.
 - **Skip Docker** — If you already have Postgres on localhost: `.\scripts\run-dev.ps1 -SkipDocker` (Windows) or `./scripts/run-dev.sh --skip-docker` (Unix).
+- **Rust cargo build --workspace failed** — `run-dev` compiles `rust/` (`libhc_kernels`). Run `cd rust; cargo build --workspace` to see the compiler/linker message. Typical Windows miss: `rustup default stable` plus Visual Studio Build Tools with **Desktop development with C++** (`link.exe`). `cargo` on PATH is not enough if `rustc` or the MSVC linker is missing. Skip with `HC_SKIP_RUST_BUILD=1` (API uses the C# fallback).
 
 ---
 

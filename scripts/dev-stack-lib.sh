@@ -571,15 +571,29 @@ release_dev_stack_postgres() {
 # The API loads that library at runtime; C# remains the fallback so the
 # Docker image does not need rustc.
 # rustup puts cargo on PATH via ~/.cargo/bin after `source ~/.cargo/env` or a new shell.
+add_rustup_bin_to_path() {
+  local cargo_bin="$HOME/.cargo/bin"
+  if [[ -d "$cargo_bin" && ":$PATH:" != *":$cargo_bin:"* ]]; then
+    PATH="$cargo_bin:$PATH"
+    export PATH
+  fi
+}
+
 require_rust_cargo() {
-  if command -v cargo >/dev/null 2>&1; then
-    return 0
+  add_rustup_bin_to_path
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    printf 'error: cargo is required to compile rust/. Install rustup from https://rustup.rs/, then: rustup default stable\n' >&2
+    printf 'error: add ~/.cargo/bin to PATH (source ~/.cargo/env) or open a new shell\n' >&2
+    printf 'error: set HC_SKIP_RUST_BUILD=1 to skip cargo build\n' >&2
+    return 1
   fi
 
-  printf 'error: cargo is required to compile rust/. Install rustup from https://rustup.rs/, then: rustup default stable\n' >&2
-  printf 'error: add ~/.cargo/bin to PATH (source ~/.cargo/env) or open a new shell\n' >&2
-  printf 'error: set HC_SKIP_RUST_BUILD=1 to skip cargo build\n' >&2
-  return 1
+  if ! command -v rustc >/dev/null 2>&1; then
+    printf 'error: rustc is required to compile rust/. cargo is on PATH but rustc is not — run: rustup default stable\n' >&2
+    printf 'error: set HC_SKIP_RUST_BUILD=1 to skip cargo build\n' >&2
+    return 1
+  fi
 }
 
 build_rust_workspace() {
