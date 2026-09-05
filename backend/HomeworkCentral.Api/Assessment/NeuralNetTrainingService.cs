@@ -696,9 +696,7 @@ public sealed class NeuralNetTrainingService(
                         session, contexts, persistenceGate, timings, ticketIndex, CancellationToken.None);
                     if (!spilled)
                     {
-                        throw new InvalidOperationException(
-                            "Training heap could not be spilled after OutOfMemoryException.",
-                            ex);
+                        throw;
                     }
 
                     PublishProgress(session, progress => progress with
@@ -745,12 +743,8 @@ public sealed class NeuralNetTrainingService(
                         runContext.Run.CompletedAtUtc = DateTime.UtcNow;
                         runContext.Run.FailureReason ??= "Training cancelled.";
                         WriteSpillCheckpoint(session, runContext, ticketIndex);
-                        string? cancelledJson = TryBuildReplayJson(
-                            runContext,
-                            ReplayCompletionStatus.Cancelled,
-                            failure: null);
-                        if (cancelledJson is not null)
-                            runContext.Run.WorkerReplayJson = cancelledJson;
+                        // Keep spill-checkpoint-v1 on continuous cancel so resume reloads weights.
+                        // Full V2 replay is the serialize that OOM'd after ~170 tickets.
                         runContext.Replay.ReleaseAccumulatedHeap();
                     },
                     ex =>
