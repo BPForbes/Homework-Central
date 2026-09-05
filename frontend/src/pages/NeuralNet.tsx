@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBrain, faCheck, faDatabase, faDiagramProject, faFileImport, faPlay, faStop, faXmark } from '@fortawesome/free-solid-svg-icons'
@@ -22,6 +22,33 @@ function viewForPath(pathname: string): NeuralView {
   if (pathname.endsWith('/DataManagement')) return 'data'
   if (pathname.endsWith('/Visualizer')) return 'visualizer'
   return 'feedback'
+}
+
+function isActiveLivePhase(phase?: string | null): boolean {
+  if (!phase?.trim()) return false
+  const p = phase.toLowerCase()
+  return p !== 'completed' && !p.includes('cancelled') && !p.includes('failed')
+}
+
+function overlayStatusFromLivePhase(phase: string, currentStatus: string): string {
+  if (!isActiveLivePhase(phase)) return currentStatus
+  return phase.toLowerCase() === 'queued' ? 'Queued' : 'Running'
+}
+
+function mergeLiveProgress(
+  current: NeuralNetTrainingSession[],
+  live: NeuralNetTrainingLiveProgress[],
+): NeuralNetTrainingSession[] {
+  const byId = new Map(live.map((row) => [row.sessionId, row]))
+  return current.map((session) => {
+    const progress = byId.get(session.sessionId)
+    if (!progress) return { ...session, liveProgress: null }
+    return {
+      ...session,
+      liveProgress: progress,
+      status: overlayStatusFromLivePhase(progress.phase, session.status),
+    }
+  })
 }
 
 function cascadeMeta(model: NeuralNetVisualizerModel) {
@@ -439,6 +466,9 @@ export function NeuralNet() {
   const [replay, setReplay] = useState<ReplayReport | null>(null)
   const [downloadReadyIds, setDownloadReadyIds] = useState<string[]>([])
   const sessionStatusRef = useMemo(() => new Map<string, string>(), [])
+  const livePollInFlightRef = useRef(false)
+  const listRefreshInFlightRef = useRef(false)
+  const seenLiveIdsRef = useRef(new Set<string>())
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -476,21 +506,50 @@ export function NeuralNet() {
     return () => { cancelled = true }
   }, [view])
 
-  const hasActiveTraining = sessions.some((session) => session.status === 'Running' || session.status === 'Queued')
+  const hasActiveTraining = sessions.some((session) =>
+    session.status === 'Running'
+    || session.status === 'Queued'
+    || isActiveLivePhase(session.liveProgress?.phase))
   const hasReevalTone = sessions.some((session) => session.liveProgress?.pathTone === 'reeval')
   useEffect(() => {
     if (view !== 'training' || !hasActiveTraining) return
-    // Poll faster during REVISE / reinterpret so yellow mesh + audit lines are visible.
+    // Memory-only live progress; poll faster during REVISE / reinterpret so yellow mesh + audit lines stay visible.
     const intervalMs = hasReevalTone ? 750 : 2000
-    const timer = window.setInterval(() => {
-      void neuralNetApi.listTrainingSessions()
-        .then((response) => {
-          setSessions(response.data.items)
-          setSessionsHasMore(response.data.hasMore)
-          setSessionsNextBeforeUtc(response.data.nextBeforeUtc)
-        })
-        .catch(() => undefined)
-    }, intervalMs)
+
+    const pollLive = async () => {
+      if (livePollInFlightRef.current) return
+      livePollInFlightRef.current = true
+      try {
+        const response = await neuralNetApi.listLiveProgress()
+        const live = response.data
+        const liveIds = new Set(live.map((row) => row.sessionId))
+        const disappeared = [...seenLiveIdsRef.current].some((id) => !liveIds.has(id))
+        const terminalLive = live.some((row) => !isActiveLivePhase(row.phase))
+        seenLiveIdsRef.current = liveIds
+        setSessions((current) => mergeLiveProgress(current, live))
+
+        if ((disappeared || terminalLive) && !listRefreshInFlightRef.current) {
+          listRefreshInFlightRef.current = true
+          try {
+            const list = await neuralNetApi.listTrainingSessions()
+            setSessions(mergeLiveProgress(list.data.items, live))
+            setSessionsHasMore(list.data.hasMore)
+            setSessionsNextBeforeUtc(list.data.nextBeforeUtc)
+          } catch {
+            // Keep the overlaid in-memory rows when the list query is under pool pressure.
+          } finally {
+            listRefreshInFlightRef.current = false
+          }
+        }
+      } catch {
+        // Keep the last overlay when the live endpoint is briefly unavailable.
+      } finally {
+        livePollInFlightRef.current = false
+      }
+    }
+
+    void pollLive()
+    const timer = window.setInterval(() => { void pollLive() }, intervalMs)
     return () => window.clearInterval(timer)
   }, [view, hasActiveTraining, hasReevalTone])
 
@@ -544,6 +603,21 @@ export function NeuralNet() {
       setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
     } catch {
       setError('That training session could not be stopped.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+  async function resumeSession(sessionId: string) {
+    const busyKey = `resume-${sessionId}`
+    setBusyId(busyKey)
+    try {
+      await neuralNetApi.resumeTrainingSession(sessionId)
+      const r = await neuralNetApi.listTrainingSessions()
+      setSessions(r.data.items)
+      setSessionsHasMore(r.data.hasMore)
+      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+    } catch {
+      setError('That training session could not be started again.')
     } finally {
       setBusyId(null)
     }
@@ -645,11 +719,12 @@ export function NeuralNet() {
       const replayRuns = (s.chatMonitoringRuns ?? []).filter((run) => run.hasWorkerReplay)
       const canDownloadBoth = s.mode === 'Both' && replayRuns.length >= 2
       const canStop = s.status === 'Running' || s.status === 'Queued'
+      const canResume = s.status === 'Cancelled' && (s.continuous || s.requestedTicketCount === 0)
       const showDownloadPanel = downloadReadyIds.includes(s.sessionId) || s.status === 'Completed' || s.status === 'Cancelled'
       const ticketLabel = s.continuous || s.requestedTicketCount === 0
         ? 'continuous'
         : `${s.requestedTicketCount} tickets`
-      return <li key={s.sessionId} className="ticket-watch-chip"><div className="ticket-watch-chip-header"><strong>{s.status} · {s.mode} · {ticketLabel}</strong><div className="sm-form-actions">{canStop && <button type="button" className="btn-secondary" aria-label="Stop training session" title="Stop this training session" disabled={busyId === `stop-${s.sessionId}`} onClick={() => void stopSession(s.sessionId)}><FontAwesomeIcon icon={faStop} /> Stop</button>}<button type="button" className="ticket-watch-chip-remove" aria-label="Remove training request" title={s.status === 'Running' ? 'Stop the running session before removing it' : 'Remove training request'} disabled={s.status === 'Running' || busyId === `remove-${s.sessionId}`} onClick={() => void removeSession(s.sessionId)}><FontAwesomeIcon icon={faXmark} /></button></div></div><span>{s.continuous || s.requestedTicketCount === 0 ? 'Continuous · 1 message per ticket until cancelled' : `Up to ${s.maxPassesPerTicket} passes per message`} · cascade chain-rule SGD</span>{s.liveProgress && <LiveTrainingProgress progress={s.liveProgress} status={s.status} /> }{(s.chatMonitoringRuns ?? []).map(run => <div key={run.chatMonitoringKind} className="sm-form-actions"><span>{run.chatMonitoringKind} cascade · {run.status}{run.canonicalGeneration !== undefined ? ` · canonical generation ${run.canonicalGeneration}` : ''}</span>{run.hasWorkerReplay && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} replay</button>}</div>)}{showDownloadPanel && (replayRuns.length > 0 || s.hasReport) && <div className="neural-download-ready" role="status"><strong>Downloads ready</strong><div className="sm-form-actions">{replayRuns.map((run) => <button key={run.chatMonitoringKind} type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} JSON</button>)}{canDownloadBoth && <button type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-both`} onClick={() => void downloadCascadeReports(s.sessionId, replayRuns.map((run) => run.chatMonitoringKind))}>Download Mod + Tutor JSON</button>}{s.hasReport && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-legacy`} onClick={() => void downloadReport(s.sessionId)}>Download legacy report</button>}</div></div>}{s.failureReason && <small>{s.failureReason}</small>}</li>
+      return <li key={s.sessionId} className="ticket-watch-chip"><div className="ticket-watch-chip-header"><strong>{s.status} · {s.mode} · {ticketLabel}</strong><div className="sm-form-actions">{canStop && <button type="button" className="btn-secondary" aria-label="Stop training session" title="Stop this training session" disabled={busyId === `stop-${s.sessionId}`} onClick={() => void stopSession(s.sessionId)}><FontAwesomeIcon icon={faStop} /> Stop</button>}{canResume && <button type="button" className="btn-secondary" aria-label="Start training session" title="Continue this training session" disabled={busyId === `resume-${s.sessionId}`} onClick={() => void resumeSession(s.sessionId)}><FontAwesomeIcon icon={faPlay} /> Start</button>}<button type="button" className="ticket-watch-chip-remove" aria-label="Remove training request" title={s.status === 'Running' ? 'Stop the running session before removing it' : 'Remove training request'} disabled={s.status === 'Running' || busyId === `remove-${s.sessionId}`} onClick={() => void removeSession(s.sessionId)}><FontAwesomeIcon icon={faXmark} /></button></div></div><span>{s.continuous || s.requestedTicketCount === 0 ? 'Continuous · 1 message per ticket until cancelled' : `Up to ${s.maxPassesPerTicket} passes per message`} · cascade chain-rule SGD</span>{s.liveProgress && <LiveTrainingProgress progress={s.liveProgress} status={s.status} /> }{(s.chatMonitoringRuns ?? []).map(run => <div key={run.chatMonitoringKind} className="sm-form-actions"><span>{run.chatMonitoringKind} cascade · {run.status}{run.canonicalGeneration !== undefined ? ` · canonical generation ${run.canonicalGeneration}` : ''}</span>{run.hasWorkerReplay && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} replay</button>}</div>)}{showDownloadPanel && (replayRuns.length > 0 || s.hasReport) && <div className="neural-download-ready" role="status"><strong>Downloads ready</strong><div className="sm-form-actions">{replayRuns.map((run) => <button key={run.chatMonitoringKind} type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-${run.chatMonitoringKind}` || busyId === `${s.sessionId}-both`} onClick={() => void downloadReport(s.sessionId, run.chatMonitoringKind)}>Download {run.chatMonitoringKind} JSON</button>)}{canDownloadBoth && <button type="button" className="btn-primary" disabled={busyId === `${s.sessionId}-both`} onClick={() => void downloadCascadeReports(s.sessionId, replayRuns.map((run) => run.chatMonitoringKind))}>Download Mod + Tutor JSON</button>}{s.hasReport && <button type="button" className="btn-secondary" disabled={busyId === `${s.sessionId}-legacy`} onClick={() => void downloadReport(s.sessionId)}>Download legacy report</button>}</div></div>}{s.failureReason && <small>{s.failureReason}</small>}</li>
     })}</ul>{sessionsHasMore && <div className="sm-form-actions"><button type="button" className="btn-secondary" disabled={busyId === 'load-more-sessions'} onClick={() => void loadMoreSessions()}>Load older sessions</button></div>}</section>}
     {view === 'feedback' && <section className="sm-panel"><div className="sm-panel-header"><h3>Training Feedback</h3></div>{feedback.length === 0 ? <p className="dashboard-hint">No reviewer feedback is awaiting approval.</p> : <ul className="ticket-watches-list">{feedback.map(item => <li key={item.scoreEventId} className="ticket-watch-chip"><strong>{item.category} · student {item.studentScore.toFixed(3)} → reviewer {item.reviewerScore.toFixed(3)}</strong><span>{item.messagePreview}</span><small>{item.explanation ?? 'No reviewer explanation supplied.'}</small><div className="sm-form-actions"><button type="button" className="btn-primary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, true)}><FontAwesomeIcon icon={faCheck} /> Approve</button><button type="button" className="btn-secondary" disabled={busyId === item.scoreEventId} onClick={() => void decide(item.scoreEventId, false)}><FontAwesomeIcon icon={faXmark} /> Reject</button></div></li>)}</ul>}{feedbackHasMore && <div className="sm-form-actions"><button type="button" className="btn-secondary" disabled={busyId === 'load-more-feedback'} onClick={() => void loadMoreFeedback()}>Load older feedback</button></div>}</section>}
     {view === 'data' && data && <><section className="sm-panel"><div className="sm-panel-header"><h3><FontAwesomeIcon icon={faDatabase} /> Data Management</h3></div><p className="dashboard-hint">PostgreSQL is authoritative; the vector store is a retrieval mirror. Category counts include fine moderation concepts and tutoring subject slugs.</p><ul className="ticket-watches-list"><li className="ticket-watch-chip"><strong>{data.trainingExamples}</strong><span>Approved examples</span></li><li className="ticket-watch-chip"><strong>{data.vectorExamples}</strong><span>Vector examples</span></li><li className="ticket-watch-chip"><strong>{data.pendingFeedback}</strong><span>Pending feedback</span></li></ul>{Object.keys(data.categoryCounts ?? {}).length > 0 && <div className="neural-category-cloud" aria-label="Training category distribution">{Object.entries(data.categoryCounts).sort((a, b) => b[1] - a[1]).slice(0, 24).map(([category, count]) => <span key={category} className="neural-category-chip">{category} · {count}</span>)}</div>}</section><AITrackingDataPanel /></>}
