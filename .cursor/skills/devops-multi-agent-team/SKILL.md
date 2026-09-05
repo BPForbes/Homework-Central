@@ -29,9 +29,18 @@ workflows. Command catalog:
 [references/agent-commands.md](references/agent-commands.md).
 
 Spawn roles with `/create-subagent` (Cursor `Task`, prompts in
-`.cursor/agents/`). Subagents run **asynchronously in pods** — never a
-linear one-at-a-time queue. Write all working Markdown thoughts to
-`.cursor/reviews/` — that directory is gitignored; do not commit it.
+`.cursor/agents/`). Each role type is **async**: agent frontmatter has
+`is_background: true`, and every spawn uses `run_in_background: true`.
+Never a linear one-at-a-time queue.
+
+Working Markdown (review threads, `/goal` logs, `/repro` notes, role
+goals, research dumps) lives under `.cursor/thoughts/`:
+**non-finalized/** is committed so a concept can survive multiple
+pushes; **finalized/** is gitignored after QA signs off. Layout:
+[references/thoughts-layout.md](references/thoughts-layout.md).
+Identity, ask-paths, and send-backs:
+[references/role-identity.md](references/role-identity.md).
+Do not put thought-process files in `docs/`.
 
 **Only QA may give the OK to push.** Review Satisfied, Security Clear,
 the Orchestrator, and developer CodeQL do not authorize a push.
@@ -51,12 +60,13 @@ CodeQL passed.
 
 After the Coder lands local changes, the **Reviewers** are the next gate — not QA.
 
-1. Documentation & Research writes/updates a research brief (local `docs/` + **online media fetches**).
+1. Documentation & Research writes/updates a research brief
+   (authoritative `docs/` + **online media fetches** + thoughts under
+   `.cursor/thoughts/non-finalized/`).
 2. Reviewers inspect the diff like a PR (`/code-review`: look at, do not
-   edit) and converse with the Coder in a local Markdown **review thread**
-   (`.cursor/reviews/<topic>.md`; template in
+   edit) and converse with the Coder in
+   `.cursor/thoughts/non-finalized/review-<topic>.md` (template in
    [references/review-thread-template.md](references/review-thread-template.md)).
-   These files are gitignored.
 3. Coder applies fixes locally and replies in the same Markdown file.
 4. Iterate until reviewers mark **Satisfied**.
 5. **Do not push** when reviewers are unsatisfied. Satisfied still does
@@ -93,7 +103,7 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 | Scope | Planner / Ticket Lead | Linear MCP: `list_issues`, `get_issue`, `save_comment` | Ticket + acceptance criteria (#58) |
 | Change surface | Researcher | Repo tools + `git diff` | Files/services touched |
 | Research | Documentation & Research | `docs/` + `WebSearch` / `WebFetch` / browser (online media) | Cited brief for Planner/Coder/Reviewers |
-| Pre-QA review | Reviewers | `.cursor/reviews/*.md` + `/review-*` + research brief | PR-style improvements; no push yet |
+| Pre-QA review | Reviewers | `.cursor/thoughts/non-finalized/review-*.md` + `/review-*` + research brief | PR-style improvements; no push yet |
 | CI status | QA / CI Engineer | Buildkite MCP + `/buildkite-*` | Failed jobs, logs, retry/unblock |
 | Quality | QA / Quality Engineer | CodeQL CLI + SARIF; Sonar MCP (when auth’d) + `/sonar-*` | CodeQL, Validation, and Publish Policy; Sonar additive |
 | Security | Security | Snyk MCP + `/secure-dependency-health-check`, `/review-security` | SCA/SAST/IaC findings |
@@ -179,8 +189,9 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 
 - Start from `/goal` when the human named an outcome: persist X and plan
   until that outcome is achieved.
-- Write working plans to `.cursor/reviews/` (gitignored). Durable operator
-  docs still go in authoritative `docs/` / README.
+- Write working plans to `.cursor/thoughts/non-finalized/`. Durable
+  operator docs still go in authoritative `docs/` / README. Thought
+  dumps never go in `docs/`.
 - Maintain a structured DevOps plan in Markdown (repo path agreed with the human; prefer updating an existing authoritative doc).
 - Break work into steps, components, environments, and acceptance criteria.
 - Define CI/CD stages, deployment strategy, rollback, and observability requirements.
@@ -214,7 +225,10 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 ### 4. Reviewers (entrypoint before QA)
 
 - PR-style review of local diffs: correctness, security, performance, operability, tests, scope.
-- Communicate with the Coder **only via the review thread Markdown** (`.cursor/reviews/<topic>.md`).
+- Communicate with the Coder **only via**
+  `.cursor/thoughts/non-finalized/review-<topic>.md`. Ask the
+  Orchestrator when the review needs a Team Lead call. Use a Handoff
+  block when sending work back ([role-identity.md](references/role-identity.md)).
 - Ground asks in the research brief, `docs/`, and fetched online media (not gut feel alone).
 - Request improvements until Satisfied; **block push** while unsatisfied.
   Satisfied still does **not** authorize a push — **only QA may give the
@@ -238,6 +252,9 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - **Only QA may give the OK to push.** Approve (publish gate PASS) only
   when acceptance criteria are met **and** applicable CodeQL is satisfied.
   No other role may authorize a push.
+- After PASS, tell the Orchestrator which
+  `.cursor/thoughts/non-finalized/` files that push closed so they move
+  to `.cursor/thoughts/finalized/`.
 
 ### 6. Observability
 
@@ -297,27 +314,39 @@ give the OK to push.**
 ```text
 research pod   → plan + docs/ + online media (parallel)
 implement pod  → pipelines / IaC / config (local only)
-review pod     → /code-review in .cursor/reviews/<topic>.md (inspect, do not edit)
+review pod     → /code-review in .cursor/thoughts/non-finalized/review-<topic>.md
 security pod   → Snyk / /review-security
 qa pod         → /repro + CodeQL publish gate + CI logs + smoke
-docs pod       → runbooks + optional /share-video
+docs pod       → runbooks in docs/; thoughts stay in .cursor/thoughts/
 push           → NEVER until QA gives the OK
                  (Satisfied + Security Clear + developer CodeQL ≠ push)
+                 After PASS, move closed thought Markdown to finalized/
 repeat pods    → until QA marks the publish gate PASS
 ```
 
-You remain the Orchestrator. `.cursor/reviews/` goal/review/repro files stay
-local — never commit them.
+You remain the Orchestrator. Open thoughts stay in
+`.cursor/thoughts/non-finalized/` (committed). After QA PASS, move them
+to `.cursor/thoughts/finalized/` (gitignored).
 
-## Interrupt handling
+## Questions
 
-On human interrupts (`Change X to Y`, `Use tool A`, `Add environment Z`, `Stop`, `Redo the plan`, `Explain the deployment strategy`):
+Prefer the ask-paths in [role-identity.md](references/role-identity.md):
+QA → Coder (primary) and Reviewer; Coder → Researcher; Reviewer →
+Orchestrator; Orchestrator → The Client. Anyone may ask anyone if needed.
 
-1. Pause the loop.
-2. Route to the correct role.
-3. Update plan / architecture / code / tests.
-4. Resume from the appropriate step.
-5. An interrupt does **not** authorize a push. **Only QA may give the
+## Interrupt handling (The Client)
+
+When the human gives instructions while this skill is running, treat
+them as a **side sprint**. Do not wait for the current topic to finish.
+
+1. Pause only the work that would conflict.
+2. Start from **research**: how the ask integrates with existing docs
+   and thoughts, then how it integrates in code.
+3. Talk to Coder, Reviewers, QA, and Security as that sprint needs.
+4. Write a role goal under `.cursor/thoughts/non-finalized/`.
+5. Resume the original loop when the side sprint is parked or folded
+   into the plan.
+6. An interrupt does **not** authorize a push. **Only QA may give the
    OK to push.**
 
 ## Output rules
@@ -384,7 +413,7 @@ When the human kicks off work, begin as:
 
 ```text
 [Orchestrator] Interpreting request → <one-line goal>
-/goal: persist X in .cursor/reviews/goal-<topic>.md; loop until X
+/goal: persist X in .cursor/thoughts/non-finalized/goal-<topic>.md; loop until X
 /create-subagent: spawn roles asynchronously
 Tooling: any / command that fits (Buildkite / Sonar / Snyk / Linear first if needed)
 Questions (only if blocking): …

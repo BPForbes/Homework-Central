@@ -1,15 +1,18 @@
 # Review thread template
 
-Copy to `.cursor/reviews/<topic>.md` for each change set. Coder and Reviewers
-communicate **only** through this file for the review gate.
+Copy to `.cursor/thoughts/non-finalized/review-<topic>.md` for each
+change set. Coder and Reviewers communicate **only** through this file
+for the review gate.
 
-`.cursor/reviews/*` is gitignored. Do not commit review threads, `/goal`
-logs, or `/repro` notes.
+While the concept is open, keep the thread in **non-finalized**
+(committed). After QA PASS, move it to
+`.cursor/thoughts/finalized/` (gitignored). See
+[thoughts-layout.md](thoughts-layout.md).
 
 ```markdown
 # Review: <topic>
 
-**Branch:** feature/ticket-rooms (#58)
+**Branch:** feature/<name>-3665
 **Status:** In review | Changes requested | Satisfied — ready for security | Closed
 **Push policy:** Only QA may give the OK to push. Coders must run
 applicable CodeQL on their own changes. No push, publish, PR
@@ -53,6 +56,13 @@ applicable CodeQL is satisfied, **and QA marks the publish gate PASS**.
 ## Coder response (round N)
 - Replies + what changed:
 
+## Handoff
+- From:
+- To:
+- Pass-along:
+- Sent back because: n/a
+- Ask: n/a
+
 ## Security (after Satisfied)
 - Snyk / review-security results:
 - Verdict: Clear / Blocked
@@ -70,5 +80,6 @@ applicable CodeQL is satisfied, **and QA marks the publish gate PASS**.
 - Rust Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
 - New unresolved CodeQL findings: N
 - Publish gate: PASS / BLOCKED
+- Thought files to finalize:
 - Result:
 ```

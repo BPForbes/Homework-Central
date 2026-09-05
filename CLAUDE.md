@@ -59,7 +59,7 @@ When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
 - Prefer `codegraph search <term>` over broad directory reads.
 - Do not stage generated local directories (`.codegraph/`, `.code-review-graph/`,
   `claude-mem/`, `node_modules/`, `.codeql-db-csharp/`, `.codeql-db-javascript/`,
-  `.codeql-db-rust/`, `.cursor/reviews/`).
+  `.codeql-db-rust/`, `.cursor/thoughts/finalized/`).
 - Do not commit local CodeQL SARIF dumps (`codeql-*.sarif`).
 - Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 

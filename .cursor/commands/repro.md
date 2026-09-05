@@ -1,6 +1,6 @@
 ---
 name: repro
-description: Reproduce a failure with exact commands before declaring a cause. Notes stay in .cursor/reviews/.
+description: Reproduce a failure with exact commands before declaring a cause. Notes stay in .cursor/thoughts/non-finalized/.
 ---
 
 # /repro
@@ -10,7 +10,7 @@ Also: `reproduce`, `write a repro`.
 Reproduce the failure before declaring a cause.
 
 1. Recreate it with exact commands, inputs, and exit codes.
-2. Write the repro to `.cursor/reviews/repro-<topic>.md` (gitignored). Do not commit it.
+2. Write the repro to `.cursor/thoughts/non-finalized/repro-<topic>.md`.
 3. Do not claim a root cause until the repro ran (or the environment cannot run it — then say so).
 4. A successful repro or fix still does **not** authorize a push.
    **Only QA may give the OK to push.** Coders who change code must

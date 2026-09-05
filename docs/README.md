@@ -22,7 +22,6 @@ per class, endpoint, TSX panel, or complexity finding. See
 | Identity | [identity.md](./identity.md) | Auth, sessions, captcha, account classes, tenancy |
 | Chat | [chat.md](./chat.md) | Rooms, messages, SignalR, uploads, ClamAV, downloads |
 | Tickets | [tickets.md](./tickets.md) | Portals, preface checks, votes, neural scoring, NeuralNet admin |
-| NN training research | [nn-training-db-relief-research.md](./nn-training-db-relief-research.md), [nn-training-heap-spill-research.md](./nn-training-heap-spill-research.md) | Persist-on-stop vs heap-pressure spill |
 
 Local Docker Compose profiles, WSL caps, and ClamAV resource notes live in
 [`README.md`](../README.md). Assessment queue capacity is noted in
@@ -47,3 +46,8 @@ Local Docker Compose profiles, WSL caps, and ClamAV resource notes live in
 
 When documents overlap, update the canonical module file and link from secondary
 notes. Do not invent parallel standards or per-item Markdown files.
+
+Agent thought-process files (research dumps, review threads, role goals)
+live under `.cursor/thoughts/non-finalized/` while a concept is open and
+move to `.cursor/thoughts/finalized/` after QA. They are not feature-level
+`docs/`.

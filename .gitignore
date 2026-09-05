@@ -27,8 +27,8 @@ appsettings.Local.json
 .code-review-graph/
 claude-mem/
 
-# Local DevOps agent thoughts (review threads, goals, repros). Do not commit.
-.cursor/reviews/*
+# Closed DevOps thought-process files (moved after QA PASS). Do not commit.
+.cursor/thoughts/finalized/*
 
 # Local CodeQL CLI databases and SARIF dumps
 .codeql-db-csharp/

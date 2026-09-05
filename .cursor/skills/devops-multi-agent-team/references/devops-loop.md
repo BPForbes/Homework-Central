@@ -1,10 +1,13 @@
 # DevOps development loop — detailed checklists
 
 Use these checklists when executing the orchestrator loop. Persist `/goal`,
-review threads, and `/repro` notes under `.cursor/reviews/` (gitignored).
-Spawn roles with `/create-subagent` asynchronously **in pods** (research,
-review, security, qa), not a linear queue. Command catalog:
-[agent-commands.md](agent-commands.md).
+review threads, and `/repro` notes under
+`.cursor/thoughts/non-finalized/` (committed while open). After QA PASS,
+move closed thoughts to `.cursor/thoughts/finalized/` (gitignored).
+See [thoughts-layout.md](thoughts-layout.md) and
+[role-identity.md](role-identity.md). Spawn roles with `/create-subagent`
+asynchronously **in pods** (`is_background: true` / `run_in_background:
+true`). Command catalog: [agent-commands.md](agent-commands.md).
 
 ## 1. Planner
 
@@ -42,13 +45,15 @@ Before proposing new structure:
 - Run applicable CodeQL on every code change before handing to Reviewers.
   Developer CodeQL does **not** authorize a push.
 - Keep changes local until **QA gives the OK to push** (communicate in
-  `.cursor/reviews/<topic>.md`). Only QA may authorize a push.
+  `.cursor/thoughts/non-finalized/review-<topic>.md`). Only QA may authorize a push.
+  Ask Researcher when the change needs evidence.
   DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR
   OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 ## 3b. Documentation & Research (online media)
 
-- Inventory `docs/` and authoritative Markdown first.
+- Inventory `docs/` and open thoughts under `.cursor/thoughts/non-finalized/` first.
+  Do not write research dumps into `docs/`.
 - Fetch online media as needed (`WebSearch`, `WebFetch`, browser): vendor docs, releases, issues, articles.
 - Write a research brief into the review thread (URLs + takeaways). Reviewers must use it.
 
@@ -95,7 +100,10 @@ REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 If CodeQL cannot be executed when required: do not claim CodeQL passed and do
 not automatically publish.
 
-Fail → feedback list for Coder → retest (re-open reviewers if code changes).
+Fail → feedback list for Coder (primary) and Reviewer → retest (re-open reviewers if code changes).
+After PASS, list thought files to move to finalized.
+
+Ask the Coder first, then the Reviewer ([role-identity.md](role-identity.md)).
 
 ## 6. Optimization
 
@@ -152,6 +160,8 @@ Capture before/after where possible:
 - Hot app paths only if in scope
 
 ## Interrupt routing cheat sheet
+
+Human interrupts start a **side sprint from research** (see the skill).
 
 | Human says | Route to |
 |------------|----------|
