@@ -12,7 +12,12 @@ role goals in `docs/`.
 | `.cursor/thoughts/finalized/` | **Gitignored** | Concept is done (QA signed off on the related change) |
 
 `.cursor/thoughts/finalized/*` replaces the old `.cursor/reviews/*`
-gitignore rule.
+gitignore rule. Leftover `.cursor/reviews/` files are obsolete: do
+**not** `git add` them. Move any still-useful notes into
+`non-finalized/` or `finalized/`, then leave the old directory untracked.
+
+Keep `.cursor/thoughts/non-finalized/.gitkeep` so the open-thoughts
+directory still exists after a QA move empties it.
 
 ## What goes where
 
