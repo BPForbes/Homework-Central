@@ -85,9 +85,11 @@ services:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
-    # Published for local dev (scripts/run-dev.*). Omit in production deployments.
+    # Published for local dev (scripts/run-dev.*). Bind IPv4 loopback only so
+    # Windows host checks and the API use 127.0.0.1 instead of dual-stack localhost.
+    # Omit the host mapping in production deployments.
     ports:
-      - "${POSTGRES_HOST_PORT:-5434}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

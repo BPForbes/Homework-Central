@@ -44,8 +44,8 @@ export FCaptcha__ServerUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 export FCaptcha__PublicUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 export HC_DEV_BYPASS=1
-export ConnectionStrings__MasterConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
-export ConnectionStrings__PostgresAdmin="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=postgres;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
+export ConnectionStrings__MasterConnection="Host=127.0.0.1;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
+export ConnectionStrings__PostgresAdmin="Host=127.0.0.1;Port=${POSTGRES_HOST_PORT};Database=postgres;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 export Tenancy__ClusterEnvironment=dev
 export DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER=1
 
@@ -55,7 +55,7 @@ if [[ "${HC_API_WATCH:-1}" == "0" ]]; then
 fi
 
 printf 'Homework Central API - http://localhost:5000\n'
-printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
+printf 'Using Postgres user %s on 127.0.0.1:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
 if [[ "$USE_WATCH" == "1" ]]; then
   printf 'API watch enabled (dotnet watch). File changes / git pull rebuild or hot-reload the process.\n'
   printf 'Set HC_API_WATCH=0 for a one-shot run without watching.\n'
@@ -71,7 +71,7 @@ cleanup_api() {
 trap cleanup_api EXIT
 
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
-  ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
   ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" || fail "Could not start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
   ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" || fail "Could not start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
