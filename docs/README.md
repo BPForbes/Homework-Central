@@ -22,6 +22,7 @@ per class, endpoint, TSX panel, or complexity finding. See
 | Identity | [identity.md](./identity.md) | Auth, sessions, captcha, account classes, tenancy |
 | Chat | [chat.md](./chat.md) | Rooms, messages, SignalR, uploads, ClamAV, downloads |
 | Tickets | [tickets.md](./tickets.md) | Portals, preface checks, votes, neural scoring, NeuralNet admin |
+| NN training research | [nn-training-db-relief-research.md](./nn-training-db-relief-research.md), [nn-training-heap-spill-research.md](./nn-training-heap-spill-research.md) | Persist-on-stop vs heap-pressure spill |
 
 Local Docker Compose profiles, WSL caps, and ClamAV resource notes live in
 [`README.md`](../README.md). Assessment queue capacity is noted in

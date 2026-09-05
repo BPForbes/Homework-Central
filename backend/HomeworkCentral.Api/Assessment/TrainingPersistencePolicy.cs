@@ -3,6 +3,8 @@ namespace HomeworkCentral.Api.Assessment;
 /// <summary>
 /// Training SQL is written at session start (Queued row) and again when a run
 /// stops, completes, or fails — not after every continuous step.
+/// Heap-pressure spill is the only mid-run SQL exception: persist the latest
+/// weights/bias snapshot, then empty in-memory traces so training can continue.
 /// </summary>
 public static class TrainingPersistencePolicy
 {
