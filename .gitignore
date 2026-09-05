@@ -27,8 +27,12 @@ appsettings.Local.json
 .code-review-graph/
 claude-mem/
 
-# Closed DevOps thought-process files (moved after QA PASS). Do not commit.
-.cursor/thoughts/finalized/*
+# Transient DevOps thoughts (review, repro, research, goals, Push JSON).
+# Never commit these. Moving them to finalized later does not remove
+# blobs from already-pushed commits. Keepfile only.
+.cursor/thoughts/non-finalized/**
+!.cursor/thoughts/non-finalized/.gitkeep
+.cursor/thoughts/finalized/**
 
 # Local CodeQL CLI databases and SARIF dumps
 .codeql-db-csharp/

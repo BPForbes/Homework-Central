@@ -20,9 +20,16 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - Write goals to `.cursor/thoughts/non-finalized/goal-<role>-<topic>.md`.
 - Write review / research / repro notes under `.cursor/thoughts/non-finalized/`.
 - After QA PASS on this concept, the Orchestrator moves those files to
-  `.cursor/thoughts/finalized/` (gitignored). Do not put thought dumps in `docs/`.
+  `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
+  Do not put thought dumps in `docs/`.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
+- Reuse existing helpers, scripts, and docs. Do not duplicate them.
+- Stay on the current non-`main` branch. Do not cut a new branch
+  for each increment unless The Client asks.
+- Do not git-push until QA PASS, then one squashed commit
+  ([thoughts-layout.md](../skills/devops-multi-agent-team/references/thoughts-layout.md)
+  One push).
 
 **Ask path:** Ask the Orchestrator before touching external systems.
 
