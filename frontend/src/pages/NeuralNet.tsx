@@ -572,20 +572,36 @@ export function NeuralNet() {
   }, [sessions, sessionStatusRef])
 
   async function decide(id: string, approve: boolean) { setBusyId(id); try { if (approve) await neuralNetApi.approve(id); else await neuralNetApi.reject(id); setFeedback(items => items.filter(item => item.scoreEventId !== id)) } catch { setError('The feedback decision could not be saved.') } finally { setBusyId(null) } }
+  async function refreshSessionHistory() {
+    const r = await neuralNetApi.listTrainingSessions()
+    setSessions(r.data.items)
+    setSessionsHasMore(r.data.hasMore)
+    setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+  }
+  function overlaySession(sessionId: string, patch: Partial<NeuralNetTrainingSession>) {
+    setSessions((prev) => prev.map((session) => (
+      session.sessionId === sessionId ? { ...session, ...patch } : session
+    )))
+  }
   async function startTraining() {
     setBusyId('training')
     try {
-      await neuralNetApi.startTraining({
+      const started = await neuralNetApi.startTraining({
         // ticketCount 0 reinforces continuous even if the boolean is dropped in transit.
         ticketCount: continuous ? 0 : ticketCount,
         maxPassesPerTicket: continuous ? 1 : maxPasses,
         mode,
         continuous,
       })
-      const r = await neuralNetApi.listTrainingSessions()
-      setSessions(r.data.items)
-      setSessionsHasMore(r.data.hasMore)
-      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+      setSessions((prev) => {
+        const next = prev.filter((session) => session.sessionId !== started.data.sessionId)
+        return [started.data, ...next]
+      })
+      try {
+        await refreshSessionHistory()
+      } catch {
+        // Keep the optimistic row if the history query is still recovering.
+      }
     } catch {
       setError('Training could not be queued.')
     } finally {
@@ -597,10 +613,12 @@ export function NeuralNet() {
     setBusyId(busyKey)
     try {
       await neuralNetApi.stopTrainingSession(sessionId)
-      const r = await neuralNetApi.listTrainingSessions()
-      setSessions(r.data.items)
-      setSessionsHasMore(r.data.hasMore)
-      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+      overlaySession(sessionId, { status: 'Cancelled', liveProgress: null })
+      try {
+        await refreshSessionHistory()
+      } catch {
+        // Keep the cancelled overlay so Start can appear while history recovers.
+      }
     } catch {
       setError('That training session could not be stopped.')
     } finally {
@@ -612,10 +630,12 @@ export function NeuralNet() {
     setBusyId(busyKey)
     try {
       await neuralNetApi.resumeTrainingSession(sessionId)
-      const r = await neuralNetApi.listTrainingSessions()
-      setSessions(r.data.items)
-      setSessionsHasMore(r.data.hasMore)
-      setSessionsNextBeforeUtc(r.data.nextBeforeUtc)
+      overlaySession(sessionId, { status: 'Queued' })
+      try {
+        await refreshSessionHistory()
+      } catch {
+        // Keep the queued overlay so live polling starts while history recovers.
+      }
     } catch {
       setError('That training session could not be started again.')
     } finally {
