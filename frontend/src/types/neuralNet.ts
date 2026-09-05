@@ -56,6 +56,7 @@ export interface NeuralNetVisualizer {
 }
 
 export interface NeuralNetTrainingLiveProgress {
+  sessionId: string
   phase: string
   ticketsRequested: number
   ticketsGenerated: number
