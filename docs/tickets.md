@@ -1234,7 +1234,7 @@ lineage delete, which purges first) runs.
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs) | Chat-monitor model inputs, targets, predictions, traces, telemetry, and factory contracts. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs) | Moderation/tutoring model selection and training-mode resolution. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs) | Math.NET Numerics dense network engine (`DenseLayer`, forward/backprop, momentum SGD, parameter flatten). |
-| [backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs](../backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs) | Parallel extraction of live mesh active node/edge indexes from forward/backprop traces. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs](../backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs) | Sequential top-K extraction of live mesh active node/edge indexes (Rust `hc_heap_top_k_abs` or managed `PriorityQueue`; no Parallel.ForEach). |
 | [backend/HomeworkCentral.Api/Assessment/Node.cs](../backend/HomeworkCentral.Api/Assessment/Node.cs) | Topology node identity/labels for replay and visualizer mapping. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs) | CPU hashed-MLP scorer + cascade wrappers over `NeuralNetwork`; telemetry, topology, and parameter snapshots. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs) | Shared 86-float feature encoder and vector embedding helper. |
@@ -1257,7 +1257,10 @@ the next step until Stop. A running session with no live worker is marked stoppe
 admin list cannot strand an unstoppable row.
 `GET /api/neural-net/training` projects replay presence flags rather than the JSON payloads: those
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
-Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
+Worker replay is not snapshotted every N steps. Persist-on-stop is the default; mid-run SQL is
+an emergency heap spill (`spill-checkpoint-v1` on the run row). In-memory replay is bounded by
+`ReplayBuilder.MaxFrames` and compact trace sampling; `TrySerialize` skips a V2 blob when the
+heap cannot allocate it.
 
 Synthetic training uses a **single multipurpose training LLM** (`INeuralNetTrainingLlmModule`) for
 scenario generation, embedded self-critique, and revision rewrites (generate+evaluate in one Ollama
