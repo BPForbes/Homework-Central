@@ -462,7 +462,20 @@ Training sessions:
 - select matching-domain tickets plus a configured cross-domain sample;
 - train mini-batches with momentum SGD and cascade chain-rule updates;
 - persist examples and vector mirrors in batches;
-- sample full traces while compacting routine replay frames.
+- sample full traces while compacting routine replay frames;
+- treat the in-memory session as a heap bucket: when
+  `TrainingHeapPressure` says the CLR heap or process working set is
+  about to fill (70% of `GCMemoryInfo.TotalAvailableMemoryBytes`), write
+  the latest weights/bias snapshot to
+  `ChatMonitoringNeuralModelRun.WorkerReplayJson` as
+  `spill-checkpoint-v1`, empty replay traces, and reload that snapshot
+  so continuous or finite training can continue. The same persist-and-empty
+  happens on Stop / pause and when a finite run completes. Mid-run SQL
+  is otherwise still persist-on-stop only. Rust `hc_heap_should_spill`
+  and `hc_heap_top_k_abs` own the watermark and bounded mesh top-K;
+  C# still samples `GC.GetGCMemoryInfo()` because the native library
+  cannot see the CLR heap. After `OutOfMemoryException`, training spills
+  once instead of retrying the same allocating step until the process dies.
 
 ### Readability exception: hashed-MLP mini-batch training
 

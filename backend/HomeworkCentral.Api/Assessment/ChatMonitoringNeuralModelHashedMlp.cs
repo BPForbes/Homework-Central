@@ -33,6 +33,17 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly NeuralNetTopologySnapshot topology;
     private readonly Queue<SupportExample> support = new();
     private readonly object gate = new();
+    private static readonly ForwardPropagationTrace EmptyForwardTrace = new(
+        [],
+        [],
+        [],
+        [],
+        [],
+        0f,
+        0f,
+        0f,
+        0f,
+        0f);
 
     protected ChatMonitoringNeuralModelHashedMlp(
         NeuralModelKindChatMonitoring kind,
@@ -508,7 +519,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(ChatMonitoringNeuralModelInput input, float[]? encoded = null)
     {
         float[] features = encoded ?? ChatMonitoringFeatureEncoder.Encode(input);
-        NeuralNetworkForwardState cache = network.Forward(features, captureTrace: true);
+        bool captureTrace = !TrainingHeapPressure.ShouldSkipTraces();
+        NeuralNetworkForwardState cache = network.Forward(features, captureTrace);
         return BuildInference(input, features, cache);
     }
 
@@ -532,7 +544,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             : $"Limited training support for {category}; neural score stands alone when LLM review is disabled.";
         return new ChatMonitoringNeuralModelInferenceTrace(
             new ChatMonitoringNeuralModelPrediction(evidence, relevance, confidence, Kind, ModelVersion, category, reasoning, categoryConfidence),
-            cache.Trace!);
+            cache.Trace ?? EmptyForwardTrace);
     }
 
     private double MaxSupportSimilarity(float[] features)

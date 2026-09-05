@@ -361,6 +361,128 @@ pub unsafe extern "C" fn hc_batch_cosine_json(
     0
 }
 
+/// Spill when the CLR-sampled heap is at or above the watermark, or when process
+/// RSS has reached 70% of the reported limit. Returns `1` (spill), `0` (hold),
+/// or `-1` (negative inputs). This crate does not read the .NET GC heap; C#
+/// passes [`GCMemoryInfo`](https://learn.microsoft.com/en-us/dotnet/api/system.gcmemoryinfo)
+/// samples.
+#[no_mangle]
+pub extern "C" fn hc_heap_should_spill(
+    used_bytes: i64,
+    high_watermark_bytes: i64,
+    process_rss_bytes: i64,
+    process_limit_bytes: i64,
+) -> i32 {
+    if used_bytes < 0
+        || high_watermark_bytes < 0
+        || process_rss_bytes < 0
+        || process_limit_bytes < 0
+    {
+        return -1;
+    }
+    if high_watermark_bytes > 0 && used_bytes >= high_watermark_bytes {
+        return 1;
+    }
+    if process_limit_bytes > 0
+        && process_rss_bytes >= ((process_limit_bytes as f64) * 0.70) as i64
+    {
+        return 1;
+    }
+    0
+}
+
+/// Bounded top-K by absolute value. Writes at most `take` indexes/values,
+/// largest-abs first. Skips non-finite values and `|v| <= 1e-6`.
+///
+/// Uses a min-heap of size `take` so the working set is O(k), not O(n).
+/// See [`BinaryHeap`](https://doc.rust-lang.org/stable/std/collections/struct.BinaryHeap.html).
+///
+/// # Safety
+/// `values` and `indexes` must hold `count` elements when `count` is nonzero.
+/// `out_indexes` and `out_values` must hold `take` elements when `take` is nonzero.
+#[no_mangle]
+pub unsafe extern "C" fn hc_heap_top_k_abs(
+    values: *const f32,
+    indexes: *const i32,
+    count: usize,
+    take: usize,
+    out_indexes: *mut i32,
+    out_values: *mut f32,
+) -> i32 {
+    if take == 0 {
+        return 0;
+    }
+    if out_indexes.is_null() || out_values.is_null() {
+        return -1;
+    }
+    if count > 0 && (values.is_null() || indexes.is_null()) {
+        return -1;
+    }
+
+    let values = if count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(values, count) }
+    };
+    let indexes = if count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(indexes, count) }
+    };
+
+    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<AbsEntry>> =
+        std::collections::BinaryHeap::with_capacity(take.min(count).saturating_add(1));
+    for i in 0..count {
+        let abs = values[i].abs();
+        if !abs.is_finite() || abs <= 1e-6 {
+            continue;
+        }
+        let entry = AbsEntry {
+            abs_bits: abs.to_bits(),
+            index: indexes[i],
+        };
+        if heap.len() < take {
+            heap.push(std::cmp::Reverse(entry));
+        } else if let Some(std::cmp::Reverse(worst)) = heap.peek() {
+            if abs.to_bits() > worst.abs_bits {
+                heap.pop();
+                heap.push(std::cmp::Reverse(entry));
+            }
+        }
+    }
+
+    let mut items: Vec<AbsEntry> = heap.into_iter().map(|std::cmp::Reverse(entry)| entry).collect();
+    items.sort_by(|left, right| right.abs_bits.cmp(&left.abs_bits));
+    let written = items.len();
+    let out_i = unsafe { std::slice::from_raw_parts_mut(out_indexes, take) };
+    let out_v = unsafe { std::slice::from_raw_parts_mut(out_values, take) };
+    for (slot, item) in items.into_iter().enumerate() {
+        out_i[slot] = item.index;
+        out_v[slot] = f32::from_bits(item.abs_bits);
+    }
+    written as i32
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+struct AbsEntry {
+    abs_bits: u32,
+    index: i32,
+}
+
+impl Ord for AbsEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.abs_bits
+            .cmp(&other.abs_bits)
+            .then(self.index.cmp(&other.index))
+    }
+}
+
+impl PartialOrd for AbsEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// UTF-8 text, or `""` when `len` is 0 (never `from_raw_parts` on a null empty).
 ///
 /// # Safety
@@ -441,5 +563,35 @@ mod tests {
             hc_batch_cosine_json(query.as_ptr(), 1, std::ptr::null(), 0, std::ptr::null(), 0, std::ptr::null_mut())
         };
         assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn heap_should_spill_at_watermark() {
+        assert_eq!(hc_heap_should_spill(70, 70, 1, 100), 1);
+        assert_eq!(hc_heap_should_spill(69, 70, 1, 100), 0);
+        assert_eq!(hc_heap_should_spill(10, 0, 70, 100), 1);
+        assert_eq!(hc_heap_should_spill(-1, 10, 0, 0), -1);
+    }
+
+    #[test]
+    fn heap_top_k_abs_keeps_largest() {
+        let values = [0.1_f32, -2.0, 0.0, 3.0, 1e-8];
+        let indexes = [10, 11, 12, 13, 14];
+        let mut out_indexes = [0_i32; 2];
+        let mut out_values = [0.0_f32; 2];
+        let written = unsafe {
+            hc_heap_top_k_abs(
+                values.as_ptr(),
+                indexes.as_ptr(),
+                values.len(),
+                2,
+                out_indexes.as_mut_ptr(),
+                out_values.as_mut_ptr(),
+            )
+        };
+        assert_eq!(written, 2);
+        assert_eq!(out_indexes, [13, 11]);
+        assert!((out_values[0] - 3.0).abs() < 1e-6);
+        assert!((out_values[1] - 2.0).abs() < 1e-6);
     }
 }

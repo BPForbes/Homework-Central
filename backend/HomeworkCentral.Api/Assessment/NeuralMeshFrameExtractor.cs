@@ -1,11 +1,9 @@
-using System.Collections.Concurrent;
-
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
 /// Builds live mesh highlight indexes from forward/backprop traces.
-/// Uses parallel partitions so large activation/gradient bags do not stall the training loop
-/// on the visualization publish path.
+/// Uses a bounded top-K (Rust min-heap when <c>libhc_kernels</c> is loaded)
+/// so a dense parameter bag never materializes a full sort.
 /// </summary>
 public static class NeuralMeshFrameExtractor
 {
@@ -77,23 +75,11 @@ public static class NeuralMeshFrameExtractor
         if (forward is null || forward.NodeActivations.Count == 0)
             return [];
 
-        ConcurrentBag<(int Index, float AbsValue)> candidates = new();
-        Parallel.ForEach(
+        return TopParameterIndexes(
             forward.NodeActivations,
-            activation =>
-            {
-                float absolute = MathF.Abs(activation.Value);
-                if (absolute <= ActivationEpsilon)
-                    return;
-                candidates.Add((activation.Index, absolute));
-            });
-
-        return candidates
-            .OrderByDescending(item => item.AbsValue)
-            .Select(item => item.Index)
-            .Distinct()
-            .Take(MaxActiveNodes)
-            .ToList();
+            static value => MathF.Abs(value) > ActivationEpsilon,
+            MaxActiveNodes,
+            distinct: true);
     }
 
     private static List<int> ExtractActiveEdges(ForwardPropagationTrace? forward, BackpropagationTrace? backward)
@@ -102,8 +88,9 @@ public static class NeuralMeshFrameExtractor
         {
             return TopParameterIndexes(
                 backward.WeightGradients,
-                value => MathF.Abs(value) > ActivationEpsilon,
-                MaxActiveEdges);
+                static value => MathF.Abs(value) > ActivationEpsilon,
+                MaxActiveEdges,
+                distinct: false);
         }
 
         if (forward is null || forward.EdgeContributions.Count == 0)
@@ -111,29 +98,69 @@ public static class NeuralMeshFrameExtractor
 
         return TopParameterIndexes(
             forward.EdgeContributions,
-            value => MathF.Abs(value) > ActivationEpsilon,
-            MaxActiveEdges);
+            static value => MathF.Abs(value) > ActivationEpsilon,
+            MaxActiveEdges,
+            distinct: false);
     }
 
     private static List<int> TopParameterIndexes(
         IReadOnlyList<SparseValue> values,
         Func<float, bool> include,
-        int take)
+        int take,
+        bool distinct)
     {
-        ConcurrentBag<(int Index, float AbsValue)> candidates = new();
-        Parallel.ForEach(
-            values,
-            item =>
-            {
-                if (!include(item.Value))
-                    return;
-                candidates.Add((item.Index, MathF.Abs(item.Value)));
-            });
+        if (take <= 0 || values.Count == 0)
+            return [];
 
-        return candidates
-            .OrderByDescending(item => item.AbsValue)
-            .Select(item => item.Index)
-            .Take(take)
-            .ToList();
+        int count = values.Count;
+        float[] packedValues = new float[count];
+        int[] packedIndexes = new int[count];
+        for (int index = 0; index < count; index++)
+        {
+            SparseValue item = values[index];
+            packedValues[index] = include(item.Value) ? item.Value : 0f;
+            packedIndexes[index] = item.Index;
+        }
+
+        if (RustKernels.TryTopKAbs(packedValues, packedIndexes, take, out int[] rustIndexes))
+        {
+            return distinct ? rustIndexes.Distinct().ToList() : [.. rustIndexes];
+        }
+
+        return SelectTopKManaged(packedValues, packedIndexes, take, distinct);
+    }
+
+    /// <summary>Managed min-heap of size <paramref name="take"/>; same skip rule as <c>hc_heap_top_k_abs</c>.</summary>
+    internal static List<int> SelectTopKManaged(
+        float[] values,
+        int[] indexes,
+        int take,
+        bool distinct)
+    {
+        PriorityQueue<int, float> worstKept = new();
+        for (int index = 0; index < values.Length; index++)
+        {
+            float absolute = MathF.Abs(values[index]);
+            if (!float.IsFinite(absolute) || absolute <= ActivationEpsilon)
+                continue;
+
+            if (worstKept.Count < take)
+            {
+                worstKept.Enqueue(indexes[index], absolute);
+            }
+            else if (worstKept.TryPeek(out _, out float worst) && absolute > worst)
+            {
+                worstKept.Dequeue();
+                worstKept.Enqueue(indexes[index], absolute);
+            }
+        }
+
+        List<(int Index, float Abs)> ranked = [];
+        while (worstKept.TryDequeue(out int selected, out float absolute))
+            ranked.Add((selected, absolute));
+
+        ranked.Sort(static (left, right) => right.Abs.CompareTo(left.Abs));
+        IEnumerable<int> ordered = ranked.Select(static item => item.Index);
+        return distinct ? ordered.Distinct().ToList() : ordered.ToList();
     }
 }

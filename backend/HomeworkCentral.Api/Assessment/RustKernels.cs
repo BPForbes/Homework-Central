@@ -5,7 +5,8 @@ namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
 /// Loads <c>libhc_kernels</c> for lexical bins, store cosine, GEMV,
-/// expertise hash, HashEmbed, JSON batch cosine, and support-set cosine.
+/// expertise hash, HashEmbed, JSON batch cosine, support-set cosine,
+/// heap-pressure watermarks, and bounded top-K mesh extraction.
 /// Encode metadata, hashed-MLP train/replay, and the rest of the API stay
 /// in C#. The API image does not ship rustc; managed implementations run
 /// when the native library is missing or a newer export is absent.
@@ -36,6 +37,8 @@ internal static class RustKernels
     private static readonly CosineNative? SupportCosineFn;
     private static readonly SupportMaxCosineNative? SupportMaxCosineFn;
     private static readonly BatchCosineJsonNative? BatchCosineJsonFn;
+    private static readonly HeapShouldSpillNative? HeapShouldSpillFn;
+    private static readonly HeapTopKAbsNative? HeapTopKAbsFn;
 
     internal static bool IsLoaded { get; }
 
@@ -63,6 +66,8 @@ internal static class RustKernels
         TryBind(handle, "hc_support_cosine", out CosineNative? supportCosine);
         TryBind(handle, "hc_support_max_cosine", out SupportMaxCosineNative? supportMax);
         TryBind(handle, "hc_batch_cosine_json", out BatchCosineJsonNative? batchCosine);
+        TryBind(handle, "hc_heap_should_spill", out HeapShouldSpillNative? heapSpill);
+        TryBind(handle, "hc_heap_top_k_abs", out HeapTopKAbsNative? heapTopK);
         GemvBiasFn = gemvBias;
         GemvTransposeFn = gemvTranspose;
         AddExpertiseHashFn = addExpertise;
@@ -70,6 +75,8 @@ internal static class RustKernels
         SupportCosineFn = supportCosine;
         SupportMaxCosineFn = supportMax;
         BatchCosineJsonFn = batchCosine;
+        HeapShouldSpillFn = heapSpill;
+        HeapTopKAbsFn = heapTopK;
         IsLoaded = true;
     }
 
@@ -403,6 +410,66 @@ internal static class RustKernels
         return true;
     }
 
+    internal static bool TryShouldSpill(
+        long usedBytes,
+        long highWatermarkBytes,
+        long processRssBytes,
+        long processLimitBytes,
+        out bool spill)
+    {
+        spill = false;
+        if (HeapShouldSpillFn is null)
+            return false;
+
+        int status = HeapShouldSpillFn(usedBytes, highWatermarkBytes, processRssBytes, processLimitBytes);
+        if (status < 0)
+            return false;
+
+        spill = status > 0;
+        return true;
+    }
+
+    internal static unsafe bool TryTopKAbs(
+        ReadOnlySpan<float> values,
+        ReadOnlySpan<int> indexes,
+        int take,
+        out int[] selectedIndexes)
+    {
+        selectedIndexes = [];
+        if (HeapTopKAbsFn is null || take <= 0)
+            return false;
+        if (values.Length != indexes.Length)
+            return false;
+        if (values.Length == 0)
+            return true;
+
+        int[] outIndexes = new int[take];
+        float[] outValues = new float[take];
+        int written;
+        fixed (float* valuesPointer = values)
+        fixed (int* indexesPointer = indexes)
+        fixed (int* outIndexPointer = outIndexes)
+        fixed (float* outValuePointer = outValues)
+        {
+            written = HeapTopKAbsFn(
+                valuesPointer,
+                indexesPointer,
+                (nuint)values.Length,
+                (nuint)take,
+                outIndexPointer,
+                outValuePointer);
+        }
+
+        if (written < 0)
+            return false;
+
+        if (written == 0)
+            return true;
+
+        selectedIndexes = outIndexes[..written];
+        return true;
+    }
+
     private static float[] ToArray(IReadOnlyList<float> values)
     {
         if (values is float[] array)
@@ -542,6 +609,22 @@ internal static class RustKernels
         nuint packedLength,
         nuint* lengths,
         nuint count);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int HeapShouldSpillNative(
+        long usedBytes,
+        long highWatermarkBytes,
+        long processRssBytes,
+        long processLimitBytes);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int HeapTopKAbsNative(
+        float* values,
+        int* indexes,
+        nuint count,
+        nuint take,
+        int* outIndexes,
+        float* outValues);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private unsafe delegate int BatchCosineJsonNative(

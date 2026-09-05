@@ -32,7 +32,7 @@ Observed cascade:
 
 ## Rust
 
-This checkout already has kernels under `rust/` (`hc-kernels`, `hc-gemv`, `hc-feature-encode`, `hc-vector-cosine`; workspace `rust/Cargo.toml`) bound from `backend/HomeworkCentral.Api/Assessment/RustKernels.cs`. Further kernel work can land in those crates. Do **not** rewrite EF, auth, or training orchestration in Rust.
+This checkout already has kernels under `rust/` (`hc-kernels`, `hc-gemv`, `hc-feature-encode`, `hc-vector-cosine`; workspace `rust/Cargo.toml`) bound from `backend/HomeworkCentral.Api/Assessment/RustKernels.cs`. Heap-pressure watermarks and bounded mesh top-K live in `hc-kernels` (`hc_heap_should_spill`, `hc_heap_top_k_abs`); C# still samples the CLR heap. Do **not** rewrite EF, auth, or training orchestration in Rust. See [`nn-training-heap-spill-research.md`](./nn-training-heap-spill-research.md).
 
 ## Plan
 
