@@ -48,6 +48,6 @@ When documents overlap, update the canonical module file and link from secondary
 notes. Do not invent parallel standards or per-item Markdown files.
 
 Agent thought-process files (research dumps, review threads, role goals)
-live under `.cursor/thoughts/non-finalized/` while a concept is open and
-move to `.cursor/thoughts/finalized/` after QA. They are not feature-level
-`docs/`.
+live under `.cursor/thoughts/` on the local machine and are gitignored.
+They are not feature-level `docs/` and must not be committed so a later
+push can “see” them.

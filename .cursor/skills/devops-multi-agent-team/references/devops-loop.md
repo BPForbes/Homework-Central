@@ -2,8 +2,8 @@
 
 Use these checklists when executing the orchestrator loop. Persist `/goal`,
 review threads, and `/repro` notes under
-`.cursor/thoughts/non-finalized/` (committed while open). After QA PASS,
-move closed thoughts to `.cursor/thoughts/finalized/` (gitignored).
+`.cursor/thoughts/non-finalized/` (local; do not commit). After QA PASS,
+move closed thoughts to `.cursor/thoughts/finalized/` (still local).
 See [thoughts-layout.md](thoughts-layout.md) and
 [role-identity.md](role-identity.md). Spawn roles with `/create-subagent`
 asynchronously **in pods** (`is_background: true` / `run_in_background:
@@ -38,6 +38,8 @@ Before proposing new structure:
 ## 3. Coder
 
 - Implement only what the plan authorizes.
+- Stay on the current non-`main` branch. Do not cut a new branch
+  for each increment (`AGENTS.md` Git branches).
 - Keep secrets out of git; use the repo’s secret mechanism.
 - Make scripts non-interactive for agents (`--yes`, flags, env vars).
 - Prefer idempotent apply/deploy paths and dry-run where available.
@@ -45,8 +47,11 @@ Before proposing new structure:
 - Run applicable CodeQL on every code change before handing to Reviewers.
   Developer CodeQL does **not** authorize a push.
 - Keep changes local until **QA gives the OK to push** (communicate in
-  `.cursor/thoughts/non-finalized/review-<topic>.md`). Only QA may authorize a push.
-  Ask Researcher when the change needs evidence.
+  `.cursor/thoughts/non-finalized/review-<topic>.md` and an uncommitted
+  `push-<topic>.json` written **before the first review**). Update that
+  JSON when a later change should close feedback. Only QA may authorize
+  a git push.
+  Ask Researcher for a reuse map before duplicating code.
   DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR
   OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
@@ -60,9 +65,14 @@ Before proposing new structure:
 ## 3c. Reviewers (entrypoint before QA)
 
 - PR-style review of local diffs; request improvements like a human PR review.
-- Converse with Coder **in the review thread Markdown** only.
-- Cite research brief, `docs/`, and fetched URLs on each request-change.
+- Converse with Coder in the review thread **and** Push JSON
+  ([push-json.md](push-json.md)). Always compare the JSON to
+  `git diff <integration-base>...HEAD`. Questions and answers use
+  `## Q&A` plus `qa` (same ids). Rounds are not a queue.
+- Cite research brief, reuse map, `docs/`, and fetched URLs.
+  If the Coder duplicated existing code, request an import.
 - Iterate until all reviewers mark Satisfied → then Security → then QA.
+  Reviews may be long; do not rush Satisfied.
 - Satisfied does **not** authorize a push. **Only QA may give the OK to
   push.**
 - Template: [review-thread-template.md](review-thread-template.md).
@@ -100,8 +110,14 @@ REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 If CodeQL cannot be executed when required: do not claim CodeQL passed and do
 not automatically publish.
 
-Fail → feedback list for Coder (primary) and Reviewer → retest (re-open reviewers if code changes).
-After PASS, list thought files to move to finalized.
+Fail → Handoff `To: Coder` from a **VM** review (quality / bug
+standard). Open `triage-<id>.md` when the item must stay tracked
+([triage-template.md](triage-template.md)). An active item restarts
+research → coder → reviewer → QA. Retest; re-open reviewers if code
+changes.
+After PASS, list thought files to move to finalized, then squash
+the skill workstream to one commit and one push
+([thoughts-layout.md](thoughts-layout.md) One push).
 
 Ask the Coder first, then the Reviewer ([role-identity.md](role-identity.md)).
 

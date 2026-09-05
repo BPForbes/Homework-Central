@@ -7,10 +7,16 @@ subagent`). Invocable copies live in `.cursor/commands/`. Use any installed
 
 Working notes, review threads, goal logs, and repro notes are Markdown
 under `.cursor/thoughts/non-finalized/` while the concept is open
-(commit them). After QA PASS, move them to
-`.cursor/thoughts/finalized/` (gitignored). See
-[thoughts-layout.md](thoughts-layout.md). Do not write thought dumps
-into `docs/`.
+(**do not commit them**). Push JSON lives there too. After QA PASS,
+move them to `.cursor/thoughts/finalized/` (still local). See
+[thoughts-layout.md](thoughts-layout.md) and [push-json.md](push-json.md).
+Do not write thought dumps into `docs/`. Durable history is `docs/`
+or skill `references/` only.
+Stay on the current non-`main` branch. Do not cut a new branch for
+each increment (`AGENTS.md` Git branches).
+After QA PASS, squash the skill workstream to one commit and one
+push ([thoughts-layout.md](thoughts-layout.md) One push).
+QA `/triage`: [triage-template.md](triage-template.md).
 
 **Only QA may give the OK to push.** Anyone who changes code (Coder /
 primary developers) must run applicable CodeQL first; that run does not
@@ -62,7 +68,9 @@ Also: `/review-bugbot`, `review the diff`, `look but don't edit`.
 
 **Primary owner: QA.** Reviewers may use the same inspect-only bar.
 
-- Read the diff, tests, logs, and SARIF. Write findings into
+- Confirm the Coder Push JSON exists. Read it as an index, then
+  **always** `git diff <integration-base>...HEAD`, tests, logs,
+  and SARIF. Compare mock and real diff. Write findings into
   `.cursor/thoughts/non-finalized/review-<topic>.md`.
 - **Do not edit product code, workflows, or docs to "fix" findings** while
   acting as `/code-review`. Hand remediations to the Coder.
@@ -76,6 +84,15 @@ Also: `reproduce`, `write a repro`.
 - Write the repro to `.cursor/thoughts/non-finalized/repro-<topic>.md`.
 - Do not claim a root cause until the repro ran (or the environment cannot
   run it — then say so).
+
+## `/triage` — QA tracks a bug or discovery
+
+Also: `open triage`, `track this bug`.
+
+**Owner: QA.** Copy [triage-template.md](triage-template.md) to
+`.cursor/thoughts/non-finalized/triage-<id>.md`. Set State `active`.
+Handoff `To: Coder`. The Orchestrator restarts research → coder →
+reviewer → QA for that id. Invocable copy: `.cursor/commands/triage.md`.
 
 ## Other `/` skills
 

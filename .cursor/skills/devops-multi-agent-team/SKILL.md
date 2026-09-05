@@ -34,13 +34,19 @@ Spawn roles with `/create-subagent` (Cursor `Task`, prompts in
 Never a linear one-at-a-time queue.
 
 Working Markdown (review threads, `/goal` logs, `/repro` notes, role
-goals, research dumps) lives under `.cursor/thoughts/`:
-**non-finalized/** is committed so a concept can survive multiple
-pushes; **finalized/** is gitignored after QA signs off. Layout:
+goals, research dumps) lives under `.cursor/thoughts/` and is
+**gitignored**. Do not commit thoughts so a concept can “survive
+multiple pushes” — that stores blobs in every earlier commit; moving
+them to `finalized/` later only deletes the tip. Layout:
 [references/thoughts-layout.md](references/thoughts-layout.md).
-Identity, ask-paths, and send-backs:
+Identity, ask-paths, send-backs, Coder notify, and reuse:
 [references/role-identity.md](references/role-identity.md).
+Coder/Reviewer mock diffs:
+[references/push-json.md](references/push-json.md).
 Do not put thought-process files in `docs/`.
+Do not `git add` anything under `.cursor/thoughts/` except
+`non-finalized/.gitkeep`. Durable history belongs in `docs/` or
+skill `references/`.
 
 **Only QA may give the OK to push.** Review Satisfied, Security Clear,
 the Orchestrator, and developer CodeQL do not authorize a push.
@@ -63,24 +69,44 @@ After the Coder lands local changes, the **Reviewers** are the next gate — not
 1. Documentation & Research writes/updates a research brief
    (authoritative `docs/` + **online media fetches** + thoughts under
    `.cursor/thoughts/non-finalized/`).
-2. Reviewers inspect the diff like a PR (`/code-review`: look at, do not
-   edit) and converse with the Coder in
+2. Coder writes the **Push JSON** and a Handoff `To: Reviewer`
+   **before the first review** (`closes` may be empty on a fresh
+   change). Schema: [push-json.md](references/push-json.md).
+3. Reviewers compare that JSON to the real
+   `git diff <integration-base>...HEAD` (`/code-review`: look at,
+   do not edit) and converse with the Coder in
    `.cursor/thoughts/non-finalized/review-<topic>.md` (template in
    [references/review-thread-template.md](references/review-thread-template.md)).
-3. Coder applies fixes locally and replies in the same Markdown file.
-4. Iterate until reviewers mark **Satisfied**.
-5. **Do not push** when reviewers are unsatisfied. Satisfied still does
+   They always open the repository diff. An omitted or wrong hunk
+   is a finding, not “unclear.”
+4. Coder applies fixes locally, updates the Push JSON, and
+   **notifies** Reviewers with a Handoff that names the findings
+   the change should close.
+5. Either side may Push again — not a linear queue. Iterate until
+   reviewers mark **Satisfied**. They must have compared mock and
+   real diff before Satisfied. Reviews may be long; do not cut
+   them short to push.
+6. **Do not push** when reviewers are unsatisfied. Satisfied still does
    **not** authorize a push.
-6. Then run **Security** (Snyk / `/review-security`).
-7. Then **QA** (`.cursor/agents/devops-quality-engineer.md`). QA owns
+7. Then run **Security** (Snyk / `/review-security`).
+8. Then **QA** (`.cursor/agents/devops-quality-engineer.md`). QA owns
    **CodeQL, Validation, and Publish Policy**
    ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md))
    and is the **only** role that may give the OK to push.
-8. **Never push until QA gives the OK.** Do not push until reviewers
+9. **Never push until QA gives the OK.** Do not push until reviewers
    are Satisfied, Security is clear, **applicable CodeQL analysis is
    satisfied**, and QA marks the publish gate PASS. If CodeQL cannot be
    executed when required, do not automatically publish and do not claim
    CodeQL passed.
+10. After PASS, the Orchestrator **compresses** the skill workstream
+    to one commit and **one push**
+    ([thoughts-layout.md](references/thoughts-layout.md) One push).
+    QA may send back to the Coder from a VM review, and may open
+    `triage-<id>.md` items
+    ([triage-template.md](references/triage-template.md)).
+    Triage has the same **Q&A** as the review thread. An active
+    triage item restarts research → coder → reviewer → QA. Do
+    not commit “Record Satisfied / Security / QA” notes.
 
 ## When to use
 
@@ -119,7 +145,11 @@ Do **not** invent requirements. Ask the human when scope, environments, tools, o
 - Do not invent CI, Sonar, or CodeQL results — pull from MCP/CLI/SARIF or report unavailable.
 - Do not suppress CodeQL queries or weaken `.github/codeql/codeql-config.yml`
   / `.github/workflows/codeql.yml` to pass the gate. Fix the code.
-- Stay on the active feature branch for #58 (`feature/ticket-rooms`); prefer the existing PR over new branches.
+- Stay on the current non-`main` branch. Do not cut a new branch for each
+  increment, side sprint, or related follow-up. Prefer the existing PR.
+  On `main` only, create one feature branch when work needs one.
+  Canonical: `AGENTS.md` Git branches. Ticket-rooms integration is
+  `feature/ticket-rooms` / #58.
 - Confirm destructive ops (deletes, force-push, hard reset) with the human.
 - **No push** while a review thread is `In review` or `Changes requested`.
 - **Only QA may give the OK to push.** Review Satisfied + Security
@@ -203,6 +233,7 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 
 - Design pipelines, containerization, orchestration, networking, security, and runtime environments.
 - **Before designing anything new, inspect the existing codebase and infra patterns and reuse them when possible.**
+- Produce a **reuse map** (existing helper/script/doc → import / extend / replace). Flag duplicates the Coder must not reimplement.
 - Inventory `docs/` and related authoritative Markdown first.
 - **Research must include fetching online media as needed** (`WebSearch`, `WebFetch`, browser MCP): vendor docs, release notes, GitHub issues, articles — cite URLs in the research brief.
 - Recommend deploy strategies (blue/green, canary, rolling), scaling, and resilience.
@@ -214,25 +245,32 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 
 - Implement pipelines, IaC, config, and deploy scripts per the plan.
 - Produce clean, production-ready DevOps artifacts (YAML, HCL, shell, etc.).
-- Follow architecture; reuse existing structures; ask when blocked.
+- Follow architecture; **import or extend existing code** instead of
+  duplicating it. Ask Researcher for a reuse map when unsure.
 - Prefer fail-first scripts, parameterized secrets, and idempotent operations.
 - Run applicable CodeQL on every code change before handing to Reviewers.
   Developer CodeQL does **not** authorize a push.
-- Keep changes **local** until QA gives the OK to push. Reply in the
-  review thread Markdown when addressing feedback. **Never push until QA
+- Keep changes **local** until QA gives the OK to push. Write
+  `push-<topic>.json` and a Handoff **before the first review**,
+  and again when a later change should close feedback. Bounce Push
+  JSONs until both sides are happy. **Never git-push until QA
   gives the OK.**
 
 ### 4. Reviewers (entrypoint before QA)
 
 - PR-style review of local diffs: correctness, security, performance, operability, tests, scope.
-- Communicate with the Coder **only via**
-  `.cursor/thoughts/non-finalized/review-<topic>.md`. Ask the
-  Orchestrator when the review needs a Team Lead call. Use a Handoff
-  block when sending work back ([role-identity.md](references/role-identity.md)).
-- Ground asks in the research brief, `docs/`, and fetched online media (not gut feel alone).
+- Communicate with the Coder via
+  `.cursor/thoughts/non-finalized/review-<topic>.md` **and** the
+  uncommitted Push JSON (index). Always compare that JSON to
+  `git diff <integration-base>...HEAD`. Ask the Orchestrator when the
+  review needs a Team Lead call. Use a Handoff when sending work
+  back ([role-identity.md](references/role-identity.md)).
+- Treat duplicated new code as a request-change: import the existing
+  helper instead. Ground asks in the research reuse map, `docs/`, and
+  fetched online media (not gut feel alone).
 - Request improvements until Satisfied; **block push** while unsatisfied.
-  Satisfied still does **not** authorize a push — **only QA may give the
-  OK to push.**
+  Reviews may be long. Satisfied still does **not** authorize a push —
+  **only QA may give the OK to push.**
 - Agent prompt: `.cursor/agents/devops-reviewer.md`.
 
 ### 5. QA
@@ -241,6 +279,9 @@ Label every substantive reply with the active role, e.g. `[Planner]`, `[Research
 - `/code-review` (`/code-review`): look at the change, tests, logs, and
   SARIF; **do not edit** product or workflow files. Hand fixes to the Coder.
 - `/repro` when a failure needs a concrete reproduction before the verdict.
+- Quality or bug-standard failures: review on a **VM**, Handoff
+  `To: Coder`, and `/triage` if the item must stay tracked
+  ([triage-template.md](references/triage-template.md)).
 - Agent prompt: `.cursor/agents/devops-quality-engineer.md`.
 - Follow **CodeQL, Validation, and Publish Policy** exactly
   ([references/codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)).
@@ -320,19 +361,26 @@ qa pod         → /repro + CodeQL publish gate + CI logs + smoke
 docs pod       → runbooks in docs/; thoughts stay in .cursor/thoughts/
 push           → NEVER until QA gives the OK
                  (Satisfied + Security Clear + developer CodeQL ≠ push)
-                 After PASS, move closed thought Markdown to finalized/
+                 After PASS, move thoughts to finalized/, squash to
+                 one commit, one push (--force-with-lease if needed)
 repeat pods    → until QA marks the publish gate PASS
+                 QA send-back or active triage → research → coder →
+                 reviewer → QA
 ```
 
 You remain the Orchestrator. Open thoughts stay in
-`.cursor/thoughts/non-finalized/` (committed). After QA PASS, move them
-to `.cursor/thoughts/finalized/` (gitignored).
+`.cursor/thoughts/non-finalized/` (local). After QA PASS, move them
+to `.cursor/thoughts/finalized/` (still local). Never commit either.
+Then squash to one commit and push once.
 
 ## Questions
 
 Prefer the ask-paths in [role-identity.md](references/role-identity.md):
-QA → Coder (primary) and Reviewer; Coder → Researcher; Reviewer →
-Orchestrator; Orchestrator → The Client. Anyone may ask anyone if needed.
+QA → Coder (primary) and Reviewer; Coder ↔ Reviewer on the review
+exchange (`## Q&A` + Push JSON `qa`); triage items use that same
+Q&A (no extra file, no commit when the tree is unchanged); Coder →
+Researcher; Reviewer → Orchestrator for Team Lead calls;
+Orchestrator → The Client. Anyone may ask anyone if needed.
 
 ## Interrupt handling (The Client)
 
@@ -348,6 +396,8 @@ them as a **side sprint**. Do not wait for the current topic to finish.
    into the plan.
 6. An interrupt does **not** authorize a push. **Only QA may give the
    OK to push.**
+7. Stay on the current branch. Do not cut a new branch for the
+   interrupt.
 
 ## Output rules
 

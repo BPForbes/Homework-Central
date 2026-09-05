@@ -59,7 +59,7 @@ When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
 - Prefer `codegraph search <term>` over broad directory reads.
 - Do not stage generated local directories (`.codegraph/`, `.code-review-graph/`,
   `claude-mem/`, `node_modules/`, `.codeql-db-csharp/`, `.codeql-db-javascript/`,
-  `.codeql-db-rust/`, `.cursor/thoughts/finalized/`).
+  `.codeql-db-rust/`, `.cursor/thoughts/`).
 - Do not commit local CodeQL SARIF dumps (`codeql-*.sarif`).
 - Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
@@ -103,6 +103,14 @@ Minimize branches and PRs. Do not open extra workstreams unless a human asks.
   Do **not** open a new PR unless a human explicitly asks for a separate PR.
 - Prefer landing related follow-up work on the existing integration PR (for example
   `feature/ticket-rooms` / PR #58) instead of stacking new `cursor/*` PRs.
+- **Related follow-ups and side sprints:** stay on the current branch. Do not
+  cut a new `feature/*` (including `feature/*-3665`) for each increment of the
+  same workstream.
+- **DevOps multi-agent final publish:** after that skill’s Security Clear and
+  QA PASS, compress the skill workstream to one commit and one push
+  (`git reset --soft <integration-base>`, then one `git commit`, then
+  `git push --force-with-lease` when the remote still has the pre-squash
+  history). That rewrite is part of the skill, not an extra Client ask.
 
 ## CodeQL, Validation, and Publish Policy
 
