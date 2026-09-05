@@ -1856,16 +1856,20 @@ public sealed class NeuralNetTrainingService(
         if (resumed.Count == 0)
             return;
 
-        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<NeuralNetTrainingSession> entry in db.ChangeTracker.Entries<NeuralNetTrainingSession>())
+        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<NeuralNetTrainingSession> entry in db.ChangeTracker
+            .Entries<NeuralNetTrainingSession>()
+            .Where(tracked => resumed.Contains(tracked.Entity.SessionId))
+            .ToList())
         {
-            if (resumed.Contains(entry.Entity.SessionId))
-                entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
         }
 
-        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<ChatMonitoringNeuralModelRun> entry in db.ChangeTracker.Entries<ChatMonitoringNeuralModelRun>())
+        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<ChatMonitoringNeuralModelRun> entry in db.ChangeTracker
+            .Entries<ChatMonitoringNeuralModelRun>()
+            .Where(tracked => resumed.Contains(tracked.Entity.SessionId))
+            .ToList())
         {
-            if (resumed.Contains(entry.Entity.SessionId))
-                entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
         }
     }
 
