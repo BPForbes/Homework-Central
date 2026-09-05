@@ -1,11 +1,20 @@
+using HomeworkCentral.Api.Services;
+
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>Reloads each isolated hashed-MLP chat monitor when another worker publishes its canonical generation.</summary>
-public sealed class NeuralNetCheckpointRefreshService(IServiceScopeFactory scopes, IChatMonitoringNeuralModelFactory chatMonitoringModels, ILogger<NeuralNetCheckpointRefreshService> logger) : BackgroundService
+public sealed class NeuralNetCheckpointRefreshService(
+    IServiceScopeFactory scopes,
+    IChatMonitoringNeuralModelFactory chatMonitoringModels,
+    IApplicationReadiness readiness,
+    ILogger<NeuralNetCheckpointRefreshService> logger) : BackgroundService
 {
     private readonly Dictionary<NeuralModelKindChatMonitoring, string> loadedChecksums = [];
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!await readiness.WaitUntilReadyAsync(stoppingToken))
+            return;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try

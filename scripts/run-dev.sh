@@ -564,12 +564,8 @@ run_stack() {
     log "Skipping API start because the build failed (see API Build Errors browser tab)"
   fi
 
-  if [[ "$api_ready" -eq 1 ]]; then
-    "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
-    API_BROWSER_PID=$!
-  else
-    API_BROWSER_PID=""
-  fi
+  # API GET / is an intentional 403 landing page; the app is the Vite login route.
+  API_BROWSER_PID=""
   "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/login" "Frontend" 300 &
   FRONTEND_BROWSER_PID=$!
 
