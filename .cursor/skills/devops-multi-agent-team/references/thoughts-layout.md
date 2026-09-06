@@ -342,6 +342,14 @@ other roles' uncommitted work. Finish with `git status --short` clean
 and with `--history` it also catches a blob that was added and later
 deleted within the branch.
 
+One consequence of the reserved names being gitignored: `check-no-var.sh`
+enumerates with `git ls-files`, so it does not see a probe living under
+one of them. A `var` inside `Probe.scratch.cs` is therefore *unreported*
+rather than *clean*, and the same is true of the C# gate's own probe
+files. Do not read a green `check-no-var.sh` as evidence about anything
+sitting at a reserved name — check it directly, or in a throwaway clone
+where it can be tracked.
+
 ### Fixed-name probes
 
 Some probes cannot take a reserved name because the tool only reads a
