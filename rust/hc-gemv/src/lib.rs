@@ -25,8 +25,9 @@ pub fn multiply_bias(
             continue;
         }
         let offset = column * rows;
-        for row in 0..rows {
-            destination[row] += weights[offset + row] * source_value;
+        let weight_col = &weights[offset..offset + rows];
+        for (dest, &weight) in destination.iter_mut().zip(weight_col.iter()) {
+            *dest += weight * source_value;
         }
     }
     true
@@ -54,10 +55,11 @@ pub fn multiply_transpose(
     }
 
     for column in 0..cols {
-        let mut sum = 0.0_f32;
         let offset = column * rows;
-        for row in 0..rows {
-            sum += weights[offset + row] * delta[row];
+        let weight_col = &weights[offset..offset + rows];
+        let mut sum = 0.0_f32;
+        for (&weight, &delta_value) in weight_col.iter().zip(delta.iter()) {
+            sum += weight * delta_value;
         }
         destination[column] = sum;
     }
