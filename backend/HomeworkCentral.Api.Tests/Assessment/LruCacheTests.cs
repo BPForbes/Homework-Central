@@ -71,7 +71,7 @@ public sealed class LruCacheTests
     [Fact]
     public void Host_lru_dispose_is_idempotent_and_stops_native_gets()
     {
-        HostLru cache = new(2);
+        using HostLru cache = new(2);
         cache.PutBytes("k", [7]);
         Assert.True(cache.TryGetBytes("k", out byte[] before));
         Assert.Equal(new byte[] { 7 }, before);
@@ -81,5 +81,35 @@ public sealed class LruCacheTests
         Assert.False(cache.IsNative);
         if (wasNative)
             Assert.False(cache.TryGetBytes("k", out _));
+    }
+
+    [Fact]
+    public void Host_lru_uses_rust_when_kernels_export_lru()
+    {
+        if (!RustKernels.HasLru)
+            return;
+
+        using HostLru cache = new(2);
+        Assert.True(cache.IsNative);
+    }
+
+    [Fact]
+    public void Host_lru_managed_fallback_follows_client_walk()
+    {
+        using HostLru cache = HostLru.CreateManaged(3);
+        Assert.False(cache.IsNative);
+        cache.PutBytes("A", [1]);
+        cache.PutBytes("B", [2]);
+        cache.PutBytes("C", [3]);
+        Assert.True(cache.TryGetBytes("A", out byte[] reused));
+        Assert.Equal(new byte[] { 1 }, reused);
+        cache.PutBytes("D", [4]);
+        Assert.False(cache.TryGetBytes("B", out _));
+        Assert.True(cache.TryGetBytes("A", out byte[] a));
+        Assert.True(cache.TryGetBytes("C", out byte[] c));
+        Assert.True(cache.TryGetBytes("D", out byte[] d));
+        Assert.Equal(new byte[] { 1 }, a);
+        Assert.Equal(new byte[] { 3 }, c);
+        Assert.Equal(new byte[] { 4 }, d);
     }
 }

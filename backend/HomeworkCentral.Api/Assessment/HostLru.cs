@@ -3,9 +3,10 @@ using System.Text;
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
-/// Process-facing LRU. Prefers the Rust <c>hc_lru_*</c> exports
-/// (<c>hc-cache</c> via <c>libhc_kernels</c>). Falls back to the managed
-/// twin when the native library is missing or the exports are absent.
+/// Process-facing LRU. Uses the Rust <c>hc_lru_*</c> exports when
+/// <c>libhc_kernels</c> is loaded. Otherwise runs the managed
+/// <see cref="LruCache{TKey,TValue}"/> twin (Rust not installed, or the
+/// native library is missing those exports).
 /// </summary>
 internal sealed class HostLru : IDisposable
 {
@@ -13,8 +14,16 @@ internal sealed class HostLru : IDisposable
     private readonly LruCache<string, byte[]>? fallback;
 
     public HostLru(int capacity)
+        : this(capacity, forceManaged: false)
     {
-        if (RustKernels.HasLru && RustKernels.TryLruCreate((nuint)capacity, out nint handle) && handle != 0)
+    }
+
+    /// <summary>Managed twin only — for hosts without Rust and for tests.</summary>
+    internal static HostLru CreateManaged(int capacity) => new(capacity, forceManaged: true);
+
+    private HostLru(int capacity, bool forceManaged)
+    {
+        if (!forceManaged && RustKernels.HasLru && RustKernels.TryLruCreate((nuint)capacity, out nint handle) && handle != 0)
         {
             native = handle;
             fallback = null;

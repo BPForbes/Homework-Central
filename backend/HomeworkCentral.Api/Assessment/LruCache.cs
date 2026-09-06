@@ -6,8 +6,9 @@ namespace HomeworkCentral.Api.Assessment;
 /// Managed fallback for <c>rust/hc-cache</c> when <c>libhc_kernels</c> is
 /// missing the <c>hc_lru_*</c> exports. Eviction is never FIFO: delete the
 /// least recent (rightmost) address, then insert the new item at the left.
-/// After A is reused, <c>D &gt;&gt; [A,B,C] -&gt; [D,A,C]</c>. Runtime
-/// prefers <see cref="HostLru"/> (Rust).
+/// After A is reused, <c>D &gt;&gt; [A,B,C] -&gt; [D,A,C]</c>.
+/// <see cref="HostLru"/> uses this type when Rust is not installed or
+/// <c>hc_lru_*</c> is unbound, and the Rust LRU when those exports load.
 /// </summary>
 public sealed class LruCache<TKey, TValue>
     where TKey : notnull
