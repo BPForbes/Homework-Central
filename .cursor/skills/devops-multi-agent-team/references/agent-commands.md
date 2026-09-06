@@ -102,6 +102,9 @@ Also: `open triage`, `track this bug`.
 `.cursor/thoughts/non-finalized/triage-<id>.md`. Set State `active`.
 Handoff `To: Coder`. The Orchestrator restarts research → coder →
 reviewer → QA for that id. Invocable copy: `.cursor/commands/triage.md`.
+- Any probe the triage run creates is process output too: throwaway
+  clone, or a reserved lower-case name (`_scratch/`, `.scratch`),
+  deleted before you report.
 
 ## Other `/` skills
 

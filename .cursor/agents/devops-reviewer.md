@@ -133,7 +133,7 @@ file, a throwaway `.js`.
   The shared worktree stays untouched, and it is the only way to test a
   filename the convention forbids.
 - When a probe must sit in this worktree, use a reserved name: a
-  lower-case `_scratch/` directory or a `.scratch.` infix
+  lower-case `_scratch/` directory or a `.scratch` infix or suffix
   (`Probe.scratch.cs`). Both are gitignored at any depth. Write them
   lower-case — `.gitignore` cannot case-fold portably, so `_Scratch/`
   is ignored on macOS but not on Linux; the CI guard rejects any

@@ -142,31 +142,55 @@ Clear, applicable CodeQL is satisfied, **and QA marks PASS**:
    Also confirm `git status --short` is clean of files you created, so
    no probe is swept into the fold commit.
 
-3a. **If the scan reports a path inside a keep-commit**, replaying that
-   commit verbatim would re-introduce the blob and step 3 would still
-   report clean. Strip the path from every commit in the range *before*
-   replaying:
+### Step 3a — stripping a path from a keep-commit
 
-   ```
-   git filter-repo --path <path> --invert-paths --refs <integration-base>..HEAD
-   ```
+If the step 3 scan reports a path inside a keep-commit, replaying that
+commit verbatim re-introduces the blob and the scan still reports it.
+The path has to come out of every commit in the range *before* replaying.
 
-   `git filter-repo` is the supported tool
-   ([git-filter-branch warns and points at it](https://git-scm.com/docs/git-filter-branch)).
-   Where it is not installed:
+**Verify `git status --short` is empty before you start, and do not
+stash to get there.** A history rewrite resets the working tree, and
+the worktree is shared: if another role has uncommitted work, wait for
+it rather than discarding it. This check is the real protection —
+neither tool below will reliably stop you.
 
-   ```
-   git filter-branch -f --index-filter \
-     'git rm -r --cached --ignore-unmatch <path>' \
-     --prune-empty <integration-base>..HEAD
-   ```
+Record the old tip first (`old=$(git rev-parse HEAD)`) so the
+content-equality check at the end is possible.
 
-   Both refuse to run with a dirty worktree (`Cannot rewrite branches:
-   You have unstaged changes`), so commit or stash first.
+```
+git filter-repo --force --path <path> --invert-paths --refs <integration-base>..HEAD
+```
 
-   Then re-run the step 3 scan, and confirm `git diff` between the old
-   and new tip is **empty** — the rewrite must change history only, not
-   content.
+`git filter-repo` is the supported tool
+([git-filter-branch warns and points at it](https://git-scm.com/docs/git-filter-branch)).
+Two things about it are easy to get wrong:
+
+- `--force` is **required** here. Without it the command aborts with
+  "Refusing to destructively overwrite repo history… (expected freshly
+  packed repo)", because a working checkout is not a fresh clone.
+- `--force` also disables its dirty-worktree guard. Verified: with an
+  uncommitted edit present it exits 0, hard-resets, and the edit is
+  gone with no prompt. That is why the status check above comes first,
+  and why "just add `--force`" is not a safe reflex.
+
+Where `filter-repo` is not installed:
+
+```
+git filter-branch -f --index-filter \
+  'git rm -r --cached --ignore-unmatch <path>' \
+  --prune-empty <integration-base>..HEAD
+```
+
+`filter-branch` refuses on a dirty worktree (`Cannot rewrite branches:
+You have unstaged changes`), which makes it the more forgiving of the
+two, but it is deprecated.
+
+Then re-run the step 3 scan, and confirm the rewrite changed history
+only and not content:
+
+```
+git diff $old HEAD    # must be empty
+```
 
 4. Push once. If the remote still has the pre-rewrite history,
    `git push --force-with-lease` (safer than `--force`). The

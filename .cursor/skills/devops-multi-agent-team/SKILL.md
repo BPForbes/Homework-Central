@@ -110,9 +110,12 @@ After the Coder lands local changes, the **Reviewers** are the next gate — not
    CodeQL passed.
 10. After PASS, the Orchestrator **compresses** the skill
     workstream into **one push**, **keeping reviewer-approved
-    Coder commits**, after verifying with
-    `check-clean-timeline.sh --history <integration-base>` that no
-    non-Coder output is anywhere in the range
+    Coder commits**. QA may have passed its gate with a recorded
+    history finding still outstanding, because a path inside a
+    keep-commit is stripped here rather than sent back. Strip those at
+    step 3a, then re-run
+    `check-clean-timeline.sh --history <integration-base>`; that run,
+    after the scrub, is the one that must be clean before you push
     ([thoughts-layout.md](references/thoughts-layout.md) One push).
     QA may send back to the Coder from a VM review, and may open
     `triage-<id>.md` items

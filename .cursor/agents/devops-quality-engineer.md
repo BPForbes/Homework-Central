@@ -618,11 +618,19 @@ updates do land, whichever role drafted them.
 - Prefer probing in a throwaway clone
   (`git clone --no-hardlinks . /tmp/probe`). When a probe must sit in
   this worktree, use a reserved lower-case name: a `_scratch/`
-  directory or a `.scratch.` infix (`Repro.scratch.cs`).
+  directory or a `.scratch` infix or suffix (`Repro.scratch.cs`).
 - Delete every probe before you give a verdict. Undo a probe that
   edited a tracked file with `git checkout -- <exact path>` — never
   `git checkout -- .`, `git restore :/` or `git stash`, because the
   worktree is shared.
+- Some probes have **fixed names** and cannot be reserved:
+  `.editorconfig`, `Directory.Build.props`/`.targets`, `.gitignore`,
+  `global.json`, `eslint.config.js`/`.eslintrc*`, `.gitattributes`, and
+  anything under `frontend/public/` that must keep a servable name.
+  Those show up in `git status`, so delete them immediately and say so.
+  A nested `.gitignore` is the dangerous one — it re-includes the
+  reserved names for its whole subtree — and both gate scripts reject
+  the non-root fixed-name files independently.
 - Finish with `git status --short` clean **of files you created**.
   List anything else by path in your verdict and leave it in place;
   you are the role most likely to clobber another's in-flight work.
@@ -659,17 +667,24 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] Rust CodeQL analysis succeeds
 [ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
-[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes.
-    This is the range scan, not the tip check: no reserved scratch name,
-    `.cursor/reviews/` path, thought file other than `.gitkeep`, CodeQL
-    database or SARIF dump was added in ANY commit in the range. A net
-    diff cannot see a path that was added and later deleted, and that is
-    the exact way a review write-up reached this branch's history
+[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes,
+    **or** every path it reports is recorded for the Orchestrator to strip
+    at One-push step 3a. This is the range scan, not the tip check: no
+    reserved scratch name, `.cursor/reviews/` path, thought file other
+    than `.gitkeep`, CodeQL database or SARIF dump was added in ANY commit
+    in the range. A net diff cannot see a path added and later deleted,
+    and that is the exact way a review write-up reached this branch's
+    history. A finding inside a keep-commit is **not** a send-back to the
+    Coder: the commit is kept and the path is stripped from the range
+    during compression. Record it, pass the gate on that basis, and the
+    Orchestrator re-runs the scan after step 3a
 [ ] `git status --short` is clean of files you created. Anything else is
     listed by path in your verdict and left in place
 [ ] `git diff <integration-base>...HEAD --name-only` contains no path
-    outside `backend/`, `frontend/`, `rust/`, `scripts/`, `docs/`,
-    `deploy/`, `.github/`, `.cursor/` and the tracked root config files.
+    outside `backend/`, `frontend/`, `rust/`, `scripts/`, `tools/`,
+    `llm-service/`, `docs/`, `deploy/`, `.github/`, `.vscode/`,
+    `.cursor/` and the tracked root config files — that is every tracked
+    top-level path today.
     Anything else is escalated to the Orchestrator rather than judged
     here. ("Is this a Coder edit?" is not decidable from git — every
     commit carries the same committer — so this is an allowlist sweep

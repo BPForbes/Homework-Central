@@ -77,6 +77,9 @@ analysis_re='(^|/)\.codeql-db|\.sarif$|(^|/)\.code-review-graph/|(^|/)\.codegrap
 # Thought files. Only the keepfile may be tracked.
 thoughts_re='^\.cursor/thoughts/'
 keepfile='^\.cursor/thoughts/non-finalized/\.gitkeep$'
+# A nested .gitignore can re-include the reserved names for its whole subtree.
+# The root one is excluded by a second filter at each use site.
+nested_gitignore_re='(^|/)\.gitignore$'
 
 # 1. Reserved scratch names must never be tracked.
 scratch_tracked="$(printf '%s\n' "$tracked" | grep -Ei "$scratch_re" || true)"
@@ -111,7 +114,7 @@ fi
 #    reserved. Rejecting it mirrors how check-no-var.sh treats a nested
 #    .editorconfig, and is equally safe: the repository has exactly one.
 nested_gitignore="$(
-    printf '%s\n' "$tracked" | grep -E '(^|/)\.gitignore$' | grep -v -E '^\.gitignore$' || true
+    printf '%s\n' "$tracked" | grep -Ei "$nested_gitignore_re" | grep -v -E '^\.gitignore$' || true
 )"
 if [ -n "$nested_gitignore" ]; then
     report 'Only the repository root .gitignore is allowed (a nested one can re-include reserved names):' "$nested_gitignore"
@@ -128,8 +131,9 @@ if [ -n "$history_base" ]; then
     # was added and later deleted is still seen.
     history_added="$(
         git log --diff-filter=A --name-only --format='' "$history_base..HEAD" 2>/dev/null \
-            | grep -Ei "$scratch_re|$analysis_re|$thoughts_re|^\.cursor/reviews/" \
+            | grep -Ei "$scratch_re|$analysis_re|$thoughts_re|^\.cursor/reviews/|$nested_gitignore_re" \
             | grep -v -E "$keepfile" \
+            | grep -v -E '^\.gitignore$' \
             | sort -u || true
     )"
     if [ -n "$history_added" ]; then

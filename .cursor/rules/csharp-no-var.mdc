@@ -1,6 +1,6 @@
 ---
 description: Homework Central C# style — no var, no dynamic, explicit types, pattern matching
-globs: ["backend/**/*.cs", "scripts/**/*.cs", "tools/**/*.cs"]
+globs: backend/**/*.cs,scripts/**/*.cs,tools/**/*.cs
 alwaysApply: false
 ---
 
@@ -26,6 +26,11 @@ When editing C# anywhere in this repository (`backend/`, `scripts/`, `tools/`):
 - Before adding or changing comments, XML docs, Markdown, naming, or function structure, read and
   follow the Comment Documentation Guide at
   [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](../../docs/COMMENT_DOCUMENTATION_GUIDE.md).
+
+- Never suppress the rule. No `#pragma warning disable IDE0008`, `<NoWarn>`, `[SuppressMessage]`,
+  `eslint-disable`, nested `.editorconfig`, or nested `Directory.Build.props`/`.targets` — a nested
+  MSBuild file shadows the root one and silently disables the check for that subtree. CI rejects
+  all of these.
 
 Enforced at build and in CI. The canonical statement of the rule, its exceptions, and which gate
 owns which case live in [`AGENTS.md`](../../AGENTS.md) — do not restate the enforcement chain here,

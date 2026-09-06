@@ -530,15 +530,23 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] Rust CodeQL analysis succeeds
 [ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
-[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes.
-    The range scan, not the tip check: a net diff cannot see a path that
-    was added in one commit and deleted in a later one, and that is
-    exactly how a review write-up reached this branch's history
+[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes,
+    **or** every path it reports is recorded for the Orchestrator to strip
+    at One-push step 3a. The range scan, not the tip check: a net diff
+    cannot see a path added in one commit and deleted in a later one, and
+    that is exactly how a review write-up reached this branch's history.
+    A finding inside a keep-commit is not a Coder send-back — the commit
+    is kept and the path is stripped from the range during compression,
+    so record it and let the gate pass on that basis. The Orchestrator
+    re-runs the same scan after step 3a and must get a clean result
+    before pushing
 [ ] `git status --short` is clean of files you created; anything else is
     listed by path and left in place
 [ ] `git diff <integration-base>...HEAD --name-only` contains no path
-    outside backend/, frontend/, rust/, scripts/, docs/, deploy/,
-    .github/, .cursor/ and the tracked root config files
+    outside backend/, frontend/, rust/, scripts/, tools/, llm-service/,
+    docs/, deploy/, .github/, .vscode/, .cursor/ and the tracked root
+    config files (this is every tracked top-level path; regenerate with
+    `git ls-files | awk -F/ 'NF>1{print $1}' | sort -u` if that changes)
 
 If any required item is incomplete or failing:
 
