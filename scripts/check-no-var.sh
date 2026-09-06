@@ -29,8 +29,11 @@ report() {
 # 1. Any `var` token left in C#. The build already rejects ordinary declarations,
 #    so whatever reaches here is a pattern position or a suppressed declaration.
 #    Comment-only lines are skipped so prose about the rule does not trip it.
+#    Matching declaration and pattern *syntax* rather than the bare token keeps
+#    prose, string literals and identifiers such as `invariant` from tripping it.
 csharp_hits="$(
-    grep -rn --include='*.cs' -E '(^|[^A-Za-z0-9_])var([^A-Za-z0-9_]|$)' \
+    grep -rn --include='*.cs' -E \
+        '(^|[^A-Za-z0-9_])(is|case)[[:space:]]+var[[:space:]]+[A-Za-z_]|(^|[^A-Za-z0-9_])var[[:space:]]*\(|(^|[^A-Za-z0-9_])var[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(=>|=[^=]|;|,|\)|[[:space:]]in[[:space:]])' \
         backend tools scripts 2>/dev/null \
         | grep -v -E '/(obj|bin)/' \
         | grep -v -E ':[[:space:]]*(///|//|\*|/\*)'
@@ -57,12 +60,15 @@ if [ -n "$suppression_hits" ]; then
 fi
 
 # 3. `var` in files neither the C# build nor the eslint {ts,tsx} glob covers.
+#    Same rule as above: require declaration syntax, and skip comment lines,
+#    since a `var` inside a comment does not execute.
 web_hits="$(
     grep -rn --include='*.html' --include='*.js' --include='*.cjs' \
         --include='*.mjs' --include='*.jsx' \
-        -E '(^|[^A-Za-z0-9_$.])var[[:space:]]+[A-Za-z_$]' \
+        -E '(^|[^A-Za-z0-9_$.])var[[:space:]]+[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*(=[^=]|;|,|\)|[[:space:]](in|of)[[:space:]])' \
         . 2>/dev/null \
-        | grep -v -E '/(node_modules|dist|obj|bin)/'
+        | grep -v -E '/(node_modules|dist|obj|bin)/' \
+        | grep -v -E ':[[:space:]]*(//|\*|/\*|<!--)'
 )"
 if [ -n "$web_hits" ]; then
     report 'var in an unlinted web file (use const, or let when reassigned):' "$web_hits"

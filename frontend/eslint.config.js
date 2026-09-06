@@ -27,4 +27,18 @@ export default tseslint.config(
       'prefer-const': 'error',
     },
   },
+  {
+    // The block above is scoped to {ts,tsx}, which left plain JavaScript
+    // unlinted. Only the two var rules are applied here: the TypeScript
+    // recommended set is deliberately not extended onto config files.
+    files: ['**/*.{js,cjs,mjs,jsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: { ...globals.browser, ...globals.node },
+    },
+    rules: {
+      'no-var': 'error',
+      'prefer-const': 'error',
+    },
+  },
 )

@@ -56,6 +56,14 @@ jobs:
       - name: Build
         run: dotnet build HomeworkCentral.sln --configuration Release --no-restore
 
+      # PostgresHostCheck is not a member of HomeworkCentral.sln, so the solution
+      # build above never compiles it and its IDE0008 gate would never run.
+      - name: Build projects outside the solution
+        run: dotnet build scripts/PostgresHostCheck/PostgresHostCheck.csproj --configuration Release
+
+      - name: Reject implicitly typed locals
+        run: ./scripts/check-no-var.sh
+
       - name: Reject unparameterized raw SQL
         run: |
           if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(|ExecuteSqlRawAsync\(|SqlQueryRaw\(' backend/HomeworkCentral.Api --type cs; then
