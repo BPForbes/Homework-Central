@@ -32,39 +32,37 @@ Hard rules:
   has no nameable type; prefer keeping anonymous types inline (as every current
   call site does) so the exception does not arise.
 - Do not write the word `var` in C# **prose** either — comments, XML docs and
-  string literals included. Write "implicitly typed local". The backstop script
-  matches the bare word; the word occurs nowhere in the current C# sources, so
-  this costs nothing today.
+  string literals included. Write "implicitly typed local".
 - Do not use C# `dynamic` for locals, fields, parameters, return types or type
   arguments. `var` is statically typed and merely inferred; `dynamic` defers
-  binding to runtime, so it is the one construct genuinely less typed than
-  `var`. Unlike `var`, "dynamic" **is** allowed in prose — the risk engine's
-  "dynamic threshold" is a real domain term — so the gate skips comment lines
-  for it.
-- Do not use TypeScript/JavaScript `var` either; use `const`, or `let` when the
+  binding to runtime. Unlike `var`, "dynamic" **is** allowed in prose — the
+  risk engine's "dynamic threshold" is a real domain term.
+- Do not use TypeScript/JavaScript `var`; use `const`, or `let` when the
   binding is reassigned. TypeScript does **not** additionally require explicit
-  annotations on inferred locals or return types, and the C# rule should not be
-  read that way: `strict` in `frontend/tsconfig.app.json` and
-  `tsconfig.node.json` already rejects implicit `any` (`TS7006`) and
-  `@typescript-eslint/no-explicit-any` rejects the explicit form, so inference
-  there is already fully checked. Requiring annotations would add churn without
-  adding type safety.
-- These rules are enforced in toolchain config, not advisory:
-  - **C# — Roslyn:** `.editorconfig` sets `csharp_style_var_* = false:error`.
-    `Directory.Build.props` enables `EnforceCodeStyleInBuild`, so an implicitly
-    typed local fails `dotnet build` as `IDE0008`.
-  - **Web — eslint:** `no-var` and `prefer-const` are error in
-    `frontend/eslint.config.js` and root `eslint.config.mjs`. `npm run lint`
-    covers `frontend/`; the root config covers other tracked web sources.
-    `npm run lint:ci` adds `--no-inline-config` so blanket disables cannot
-    silence these rules. Inline `<script>` in `.html`, `.htm`, and `.xhtml` is
-    parsed via `eslint-plugin-html`.
-  - **Backstop — `scripts/check-no-var.sh`:** grep for C# pattern `var`,
-    `dynamic`, per-file suppressions (`#pragma warning disable`, `SuppressMessage`),
-    and nested `.editorconfig` or `Directory.Build.props` copies that would bypass
-    Roslyn. This is a short backstop, not a second linter.
-  Reviewers treat any `var` as a blocking finding regardless of green CI and must
-  not mark a change Satisfied while one remains.
+  annotations on inferred locals or return types: `strict` in
+  `frontend/tsconfig.app.json` and `tsconfig.node.json` already rejects
+  implicit `any` (`TS7006`) and `@typescript-eslint/no-explicit-any` rejects
+  the explicit form.
+- These rules are **pinned** in toolchain config:
+  - **C#:** `.editorconfig` sets `root = true` and
+    `csharp_style_var_* = false:error`. `Directory.Build.props` sets
+    `EnforceCodeStyleInBuild`, so `dotnet build` and CI fail as `IDE0008` on
+    an implicitly typed local.
+  - **JavaScript / TypeScript:** `frontend/eslint.config.js` and the root
+    `eslint.config.mjs` set `no-var` and `prefer-const` to `error`.
+    `npm run lint` covers `frontend/`; the root config covers tracked web
+    files outside `frontend/` (`scripts/`, `tools/`, root `*.js`).
+    `npm run lint:ci` is `eslint . --no-inline-config` so a blanket
+    `/* eslint-disable */` does not silence those two rules. The plain
+    `lint` script keeps legitimate warn-level inline directives working.
+    Inline `<script>` in `.html`, `.htm`, and `.xhtml` is parsed via
+    `eslint-plugin-html`.
+  - **Short backstop:** `scripts/check-no-var.sh` greps for what the pins
+    cannot see (C# pattern `var`, `dynamic`, per-file suppressions, nested
+    `.editorconfig` / `Directory.Build.*`). It is a grep, not a parser.
+  Pins can be turned off in config. Do not treat a green build as proof
+  that no `var` exists. Reviewers treat any `var` as a blocking finding
+  and must read the line themselves.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
