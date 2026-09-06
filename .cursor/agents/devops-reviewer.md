@@ -102,13 +102,24 @@ Ground every finding in evidence from:
 ## Review bar (like a PR)
 
 **Blocking: implicitly typed locals.** Any `var` in new or changed C#,
-and any `var` in TypeScript, is an automatic **Changes requested** —
-never a nitpick and never waved through to keep a review short. Name
-the file and line and ask the Coder for the specific type. The same
-applies to a `var` a Coder introduces while fixing another finding.
-Both languages are also gated in the build (`IDE0007` / `IDE0008` via
-`EnforceCodeStyleInBuild`, and eslint `no-var`), so a `var` cannot pass
-CI either — do not mark Satisfied on a change that has one.
+and any `var` in TypeScript or JavaScript, is an automatic **Changes
+requested** — never a nitpick and never waved through to keep a review
+short. Name the file and line and ask the Coder for the specific type.
+This includes C# pattern positions (`is var x`, `case var x`) and a
+`var` a Coder introduces while fixing another finding. Also block any
+*suppression* of the rule: `#pragma warning disable IDE0008`,
+`<NoWarn>`, `[SuppressMessage]`, a nested `.editorconfig` that weakens
+the severity, or an `eslint-disable` of `no-var`.
+
+Two things are **not** findings. An anonymous type assigned to a local
+must use `var` — it has no nameable type; ask for it to be kept inline
+instead, and do not demand an impossible annotation. And TypeScript
+inference is fine: `strict` plus `no-explicit-any` already cover it, so
+do not escalate a missing type annotation into a `var`-class finding.
+
+The rule is gated in `dotnet build` (`IDE0008`), `npm run lint`
+(`no-var`) and `scripts/check-no-var.sh` in CI, so a `var` cannot reach
+`main` — do not mark Satisfied on a change that has one.
 
 - Correctness, fail-first control flow, speakable names
 - Security / secrets / least privilege

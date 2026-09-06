@@ -26,13 +26,33 @@ explicit type declarations before adding comments.
 
 Hard rules:
 
-- Do not use C# `var`; use explicit local and iteration types. Do not use
-  TypeScript/JavaScript `var` either; use `const`, or `let` when the binding is
-  reassigned. This is enforced, not advisory: `csharp_style_var_*` in
-  `.editorconfig` is `error` and `EnforceCodeStyleInBuild` is on, so a `var`
-  fails `dotnet build` and CI as `IDE0007`/`IDE0008`; eslint `no-var` and
-  `prefer-const` fail `npm run lint`. Reviewers treat any `var` as a blocking
-  finding and must not mark a change Satisfied while one remains.
+- Do not use C# `var`; use explicit local and iteration types. This also covers
+  pattern positions (`is var x`, `case var x`) — match the real type instead.
+  The one unavoidable exception is an anonymous type assigned to a local, which
+  has no nameable type; prefer keeping anonymous types inline (as every current
+  call site does) so the exception does not arise.
+- Do not use TypeScript/JavaScript `var` either; use `const`, or `let` when the
+  binding is reassigned. TypeScript does **not** additionally require explicit
+  annotations on inferred locals or return types, and the C# rule should not be
+  read that way: `strict` in `frontend/tsconfig.app.json` and
+  `tsconfig.node.json` already rejects implicit `any` (`TS7006`) and
+  `@typescript-eslint/no-explicit-any` rejects the explicit form, so inference
+  there is already fully checked. Requiring annotations would add churn without
+  adding type safety.
+- Both rules are enforced, not advisory:
+  - `csharp_style_var_*` is `error` in `.editorconfig` and
+    `EnforceCodeStyleInBuild` is on in `Directory.Build.props`, so an
+    implicitly typed C# local fails `dotnet build` and CI as `IDE0008`.
+    (`IDE0007` is the inverse rule and cannot fire while those settings are
+    `false`.)
+  - eslint `no-var` and `prefer-const` fail `npm run lint` for `.ts`, `.tsx`,
+    `.js`, `.cjs`, `.mjs` and `.jsx`.
+  - `scripts/check-no-var.sh` runs in CI and covers what neither of those can
+    see: C# pattern positions, any suppression of the rule (`#pragma`,
+    `NoWarn`, `SuppressMessage`, a nested `.editorconfig`, `eslint-disable`),
+    and inline `<script>` blocks in `.html`.
+  Reviewers treat any `var` as a blocking finding and must not mark a change
+  Satisfied while one remains.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
