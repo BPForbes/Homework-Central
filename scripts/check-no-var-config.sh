@@ -95,70 +95,132 @@ cleanup() {
 trap cleanup EXIT
 
 # ------------------------------------------------------------------- C# ------
-# One probe per project rather than per solution: each project has its own
-# effective .editorconfig section, its own NoWarn, and its own analyzer
-# settings, and a section-scoped severity is precisely the bypass that a single
-# whole-solution probe would miss.
+# A probe in every directory that holds tracked source, with a name that is
+# different on every run, and the diagnostic attributed to each probe by path.
+#
+# One probe per project at the project root was not enough. The probe's address
+# was fixed and predictable, so four tamperings routed around it while a real
+# `var` in shipping code compiled:
+#
+#   [**/Services/*.cs] IDE0008.severity = none   scopes the disable to a
+#   [**/Services/*.cs] generated_code = true     directory the probe never
+#   <Compile Remove="Legacy/**/*.cs" />          occupied
+#
+#   Directory.Build.targets with an <Error Text="IDE0008..."> conditioned on
+#   Exists(.../NoVarAnalyzerProbe.scratch.cs) -- which satisfied the "the build
+#   failed for another reason" guard, because that guard only looked for the
+#   string IDE0008 anywhere in the output, while the analyzer never ran at all.
+#
+# So: a probe per source directory defeats any section- or subtree-scoped
+# disable, a random name per run cannot be named in a condition or a Remove
+# glob, and requiring `error IDE0008` on a line naming that specific probe
+# defeats a forged error message. All probes for a project go into one build,
+# so this costs the same four builds as before.
 if [ "$want_csharp" -eq 1 ]; then
     if ! command -v dotnet >/dev/null 2>&1; then
         skip 'dotnet not installed; C# analyzer probe not run'
     else
-        printf 'C# analyzer probe (planting an implicitly typed local per project):\n'
+        printf 'C# analyzer probe (planting implicitly typed locals):\n'
         # A loop over nothing succeeds, so a gate that iterates projects has to
         # say how many it found. Renaming every .csproj, or running from a
         # subdirectory, would otherwise report "check passed".
-        project_count="$(git ls-files '*.csproj' | grep -c . || true)"
+        # NUL-delimited, like the web half. A newline in a path split one
+        # entry into two, and the halves named no project, so the loop reported
+        # a failure for a path that did not exist while the real project went
+        # unprobed.
+        mapfile -d '' -t csproj_files < <(git -c core.quotePath=false ls-files -z '*.csproj')
+        project_count=0
+        for proj in "${csproj_files[@]:-}"; do
+            [ -n "$proj" ] && project_count=$((project_count + 1))
+        done
         if [ "${project_count:-0}" -eq 0 ]; then
             fail 'no tracked .csproj found, so the C# probe verified nothing'
         fi
-        while IFS= read -r proj; do
+
+        # Random per run. A fixed name is an address a condition can test for or
+        # a Compile Remove glob can name.
+        probe_tag="NoVarProbe$(od -An -tx1 -N4 /dev/urandom 2>/dev/null | tr -cd '[:alnum:]' || printf '%s' "$$")"
+
+        for proj in "${csproj_files[@]:-}"; do
             [ -n "$proj" ] || continue
             # `dirname --`, because a project named `-p:WarningLevel=0.csproj`
             # is parsed as an option otherwise: proj_dir comes back empty and the
-            # probe target becomes `/NoVarAnalyzerProbe.scratch.cs`, at the
-            # filesystem root. Unprivileged that fails on permissions; as root it
-            # writes outside the repo.
+            # probe target lands at the filesystem root.
             proj_dir="$(dirname -- "$proj")"
-            probe="$proj_dir/NoVarAnalyzerProbe.scratch.cs"
-            probe_files+=("$probe")
 
-            # A distinct type name per project keeps two probes from colliding
-            # if a project ever includes a sibling's sources.
-            printf 'namespace NoVarAnalyzerProbe;\ninternal static class Probe%s\n{\n    internal static int Run()\n    {\n        var value = 1;\n        return value;\n    }\n}\n' \
-                "$(printf '%s' "$proj_dir" | tr -cd '[:alnum:]')" > "$probe"
+            # Every directory under this project that holds tracked .cs. That is
+            # where real code lives, and therefore where a scoped disable would
+            # be aimed.
+            mapfile -d '' -t proj_sources < <(
+                git -c core.quotePath=false ls-files -z \
+                    "$proj_dir/*.cs" "$proj_dir/**/*.cs" 2>/dev/null
+            )
+            probe_dirs=()
+            for src in "${proj_sources[@]:-}"; do
+                [ -n "$src" ] || continue
+                src_dir="$(dirname -- "$src")"
+                case " ${probe_dirs[*]-} " in
+                    *" $src_dir "*) ;;
+                    *) probe_dirs+=("$src_dir") ;;
+                esac
+            done
+            [ "${#probe_dirs[@]}" -gt 0 ] || probe_dirs=("$proj_dir")
+
+            planted=()
+            for d in "${probe_dirs[@]}"; do
+                [ -n "$d" ] || continue
+                probe="$d/$probe_tag.scratch.cs"
+                probe_files+=("$probe")
+                planted+=("$probe")
+                # A type name unique per directory, so several probes can coexist
+                # in one compilation.
+                printf 'namespace %s;\ninternal static class C%s\n{\n    internal static int Run()\n    {\n        var value = 1;\n        return value;\n    }\n}\n' \
+                    "$probe_tag" "$(printf '%s' "$d" | tr -cd '[:alnum:]')" > "$probe"
+            done
 
             out="$(dotnet build -c Release --nologo -- "$proj" 2>&1)"
             status=$?
-            rm -f "$probe"
 
-            if [ "$status" -eq 0 ]; then
-                fail "$proj: a real \`var value = 1;\` compiled successfully. The IDE0008 analyzer is not in force for this project — check NoWarn (including target-time appends in a .targets), EnforceCodeStyleInBuild, the .editorconfig section that matches this directory, and dotnet_analyzer_diagnostic.category-Style.severity."
-            elif ! printf '%s' "$out" | grep -q 'IDE0008'; then
-                # The build failed, but not for the reason being tested. Reading
-                # that as a pass would make any broken build look like a working
-                # gate.
-                fail "$proj: build failed without reporting IDE0008, so the probe proves nothing. First errors:
-$(printf '%s' "$out" | grep -E 'error|warning' | head -5)"
+            # Each probe must be named on a line reporting error IDE0008. Not
+            # "IDE0008 appears somewhere", which a forged <Error Text> satisfied.
+            missing=()
+            for probe in "${planted[@]}"; do
+                if ! printf '%s' "$out" | grep -F "$probe" | grep -q 'error IDE0008'; then
+                    missing+=("$probe")
+                fi
+                rm -f "$probe"
+            done
+
+            if [ "${#missing[@]}" -eq 0 ]; then
+                note "$proj rejected all ${#planted[@]} (IDE0008 attributed to each)"
+            elif [ "$status" -eq 0 ]; then
+                fail "$proj: a real \`var value = 1;\` compiled successfully in ${#missing[@]} of ${#planted[@]} source directories. The IDE0008 analyzer is not in force there:
+$(printf '  %s\n' "${missing[@]}" | head -8)"
             else
-                note "$proj rejected it (IDE0008)"
+                fail "$proj: the build failed, but IDE0008 was not attributed to ${#missing[@]} of ${#planted[@]} probes, so the probe proves nothing for those directories:
+$(printf '  %s\n' "${missing[@]}" | head -8)
+First errors:
+$(printf '%s' "$out" | grep -E 'error|warning' | head -5)"
             fi
-        done <<< "$(git ls-files '*.csproj')"
+        done
 
         # A .cs file that no project compiles is analysed by nothing. The
         # solution does not cover PostgresHostCheck or DevHost, which is why CI
         # builds them separately, and a new stray source root would repeat that.
         unowned=0
-        while IFS= read -r cs; do
+        mapfile -d '' -t cs_files < <(git -c core.quotePath=false ls-files -z '*.cs')
+        for cs in "${cs_files[@]:-}"; do
             [ -n "$cs" ] || continue
             owned=0
-            while IFS= read -r proj; do
-                case "$cs" in "$(dirname "$proj")"/*) owned=1; break ;; esac
-            done <<< "$(git ls-files '*.csproj')"
+            for proj in "${csproj_files[@]:-}"; do
+                [ -n "$proj" ] || continue
+                case "$cs" in "$(dirname -- "$proj")"/*) owned=1; break ;; esac
+            done
             if [ "$owned" -eq 0 ]; then
                 fail "$cs is compiled by no tracked project, so no analyzer sees it"
                 unowned=1
             fi
-        done <<< "$(git ls-files '*.cs')"
+        done
         [ "$unowned" -eq 0 ] && note 'every tracked .cs belongs to a tracked project'
     fi
 fi
@@ -205,6 +267,45 @@ if [ "$want_web" -eq 1 ]; then
         done
         web_files="${web_files%$'\n'}"
 
+        # An extension the enumeration does not glob is invisible to every gate
+        # here. A tracked frontend/src/RbWidget.vue holding `var x = 1` passed
+        # all four of them, and the summary still read "all 130 tracked web
+        # files" — the fail-closed rule written for files *outside* frontend/
+        # had never been applied to unfamiliar file *types* inside it. The
+        # backstop in check-no-var.sh already carries `--include='*.vue'`, so
+        # the two scripts disagreed about what counts as a web file.
+        #
+        # These types compile to, or embed, JavaScript. Adding one to the repo
+        # should be a decision, not an accident, so the gate fails until either
+        # the toolchain covers it or it is deliberately listed as harmless.
+        mapfile -d '' -t unclaimed_web < <(
+            git -c core.quotePath=false ls-files -z \
+                '*.vue' '*.svelte' '*.astro' '*.mdx' '*.ejs' '*.hbs' \
+                '*.handlebars' '*.pug' '*.cshtml' '*.razor' '*.php' '*.vbhtml'
+        )
+        if [ "${#unclaimed_web[@]}" -gt 0 ] && [ -n "${unclaimed_web[0]:-}" ]; then
+            fail "these tracked files carry or compile to JavaScript, and no no-var gate covers their file type:
+$(printf '  %s\n' "${unclaimed_web[@]}")
+Either teach eslint to parse them (a plugin plus a glob in the config, and add
+the extension to the enumeration in this script), or, if they cannot contain a
+variable declaration, add them to the harmless list here with a reason."
+        fi
+
+        # SVG is the one script-bearing type deliberately left uncovered: eslint
+        # cannot parse it, and the tracked file is a static icon. Left uncovered,
+        # not unchecked — an SVG may hold a <script> element.
+        mapfile -d '' -t svg_files < <(git -c core.quotePath=false ls-files -z '*.svg')
+        svg_with_script=()
+        for path in "${svg_files[@]:-}"; do
+            [ -n "$path" ] || continue
+            grep -lq '<script' -- "$path" 2>/dev/null && svg_with_script+=("$path")
+        done
+        if [ "${#svg_with_script[@]}" -gt 0 ]; then
+            fail "these tracked SVG files contain a <script> element, which no no-var gate can parse:
+$(printf '  %s\n' "${svg_with_script[@]}")
+Move the script into a .ts/.js module that eslint lints."
+        fi
+
         # Web files outside frontend/ are covered by nothing unless something
         # says so: eslint refuses to lint above its base path, and reports the
         # refusal as a *warning* ("File ignored because outside of base path"),
@@ -223,35 +324,21 @@ $outside"
                 # exits 0, so an unclaimed file in a new directory looked exactly
                 # like a clean lint. Resolving the config per file turns "nothing
                 # claims this" into a hard answer.
-                out_bad=''
-                for rel in "${outside_files[@]}"; do
-                    [ -n "$rel" ] || continue
-                    # `--print-config=<path>`, not `--print-config -- <path>`:
-                    # the flag takes the path as its own value, so `--` would be
-                    # consumed as that value. The `=` form is also what keeps a
-                    # dash-prefixed path from being read as another option.
-                    rel_cfg="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs "--print-config=$rel" 2>&1)"
-                    if ! printf '%s' "$rel_cfg" | grep -q '^{'; then
-                        out_bad="$out_bad
-  $rel: no config resolves for it ($(printf '%s' "$rel_cfg" | head -1))"
-                        continue
-                    fi
-                    rel_verdict="$(
-                        printf '%s' "$rel_cfg" | python3 -c '
-import json, sys
-rules = json.load(sys.stdin).get("rules", {})
-bad = []
-for name in ("no-var", "prefer-const"):
-    entry = rules.get(name)
-    sev = entry[0] if isinstance(entry, list) and entry else entry
-    if sev not in (2, "error"):
-        bad.append("%s=%r" % (name, sev))
-print("; ".join(bad))
-' 2>/dev/null
-                    )"
-                    [ -n "$rel_verdict" ] && out_bad="$out_bad
-  $rel: $rel_verdict"
-                done
+                # Resolved through the same node probe as everything else,
+                # rather than `--print-config` piped into python3. eslint reports
+                # both "outside of base path" and "no matching configuration was
+                # supplied" as *warnings* and exits 0, so an unclaimed file in a
+                # new directory looked exactly like a clean lint; resolving the
+                # config per file turns "nothing claims this" into a hard answer.
+                out_report="$(
+                    printf '%s\n' "${outside_files[@]}" \
+                        | node scripts/novar-eslint-probe.mjs --config eslint.config.mjs 2>&1
+                )"
+                out_bad="$(printf '%s\n' "$out_report" | sed -n 's/^problem //p')"
+                if ! printf '%s\n' "$out_report" | grep -qE '^verdict (ok|problems)$'; then
+                    fail "the root-config probe did not run to completion, so it proves nothing:
+$out_report"
+                fi
 
                 out_lint="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs -- "${outside_files[@]}" 2>&1)"
                 out_status=$?
@@ -273,13 +360,21 @@ $out_lint"
                 printf '%s\n' "$web_files" \
                     | (cd frontend && node ../scripts/novar-eslint-probe.mjs) 2>&1
             )"
-            verdict="$(printf '%s' "$eslint_report" | tail -1)"
-            if ! printf '%s' "$verdict" | grep -q '^{'; then
-                fail "eslint probe did not run:
+            # The probe's last line is its verdict. Requiring that line to be
+            # present is what keeps a probe that died halfway — or never
+            # started — from reading as "no problems found".
+            if ! printf '%s\n' "$eslint_report" | grep -qE '^verdict (ok|problems)$'; then
+                fail "eslint probe did not run to completion, so it proves nothing:
 $eslint_report"
             else
-                checked="$(printf '%s' "$verdict" | python3 -c 'import json,sys; print(json.load(sys.stdin)["checked"])' 2>/dev/null)"
-                problems="$(printf '%s' "$verdict" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["problems"]))' 2>/dev/null)"
+                checked="$(printf '%s\n' "$eslint_report" | sed -n 's/^checked //p')"
+                problems="$(printf '%s\n' "$eslint_report" | sed -n 's/^problem //p')"
+                # A count that is absent, zero or non-numeric means the
+                # enumeration did not happen, however clean the problem list looks.
+                case "$checked" in
+                    ''|*[!0-9]*) fail "the eslint probe reported no usable file count (got '$checked'), so its clean result proves nothing" ;;
+                    0) fail 'the eslint probe resolved config for 0 files, so its clean result proves nothing' ;;
+                esac
                 if [ -n "$problems" ]; then
                     fail "eslint effective config over $checked tracked web files:
 $problems"

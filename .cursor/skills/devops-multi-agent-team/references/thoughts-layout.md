@@ -230,11 +230,18 @@ git push --force-with-lease=refs/heads/<branch>:$remote_tip origin <branch>
 `--force-with-lease=<ref>:$old` looks right and is wrong here. `$old` is
 the local tip before the rewrite, and under One push the remote never
 held it, so the lease names a value the remote never had and git rejects
-the push as `stale info` (verified against a bare remote). The bare
-`--force-with-lease` fails the same way after a rewrite, because the
-remote-tracking ref it reads is itself stale. Reading the remote is also
-what makes the lease meaningful: it still refuses if someone pushed
-between the `ls-remote` and the push.
+the push as `stale info` (verified against a bare remote).
+
+The bare `--force-with-lease` is not broken, though — it reads the
+remote-tracking ref, and step 1 of this procedure already prescribes a
+`git fetch origin`, which refreshes it. Measured against a bare remote:
+after that fetch the bare form **succeeds**; only if you skip the fetch
+does it fail as stale. So prefer the `ls-remote` form for being explicit
+rather than for being the only one that works — it states the expected
+value at the point of use instead of depending on when the tracking ref
+was last refreshed, which matters most when the push is retried after an
+interruption. Either way the lease is real: both refuse if someone else
+pushed in the interval.
 
 Once the push succeeds and a fresh `git clone` of the remote passes the
 step 3 scan, delete the backup ref and any other local ref that still

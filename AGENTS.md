@@ -99,19 +99,63 @@ Hard rules:
     (`[*.cs]` renamed to `[docs/*.cs]`). Modelling a configuration language is
     the same treadmill as modelling a programming language with a regex.
 
-    Instead it makes the rule fire. For C# it writes a real
-    `var value = 1;` into **every** tracked `csproj` in turn, builds, and
-    requires `IDE0008`; a build that fails for any *other* reason is a gate
-    failure too, so a broken build cannot masquerade as a working gate. For the
-    web half it resolves the effective config for **every** tracked web file
-    (127 today) via the eslint Node API, checks `isPathIgnored` so an `ignores`
-    entry cannot quietly remove a directory from the lint run, and plants a
-    `var` behind a blanket `/* eslint-disable */` in `frontend/src` and requires
-    `npm run lint:ci` to reject it. Sampling four representative files instead
-    was a complete end-to-end escape: one block scoped to `src/components/**`
-    with `'no-var': 'off'` passed every gate while a `var` sat in a real
-    component. Probe files use the reserved gitignored `.scratch` infix and are
-    removed by an `EXIT` trap.
+    Instead it makes the rule fire. For C# it writes a real `var value = 1;`
+    into **every directory that holds tracked source** — 42 probes across four
+    projects, all in one build per project — and requires `error IDE0008` on a
+    line naming each probe by path. Three properties of that shape are each
+    load-bearing, because a single probe at the project root was routed around
+    four ways while a real `var` compiled in shipping `Services/` code:
+
+      - *Per directory*, because a severity can be scoped to a subtree
+        (`[**/Services/*.cs] dotnet_diagnostic.IDE0008.severity = none`, the
+        same section with `generated_code = true`, or
+        `<Compile Remove="Services/**/*.cs" />`) and the project root is
+        precisely where no real source file lives.
+      - *A random name per run*, because a fixed one is an address: a
+        `Directory.Build.targets` target can be conditioned on
+        `Exists(.../NoVarAnalyzerProbe.scratch.cs)`.
+      - *Attributed by path*, because that same target can emit a forged
+        `<Error Text="error IDE0008..." />`, which satisfied a check that only
+        looked for the string `IDE0008` somewhere in the output — while
+        `NoWarn` kept the real analyzer silent.
+
+    A build that fails for any *other* reason is a gate failure too, so a broken
+    build cannot masquerade as a working gate.
+
+    For the web half it resolves the effective config for **every** tracked web
+    file (130 today) via the eslint Node API, checks `isPathIgnored` so an
+    `ignores` entry cannot quietly remove a directory from the lint run, and
+    plants a `var` behind a blanket `/* eslint-disable */` in `frontend/src` and
+    requires `npm run lint:ci` to reject it. Sampling four representative files
+    instead was a complete end-to-end escape: one block scoped to
+    `src/components/**` with `'no-var': 'off'` passed every gate while a `var`
+    sat in a real component. Nothing is exempt from the `isPathIgnored` check,
+    including `dist/` — an unconditional exemption let a tracked path under any
+    `dist/` be skipped while still counting toward the total, so coverage fell
+    as the reported number rose. Probe files use the reserved gitignored
+    `.scratch` infix and are removed by an `EXIT` trap.
+
+    The web verdict is rendered by the same interpreter that computes it.
+    `scripts/novar-eslint-probe.mjs` prints plain `checked`/`problem`/`verdict`
+    lines, and the shell requires the `verdict` line to be present and the
+    count to be a positive integer. It used to print JSON that the caller read
+    with `python3 -c '...' 2>/dev/null`, unguarded and with no preflight: with
+    `python3` unavailable both reads came back empty, empty was taken to mean
+    "no problems", and the gate passed while announcing "error for all&nbsp;
+    tracked web files" with the count silently missing. `node` was already
+    mandatory, so the extra interpreter bought nothing and could only fail open.
+
+    A file type the enumeration does not glob is invisible to every gate here,
+    so an unfamiliar one now fails closed. A tracked `frontend/src/RbWidget.vue`
+    holding `var x = 1` passed all four gates while the summary still read "all
+    130 tracked web files": the fail-closed rule written for files *outside*
+    `frontend/` had never been applied to unfamiliar file *types* inside it, and
+    `check-no-var.sh` already carried `--include='*.vue'`, so the two scripts
+    disagreed about what a web file is. `.vue`, `.svelte`, `.astro`, `.mdx`,
+    `.ejs`, `.hbs`, `.pug`, `.cshtml`, `.razor` and `.php` are rejected on
+    sight until the toolchain covers them. `.svg` stays deliberately uncovered —
+    eslint cannot parse it — but is no longer unchecked: a tracked `.svg`
+    containing `<script` fails.
 
     Two coverage facts worth keeping straight. First, eslint will not lint above
     its own base path, and it reports the refusal as a **warning** ("File
