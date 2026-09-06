@@ -65,6 +65,9 @@ jobs:
           set -euo pipefail
           dotnet restore HomeworkCentral.sln
           dotnet build HomeworkCentral.sln --configuration Release --no-restore
+          # PostgresHostCheck is not a member of the solution, so the build above
+          # leaves it out of the CodeQL database entirely.
+          dotnet build scripts/PostgresHostCheck/PostgresHostCheck.csproj --configuration Release
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3

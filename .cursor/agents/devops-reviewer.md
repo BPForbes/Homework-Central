@@ -118,8 +118,13 @@ inference is fine: `strict` plus `no-explicit-any` already cover it, so
 do not escalate a missing type annotation into a `var`-class finding.
 
 The rule is gated in `dotnet build` (`IDE0008`), `npm run lint`
-(`no-var`) and `scripts/check-no-var.sh` in CI, so a `var` cannot reach
-`main` — do not mark Satisfied on a change that has one.
+(`no-var`) and `scripts/check-no-var.sh` in CI. **Those gates are not
+complete, so do not treat a green CI as the review.** They cover
+declaration-form `var` in compiled C#, `var` in `.ts`/`.tsx`/`.js`/
+`.cjs`/`.mjs`/`.jsx`, the listed suppressions, and inline `<script>`
+in `.html`. They cannot lex C#, so read any `var`-shaped line yourself
+rather than trusting the scan, and hand-sweep files excluded from
+compilation. Do not mark Satisfied on a change that has a `var`.
 
 - Correctness, fail-first control flow, speakable names
 - Security / secrets / least privilege

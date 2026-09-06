@@ -48,11 +48,19 @@ Hard rules:
   - eslint `no-var` and `prefer-const` fail `npm run lint` for `.ts`, `.tsx`,
     `.js`, `.cjs`, `.mjs` and `.jsx`.
   - `scripts/check-no-var.sh` runs in CI and covers what neither of those can
-    see: C# pattern positions, any suppression of the rule (`#pragma`,
-    `NoWarn`, `SuppressMessage`, a nested `.editorconfig`, `eslint-disable`),
-    and inline `<script>` blocks in `.html`.
-  Reviewers treat any `var` as a blocking finding and must not mark a change
-  Satisfied while one remains.
+    see: C# pattern positions, `dynamic`, any suppression of the rule
+    (`#pragma`, `NoWarn` including `Directory.Build.targets`,
+    `SuppressMessage`, a non-root `.editorconfig`, a `-p:` flag in a workflow,
+    `eslint-disable`), and inline `<script>` blocks in `.html`.
+  These gates are deliberately not claimed to be complete: a `grep` cannot lex
+  C#, so the script has a documented false-positive surface and cannot see
+  every construct. Reviewers treat any `var` as a blocking finding, must read
+  `var`-shaped lines themselves rather than trusting a green CI, and must not
+  mark a change Satisfied while one remains.
+- Do not use C# `dynamic` for locals or fields. `var` is statically typed and
+  merely inferred; `dynamic` defers binding to runtime, so it is the one
+  construct that is genuinely less typed than `var`. `scripts/check-no-var.sh`
+  rejects it; there are no occurrences today.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
