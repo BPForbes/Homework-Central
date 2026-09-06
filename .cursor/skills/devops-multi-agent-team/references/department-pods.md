@@ -75,5 +75,6 @@ helping on another item.
 - Record primaries, finish-the-line handoffs, and QA swaps.
 - Gates: no push while review is open; Security before publish;
   **only QA may give the OK to push.** Coders cut a skill
-  side-branch; no shared commits until QA PASS
-  ([side-work.md](side-work.md)).
+  side-branch (clone, not worktree); no shared commits until
+  QA PASS. Record overlapping **files owned** so Coders talk
+  before they collide ([side-work.md](side-work.md)).

@@ -12,6 +12,7 @@ Anyone may ask anyone when blocked. Prefer:
 |--------------------|------------|------|
 | QA | **Coder** (primary) | Reviewer |
 | Coder | **Reviewer** (review Q&A) or **Researcher** | Orchestrator |
+| Coder (path overlap) | **the other Coder** | Orchestrator |
 | Reviewer | **Coder** (review Q&A) or **Orchestrator** | Coder |
 | Security / CI / Verifier / Ticket Lead | Orchestrator or task opener | — |
 | Orchestrator (Team Lead) | **The Client** (human) | — |

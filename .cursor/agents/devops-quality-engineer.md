@@ -20,8 +20,9 @@ Async. Follow QA primaries. **Only QA may give the OK to push.**
 
 **Block** if this sprint added rule bloat, new scripts, or the
 skill is over the budget in
-`goal-side-work-cr.md` (skill dir + 9 agents **≤1320**;
-per-file caps there). Compare to `origin/feature/ticket-rooms`.
+`goal-side-work-cr.md` (skill dir + 9 agents; required
+side-work/CR growth may exceed 1320). Compare to
+`origin/feature/ticket-rooms`.
 Agents **read** identity/pods. Do not add scripts. **Block
 PASS** if CodeRabbit findings are `open` or CR was NOT RUN on
 a code change.

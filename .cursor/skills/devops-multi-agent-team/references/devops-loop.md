@@ -26,9 +26,10 @@ picks the item up ([department-pods.md](department-pods.md)).
 ## 3. Coder
 
 Implement only what the plan authorizes. **Cut a skill
-side-branch** (not `git checkout -b`); edit in that clone / VM
-([side-work.md](side-work.md)). Do not commit on the shared
-checkout. Keep secrets out of git. Prefer idempotent,
+side-branch** (not `git checkout -b`); isolate with a **clone**,
+not `git worktree add`; talk to other Coders so owned paths do
+not collide ([side-work.md](side-work.md)). Do not commit on
+the shared checkout. Keep secrets out of git. Prefer idempotent,
 non-interactive scripts. Run applicable CodeQL and CodeRabbit
 (`cr review --agent --uncommitted --include-untracked --base
 <integration-base>`) before Reviewers — neither authorizes a

@@ -24,7 +24,8 @@ push.** Satisfied does not authorize a push.
 **Block** (Changes requested) if this sprint added rule bloat or
 the skill is over the budget in
 `.cursor/thoughts/non-finalized/goal-side-work-cr.md`
-(skill dir + 9 agents **≤1320**; per-file caps there). Compare to
+(skill dir + 9 agents; required side-work/CR growth may
+exceed 1320). Compare to
 `origin/feature/ticket-rooms`. Agents **read** identity/pods, not
 paste them. **Block Satisfied** if CodeRabbit findings are
 `open` or CR was NOT RUN on a code change

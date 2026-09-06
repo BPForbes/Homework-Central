@@ -147,10 +147,12 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
   then **join the Coder of the same department**.
   Agent: `.cursor/agents/devops-researcher.md`.
 - **Coder** — implement on a **skill side-branch** (not a real git
-  branch; no shared-checkout commits until QA PASS). Run the change
-  in that clone (VM / tools). CodeQL + CodeRabbit CLI (`cr`) before
-  Reviewers. Write Push JSON, Coder→Reviewer `qa` comments, and a
-  Handoff **before the first review**
+  branch; no shared-checkout commits until QA PASS). Isolate with
+  a **clone**, not `git worktree add`. Talk to other Coders so
+  side-branches do not collide. Run the change in that clone
+  (VM / tools). CodeQL + CodeRabbit CLI (`cr`) before Reviewers.
+  Write Push JSON, Coder→Reviewer `qa` comments, and a Handoff
+  **before the first review**
   ([side-work.md](references/side-work.md)).
 - **Reviewers** — compare Push JSON to the side-branch diff vs
   `<integration-base>`; Handoff on send-back
