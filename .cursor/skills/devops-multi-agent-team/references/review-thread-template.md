@@ -12,14 +12,8 @@ See [thoughts-layout.md](thoughts-layout.md).
 **Push policy:** Only QA may give the OK to push.
 
 ## Research brief
-### Local docs
-- …
-### Online media (fetched)
-| URL | Takeaway |
-|-----|----------|
-| … | … |
-### Recommendations
-- …
+### Local docs / Online media / Recommendations
+- … · | URL | Takeaway |
 
 ## Push JSON
 - Latest: `.cursor/thoughts/non-finalized/push-<topic>.json`

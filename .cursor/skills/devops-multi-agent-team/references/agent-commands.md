@@ -1,68 +1,50 @@
 # Agent commands
 
-The Orchestrator and every subagent accept these as `/name` or
-plain wording. Invocable copies live in `.cursor/commands/`.
+Accept as `/name` or plain wording. Copies live in
+`.cursor/commands/`. Notes under `.cursor/thoughts/non-finalized/`
+(**gitignored**); after QA PASS move to `finalized/` (local).
+See [thoughts-layout.md](thoughts-layout.md). Stay on the current
+non-`main` branch. **Only QA may give the OK to push.** After
+PASS: one compressed push that keeps approved Coder commits.
 
-Working notes live under `.cursor/thoughts/non-finalized/`
-(**gitignored**). After QA PASS, move them to `finalized/` (local).
-See [thoughts-layout.md](thoughts-layout.md) and
-[push-json.md](push-json.md). Stay on the current non-`main` branch.
-**Only QA may give the OK to push.** After PASS, one compressed
-push that keeps reviewer-approved Coder commits.
+## `/goal`
 
-## `/goal` — do until you achieve X
+Write `goal-<topic>.md`. Loop until X; do not stop at a plan.
 
-1. Write `.cursor/thoughts/non-finalized/goal-<topic>.md` (and
-   optional `goal-<role>-<topic>.md`).
-2. If the human invoked a long-running goal, use Cursor goal tools.
-3. Keep looping until X is achieved. Do not stop at a plan.
+## `/create-subagent`
 
-## `/create-subagent` — spawn roles asynchronously
+Spawn `.cursor/agents/devops-*.md` with Cursor `Task`,
+asynchronously in pods (`is_background: true` /
+`run_in_background: true`). Rules:
+[department-pods.md](department-pods.md). Do not poll. Subagents
+do not push. Orchestrator pushes only after QA PASS. Agent table:
+[SKILL.md](../SKILL.md).
 
-- Spawn from `.cursor/agents/devops-*.md` with Cursor `Task`.
-- Run **asynchronously in pods** (`is_background: true` /
-  `run_in_background: true`). Department rules:
-  [department-pods.md](department-pods.md).
-- Do not poll background subagents. The Orchestrator synthesizes.
-  Subagents do not push. Orchestrator may push only after QA PASS.
+## `/code-review`
 
-| Role | Agent file |
-|------|------------|
-| Researcher | `devops-researcher.md` |
-| Reviewer | `devops-reviewer.md` |
-| CI Engineer | `devops-ci-engineer.md` |
-| QA | `devops-quality-engineer.md` |
-| Security | `devops-security-engineer.md` |
-| Ticket Lead | `devops-ticket-lead.md` |
-| Verifier | `devops-verifier.md` |
-| Integrator | `devops-integrator.md` |
-| Communicator | `devops-communicator.md` |
+**Owner: QA.** Inspect only. Confirm Coder Push JSON. Always
+`git diff <integration-base>...HEAD`. Write `review-<topic>.md`.
+**Do not edit** product code. Probes:
+[thoughts-layout.md](thoughts-layout.md).
 
-## `/code-review` — look at, do not edit
+## `/repro`
 
-**Primary owner: QA.** Reviewers may use the same inspect-only bar.
+Recreate with exact commands and exit codes. Write `repro-<topic>.md`. Repro files are process output.
 
-- Confirm the Coder Push JSON exists. Always
-  `git diff <integration-base>...HEAD`. Write findings to
-  `review-<topic>.md`. **Do not edit** product code.
-- Probe in a throwaway clone, or a reserved lower-case name
-  (`_scratch/`, `.scratch`). Undo tracked edits with
-  `git checkout -- <exact path>`. See
-  [thoughts-layout.md](thoughts-layout.md).
-
-## `/repro` — reproduce before declaring a cause
-
-Recreate the failure with exact commands and exit codes. Write
-`repro-<topic>.md`. Files the repro creates are process output.
-
-## `/triage` — QA tracks a bug or discovery
+## `/triage`
 
 **Owner: QA.** Copy [triage-template.md](triage-template.md) to
-`triage-<id>.md`. State `active`. Handoff `To: Coder`. Restarts
-research → coder → reviewer → QA.
+`triage-<id>.md`. Handoff `To: Coder`. Research *N* joins the
+Coder who picks it up ([department-pods.md](department-pods.md)).
 
 ## Other `/` skills
 
-`/buildkite-*`, `/sonar-*`, `/review-security`, `/browser-automation`,
-`/share-video`, `/docs-canvas`, `/loop`, `/babysit`,
-`/secure-dependency-health-check`, and the same names without a slash.
+`/buildkite-*` · `/sonar-*` · `/review-security` ·
+`/browser-automation` · `/share-video` · `/docs-canvas` ·
+`/loop` · `/babysit` · `/secure-dependency-health-check`.
+
+**MCP:** `plugin-buildkite-buildkite`, `sonarqube`,
+`plugin-snyk-secure-development-Snyk`, `plugin-linear-linear`,
+`plugin-composio-composio`, `cursor-ide-browser` /
+`plugin-browse-browser`, `plugin-tldraw-tldraw`,
+`plugin-mainframe-mainframe`, `cursor-app-control`.

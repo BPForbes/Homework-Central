@@ -16,31 +16,19 @@ a finding. Do not mark Satisfied from the JSON alone.
 
 ## First handoff (required)
 
-Coder writes `push-<topic>.json` **before the first review**, with
-a Handoff `To: Reviewer`. `closes` may be `[]`. Reviewers do not
-start without that file. Update it on every rewrite. Either side
-may Push when they have something new. Open `qa` rows must be
-answered or withdrawn before Satisfied. Satisfied does **not**
-authorize a git push.
+- Coder writes `push-<topic>.json` **before the first review**,
+  with a Handoff `To: Reviewer`. `closes` may be `[]`.
+- Reviewers do not start without that file. Update it on every
+  rewrite. Either side may Push when they have something new.
+- Open `qa` rows must be answered or withdrawn before Satisfied.
+- Satisfied does **not** authorize a git push.
 
 ## Q&A
 
 Same ids in the thread `## Q&A` table and the JSON `qa` array.
 `status` is `open`, `answered`, or `withdrawn`. A Q&A-only bounce
 may set `"files": {}`. Do not invent a commit to record an answer.
-
-```json
-"qa": [
-  {
-    "id": "q1",
-    "from": "Reviewer",
-    "to": "Coder",
-    "ask": "Can TrainingHeapPressure reuse Sample()?",
-    "answer": "Yes — imported Sample().",
-    "status": "answered"
-  }
-]
-```
+Each `qa` row: `id`, `from`, `to`, `ask`, `answer`, `status`.
 
 ## Shape
 
@@ -50,23 +38,6 @@ Valid JSON. File paths are object keys. Hunks are
 `lines` is a single line or `start-end`. Index the three-dot
 range, not `git show HEAD` alone.
 
-```json
-{
-  "topic": "heap-spill",
-  "round": 2,
-  "from": "Coder",
-  "to": "Reviewer",
-  "notifies": "Should close hysteresis",
-  "closes": ["r1-hysteresis"],
-  "qa": [],
-  "files": {
-    "backend/HomeworkCentral.Api/Assessment/TrainingHeapPressure.cs": {
-      "hunks": [
-        { "op": "-", "lines": "107-118", "why": "old ShouldAttemptSpill" },
-        { "op": "+", "lines": "107-125", "why": "wait until below skip-trace" }
-      ],
-      "delta": "+20/-4"
-    }
-  }
-}
-```
+Top-level keys: `topic`, `round`, `from`, `to`, `notifies`,
+`closes`, `qa`, `files`. Example hunk:
+`{ "op": "+", "lines": "12-20", "why": "…" }` then `"delta": "+9/-2"`.

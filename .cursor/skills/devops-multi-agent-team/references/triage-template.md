@@ -3,8 +3,13 @@
 Copy to `.cursor/thoughts/non-finalized/triage-<id>.md`. Same
 Handoff + **Q&A** as the review thread. Copy ids into Push JSON
 `qa`. `"files"` may be `{}`. Do not `git add`. After QA PASS,
-move to `finalized/`. An **active** item restarts
-research → coder → reviewer → QA.
+move to `finalized/`.
+
+When QA is **blocked**, **sends back**, or is **not pleased**, QA
+opens this file. Research *N* of that department **joins the Coder
+who picks the item up** and stays until Reviewers take the rewrite
+([department-pods.md](department-pods.md)). Not a serial
+research-then-coder queue.
 
 ```markdown
 # Triage: <id>
@@ -22,7 +27,7 @@ research → coder → reviewer → QA.
 - VM / host; commands; exit code
 
 ## Active loop
-- [ ] Research brief updated
+- [ ] Research *N* joins Coder who picked this up (paired, not serial)
 - [ ] Coder rewrite + Push JSON
 - [ ] Reviewers compared JSON to `git diff <integration-base>...HEAD`
 - [ ] Security (after Satisfied)
