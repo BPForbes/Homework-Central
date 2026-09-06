@@ -143,14 +143,33 @@ instead, and do not demand an impossible annotation. And TypeScript
 inference is fine: `strict` plus `no-explicit-any` already cover it, so
 do not escalate a missing type annotation into a `var`-class finding.
 
-The rule is gated in `dotnet build` (`IDE0008`), `npm run lint`
-(`no-var`) and `scripts/check-no-var.sh` in CI. **Those gates are not
-complete, so do not treat a green CI as the review.** They cover
-declaration-form `var` in compiled C#, `var` in `.ts`/`.tsx`/`.js`/
-`.cjs`/`.mjs`/`.jsx`, the listed suppressions, and inline `<script>`
-in `.html`. They cannot lex C#, so read any `var`-shaped line yourself
-rather than trusting the scan, and hand-sweep files excluded from
-compilation. Do not mark Satisfied on a change that has a `var`.
+Three gates split the work by what each can actually parse. Roslyn
+(`IDE0008`) owns every C# declaration and CI compiles every tracked
+`.cs`. eslint owns `.ts`/`.tsx`/`.mts`/`.cts`/`.js`/`.cjs`/`.mjs`/
+`.jsx` and, via `eslint-plugin-html`, inline `<script>` — parsed, not
+grepped. `scripts/check-no-var.sh` owns only the remainder: the word
+`var` in a C# pattern position, `dynamic`, config-file suppressions,
+and non-root `.editorconfig` / `Directory.Build.props` / `.targets`.
+
+**Do not treat a green CI as the review.** A `grep` cannot lex C#, so
+a `dynamic` after a `/* */` that closes mid-line still slips past.
+Read any `var`-shaped line yourself. Do not mark Satisfied on a
+change that has a `var`.
+
+Note the C# scan matches the **bare word**, so `var` is blocked in C#
+comments, XML docs and string literals too — write "implicitly typed
+local" in prose. That is deliberate: the word appears nowhere in the
+current C# sources, and matching the bare word is what lets the scan
+catch pattern positions, wrapped declarations and a non-breaking
+space after the keyword without a terminator regex that false-
+positives on ordinary English. "dynamic" **is** allowed in prose, so
+that scan skips comment lines.
+
+If you are tempted to file a finding that the scan should also
+recognise some new syntactic shape, weigh it against that history
+first: a filter added to suppress a false positive is usually also a
+new place to hide a `var`. Prefer moving the case to a real parser, or
+to this review bar, over another regex branch.
 
 - Correctness, fail-first control flow, speakable names
 - Security / secrets / least privilege

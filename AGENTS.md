@@ -31,6 +31,16 @@ Hard rules:
   The one unavoidable exception is an anonymous type assigned to a local, which
   has no nameable type; prefer keeping anonymous types inline (as every current
   call site does) so the exception does not arise.
+- Do not write the word `var` in C# **prose** either — comments, XML docs and
+  string literals included. Write "implicitly typed local". The gate matches the
+  bare word, which is what lets it be simple and complete (see below); the word
+  occurs nowhere in the current C# sources, so this costs nothing today.
+- Do not use C# `dynamic` for locals, fields, parameters, return types or type
+  arguments. `var` is statically typed and merely inferred; `dynamic` defers
+  binding to runtime, so it is the one construct genuinely less typed than
+  `var`. Unlike `var`, "dynamic" **is** allowed in prose — the risk engine's
+  "dynamic threshold" is a real domain term — so the gate skips comment lines
+  for it.
 - Do not use TypeScript/JavaScript `var` either; use `const`, or `let` when the
   binding is reassigned. TypeScript does **not** additionally require explicit
   annotations on inferred locals or return types, and the C# rule should not be
@@ -39,28 +49,41 @@ Hard rules:
   `@typescript-eslint/no-explicit-any` rejects the explicit form, so inference
   there is already fully checked. Requiring annotations would add churn without
   adding type safety.
-- Both rules are enforced, not advisory:
-  - `csharp_style_var_*` is `error` in `.editorconfig` and
-    `EnforceCodeStyleInBuild` is on in `Directory.Build.props`, so an
-    implicitly typed C# local fails `dotnet build` and CI as `IDE0008`.
+- These rules are enforced, not advisory. Three gates split the work by what
+  each can actually parse, which matters more than it sounds: two review rounds
+  spent trading regex false positives against regex bypasses one line at a time
+  before the work was divided this way.
+  - **Roslyn owns every C# declaration.** `csharp_style_var_*` is `error` in
+    `.editorconfig` and `EnforceCodeStyleInBuild` is on in
+    `Directory.Build.props`, so an implicitly typed local fails `dotnet build`
+    and CI as `IDE0008`. CI compiles all four `csproj`, which between them
+    cover every tracked `.cs` file, so this is complete rather than partial.
     (`IDE0007` is the inverse rule and cannot fire while those settings are
     `false`.)
-  - eslint `no-var` and `prefer-const` fail `npm run lint` for `.ts`, `.tsx`,
-    `.js`, `.cjs`, `.mjs` and `.jsx`.
-  - `scripts/check-no-var.sh` runs in CI and covers what neither of those can
-    see: C# pattern positions, `dynamic`, any suppression of the rule
-    (`#pragma`, `NoWarn` including `Directory.Build.targets`,
-    `SuppressMessage`, a non-root `.editorconfig`, a `-p:` flag in a workflow,
-    `eslint-disable`), and inline `<script>` blocks in `.html`.
-  These gates are deliberately not claimed to be complete: a `grep` cannot lex
-  C#, so the script has a documented false-positive surface and cannot see
-  every construct. Reviewers treat any `var` as a blocking finding, must read
+  - **eslint owns everything web.** `no-var` and `prefer-const` fail
+    `npm run lint` for `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.cjs`, `.mjs`,
+    `.jsx`, and — through `eslint-plugin-html` — inline `<script>` in `.html`,
+    `.htm` and `.xhtml`. The HTML processor hands eslint the real script text,
+    so it is parsed, not pattern-matched. That distinction is the whole reason
+    the plugin is a dependency: a grep over HTML cannot tell a `var` in code
+    from one inside a comment or a string, and every filter added to teach it
+    the difference became a way to hide a `var` from it.
+  - **`scripts/check-no-var.sh` owns only what neither can see**, and nothing
+    else: the word `var` in a C# pattern position, `dynamic`, and suppressions
+    of the rules in config files (`#pragma`, `NoWarn` including
+    `Directory.Build.targets`, `SuppressMessage`, a `-p:` flag in a workflow,
+    `eslint-disable` aimed at these rules). It also rejects any non-root
+    `.editorconfig` and any non-root `Directory.Build.props`/`.targets`: MSBuild
+    takes the *nearest* such file and does not merge, so a nested copy that
+    merely **omits** `EnforceCodeStyleInBuild` silently disables `IDE0008` for
+    that subtree with no suppression syntax to grep for. The script pins
+    `LC_ALL=C`, because grep word boundaries are locale-sensitive and a gate
+    whose verdict depends on the machine is not a gate.
+  The script is still not claimed to be complete — a `grep` cannot lex C#, and
+  a `dynamic` after a `/* */` that closes mid-line will slip past the comment
+  filter. Reviewers treat any `var` as a blocking finding, must read
   `var`-shaped lines themselves rather than trusting a green CI, and must not
   mark a change Satisfied while one remains.
-- Do not use C# `dynamic` for locals or fields. `var` is statically typed and
-  merely inferred; `dynamic` defers binding to runtime, so it is the one
-  construct that is genuinely less typed than `var`. `scripts/check-no-var.sh`
-  rejects it; there are no occurrences today.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
