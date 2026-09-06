@@ -113,6 +113,15 @@ public class RustKernelsTests
         Assert.Equal(1d, batchScores[0], 12);
         Assert.Equal(0d, batchScores[1], 12);
         Assert.Equal(0d, batchScores[2], 12);
+
+        if (RustKernels.HasTopKAbs)
+        {
+            Assert.True(RustKernels.TryTopKAbs([0.1f, -2f, 0f, 3f, 1e-8f], [10, 11, 12, 13, 14], 2, out int[] topK));
+            Assert.Equal([13, 11], topK);
+        }
+
+        if (RustKernels.TryShouldSpill(70, 70, 1, 100, out bool spill))
+            Assert.True(spill);
     }
 
     [Fact]

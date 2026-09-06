@@ -42,6 +42,9 @@ internal static class RustKernels
 
     internal static bool IsLoaded { get; }
 
+    /// <summary>True when <c>hc_heap_top_k_abs</c> is bound. Live mesh extraction stays on the managed O(k) heap.</summary>
+    internal static bool HasTopKAbs => HeapTopKAbsFn is not null;
+
     static RustKernels()
     {
         nint handle = TryOpenLibrary();
@@ -49,8 +52,7 @@ internal static class RustKernels
             return;
 
         if (!TryBind(handle, "hc_embed_text", out EmbedTextNative? embedText)
-            || !TryBind(handle, "hc_add_weighted_tokens", out AddWeightedTokensNative? addTokens)
-            || !TryBind(handle, "hc_cosine", out CosineNative? cosine))
+            || !TryBind(handle, "hc_add_weighted_tokens", out AddWeightedTokensNative? addTokens))
         {
             NativeLibrary.Free(handle);
             return;
@@ -58,7 +60,7 @@ internal static class RustKernels
 
         EmbedTextFn = embedText;
         AddWeightedTokensFn = addTokens;
-        CosineFn = cosine;
+        TryBind(handle, "hc_cosine", out CosineNative? cosine);
         TryBind(handle, "hc_gemv_bias", out GemvBiasNative? gemvBias);
         TryBind(handle, "hc_gemv_transpose", out GemvTransposeNative? gemvTranspose);
         TryBind(handle, "hc_add_expertise_hash", out AddExpertiseHashNative? addExpertise);
@@ -68,6 +70,7 @@ internal static class RustKernels
         TryBind(handle, "hc_batch_cosine_json", out BatchCosineJsonNative? batchCosine);
         TryBind(handle, "hc_heap_should_spill", out HeapShouldSpillNative? heapSpill);
         TryBind(handle, "hc_heap_top_k_abs", out HeapTopKAbsNative? heapTopK);
+        CosineFn = cosine;
         GemvBiasFn = gemvBias;
         GemvTransposeFn = gemvTranspose;
         AddExpertiseHashFn = addExpertise;

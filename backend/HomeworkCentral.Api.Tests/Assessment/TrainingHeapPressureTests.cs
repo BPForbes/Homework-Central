@@ -117,6 +117,11 @@ public sealed class NeuralMeshTopKTests
         List<int> selected = NeuralMeshFrameExtractor.SelectTopKManaged(values, indexes, take: 2, distinct: false);
 
         Assert.Equal([13, 11], selected);
+        if (RustKernels.HasTopKAbs)
+        {
+            Assert.True(RustKernels.TryTopKAbs(values, indexes, 2, out int[] rustSelected));
+            Assert.Equal(selected, rustSelected);
+        }
     }
 
     [Fact]
