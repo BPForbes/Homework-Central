@@ -55,7 +55,13 @@ git rev-parse --git-dir >/dev/null 2>&1 || {
     printf 'not a git repository: %s\n' "$repo_root" >&2
     exit 2
 }
-tracked="$(git ls-files)" || {
+# core.quotePath=false on every invocation that produces a path. By default git
+# wraps a path containing a non-ASCII byte, a control character, `"` or `\` in
+# double quotes, and that trailing quote defeats the `$` anchor in every pattern
+# below (a leading one defeats `^`). Two reserved names spelled with a single
+# accented character were tracked while this script printed "passed" and exited
+# 0 — the backstop reporting clean on exactly what it exists to catch.
+tracked="$(git -c core.quotePath=false ls-files)" || {
     printf 'git ls-files failed in %s\n' "$repo_root" >&2
     exit 2
 }
@@ -154,13 +160,6 @@ if [ -n "$history_base" ]; then
     # git failure must not read as "nothing found". Capture the status before the
     # pipeline, because `|| true` on the whole thing is exactly how a broken
     # GIT_DIR used to print "passed".
-    history_raw="$(
-        git -c diff.renames=false log -m --diff-filter=A --name-only --no-abbrev \
-            --format='' "$history_base..HEAD"
-    )" || {
-        printf 'git log failed over %s..HEAD; cannot verify history\n' "$history_base" >&2
-        exit 2
-    }
     # Paths the base already tracks are not this range's doing. The -m flag
     # above reports, for a merge commit, every path added relative to *each*
     # parent — so a file that lives on the base branch looks "added" when the
@@ -178,14 +177,15 @@ if [ -n "$history_base" ]; then
     # text sitting in history. Inheritance is about the exact bytes already in
     # the base, so compare object ids — the real false positive this fixes has an
     # identical blob on both sides.
-    base_blobs="$(git ls-tree -r "$history_base" | awk '{print $3 "\t" substr($0, index($0, $4))}')" || {
+    base_blobs="$(git -c core.quotePath=false ls-tree -r "$history_base" | awk '{print $3 "\t" substr($0, index($0, $4))}')" || {
         printf 'cannot read the tree at %s\n' "$history_base" >&2
         exit 2
     }
-    # Same walk as history_raw, but carrying the blob id of each added path so
-    # the pairs can be compared. --raw gives ':mode mode preoid postoid A\tpath'.
+    # Walks the range carrying the blob id of each added path, so inherited
+    # bytes can be told from new bytes at the same path. --raw gives ':mode mode preoid postoid A\tpath'.
     history_pairs="$(
-        git -c diff.renames=false log -m --diff-filter=A --raw --no-abbrev \
+        git -c diff.renames=false -c core.quotePath=false \
+            log -m --diff-filter=A --raw --no-abbrev \
             --format='' "$history_base..HEAD"
     )" || {
         printf 'git log failed over %s..HEAD; cannot verify history\n' "$history_base" >&2

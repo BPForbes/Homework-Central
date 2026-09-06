@@ -9,6 +9,12 @@ on:
     # Weekly refresh so default-branch alerts stay current without a PR.
     - cron: '17 7 * * 1'
 
+
+# Least privilege at the workflow level, so a job that forgets its own
+# permissions block does not inherit write scopes from the default token.
+permissions:
+  contents: read
+
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

@@ -113,7 +113,12 @@ if [ "$want_csharp" -eq 1 ]; then
         fi
         while IFS= read -r proj; do
             [ -n "$proj" ] || continue
-            proj_dir="$(dirname "$proj")"
+            # `dirname --`, because a project named `-p:WarningLevel=0.csproj`
+            # is parsed as an option otherwise: proj_dir comes back empty and the
+            # probe target becomes `/NoVarAnalyzerProbe.scratch.cs`, at the
+            # filesystem root. Unprivileged that fails on permissions; as root it
+            # writes outside the repo.
+            proj_dir="$(dirname -- "$proj")"
             probe="$proj_dir/NoVarAnalyzerProbe.scratch.cs"
             probe_files+=("$probe")
 
@@ -122,7 +127,7 @@ if [ "$want_csharp" -eq 1 ]; then
             printf 'namespace NoVarAnalyzerProbe;\ninternal static class Probe%s\n{\n    internal static int Run()\n    {\n        var value = 1;\n        return value;\n    }\n}\n' \
                 "$(printf '%s' "$proj_dir" | tr -cd '[:alnum:]')" > "$probe"
 
-            out="$(dotnet build "$proj" -c Release --nologo 2>&1)"
+            out="$(dotnet build -c Release --nologo -- "$proj" 2>&1)"
             status=$?
             rm -f "$probe"
 
@@ -175,6 +180,9 @@ if [ "$want_web" -eq 1 ]; then
     elif [ ! -d frontend/node_modules ]; then
         skip 'frontend/node_modules absent; eslint probe not run (run npm ci first)'
     else
+        if ! (mapfile -d '' -t _probe < <(printf 'x\0')) 2>/dev/null; then
+            fail "bash $BASH_VERSION cannot run this gate: \`mapfile -d\` needs bash 4.4+ (macOS ships 3.2). Install a newer bash, or run this gate in CI."
+        fi
         # NUL-delimited into an array. A newline-separated string plus an
         # unquoted expansion split `scripts/two words.mjs` into two arguments
         # and eslint reported `No files matching the pattern "scripts/two"`.

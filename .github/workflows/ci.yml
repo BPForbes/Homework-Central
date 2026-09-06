@@ -62,8 +62,15 @@ jobs:
             # the base branch tip when the PR opened; once the base moves on,
             # a range from it sweeps in commits this PR never touched and the
             # scan blames the author for someone else's file.
-            merge_base="$(git merge-base "$BASE_SHA" HEAD)"
-            echo "base=$BASE_SHA merge-base=$merge_base"
+            # On a pull_request checkout HEAD is GitHub's merge commit, whose
+            # first parent is the base and second is the PR tip. merge-base of
+            # the base against that merge commit resolves back to BASE_SHA, so
+            # the range sweeps in every commit the base gained after the PR
+            # opened -- the false blame the merge-base was meant to prevent.
+            # Compare from the PR tip instead.
+            tip="$(git rev-parse HEAD^2 2>/dev/null || git rev-parse HEAD)"
+            merge_base="$(git merge-base "$BASE_SHA" "$tip")"
+            echo "base=$BASE_SHA tip=$tip merge-base=$merge_base"
             ./scripts/check-clean-timeline.sh --history "$merge_base"
           else
             ./scripts/check-clean-timeline.sh
@@ -130,9 +137,20 @@ jobs:
           STRICT: '1'
         run: ./scripts/check-no-var-config.sh --csharp
 
+      # Scoped to the whole repo, not just backend/HomeworkCentral.Api: a new
+      # project was outside the pattern and unscanned. `\s*\(` because a single
+      # space (`FromSqlRaw (`) evaded the previous form, and `-U` so a newline
+      # before the paren does not either.
+      #
+      # This is a lint, not a proof. It cannot see raw ADO.NET at all --
+      # TenantDatabaseProvisioner interpolates a database name into a CREATE
+      # DATABASE statement, which is correct today because the identifier is
+      # escaped by doubling `"` and comes from a fixed catalog rather than
+      # request input, but deleting that escape would not trip this step. Raw
+      # ADO.NET command text stays a review responsibility.
       - name: Reject unparameterized raw SQL
         run: |
-          if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(|ExecuteSqlRawAsync\(|SqlQueryRaw\(' backend/HomeworkCentral.Api --type cs; then
+          if rg -n -U '(FromSqlRaw|ExecuteSqlRaw|ExecuteSqlRawAsync|SqlQueryRaw)\s*\(' --type cs; then
             echo "Unparameterized raw SQL is not allowed. Use FromSqlInterpolated/ExecuteSqlInterpolated/SqlQuery."
             exit 1
           fi
