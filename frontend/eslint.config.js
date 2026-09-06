@@ -20,6 +20,11 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      // The C# side blocks `var` through csharp_style_var_* in .editorconfig;
+      // eslint:recommended does not carry no-var, so TypeScript needs it named
+      // explicitly for the same rule to hold on both sides of the app.
+      'no-var': 'error',
+      'prefer-const': 'error',
     },
   },
 )

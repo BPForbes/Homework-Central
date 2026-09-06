@@ -18,11 +18,15 @@ Primary owner: **QA** (`.cursor/agents/devops-quality-engineer.md`). Reviewers m
    list and `--numstat`, not to `git show HEAD` alone. An omitted
    or wrong hunk is a finding. Do not mark the review done from
    the JSON alone.
-2. Write findings into `.cursor/thoughts/non-finalized/review-<topic>.md`.
+2. Scan the diff for implicitly typed locals first. A `var` in C# or
+   TypeScript is a **blocking** finding: record it with the file and
+   line and the explicit type the Coder should use. Do not mark a
+   review done while one remains.
+3. Write findings into `.cursor/thoughts/non-finalized/review-<topic>.md`.
    Line-level feedback may also go in an uncommitted `push-<topic>.json`.
-3. **Do not edit** product code, workflows, or docs to "fix" findings while acting as `/code-review`. Hand remediations to the Coder.
-4. Do not push. **Only QA may give the OK to push.** Review findings
+4. **Do not edit** product code, workflows, or docs to "fix" findings while acting as `/code-review`. Hand remediations to the Coder.
+5. Do not push. **Only QA may give the OK to push.** Review findings
    and passing tests do not authorize a push.
-5. Use any installed `/` skill that fits (`/review-bugbot`, `/review-security`, `/sonar-analyze`).
+6. Use any installed `/` skill that fits (`/review-bugbot`, `/review-security`, `/sonar-analyze`).
 
 Catalog: `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.

@@ -3,5 +3,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Runs the IDE style analyzers during build so the :error severities in
+         .editorconfig fail the build and CI. Without this, csharp_style_var_*
+         is only honored by an editor and a `var` can land through CI. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 </Project>

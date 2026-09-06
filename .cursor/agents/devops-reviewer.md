@@ -101,7 +101,16 @@ Ground every finding in evidence from:
 
 ## Review bar (like a PR)
 
-- Correctness, fail-first control flow, speakable names, no C# `var`
+**Blocking: implicitly typed locals.** Any `var` in new or changed C#,
+and any `var` in TypeScript, is an automatic **Changes requested** —
+never a nitpick and never waved through to keep a review short. Name
+the file and line and ask the Coder for the specific type. The same
+applies to a `var` a Coder introduces while fixing another finding.
+Both languages are also gated in the build (`IDE0007` / `IDE0008` via
+`EnforceCodeStyleInBuild`, and eslint `no-var`), so a `var` cannot pass
+CI either — do not mark Satisfied on a change that has one.
+
+- Correctness, fail-first control flow, speakable names
 - Security / secrets / least privilege
 - Performance and operability (healthchecks, pins, probes)
 - Alignment with research + `docs/`

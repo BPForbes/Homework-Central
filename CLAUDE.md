@@ -26,7 +26,13 @@ explicit type declarations before adding comments.
 
 Hard rules:
 
-- Do not use C# `var`; use explicit local and iteration types.
+- Do not use C# `var`; use explicit local and iteration types. Do not use
+  TypeScript/JavaScript `var` either; use `const`, or `let` when the binding is
+  reassigned. This is enforced, not advisory: `csharp_style_var_*` in
+  `.editorconfig` is `error` and `EnforceCodeStyleInBuild` is on, so a `var`
+  fails `dotnet build` and CI as `IDE0007`/`IDE0008`; eslint `no-var` and
+  `prefer-const` fail `npm run lint`. Reviewers treat any `var` as a blocking
+  finding and must not mark a change Satisfied while one remains.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
