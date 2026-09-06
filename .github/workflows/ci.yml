@@ -46,8 +46,17 @@ jobs:
           # Empty for a push build, where there is no base to compare against;
           # the script then runs the tip checks only.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A merge_group event carries no pull_request payload, so BASE_SHA is
+          # empty there and the history scan would quietly degrade to the tip
+          # check — in the queue that is the last gate before the base branch.
+          # merge_group.base_sha is the equivalent, so use it when present.
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
+          if [ -z "$BASE_SHA" ] && [ -n "$MERGE_GROUP_BASE_SHA" ]; then
+            BASE_SHA="$MERGE_GROUP_BASE_SHA"
+            echo "using merge_group base"
+          fi
           if [ -n "$BASE_SHA" ]; then
             # The merge base, not the raw base sha. github.event...base.sha is
             # the base branch tip when the PR opened; once the base moves on,

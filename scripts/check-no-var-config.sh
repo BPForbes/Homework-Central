@@ -60,7 +60,13 @@ else
     explicit=1
 fi
 
-strict="${STRICT:-0}"
+# Anything set and not an explicit off-value counts as strict. Matching only
+# '1' meant STRICT=true, STRICT=yes and STRICT=on all silently disabled the
+# very behaviour they were spelled to enable.
+case "$(printf '%s' "${STRICT:-0}" | tr '[:upper:]' '[:lower:]')" in
+    ''|0|false|no|off) strict=0 ;;
+    *) strict=1 ;;
+esac
 failed=0
 
 fail() { printf '\nFAIL: %s\n' "$1"; failed=1; }
@@ -98,6 +104,13 @@ if [ "$want_csharp" -eq 1 ]; then
         skip 'dotnet not installed; C# analyzer probe not run'
     else
         printf 'C# analyzer probe (planting an implicitly typed local per project):\n'
+        # A loop over nothing succeeds, so a gate that iterates projects has to
+        # say how many it found. Renaming every .csproj, or running from a
+        # subdirectory, would otherwise report "check passed".
+        project_count="$(git ls-files '*.csproj' | grep -c . || true)"
+        if [ "${project_count:-0}" -eq 0 ]; then
+            fail 'no tracked .csproj found, so the C# probe verified nothing'
+        fi
         while IFS= read -r proj; do
             [ -n "$proj" ] || continue
             proj_dir="$(dirname "$proj")"

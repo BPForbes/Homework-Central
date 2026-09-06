@@ -48,6 +48,12 @@ report() {
 # renaming or adding a source root cannot silently shrink the scan. Untracked
 # files are included so a newly written .cs is caught before it is staged;
 # --exclude-standard keeps generated obj/ and bin/ out, since both are ignored.
+# It has a deliberate consequence worth stating: reserved-name probe files
+# (`_scratch/`, `*.scratch.*`) are gitignored, so they are *not* scanned. A
+# reviewer's probe may therefore contain `var` freely, which is the point — the
+# probe is throwaway and never reaches the timeline, and check-clean-timeline.sh
+# rejects it if it ever does. The trade is that a probe cannot be relied on to
+# demonstrate this scan catching something; use a tracked file for that.
 #
 # The list is never held in a shell variable. Command substitution silently
 # discards NUL bytes, so `$(git ls-files -z ...)` concatenates every path into

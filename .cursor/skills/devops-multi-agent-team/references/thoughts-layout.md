@@ -244,6 +244,42 @@ would republish it. Check with
 `git log --diff-filter=A --name-only --format='' --all | grep <path>`;
 the answer has to be empty, not "only reachable from a backup".
 
+### What the scrub does not do
+
+**A scrub after the branch has been pushed does not unpublish anything.**
+This is the single most important thing to know before relying on it, and
+it was learned the hard way on this branch.
+
+Measured against the real remote after a completely successful scrub and
+force-push, with a fresh clone reporting the branch clean:
+
+```
+gh api repos/<owner>/<repo>/git/blobs/<blob-sha>   -> 200, 13496 bytes
+gh api repos/<owner>/<repo>/commits/<commit-sha>   -> 200
+```
+
+The blob and the commit that carried it are still served by the forge, to
+anyone, indefinitely. A rewrite makes objects unreachable from any ref; it
+does not delete them, and a hosted forge keeps unreachable objects and
+answers for them by sha. The shas are not secret either — a force-push
+writes `head_ref_force_pushed` events into the pull request's own
+timeline, so the pre-rewrite sha is published next to the branch.
+
+So the scrub is a **pre-publication** control:
+
+- Before the first push, it works completely. Run step 3 before *every*
+  push, not only before the final one.
+- After a push, treat the content as disclosed. Removing it from the
+  branch stops it spreading to new clones and keeps it out of the merge,
+  which is worth doing, but it is containment, not removal.
+- If the content actually matters — a credential, personal data, anything
+  with a disclosure obligation — the rewrite is not the remedy. Rotate
+  the secret, and ask the forge's support to garbage-collect unreachable
+  objects; nothing you can run locally reaches them.
+
+Say which of these applies in the Push JSON, rather than reporting
+"scrubbed" and letting the reader assume the strong version.
+
 4. Push once. If the remote still has the pre-rewrite history,
    `git push --force-with-lease=refs/heads/<branch>:$(git ls-remote origin <branch> | cut -f1)`
    (safer than `--force`). The Client authorizes this rewrite for

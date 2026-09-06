@@ -71,6 +71,12 @@ Hard rules:
     Two web surfaces are **not** covered, both currently empty: script inside
     `.svg`, and an inline event attribute such as `onclick="var x=1"`, which the
     HTML processor does not extract. Adding either means adding a gate.
+    Scope matters as much as extension: `npm run lint` and `lint:ci` run with
+    `working-directory: frontend`, so they cover `frontend/` and nothing else.
+    Web files elsewhere are covered by the root `eslint.config.mjs`, and
+    `check-no-var-config.sh --web` fails on any tracked web file that neither
+    config claims — which is what keeps "eslint owns every web file" from
+    quietly becoming false the next time someone adds a directory.
   - **`npm run lint:ci` re-runs eslint with `--no-inline-config`.** A blanket
     `/* eslint-disable */` or a bare `// eslint-disable-next-line` names no rule,
     so it silences `no-var` while a scan looking for the rule name beside the
