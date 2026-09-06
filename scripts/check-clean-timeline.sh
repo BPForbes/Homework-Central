@@ -61,9 +61,47 @@ git rev-parse --git-dir >/dev/null 2>&1 || {
 # below (a leading one defeats `^`). Two reserved names spelled with a single
 # accented character were tracked while this script printed "passed" and exited
 # 0 — the backstop reporting clean on exactly what it exists to catch.
-tracked="$(git -c core.quotePath=false ls-files)" || {
+#
+# NUL-delimited into an array, not a newline-joined string, because a newline is
+# a legal byte in a path and this scan reports the paths it finds.
+#
+# Worth being precise about what that fixes, since the neighbouring quotePath
+# comment describes a real bypass and this is not one. Matching a newline-joined
+# list line by line can only ever match *more* than the paths warrant: every
+# pattern here is a substring or a suffix test, so a path split into fragments
+# offers extra candidates rather than hiding the original. The failure it
+# produces is a false positive — a file at `a<newline>_scratch/b.txt` is not in
+# a `_scratch/` directory, and the line-based scan reported it as one. A
+# backstop that cries wolf gets ignored, which is its own way of not working.
+mapfile -d '' -t tracked < <(git -c core.quotePath=false ls-files -z) || {
     printf 'git ls-files failed in %s\n' "$repo_root" >&2
     exit 2
+}
+if [ "${#tracked[@]}" -eq 0 ] || [ -z "${tracked[0]:-}" ]; then
+    printf 'git ls-files listed no tracked file in %s, so this scan proves nothing\n' "$repo_root" >&2
+    exit 2
+fi
+
+# Bash's own `=~` rather than a pipe to grep, because grep reads even a single
+# path as lines: with a newline inside the path, `$` still anchors to the end of
+# a *line*, so piping one path at a time would not have changed the matching at
+# all. `[[ =~ ]]` matches the whole string, which is what these patterns mean.
+# `nocasematch` for the same reason the greps carried -i: core.ignorecase is
+# true on macOS and Windows checkouts, so `_SCRATCH/` is the same path there.
+#
+# $1 is the regex to match, $2 an optional regex whose matches are exempt.
+match_tracked() {
+    local pattern="$1" exempt="${2:-}" path
+    shopt -s nocasematch
+    for path in "${tracked[@]}"; do
+        [ -n "$path" ] || continue
+        [[ $path =~ $pattern ]] || continue
+        if [ -n "$exempt" ] && [[ $path =~ $exempt ]]; then
+            continue
+        fi
+        printf '%s\n' "$path"
+    done
+    shopt -u nocasematch
 }
 
 failed=0
@@ -88,7 +126,7 @@ keepfile='^\.cursor/thoughts/non-finalized/\.gitkeep$'
 nested_gitignore_re='(^|/)\.gitignore$'
 
 # 1. Reserved scratch names must never be tracked.
-scratch_tracked="$(printf '%s\n' "$tracked" | grep -Ei "$scratch_re" || true)"
+scratch_tracked="$(match_tracked "$scratch_re")"
 if [ -n "$scratch_tracked" ]; then
     report 'Reviewer/QA scratch files are committed (reserved names):' "$scratch_tracked"
 fi
@@ -96,20 +134,20 @@ fi
 # 2. Thought files are gitignored, but a force-add would slip one in and every
 #    later rewrite would carry the blob.
 thoughts_tracked="$(
-    printf '%s\n' "$tracked" | grep -Ei "$thoughts_re" | grep -v -E "$keepfile" || true
+    match_tracked "$thoughts_re" "$keepfile"
 )"
 if [ -n "$thoughts_tracked" ]; then
     report 'Thought files are committed (only .gitkeep is allowed):' "$thoughts_tracked"
 fi
 
 # 3. Local analysis output that a review run produces.
-analysis_tracked="$(printf '%s\n' "$tracked" | grep -Ei "$analysis_re" || true)"
+analysis_tracked="$(match_tracked "$analysis_re")"
 if [ -n "$analysis_tracked" ]; then
     report 'Local analysis output is committed:' "$analysis_tracked"
 fi
 
 # 4. Review write-ups. These belong in .cursor/thoughts/non-finalized/.
-reviews_tracked="$(printf '%s\n' "$tracked" | grep -Ei '^\.cursor/reviews/' || true)"
+reviews_tracked="$(match_tracked '^\.cursor/reviews/')"
 if [ -n "$reviews_tracked" ]; then
     report 'Review write-ups are committed (use .cursor/thoughts/non-finalized/):' "$reviews_tracked"
 fi
@@ -120,7 +158,7 @@ fi
 #    reserved. Rejecting it mirrors how check-no-var.sh treats a nested
 #    .editorconfig, and is equally safe: the repository has exactly one.
 nested_gitignore="$(
-    printf '%s\n' "$tracked" | grep -Ei "$nested_gitignore_re" | grep -v -E '^\.gitignore$' || true
+    match_tracked "$nested_gitignore_re" '^\.gitignore$'
 )"
 if [ -n "$nested_gitignore" ]; then
     report 'Only the repository root .gitignore is allowed (a nested one can re-include reserved names):' "$nested_gitignore"
