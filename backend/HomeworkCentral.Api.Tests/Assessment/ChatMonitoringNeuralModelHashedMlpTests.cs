@@ -349,6 +349,68 @@ public class ChatMonitoringNeuralModelHashedMlpTests
     }
 
     [Fact]
+    public void Predict_second_call_is_a_memo_hit()
+    {
+        using ModerationEvidenceScorerNeuralNet model = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for harassment.",
+            "Repeated insults.",
+            "You are worthless.",
+            0, 1f, .6f, .5f);
+        ChatMonitoringNeuralModelPrediction first = model.Predict(input);
+        ChatMonitoringNeuralModelPrediction second = model.Predict(input);
+        Assert.Equal(first.Evidence, second.Evidence);
+        Assert.Equal(first.Relevance, second.Relevance);
+        Assert.Equal(first.Category, second.Category);
+        Assert.DoesNotContain("Cached chat-monitor score", first.Reasoning, StringComparison.Ordinal);
+        Assert.Contains("Cached chat-monitor score", second.Reasoning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Predict_memo_is_invalidated_after_train()
+    {
+        using ModerationEvidenceScorerNeuralNet model = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for harassment.",
+            "Repeated insults in chat.",
+            "You are worthless.",
+            0, 1f, .6f, .5f);
+        ChatMonitoringNeuralModelPrediction before = model.Predict(input);
+        Assert.Contains("Cached chat-monitor score", model.Predict(input).Reasoning, StringComparison.Ordinal);
+        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), 40);
+        ChatMonitoringNeuralModelPrediction after = model.Predict(input);
+        Assert.True(after.Evidence > before.Evidence);
+        Assert.DoesNotContain("Cached chat-monitor score", after.Reasoning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Predict_memo_is_invalidated_after_load_snapshot()
+    {
+        using ModerationEvidenceScorerNeuralNet source = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for cussing.",
+            "Prior conduct was reported.",
+            "That was a rude curse.",
+            0, .9f, .4f, .5f);
+        source.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "profanity")), 8);
+        NeuralNetParameterSnapshot snapshot = source.GetParameterSnapshot(4, 8);
+        ChatMonitoringNeuralModelPrediction trained = source.Predict(input);
+
+        using ModerationEvidenceScorerNeuralNet restored = new();
+        ChatMonitoringNeuralModelPrediction untrained = restored.Predict(input);
+        Assert.Contains("Cached chat-monitor score", restored.Predict(input).Reasoning, StringComparison.Ordinal);
+        restored.LoadParameterSnapshot(snapshot);
+        ChatMonitoringNeuralModelPrediction loaded = restored.Predict(input);
+        Assert.Equal(trained.Evidence, loaded.Evidence);
+        Assert.Equal(trained.Relevance, loaded.Relevance);
+        Assert.Equal(trained.Category, loaded.Category);
+        Assert.DoesNotContain("Cached chat-monitor score", loaded.Reasoning, StringComparison.Ordinal);
+        Assert.NotEqual(untrained.Evidence, loaded.Evidence);
+    }
+
+    [Fact]
     public void Support_similarity_raises_confidence_after_training()
     {
         using ModerationChatMonitorNeuralNet model = new();

@@ -49,4 +49,37 @@ public sealed class LruCacheTests
         Assert.Equal(first, second);
         VectorRetrievalMemo.Reset();
     }
+
+    [Fact]
+    public void Encode_second_call_is_a_memo_hit()
+    {
+        ChatMonitoringFeatureEncoder.ResetTextMemos();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for harassment.",
+            "Repeated insults.",
+            "You are worthless.",
+            0, 1f, .6f, .5f);
+        float[] first = ChatMonitoringFeatureEncoder.Encode(input);
+        float[] second = ChatMonitoringFeatureEncoder.Encode(input);
+        Assert.Equal(first, second);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FingerprintInput(input),
+            ChatMonitoringFeatureEncoder.FingerprintInput(input));
+        ChatMonitoringFeatureEncoder.ResetTextMemos();
+    }
+
+    [Fact]
+    public void Host_lru_dispose_is_idempotent_and_stops_native_gets()
+    {
+        HostLru cache = new(2);
+        cache.PutBytes("k", [7]);
+        Assert.True(cache.TryGetBytes("k", out byte[] before));
+        Assert.Equal(new byte[] { 7 }, before);
+        bool wasNative = cache.IsNative;
+        cache.Dispose();
+        cache.Dispose();
+        Assert.False(cache.IsNative);
+        if (wasNative)
+            Assert.False(cache.TryGetBytes("k", out _));
+    }
 }

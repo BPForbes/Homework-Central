@@ -7,9 +7,9 @@ namespace HomeworkCentral.Api.Assessment;
 /// (<c>hc-cache</c> via <c>libhc_kernels</c>). Falls back to the managed
 /// twin when the native library is missing or the exports are absent.
 /// </summary>
-internal sealed class HostLru
+internal sealed class HostLru : IDisposable
 {
-    private readonly nint native;
+    private nint native;
     private readonly LruCache<string, byte[]>? fallback;
 
     public HostLru(int capacity)
@@ -53,6 +53,12 @@ internal sealed class HostLru
         if (fallback is not null)
             return fallback.TryGet(key, out value!);
 
+        if (native == 0)
+        {
+            value = [];
+            return false;
+        }
+
         byte[] keyBytes = Encoding.UTF8.GetBytes(key);
         int status = RustKernels.TryLruGet(native, keyBytes, [], out int needed);
         if (status == 1)
@@ -93,6 +99,9 @@ internal sealed class HostLru
             return;
         }
 
+        if (native == 0)
+            return;
+
         byte[] keyBytes = Encoding.UTF8.GetBytes(key);
         _ = RustKernels.TryLruPut(native, keyBytes, value);
     }
@@ -101,7 +110,14 @@ internal sealed class HostLru
     {
         if (fallback is not null)
             fallback.Clear();
-        else
+        else if (native != 0)
             RustKernels.LruClear(native);
+    }
+
+    public void Dispose()
+    {
+        nint handle = Interlocked.Exchange(ref native, 0);
+        if (handle != 0)
+            RustKernels.LruFree(handle);
     }
 }

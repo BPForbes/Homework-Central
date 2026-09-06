@@ -95,7 +95,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     public ChatMonitoringNeuralModelPrediction Predict(ChatMonitoringNeuralModelInput input)
     {
-        lock (gate) return PredictUnlocked(input).Prediction;
+        // Predict discards the forward trace, so always take the memo path.
+        lock (gate) return PredictUnlocked(input, captureTrace: false).Prediction;
     }
 
     public ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input)
@@ -469,7 +470,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         }
     }
 
-    public void Dispose() { }
+    public void Dispose() => predictionMemo.Dispose();
 
     /// <summary>
     /// Normalises a supplied teacher distribution onto this model's category axis, or returns null
@@ -519,20 +520,23 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         return ChatMonitoringCategoryTaxonomy.IndexOf(Kind, category);
     }
 
-    private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(ChatMonitoringNeuralModelInput input, float[]? encoded = null)
+    private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(
+        ChatMonitoringNeuralModelInput input,
+        float[]? encoded = null,
+        bool? captureTrace = null)
     {
         float[] features = encoded ?? ChatMonitoringFeatureEncoder.Encode(input);
-        bool captureTrace = !TrainingHeapPressure.ShouldSkipTraces();
+        bool capture = captureTrace ?? !TrainingHeapPressure.ShouldSkipTraces();
         string featureKey = FingerprintFeatures(features);
-        if (!captureTrace && TryReadCachedPrediction(featureKey, out ChatMonitoringNeuralModelPrediction? cached)
+        if (!capture && TryReadCachedPrediction(featureKey, out ChatMonitoringNeuralModelPrediction? cached)
             && cached is not null)
         {
             return new ChatMonitoringNeuralModelInferenceTrace(cached, EmptyForwardTrace);
         }
 
-        NeuralNetworkForwardState cache = network.Forward(features, captureTrace);
+        NeuralNetworkForwardState cache = network.Forward(features, capture);
         ChatMonitoringNeuralModelInferenceTrace trace = BuildInference(input, features, cache);
-        if (!captureTrace)
+        if (!capture)
             WriteCachedPrediction(featureKey, trace.Prediction);
         return trace;
     }
