@@ -22,6 +22,11 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - After QA PASS on this concept, the Orchestrator moves those files to
   `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
   Do not put thought dumps in `docs/`.
+- A probe file that must sit inside a real project directory uses a
+  reserved gitignored name — a `_scratch/` directory or a `.scratch.`
+  infix — and must be deleted before you report, leaving
+  `git status --short` clean. Only Coder edits land on the committed
+  timeline; `scripts/check-clean-timeline.sh` enforces that in CI.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
 - Reuse existing helpers, scripts, and docs. Do not duplicate them.

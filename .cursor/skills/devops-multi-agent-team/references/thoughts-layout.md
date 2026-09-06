@@ -125,7 +125,15 @@ Clear, applicable CodeQL is satisfied, **and QA marks PASS**:
      `<integration-base>` (cherry-pick or rebase, dropping
      fold-only commits), then commit any remaining tip-tree
      delta as the fold commit.
-3. Push once. If the remote still has the pre-rewrite history,
+3. **Verify only Coder edits are landing.** Every path in
+   `git diff <integration-base>...HEAD --name-only` must be a Coder
+   edit. Reviewer, Security and QA output never lands: no review
+   thread, Push JSON, triage note, repro note, probe file, CodeQL
+   database, or SARIF dump. Run `scripts/check-clean-timeline.sh`
+   and confirm `git status --short` is clean, so no probe from any
+   role is swept into the fold commit. A probe found here means the
+   role that made it did not clean up — delete it and say so.
+4. Push once. If the remote still has the pre-rewrite history,
    `git push --force-with-lease` (safer than `--force`). The
    Client authorizes this rewrite for this skill’s final
    publish only.
@@ -133,3 +141,25 @@ Clear, applicable CodeQL is satisfied, **and QA marks PASS**:
 That is the only remote push for the skill run. Reviewers still
 compare each Coder rewrite’s Push JSON to the real local
 `git diff <integration-base>...HEAD` before that rewrite.
+
+## Scratch files (all non-Coder roles)
+
+A probe that exercises a compiler or linter cannot live under
+`.cursor/thoughts/` — it has to sit inside a real project directory.
+So two reserved names are gitignored **anywhere** in the tree:
+
+| Form | Example |
+|------|---------|
+| `_scratch/` directory | `backend/HomeworkCentral.Api/_scratch/Probe.cs` |
+| `.scratch.` infix | `backend/HomeworkCentral.Api/Probe.scratch.cs` |
+
+Reviewers, Security and QA must use one of these for every probe and
+must delete them before reporting. `.gitignore` stops an accidental
+`git add`; `scripts/check-clean-timeline.sh` runs in CI and fails the
+build on a force-added probe, a tracked thought file, or a committed
+CodeQL database or SARIF dump.
+
+A fixed-name probe (a nested `.editorconfig`, `Directory.Build.props`
+or `Directory.Build.targets`) cannot take a reserved name. Delete
+those immediately after the probe — a nested `.editorconfig` is
+independently rejected by `scripts/check-no-var.sh`.

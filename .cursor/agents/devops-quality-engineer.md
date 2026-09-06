@@ -23,6 +23,11 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - After QA PASS on this concept, the Orchestrator moves those files to
   `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
   Do not put thought dumps in `docs/`.
+- A probe file that must sit inside a real project directory uses a
+  reserved gitignored name — a `_scratch/` directory or a `.scratch.`
+  infix — and must be deleted before you report, leaving
+  `git status --short` clean. Only Coder edits land on the committed
+  timeline; `scripts/check-clean-timeline.sh` enforces that in CI.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
 - Reuse existing helpers, scripts, and docs. Do not duplicate them.
@@ -590,6 +595,20 @@ unless repository policy or the GitHub Actions configuration requires all applic
 
 ---
 
+## Your files never land on the timeline
+
+Only Coder edits belong in history. Your reproductions, probes, VM
+notes and SARIF dumps do not.
+
+- Name any probe with a reserved gitignored name: a `_scratch/`
+  directory or a `.scratch.` infix (`Repro.scratch.cs`).
+- Delete every probe before you give a verdict.
+- Verdicts, repro notes and triage items go under
+  `.cursor/thoughts/non-finalized/`, which is gitignored. Never
+  `git add -f` one, and never write them into `docs/`.
+- You own the last look before the push: confirm the diff contains
+  Coder edits only. See the Final Pre-Publish Gate below.
+
 ## Final Pre-Publish Gate
 
 Immediately before pushing, publishing, opening/updating a PR, or merging, verify:
@@ -615,6 +634,12 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] Rust CodeQL analysis succeeds
 [ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
+[ ] `scripts/check-clean-timeline.sh` passes
+[ ] `git status --short` is clean — no probe file from you, a Reviewer,
+    or Security is left in the tree
+[ ] Every path in `git diff <integration-base>...HEAD --name-only` is a
+    Coder edit. No review thread, Push JSON, triage note, probe,
+    CodeQL database or SARIF dump is in the diff
 
 If any required item is incomplete or failing:
 

@@ -25,6 +25,11 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - After QA PASS on this concept, the Orchestrator moves those files to
   `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
   Do not put thought dumps in `docs/`.
+- A probe file that must sit inside a real project directory uses a
+  reserved gitignored name — a `_scratch/` directory or a `.scratch.`
+  infix — and must be deleted before you report, leaving
+  `git status --short` clean. Only Coder edits land on the committed
+  timeline; `scripts/check-clean-timeline.sh` enforces that in CI.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
 - Reuse existing helpers, scripts, and docs. Do not duplicate them.
@@ -98,6 +103,27 @@ Ground every finding in evidence from:
    plus Security Clear still do not authorize a push. DO NOT PUSH,
    PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT
    CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
+
+## Your files never land on the timeline
+
+Only Coder edits belong in history. You will often need a probe file
+to prove a gate fires — a `.cs` that has to sit inside a real project
+to exercise the compiler, a nested MSBuild file, a throwaway `.js`.
+
+- Name every probe with a reserved name: put it in a `_scratch/`
+  directory, or give it a `.scratch.` infix (`Probe.scratch.cs`).
+  Both are gitignored anywhere in the tree, so a probe cannot be
+  added by accident.
+- **Delete every probe when you are done** and finish with
+  `git status --short` showing a clean tree. Say so in your report.
+- Never `git add -f` a probe, a thought file, or a CodeQL database.
+  `scripts/check-clean-timeline.sh` runs in CI and will fail the build.
+- Findings go in the review thread and your Push JSON under
+  `.cursor/thoughts/non-finalized/`, which is gitignored. Do not write
+  findings into `docs/` or any tracked file.
+- Reviewers share one working tree. Another reviewer's probe may
+  appear while you work — do not delete files you did not create;
+  report them instead so the Coder can confirm before the push.
 
 ## Review bar (like a PR)
 

@@ -34,6 +34,13 @@ claude-mem/
 !.cursor/thoughts/non-finalized/.gitkeep
 .cursor/thoughts/finalized/**
 
+# Reviewer / Security / QA scratch files. A probe that exercises the compiler
+# or a linter has to sit inside a real project directory, so it cannot live
+# under .cursor/thoughts/. These reserved names may appear anywhere and are
+# never committed: only Coder edits belong on the submitted timeline.
+**/_scratch/
+**/*.scratch.*
+
 # Local CodeQL CLI databases and SARIF dumps
 .codeql-db-csharp/
 .codeql-db-javascript/

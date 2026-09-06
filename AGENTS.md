@@ -95,6 +95,13 @@ When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
   `claude-mem/`, `node_modules/`, `.codeql-db-csharp/`, `.codeql-db-javascript/`,
   `.codeql-db-rust/`, `.cursor/thoughts/`).
 - Do not commit local CodeQL SARIF dumps (`codeql-*.sarif`).
+- Only Coder edits belong on the committed timeline. Reviewer, Security and QA
+  output never lands: review threads, Push JSON, triage and repro notes, probe
+  files, CodeQL databases and SARIF dumps. Probes that must sit inside a real
+  project directory use a reserved gitignored name — a `_scratch/` directory or
+  a `.scratch.` infix — and the role that created one deletes it before
+  reporting. `scripts/check-clean-timeline.sh` runs in CI and fails the build on
+  a force-added probe, a tracked thought file, or a committed CodeQL database.
 - Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
 ## UI and styling work
