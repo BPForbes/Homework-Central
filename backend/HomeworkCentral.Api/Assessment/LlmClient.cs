@@ -225,14 +225,24 @@ public sealed class LlmClient(HttpClient httpClient, IOptions<LlmOptions> option
             unavailableUntilUtc = DateTime.UtcNow.Add(OfflineBackoff);
     }
 
+    internal const int HashEmbedCacheCapacity = 256;
+    private static readonly HostLru HashEmbedCache = new(HashEmbedCacheCapacity);
+
     /// <summary>Deterministic fallback embedding when the LLM service is offline.</summary>
     internal static IReadOnlyList<float> HashEmbed(string text)
     {
-        if (RustKernels.TryHashEmbed(text, out float[] rustVector))
-            return rustVector;
+        if (HashEmbedCache.TryGetFloats(text, out float[] cached))
+            return cached;
 
-        return HashEmbedManaged(text);
+        IReadOnlyList<float> computed = RustKernels.TryHashEmbed(text, out float[] rustVector)
+            ? rustVector
+            : HashEmbedManaged(text);
+        float[] stored = computed as float[] ?? computed.ToArray();
+        HashEmbedCache.PutFloats(text, stored);
+        return stored;
     }
+
+    internal static void ResetHashEmbedCache() => HashEmbedCache.Clear();
 
     /// <summary>Managed 64-bin histogram used when <c>libhc_kernels</c> is absent.</summary>
     internal static IReadOnlyList<float> HashEmbedManaged(string text)

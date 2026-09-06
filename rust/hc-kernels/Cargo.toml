@@ -15,3 +15,4 @@ crate-type = ["cdylib", "rlib"]
 hc-feature-encode = { path = "../hc-feature-encode" }
 hc-vector-cosine = { path = "../hc-vector-cosine" }
 hc-gemv = { path = "../hc-gemv" }
+hc-cache = { path = "../hc-cache" }

@@ -348,6 +348,7 @@ stay in C# / TypeScript.
 | Batch store cosine + JSON float parse | `VectorDocumentStore.RetrieveSimilarAsync` | Up to 200 `EmbeddingJson` arrays in one marshal; invalid JSON scores `0`. |
 | Expertise FNV-1a bins | `TutoringSubjectContextRouter.AddExpertiseHash` | Same FNV-1a as lexical bins; 32 slots, saturate at 1. |
 | Offline `HashEmbed` | `LlmClient.HashEmbed` | 64-bin UTF-16 histogram + L2 when Ollama is down. |
+| FIFO-free LRU | `HostLru` → `hc_lru_*` (`hc-cache`) | Memo for `EmbedText`, `Encode`, `HashEmbed`, parsed `EmbeddingJson`, and hashed-MLP `Predict`. Evicts the least important address, then inserts left: `D >> [A,B,C] -> [D,A,C]` after A is reused. Managed `LruCache<TKey,TValue>` is the fallback. |
 | Support-set cosine | `ChatMonitoringNeuralModelHashedMlp.Cosine` | Max over the support queue. Clamped to `[0, 1]` — do not merge with store cosine. |
 
 TypeScript compute that is real but should stay client-side (or wasm later, not `libhc_kernels`): `frontend/src/components/neuralNet/meshProject.worker.ts` (`buildMesh` / `project`) and `NeuralNetGraph2D.tsx` `buildDenseGraphTopology`. Those are view-projection and SVG topology, not scoring. Bitmasks, Markdown, and captcha hashing stay in TypeScript.

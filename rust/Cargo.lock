@@ -18,6 +18,7 @@ version = "0.1.0"
 name = "hc-kernels"
 version = "0.1.0"
 dependencies = [
+ "hc-cache",
  "hc-feature-encode",
  "hc-gemv",
  "hc-vector-cosine",

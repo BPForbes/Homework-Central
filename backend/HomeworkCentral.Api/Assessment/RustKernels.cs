@@ -6,7 +6,8 @@ namespace HomeworkCentral.Api.Assessment;
 /// <summary>
 /// Loads <c>libhc_kernels</c> for lexical bins, store cosine, GEMV,
 /// expertise hash, HashEmbed, JSON batch cosine, support-set cosine,
-/// heap-pressure watermarks, and bounded top-K mesh extraction.
+/// heap-pressure watermarks, bounded top-K mesh extraction, and the
+/// FIFO-free LRU (<c>hc_lru_*</c> from <c>hc-cache</c>).
 /// Encode metadata, hashed-MLP train/replay, and the rest of the API stay
 /// in C#. The API image does not ship rustc; managed implementations run
 /// when the native library is missing or a newer export is absent.
@@ -39,11 +40,24 @@ internal static class RustKernels
     private static readonly BatchCosineJsonNative? BatchCosineJsonFn;
     private static readonly HeapShouldSpillNative? HeapShouldSpillFn;
     private static readonly HeapTopKAbsNative? HeapTopKAbsFn;
+    private static readonly LruCreateNative? LruCreateFn;
+    private static readonly LruFreeNative? LruFreeFn;
+    private static readonly LruPutNative? LruPutFn;
+    private static readonly LruGetNative? LruGetFn;
+    private static readonly LruClearNative? LruClearFn;
 
     internal static bool IsLoaded { get; }
 
     /// <summary>True when <c>hc_heap_top_k_abs</c> is bound. Live mesh extraction stays on the managed O(k) heap.</summary>
     internal static bool HasTopKAbs => HeapTopKAbsFn is not null;
+
+    /// <summary>True when the Rust LRU exports are bound.</summary>
+    internal static bool HasLru =>
+        LruCreateFn is not null
+        && LruFreeFn is not null
+        && LruPutFn is not null
+        && LruGetFn is not null
+        && LruClearFn is not null;
 
     static RustKernels()
     {
@@ -70,6 +84,11 @@ internal static class RustKernels
         TryBind(handle, "hc_batch_cosine_json", out BatchCosineJsonNative? batchCosine);
         TryBind(handle, "hc_heap_should_spill", out HeapShouldSpillNative? heapSpill);
         TryBind(handle, "hc_heap_top_k_abs", out HeapTopKAbsNative? heapTopK);
+        TryBind(handle, "hc_lru_create", out LruCreateNative? lruCreate);
+        TryBind(handle, "hc_lru_free", out LruFreeNative? lruFree);
+        TryBind(handle, "hc_lru_put", out LruPutNative? lruPut);
+        TryBind(handle, "hc_lru_get", out LruGetNative? lruGet);
+        TryBind(handle, "hc_lru_clear", out LruClearNative? lruClear);
         CosineFn = cosine;
         GemvBiasFn = gemvBias;
         GemvTransposeFn = gemvTranspose;
@@ -80,6 +99,11 @@ internal static class RustKernels
         BatchCosineJsonFn = batchCosine;
         HeapShouldSpillFn = heapSpill;
         HeapTopKAbsFn = heapTopK;
+        LruCreateFn = lruCreate;
+        LruFreeFn = lruFree;
+        LruPutFn = lruPut;
+        LruGetFn = lruGet;
+        LruClearFn = lruClear;
         IsLoaded = true;
     }
 
@@ -473,6 +497,72 @@ internal static class RustKernels
         return true;
     }
 
+    internal static bool TryLruCreate(nuint capacity, out nint handle)
+    {
+        handle = 0;
+        if (LruCreateFn is null)
+            return false;
+
+        handle = LruCreateFn(capacity);
+        return handle != 0;
+    }
+
+    internal static void LruFree(nint handle)
+    {
+        if (handle == 0 || LruFreeFn is null)
+            return;
+
+        LruFreeFn(handle);
+    }
+
+    internal static unsafe bool TryLruPut(nint handle, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+    {
+        if (handle == 0 || LruPutFn is null)
+            return false;
+
+        fixed (byte* keyPointer = key)
+        fixed (byte* valuePointer = value)
+        {
+            int status = LruPutFn(
+                handle,
+                keyPointer,
+                (nuint)key.Length,
+                valuePointer,
+                (nuint)value.Length);
+            return status == 0;
+        }
+    }
+
+    internal static unsafe int TryLruGet(nint handle, ReadOnlySpan<byte> key, Span<byte> destination, out int written)
+    {
+        written = 0;
+        if (handle == 0 || LruGetFn is null)
+            return -1;
+
+        nuint nativeWritten = 0;
+        fixed (byte* keyPointer = key)
+        fixed (byte* destPointer = destination)
+        {
+            int status = LruGetFn(
+                handle,
+                keyPointer,
+                (nuint)key.Length,
+                destPointer,
+                (nuint)destination.Length,
+                &nativeWritten);
+            written = (int)nativeWritten;
+            return status;
+        }
+    }
+
+    internal static void LruClear(nint handle)
+    {
+        if (handle == 0 || LruClearFn is null)
+            return;
+
+        LruClearFn(handle);
+    }
+
     private static float[] ToArray(IReadOnlyList<float> values)
     {
         if (values is float[] array)
@@ -628,6 +718,32 @@ internal static class RustKernels
         nuint take,
         int* outIndexes,
         float* outValues);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate nint LruCreateNative(nuint capacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void LruFreeNative(nint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int LruPutNative(
+        nint handle,
+        byte* key,
+        nuint keyLength,
+        byte* value,
+        nuint valueLength);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private unsafe delegate int LruGetNative(
+        nint handle,
+        byte* key,
+        nuint keyLength,
+        byte* destination,
+        nuint destinationLength,
+        nuint* written);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void LruClearNative(nint handle);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private unsafe delegate int BatchCosineJsonNative(

@@ -105,15 +105,22 @@ public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
         }
 
         return docs
-            .Select(d => (Doc: d, Score: Cosine(queryEmbedding, Parse(d.EmbeddingJson))))
-            .OrderByDescending(x => x.Score)
+            .Select(document => (Doc: document, Score: Cosine(queryEmbedding, ParseEmbeddingJson(document.EmbeddingJson))))
+            .OrderByDescending(pair => pair.Score)
             .Take(take)
-            .Select(x => x.Doc)
+            .Select(pair => pair.Doc)
             .ToList();
     }
 
-    private static float[] Parse(string json) =>
-        JsonSerializer.Deserialize<float[]>(json) ?? [];
+    internal static float[] ParseEmbeddingJson(string json)
+    {
+        if (VectorRetrievalMemo.TryParse(json, out float[]? cached) && cached is not null)
+            return (float[])cached.Clone();
+
+        float[] parsed = JsonSerializer.Deserialize<float[]>(json) ?? [];
+        VectorRetrievalMemo.PutParse(json, (float[])parsed.Clone());
+        return parsed;
+    }
 
     internal static double Cosine(IReadOnlyList<float> a, IReadOnlyList<float> b)
     {

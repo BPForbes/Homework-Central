@@ -1,6 +1,7 @@
-//! Pure-Rust cache helpers. **Not** a C ABI and **not** loaded by
-//! `RustKernels.cs`. Core chat, EF, SignalR, SPA, and training stay
-//! in C# / TypeScript.
+//! FIFO-free cache helpers. The C ABI is in <c>hc-kernels</c>
+//! (`hc_lru_create` / `put` / `get` / `clear` / `free`) and is loaded
+//! by `RustKernels.cs`. Core chat, EF, SignalR, SPA, and training stay
+//! in C# / TypeScript; those call sites hold a handle into this LRU.
 //!
 //! Eviction is **never FIFO**. FIFO drops the oldest insert even after
 //! it was used again. The Client walk is `D >> [A,B,C] -> [D,A,C]`:

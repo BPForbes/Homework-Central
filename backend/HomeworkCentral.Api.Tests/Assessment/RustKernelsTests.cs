@@ -61,6 +61,39 @@ public class RustKernelsTests
     }
 
     [Fact]
+    public void Loaded_lru_follows_client_walk_d_on_a_b_c()
+    {
+        if (!RustKernels.HasLru)
+            return;
+
+        Assert.True(RustKernels.TryLruCreate(3, out nint handle));
+        try
+        {
+            byte[] a = "A"u8.ToArray();
+            byte[] b = "B"u8.ToArray();
+            byte[] c = "C"u8.ToArray();
+            byte[] d = "D"u8.ToArray();
+            Assert.True(RustKernels.TryLruPut(handle, a, [1]));
+            Assert.True(RustKernels.TryLruPut(handle, b, [2]));
+            Assert.True(RustKernels.TryLruPut(handle, c, [3]));
+            byte[] dest = new byte[1];
+            Assert.Equal(0, RustKernels.TryLruGet(handle, a, dest, out _));
+            Assert.True(RustKernels.TryLruPut(handle, d, [4]));
+            Assert.Equal(0, RustKernels.TryLruGet(handle, d, dest, out _));
+            Assert.Equal(4, dest[0]);
+            Assert.Equal(0, RustKernels.TryLruGet(handle, a, dest, out _));
+            Assert.Equal(1, dest[0]);
+            Assert.Equal(0, RustKernels.TryLruGet(handle, c, dest, out _));
+            Assert.Equal(3, dest[0]);
+            Assert.Equal(1, RustKernels.TryLruGet(handle, b, dest, out _));
+        }
+        finally
+        {
+            RustKernels.LruFree(handle);
+        }
+    }
+
+    [Fact]
     public void Loaded_kernels_serve_embed_text_and_store_cosine()
     {
         if (!RustKernels.IsLoaded)

@@ -32,6 +32,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly NeuralNetwork network;
     private readonly NeuralNetTopologySnapshot topology;
     private readonly Queue<SupportExample> support = new();
+    private readonly HostLru predictionMemo = new(64);
     private readonly object gate = new();
     private static readonly ForwardPropagationTrace EmptyForwardTrace = new(
         [],
@@ -162,6 +163,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
         lock (gate)
         {
+            predictionMemo.Clear();
             int n = examples.Count;
             NeuralNetworkGradientBuffers gradients = network.CreateGradientBuffers();
             List<TrainingIterationReplay> iterations = [];
@@ -463,6 +465,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             float[] values = new float[snapshot.ParameterCount];
             Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
             network.LoadParameters(values);
+            predictionMemo.Clear();
         }
     }
 
@@ -520,8 +523,60 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     {
         float[] features = encoded ?? ChatMonitoringFeatureEncoder.Encode(input);
         bool captureTrace = !TrainingHeapPressure.ShouldSkipTraces();
+        string featureKey = FingerprintFeatures(features);
+        if (!captureTrace && TryReadCachedPrediction(featureKey, out ChatMonitoringNeuralModelPrediction? cached)
+            && cached is not null)
+        {
+            return new ChatMonitoringNeuralModelInferenceTrace(cached, EmptyForwardTrace);
+        }
+
         NeuralNetworkForwardState cache = network.Forward(features, captureTrace);
-        return BuildInference(input, features, cache);
+        ChatMonitoringNeuralModelInferenceTrace trace = BuildInference(input, features, cache);
+        if (!captureTrace)
+            WriteCachedPrediction(featureKey, trace.Prediction);
+        return trace;
+    }
+
+    private bool TryReadCachedPrediction(string key, out ChatMonitoringNeuralModelPrediction? prediction)
+    {
+        prediction = null;
+        if (!predictionMemo.TryGetBytes(key, out byte[] payload) || payload.Length != 20)
+            return false;
+
+        float[] numbers = new float[4];
+        Buffer.BlockCopy(payload, 0, numbers, 0, 16);
+        int categoryIndex = BitConverter.ToInt32(payload, 16);
+        if (categoryIndex < 0 || categoryIndex >= CategoryLabels.Count)
+            return false;
+
+        string category = CategoryLabels[categoryIndex];
+        prediction = new ChatMonitoringNeuralModelPrediction(
+            numbers[0],
+            numbers[1],
+            numbers[2],
+            Kind,
+            ModelVersion,
+            category,
+            $"Cached chat-monitor score for {category}.",
+            numbers[3]);
+        return true;
+    }
+
+    private void WriteCachedPrediction(string key, ChatMonitoringNeuralModelPrediction prediction)
+    {
+        int categoryIndex = ChatMonitoringCategoryTaxonomy.IndexOf(Kind, prediction.Category);
+        byte[] payload = new byte[20];
+        float[] numbers = [prediction.Evidence, prediction.Relevance, prediction.Confidence, prediction.CategoryConfidence];
+        Buffer.BlockCopy(numbers, 0, payload, 0, 16);
+        BitConverter.TryWriteBytes(payload.AsSpan(16), categoryIndex);
+        predictionMemo.PutBytes(key, payload);
+    }
+
+    internal static string FingerprintFeatures(float[] features)
+    {
+        byte[] bytes = new byte[features.Length * sizeof(float)];
+        Buffer.BlockCopy(features, 0, bytes, 0, bytes.Length);
+        return Convert.ToHexString(bytes);
     }
 
     private ChatMonitoringNeuralModelInferenceTrace BuildInference(

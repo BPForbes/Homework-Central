@@ -47,6 +47,9 @@ public static class ChatMonitoringFeatureEncoder
     private const int AppliedHotStart = 52;
     private const int ChannelHotStart = 65;
     private const int CascadeContextStart = 78;
+    internal const int TextMemoCapacity = 256;
+    private static readonly HostLru TextEmbeddings = new(TextMemoCapacity);
+    private static readonly HostLru EncodedInputs = new(TextMemoCapacity);
 
     /// <summary>
     /// Lexical-only vector for <c>VectorDocumentStore</c> retrieval. Deliberately still the
@@ -57,16 +60,29 @@ public static class ChatMonitoringFeatureEncoder
     /// </summary>
     public static IReadOnlyList<float> EmbedText(string text)
     {
-        float[] values = new float[StructuralFeatureCount];
-        if (RustKernels.TryEmbedText(text, values))
-            return values;
+        if (TextEmbeddings.TryGetFloats(text, out float[] cached))
+            return cached;
 
-        AddTokensManaged(values, text, 1f);
+        float[] values = new float[StructuralFeatureCount];
+        if (!RustKernels.TryEmbedText(text, values))
+            AddTokensManaged(values, text, 1f);
+
+        TextEmbeddings.PutFloats(text, values);
         return values;
+    }
+
+    internal static void ResetTextMemos()
+    {
+        TextEmbeddings.Clear();
+        EncodedInputs.Clear();
     }
 
     public static float[] Encode(ChatMonitoringNeuralModelInput input)
     {
+        string fingerprint = FingerprintInput(input);
+        if (EncodedInputs.TryGetFloats(fingerprint, out float[] cachedEncode))
+            return cachedEncode;
+
         float[] values = new float[FeatureCount];
         AddTokens(values, input.Requirement, .65f);
         AddTokens(values, input.ThreadContext, .5f);
@@ -90,7 +106,48 @@ public static class ChatMonitoringFeatureEncoder
         }
 
         WriteTextVector(values, input.TextEmbedding);
+        EncodedInputs.PutFloats(fingerprint, values);
         return values;
+    }
+
+    internal static string FingerprintInput(ChatMonitoringNeuralModelInput input)
+    {
+        System.Text.StringBuilder builder = new(input.Requirement.Length + input.ThreadContext.Length + input.Message.Length + 64);
+        builder.Append(input.Requirement).Append('\u001f');
+        builder.Append(input.ThreadContext).Append('\u001f');
+        builder.Append(input.Message).Append('\u001f');
+        builder.Append(input.CommunityVote).Append('\u001f');
+        builder.Append(input.ChannelRelevance).Append('\u001f');
+        builder.Append(input.ThreadContinuity).Append('\u001f');
+        builder.Append(input.PriorScore).Append('\u001f');
+        builder.Append(input.AppliedSubjectCountNorm).Append('\u001f');
+        builder.Append(input.ExactSubjectMatch).Append('\u001f');
+        builder.Append(input.RelatedSubjectMatch).Append('\u001f');
+        builder.Append(input.CrossSubjectSupport).Append('\u001f');
+        AppendFloats(builder, input.AppliedSubjectMultiHot);
+        builder.Append('\u001f');
+        AppendFloats(builder, input.ChannelSubjectMultiHot);
+        builder.Append('\u001f');
+        AppendFloats(builder, input.CascadeContext);
+        builder.Append('\u001f');
+        AppendFloats(builder, input.TextEmbedding);
+        return builder.ToString();
+    }
+
+    private static void AppendFloats(System.Text.StringBuilder builder, IReadOnlyList<float>? values)
+    {
+        if (values is null)
+        {
+            builder.Append('-');
+            return;
+        }
+
+        for (int index = 0; index < values.Count; index++)
+        {
+            if (index > 0)
+                builder.Append(',');
+            builder.Append(BitConverter.SingleToInt32Bits(values[index]));
+        }
     }
 
     /// <summary>

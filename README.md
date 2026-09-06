@@ -39,7 +39,7 @@ Install the following before running the project locally.
 
 ## Install Rust
 
-The numeric kernels live in [`rust/`](rust/) (`hc-feature-encode`, `hc-vector-cosine`, `hc-gemv`, `hc-kernels`). After `cargo build --workspace`, the API loads `libhc_kernels` for lexical bins, store cosine, GEMV, expertise hash, HashEmbed, JSON batch cosine, and support-set cosine. The rest of the C# API and the TypeScript app stay as they are. Managed C# implementations run when the native library is absent (Docker publish, C# CI). Install rustup from [rustup.rs](https://rustup.rs/) or [rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
+The numeric kernels live in [`rust/`](rust/) (`hc-feature-encode`, `hc-vector-cosine`, `hc-gemv`, `hc-kernels`, `hc-cache`). After `cargo build --workspace`, the API loads `libhc_kernels` for lexical bins, store cosine, GEMV, expertise hash, HashEmbed, JSON batch cosine, support-set cosine, and the FIFO-free LRU. The rest of the C# API and the TypeScript app stay as they are. Managed C# implementations run when the native library is absent (Docker publish, C# CI). Install rustup from [rustup.rs](https://rustup.rs/) or [rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
 
 **Where rustup installs**
 

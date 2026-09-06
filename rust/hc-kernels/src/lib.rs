@@ -1,8 +1,9 @@
 //! C ABI for the chat-monitor kernels the API loads at runtime.
 //!
 //! Lexical bins, store cosine, GEMV, expertise hash, HashEmbed, JSON
-//! batch cosine, and support-set cosine cross this boundary. Encode
-//! metadata, hashed-MLP train/replay, and the rest of the API stay in C#.
+//! batch cosine, support-set cosine, and the FIFO-free LRU (`hc-cache`)
+//! cross this boundary. Encode metadata, hashed-MLP train/replay, and
+//! the rest of the API stay in C#.
 //! The Docker image does not ship `rustc`; C# falls back when this
 //! library is absent or a newer export is missing.
 
@@ -10,8 +11,11 @@ use hc_feature_encode::{
     add_expertise_hash, add_weighted_tokens, embed_text, hash_embed, HASH_EMBED_BINS,
     STRUCTURAL_FEATURE_COUNT,
 };
+use hc_cache::LruCache;
 use hc_gemv::{multiply_bias, multiply_transpose};
 use hc_vector_cosine::{batch_cosine_json, cosine, max_support_cosine, support_cosine};
+use std::ffi::c_void;
+use std::sync::Mutex;
 
 /// Writes 86 lexical bins for `text` into `output`. Returns 0 on success.
 ///
@@ -483,6 +487,121 @@ impl PartialOrd for AbsEntry {
     }
 }
 
+struct NativeLru {
+    cache: Mutex<LruCache<Vec<u8>, Vec<u8>>>,
+}
+
+/// Creates an LRU. Capacity `0` is a valid empty cache. The pointer is
+/// owned by the caller and must be passed to [`hc_lru_free`].
+#[no_mangle]
+pub extern "C" fn hc_lru_create(capacity: usize) -> *mut c_void {
+    Box::into_raw(Box::new(NativeLru {
+        cache: Mutex::new(LruCache::new(capacity)),
+    })) as *mut c_void
+}
+
+/// # Safety
+/// `handle` must be from [`hc_lru_create`] or null.
+#[no_mangle]
+pub unsafe extern "C" fn hc_lru_free(handle: *mut c_void) {
+    if handle.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(handle as *mut NativeLru) });
+}
+
+/// Inserts `value` for `key`. Evicts the least important address first.
+/// Returns `0` on success, `-1` on a null handle or a nonempty null buffer.
+///
+/// # Safety
+/// `handle` from [`hc_lru_create`]. `key` / `value` are `key_len` /
+/// `value_len` bytes when those lengths are nonzero.
+#[no_mangle]
+pub unsafe extern "C" fn hc_lru_put(
+    handle: *mut c_void,
+    key: *const u8,
+    key_len: usize,
+    value: *const u8,
+    value_len: usize,
+) -> i32 {
+    let Some(native) = (unsafe { (handle as *mut NativeLru).as_mut() }) else {
+        return -1;
+    };
+    if key_len > 0 && key.is_null() {
+        return -1;
+    }
+    if value_len > 0 && value.is_null() {
+        return -1;
+    }
+    let key = if key_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(key, key_len) }.to_vec()
+    };
+    let value = if value_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(value, value_len) }.to_vec()
+    };
+    native.cache.lock().unwrap_or_else(|err| err.into_inner()).put(key, value);
+    0
+}
+
+/// Copies the value for `key`. `0` hit, `1` miss, `-1` bad args, `-3`
+/// destination too small (`*written` is the needed length).
+///
+/// # Safety
+/// Same as [`hc_lru_put`]. `written` may be null.
+#[no_mangle]
+pub unsafe extern "C" fn hc_lru_get(
+    handle: *mut c_void,
+    key: *const u8,
+    key_len: usize,
+    dest: *mut u8,
+    dest_len: usize,
+    written: *mut usize,
+) -> i32 {
+    let Some(native) = (unsafe { (handle as *mut NativeLru).as_mut() }) else {
+        return -1;
+    };
+    if key_len > 0 && key.is_null() {
+        return -1;
+    }
+    let key = if key_len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(key, key_len) }
+    };
+    let mut guard = native.cache.lock().unwrap_or_else(|err| err.into_inner());
+    let Some(value) = guard.get(key) else {
+        return 1;
+    };
+    if !written.is_null() {
+        unsafe { *written = value.len() };
+    }
+    if dest_len < value.len() {
+        return -3;
+    }
+    if value.is_empty() {
+        return 0;
+    }
+    if dest.is_null() {
+        return -1;
+    }
+    unsafe { std::ptr::copy_nonoverlapping(value.as_ptr(), dest, value.len()) };
+    0
+}
+
+/// # Safety
+/// `handle` from [`hc_lru_create`] or null.
+#[no_mangle]
+pub unsafe extern "C" fn hc_lru_clear(handle: *mut c_void) {
+    let Some(native) = (unsafe { (handle as *mut NativeLru).as_mut() }) else {
+        return;
+    };
+    native.cache.lock().unwrap_or_else(|err| err.into_inner()).clear();
+}
+
 /// UTF-8 text, or `""` when `len` is 0 (never `from_raw_parts` on a null empty).
 ///
 /// # Safety
@@ -571,6 +690,35 @@ mod tests {
         assert_eq!(hc_heap_should_spill(69, 70, 1, 100), 0);
         assert_eq!(hc_heap_should_spill(10, 0, 70, 100), 1);
         assert_eq!(hc_heap_should_spill(-1, 10, 0, 0), -1);
+    }
+
+    #[test]
+    fn lru_client_walk_d_on_a_b_c_is_d_a_c() {
+        let cache = hc_lru_create(3);
+        let put = |key: u8, value: u8| unsafe {
+            hc_lru_put(cache, &key, 1, &value, 1)
+        };
+        let get = |key: u8| -> Option<u8> {
+            let mut dest = [0_u8; 1];
+            let mut written = 0_usize;
+            let status = unsafe { hc_lru_get(cache, &key, 1, dest.as_mut_ptr(), 1, &mut written) };
+            if status == 0 {
+                Some(dest[0])
+            } else {
+                None
+            }
+        };
+
+        assert_eq!(put(b'A', 1), 0);
+        assert_eq!(put(b'B', 2), 0);
+        assert_eq!(put(b'C', 3), 0);
+        assert_eq!(get(b'A'), Some(1));
+        assert_eq!(put(b'D', 4), 0);
+        assert_eq!(get(b'D'), Some(4));
+        assert_eq!(get(b'A'), Some(1));
+        assert_eq!(get(b'C'), Some(3));
+        assert_eq!(get(b'B'), None);
+        unsafe { hc_lru_free(cache) };
     }
 
     #[test]

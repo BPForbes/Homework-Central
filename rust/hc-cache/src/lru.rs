@@ -3,6 +3,7 @@
 //! Order is **left = most recent, right = least recent**.
 //! Nodes store `prev` / `next` indexes so unlink does not scan.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -60,10 +61,22 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
         out
     }
 
-    pub fn get(&mut self, key: &K) -> Option<&V> {
+    pub fn get<Q>(&mut self, key: &Q) -> Option<&V>
+    where
+        Q: Hash + Eq + ?Sized,
+        K: Borrow<Q>,
+    {
         let index = *self.map.get(key)?;
         self.promote(index);
         Some(&self.nodes[index].value)
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.free.clear();
+        self.nodes.clear();
+        self.head = None;
+        self.tail = None;
     }
 
     pub fn put(&mut self, key: K, value: V) {
