@@ -1,22 +1,30 @@
 # Agent commands
 
-Orchestrator and subagents accept `/name` or plain wording. Invocable copies:
-`.cursor/commands/`. Shared rules: [role-identity.md](role-identity.md),
-[department-pods.md](department-pods.md), [thoughts-layout.md](thoughts-layout.md).
+The Orchestrator and every subagent accept these as `/name` or
+plain wording. Invocable copies live in `.cursor/commands/`.
 
-**Only QA may give the OK to push.**
+Working notes live under `.cursor/thoughts/non-finalized/`
+(**gitignored**). After QA PASS, move them to `finalized/` (local).
+See [thoughts-layout.md](thoughts-layout.md) and
+[push-json.md](push-json.md). Stay on the current non-`main` branch.
+**Only QA may give the OK to push.** After PASS, one compressed
+push that keeps reviewer-approved Coder commits.
 
-## `/goal`
+## `/goal` — do until you achieve X
 
-Write `.cursor/thoughts/non-finalized/goal-<topic>.md` (or `goal-<role>-<topic>.md`).
-Loop the DevOps cycle until done-when is met. Mark complete only when criteria
-are met or the human stops.
+1. Write `.cursor/thoughts/non-finalized/goal-<topic>.md` (and
+   optional `goal-<role>-<topic>.md`).
+2. If the human invoked a long-running goal, use Cursor goal tools.
+3. Keep looping until X is achieved. Do not stop at a plan.
 
-## `/create-subagent`
+## `/create-subagent` — spawn roles asynchronously
 
-Spawn from `.cursor/agents/devops-*.md` with Cursor `Task`,
-`run_in_background: true`. Launch pods together; do not poll. Orchestrator
-synthesizes; subagents do not push.
+- Spawn from `.cursor/agents/devops-*.md` with Cursor `Task`.
+- Run **asynchronously in pods** (`is_background: true` /
+  `run_in_background: true`). Department rules:
+  [department-pods.md](department-pods.md).
+- Do not poll background subagents. The Orchestrator synthesizes.
+  Subagents do not push. Orchestrator may push only after QA PASS.
 
 | Role | Agent file |
 |------|------------|
@@ -30,27 +38,31 @@ synthesizes; subagents do not push.
 | Integrator | `devops-integrator.md` |
 | Communicator | `devops-communicator.md` |
 
-## `/code-review`
+## `/code-review` — look at, do not edit
 
-**Primary owner: QA.** Reviewers use the same inspect-only bar.
+**Primary owner: QA.** Reviewers may use the same inspect-only bar.
 
-Read Coder Push JSON as index; **always** `git diff <integration-base>...HEAD`,
-tests, logs, SARIF. Compare mock and real diff. Write findings to
-`review-<topic>.md`. **Do not edit** product code. Hand fixes to Coder.
+- Confirm the Coder Push JSON exists. Always
+  `git diff <integration-base>...HEAD`. Write findings to
+  `review-<topic>.md`. **Do not edit** product code.
+- Probe in a throwaway clone, or a reserved lower-case name
+  (`_scratch/`, `.scratch`). Undo tracked edits with
+  `git checkout -- <exact path>`. See
+  [thoughts-layout.md](thoughts-layout.md).
 
-## `/repro`
+## `/repro` — reproduce before declaring a cause
 
-Reproduce with exact commands and exit codes. Write
-`.cursor/thoughts/non-finalized/repro-<topic>.md`. Probes: throwaway clone or
-reserved name per [role-identity.md](role-identity.md).
+Recreate the failure with exact commands and exit codes. Write
+`repro-<topic>.md`. Files the repro creates are process output.
 
-## `/triage`
+## `/triage` — QA tracks a bug or discovery
 
 **Owner: QA.** Copy [triage-template.md](triage-template.md) to
-`triage-<id>.md`. Active item restarts research → coder → reviewer → QA.
+`triage-<id>.md`. State `active`. Handoff `To: Coder`. Restarts
+research → coder → reviewer → QA.
 
 ## Other `/` skills
 
-Use when the phase matches: `/buildkite-*`, `/sonar-*`, `/review-security`,
-`/browser-automation`, `/share-video`, `/docs-canvas`, `/loop`, `/babysit`,
-`/secure-dependency-health-check`.
+`/buildkite-*`, `/sonar-*`, `/review-security`, `/browser-automation`,
+`/share-video`, `/docs-canvas`, `/loop`, `/babysit`,
+`/secure-dependency-health-check`, and the same names without a slash.

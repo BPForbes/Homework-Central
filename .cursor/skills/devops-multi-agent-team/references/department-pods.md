@@ -1,89 +1,86 @@
 # Department pods
 
-Letters are **departments / subject matters**, not people. Roles run
-**async** (`is_background: true`, `run_in_background: true`). Do not
-queue pods linearly. Spawn a pod together; synthesize when it completes.
+Letters are **departments / subject matters**, not people. Teams work
+**dynamically**: research can run with coding; coding can run with
+review. Do not run roles as a linear 1→N queue.
 
-## Departments
+Read this file. Do not paste it into agent prompts.
 
 | Dept | Owns | Coder seat |
 |------|------|------------|
-| **A** | `.cursor/skills/devops-multi-agent-team/**`, `.cursor/agents/devops-*.md` | Coder A |
+| **A** | skill `SKILL.md`, `references/*`, `.cursor/agents/*` | Coder A |
 | **B** | `AGENTS.md`, `CLAUDE.md`, PR description text | Coder B |
-
-Research and review/QA seats align with the department they support.
 
 ## Research → Coder
 
-- **Research A done** → hand off to **Coder A**. Research A **joins** Coder A.
-- **Research B not done** → **do not** run Coder B.
+- Research **A** done → hand off to Coder **A**. Research A **joins
+  Coder A** (same department, same change surface).
+- Research **B** not done → **do not** run Coder B.
+- The same rule for every letter: no Coder until that department’s
+  research brief exists (or the Orchestrator already knows the surface).
 
-## Coder → Review
+## Reviewer primary
 
-- **Coder B submits** → Reviewer A and Reviewer B may both review it.
-- **Coder A submits** → Reviewer A **prioritizes** Coder A (A is Reviewer A’s primary).
-- If Coder B is still writing and Coder A has not submitted, Reviewer A reviews other **ready** code.
+Coder B submits → Reviewer A and Reviewer B may both review it.
+If Coder A then submits, Reviewer A **prioritizes** Coder A (A is
+Reviewer A’s primary). If Coder B is still writing and Coder A has
+not submitted, Reviewer A reviews other ready code.
 
-## Cross-review (Reviewers)
-
-Review other ready diffs until a coder of the **same department** submits.
-Each reviewer has a **primary** item. If they cannot review that goal yet,
+Cross-review until a coder of the **same department** submits.
+Each reviewer has a primary item. If they cannot review that goal,
 they review other ready code.
 
-**Mid-review swap:** finish the current **line of a file**, pass notes to
-the reviewer whose primary just became ready, then take that primary.
+## Finish the line, then pass notes
 
-Example: Reviewer A primary = C#; Reviewer C primary = Rust. Both were
-on Rust. Coder A submits C# → Reviewer A sends Rust notes to Reviewer C,
-then takes the C# review.
+Mid-review, if a primary item arrives: finish the current **line of
+a file**, then pass notes to the reviewer whose primary it is.
 
-## QA pods
+Example: Reviewer A primary = C#; Reviewer C primary = Rust. Both
+were on Rust. Coder A submits C# → Reviewer A sends Rust notes to
+Reviewer C, then takes the C#.
 
-Several QA pods may test one item. Same primary / cross pattern as reviewers.
+The Orchestrator records the handoff on the review thread. Do not
+swap silently.
 
-If nothing matches a QA’s primary, they test other ready items.
+## QA primary (same idea)
 
-**Mid-test swap:** finish the current assessment, pass notes, then switch.
+Several QA pods may test one item. If nothing matches a QA’s
+primary, they test other ready items.
 
-Client example (record swaps in the review/QA thread — not silent):
+Mid-test, if their primary becomes ready: finish the current
+assessment, pass notes, then switch.
 
-- QA A primary **C#**; QA C primary **Rust**.
-- Rust not reviewer-OK yet; C# is → both assess C#.
-- Rust then becomes ready → **QA A** sends C# notes to **QA C** and begins
-  Rust; **QA C** takes C# (QA C’s priority is C# in this example).
-
-The Orchestrator logs the swap in the thread.
+**Client example (follow literally):** QA A primary C#, QA C primary
+Rust. Rust is not reviewer-OK yet, C# is → both assess C#. When
+Rust becomes ready, QA A sends C# notes to QA C and begins Rust;
+QA C takes C# (QA C’s priority is C# in this example). The
+Orchestrator records that swap on the review/QA thread.
 
 ## Send-back (review)
 
-**(a)** One reviewer on their primary → coder rewrites. That reviewer joins
-other topics and **receives context + existing feedback** before commenting.
+**a.** One reviewer on their primary → coder rewrites. That reviewer
+joins other topics and **receives context + existing feedback**
+before commenting.
 
-**(b)** Several reviewers in one session → **label which reviewer** left each
-finding. On send-back, priority may shift with goals.
+**b.** Several reviewers in one session → **label which reviewer**
+left each finding. On send-back, priority may shift with goals.
 
 ## Send-back (QA)
 
-Prioritize the assigned item when available. Pass findings when helping on
-another item. When the primary becomes available, finish the current test,
-pass notes, then switch.
+Same idea. Prioritize the assigned item when it is available. Pass
+findings when helping on another item. When the primary becomes
+available, finish the current test, pass notes, then switch.
 
-## Gates (unchanged)
+QA send-back to the Coder still uses a **VM** review and a Handoff
+`To: Coder` with **Sent back because**. See
+[role-identity.md](role-identity.md).
 
-No push while review is open. Security after Satisfied. Coder runs CodeQL on
-code changes. **Only QA may give the OK to push.** After PASS, Orchestrator
-compresses (keep approved Coder commits) and one push — see
-[thoughts-layout.md](thoughts-layout.md).
+## Orchestrator duties
 
-## Pod spawn (Orchestrator)
-
-| Pod | Roles | Starts when |
-|-----|-------|-------------|
-| research | Planner, Researcher, Ticket Lead | Immediately |
-| implement | Coder | Research brief exists or surface known |
-| review | Reviewers | Coder has local diff + Push JSON |
-| security | Security | Reviewers Satisfied |
-| qa | QA, CI Engineer, Verifier | Security clear |
-| docs | Documentation, Communicator | Stable enough to document |
-
-Details: [devops-loop.md](devops-loop.md).
+- Spawn `/create-subagent` (`Task`, `run_in_background: true`) so
+  pods overlap. Do not poll background subagents.
+- Do not start Coder *N* before Research *N* is done.
+- Record primary assignments, finish-the-line handoffs, and QA A/C
+  swaps on the review thread.
+- Gates still apply: no push while review is open; Security before
+  publish; **only QA may give the OK to push.**

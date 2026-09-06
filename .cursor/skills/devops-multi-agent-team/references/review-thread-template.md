@@ -1,19 +1,20 @@
 # Review thread template
 
-Copy to `.cursor/thoughts/non-finalized/review-<topic>.md`. Local only —
-[thoughts-layout.md](thoughts-layout.md).
+Copy to `.cursor/thoughts/non-finalized/review-<topic>.md`.
+Local only; do not commit. After QA PASS, move to `finalized/`.
+See [thoughts-layout.md](thoughts-layout.md).
 
 ```markdown
 # Review: <topic>
 
-**Branch:** <current checkout>
+**Branch:** <current checkout; do not invent a new name>
 **Status:** In review | Changes requested | Satisfied — ready for security | Closed
-**Push policy:** [codeql-validation-publish-policy.md](codeql-validation-publish-policy.md)
+**Push policy:** Only QA may give the OK to push.
 
 ## Research brief
 ### Local docs
 - …
-### Online media
+### Online media (fetched)
 | URL | Takeaway |
 |-----|----------|
 | … | … |
@@ -22,34 +23,38 @@ Copy to `.cursor/thoughts/non-finalized/review-<topic>.md`. Local only —
 
 ## Push JSON
 - Latest: `.cursor/thoughts/non-finalized/push-<topic>.json`
-- Compare to `git diff <integration-base>...HEAD`
+- Coder writes this **before the first review**. Reviewers compare
+  it to `git diff <integration-base>...HEAD`.
 
 ## Change summary (Coder)
-- Files / Intent / Notify (Handoff + JSON path)
+- Files / Intent / Notify (Handoff + Push JSON path)
 
-## Review round N
+## Review round N (Reviewers)
 ### Request changes
-- [ ] `path` — finding (cite doc/URL; reuse map if duplicate)
-### Questions
-- …
-### Suggestions
+- [ ] `path` — finding (cite research/doc/URL; label which reviewer)
+### Questions / Suggestions (non-blocking)
 - …
 ### Reviewer sign-off
 | Reviewer | Verdict | Notes |
 |----------|---------|-------|
+| reviewer-1 | Changes requested / Satisfied | … |
 
-## Q&A
+## Q&A (Coder ↔ Reviewer)
 | Id | From | To | Ask | Answer | Status |
+|----|------|----|-----|--------|--------|
+| q1 | Reviewer | Coder | … | | open |
 
 ## Coder response (round N)
-- Replies / answers (q-ids)
+- Replies + what changed; q-ids closed
 
 ## Handoff
 - From / To / Pass-along / Sent back because / Ask
 
 ## Security (after Satisfied)
-- Results / Verdict: Clear | Blocked
+- Verdict: Clear / Blocked
 
 ## QA handoff
-- Commands / build-test-CodeQL rows / publish gate / triage ids / finalize list
+- Commands; .NET / TS / Rust validation + CodeQL; clean timeline
+  (`check-clean-timeline.sh --history <base>`); publish gate
+  PASS / BLOCKED; VM send-back; triage ids; thoughts to finalize
 ```

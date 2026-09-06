@@ -1,31 +1,39 @@
 # QA triage item
 
-Copy to `.cursor/thoughts/non-finalized/triage-<id>.md`. Gitignored.
-Active item → research → coder → reviewer → QA. [thoughts-layout.md](thoughts-layout.md).
+Copy to `.cursor/thoughts/non-finalized/triage-<id>.md`. Same
+Handoff + **Q&A** as the review thread. Copy ids into Push JSON
+`qa`. `"files"` may be `{}`. Do not `git add`. After QA PASS,
+move to `finalized/`. An **active** item restarts
+research → coder → reviewer → QA.
 
 ```markdown
 # Triage: <id>
 
 **State:** active | closed
 **Opened by:** QA
-**Discovered during:** …
-**Branch:** …
-**Review thread:** review-<topic>.md
+**Discovered during:** <command, `/repro`, VM, CodeQL, CI>
+**Branch:** <current checkout>
+**Review thread:** `.cursor/thoughts/non-finalized/review-<topic>.md`
 
 ## What went wrong / Expected / Actual
 - …
 
 ## Environment
-- VM / Commands / Exit code
+- VM / host; commands; exit code
 
 ## Active loop
-- [ ] Research → Coder + Push JSON → Reviewers → Security → QA VM re-check
+- [ ] Research brief updated
+- [ ] Coder rewrite + Push JSON
+- [ ] Reviewers compared JSON to `git diff <integration-base>...HEAD`
+- [ ] Security (after Satisfied)
+- [ ] QA re-check on the VM
 
 ## Q&A
 | Id | From | To | Ask | Answer | Status |
+|----|------|----|-----|--------|--------|
+| t1 | QA | Coder | … | | open |
 
 ## Handoff
-- From: QA / To: Coder / Pass-along / Sent back because / Ask
+- From: QA / To: Coder / Pass-along /
+  Sent back because: <quality / bug standard, or "n/a">
 ```
-
-Q&A-only bounce: Push JSON `"files": {}` OK.

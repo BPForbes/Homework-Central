@@ -1,35 +1,54 @@
-# Push JSON (notification index)
+# Push JSON (notification index, not the review)
 
-Coder and Reviewer bounce `push-<topic>.json` until both are happy. Companion
-to the review thread and Handoff — not a substitute. Gitignored under
-`.cursor/thoughts/non-finalized/`.
+Coder and Reviewer bounce a **Push JSON** until both are happy.
+Companion to the review thread and Handoff — not a replacement.
+Reviewers **always** compare it to
+`git diff <integration-base>...HEAD`. An omitted or wrong hunk is
+a finding. Do not mark Satisfied from the JSON alone.
 
-Reviewers **always** compare JSON to `git diff <integration-base>...HEAD`.
-Omitted or wrong hunks are findings. Do not mark Satisfied from JSON alone.
+`.cursor/thoughts/non-finalized/` is **gitignored**. Do not
+`git add` Push JSON.
 
-## First handoff
+| File | Who | When |
+|------|-----|------|
+| `push-<topic>.json` | whoever just acted | Latest mock. Overwrite in place. |
+| `push-<topic>-r<N>-<role>.json` | optional | Keep a round if bounce needs history. |
 
-Coder writes `push-<topic>.json` **before first review** with Handoff
-`To: Reviewer`. Fresh change: `closes` may be `[]`.
+## First handoff (required)
 
-## Notify
-
-Coder updates JSON on every rewrite + Handoff (finding ids when closing).
-Reviewers may write their own JSON (`from`: `Reviewer`) + Handoff to Coder.
-Either side may Push when ready — not a linear queue.
+Coder writes `push-<topic>.json` **before the first review**, with
+a Handoff `To: Reviewer`. `closes` may be `[]`. Reviewers do not
+start without that file. Update it on every rewrite. Either side
+may Push when they have something new. Open `qa` rows must be
+answered or withdrawn before Satisfied. Satisfied does **not**
+authorize a git push.
 
 ## Q&A
 
-Mirror review thread `## Q&A` and Push JSON `qa` (same ids):
+Same ids in the thread `## Q&A` table and the JSON `qa` array.
+`status` is `open`, `answered`, or `withdrawn`. A Q&A-only bounce
+may set `"files": {}`. Do not invent a commit to record an answer.
 
 ```json
-"qa": [{ "id": "q1", "from": "Reviewer", "to": "Coder",
-  "ask": "…", "answer": "…", "status": "answered" }]
+"qa": [
+  {
+    "id": "q1",
+    "from": "Reviewer",
+    "to": "Coder",
+    "ask": "Can TrainingHeapPressure reuse Sample()?",
+    "answer": "Yes — imported Sample().",
+    "status": "answered"
+  }
+]
 ```
 
-Q&A-only bounce: `"files": {}` is valid.
-
 ## Shape
+
+Valid JSON. File paths are object keys. Hunks are
+`{ op, lines, why }`. Each file ends with `delta` `+N/-M`.
+`op` is `-` (old), `+` (new), or `~` (same span, behavior change).
+`lines` is a single line or `start-end`. Index the three-dot
+range, not `git show HEAD` alone.
 
 ```json
 {
@@ -37,20 +56,17 @@ Q&A-only bounce: `"files": {}` is valid.
   "round": 2,
   "from": "Coder",
   "to": "Reviewer",
-  "notifies": "…",
+  "notifies": "Should close hysteresis",
   "closes": ["r1-hysteresis"],
   "qa": [],
   "files": {
-    "path/to/File.cs": {
-      "hunks": [{ "op": "-", "lines": "107-118", "why": "…" }],
+    "backend/HomeworkCentral.Api/Assessment/TrainingHeapPressure.cs": {
+      "hunks": [
+        { "op": "-", "lines": "107-118", "why": "old ShouldAttemptSpill" },
+        { "op": "+", "lines": "107-125", "why": "wait until below skip-trace" }
+      ],
       "delta": "+20/-4"
     }
   }
 }
 ```
-
-`op`: `-` removed, `+` added, `~` same span behavior change. `lines`: single
-line or `start-end`.
-
-Reuse rule: [role-identity.md](role-identity.md). Comment style:
-[COMMENT_DOCUMENTATION_GUIDE.md](../../../../docs/COMMENT_DOCUMENTATION_GUIDE.md).
