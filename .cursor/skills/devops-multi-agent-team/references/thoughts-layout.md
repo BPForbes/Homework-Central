@@ -190,7 +190,21 @@ only and not content:
 
 ```
 git diff $old HEAD    # must be empty
+git log --diff-filter=A --name-only --format='' HEAD | grep <path>   # no hits
+git rev-list --count <integration-base>..HEAD   # unchanged
 ```
+
+Scope that middle check to `HEAD`, not `--all`. `--all` includes the
+stale remote-tracking ref, which still holds the pre-rewrite history, so
+it reports hits after a completely successful scrub. The commit count
+should be unchanged: `filter-repo` prunes a commit that becomes empty,
+so a changed count means the path was the commit's only content and the
+commit was not a keep-commit after all.
+
+Then `git push --force-with-lease=<ref>:$old`, which refuses if anyone
+pushed while you were rewriting. Take a local backup ref first
+(`git branch -f backup/pre-scrub HEAD` before step 3); the rewrite is
+not reversible from the reflog once the old objects are gone.
 
 4. Push once. If the remote still has the pre-rewrite history,
    `git push --force-with-lease` (safer than `--force`). The
