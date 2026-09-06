@@ -23,25 +23,31 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - After QA PASS on this concept, the Orchestrator moves those files to
   `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
   Do not put thought dumps in `docs/`.
-- Reviewer, Security and QA **process output** never lands on the
-  committed timeline: review threads, Push JSON, triage and repro notes,
-  probe files, CodeQL databases and SARIF dumps. Product, pipeline,
-  infra, test code and durable `docs/` updates *do* land, as
-  reviewer-approved keep-commits, whichever role drafted them. The rule
-  is about the class of output, not about who typed it.
+- **Process output** never lands on the committed timeline, whoever
+  produced it: review threads, Push JSON, triage and repro notes, probe
+  files, CodeQL databases and SARIF dumps. Product, pipeline, infra, test
+  code and durable `docs/` updates *do* land, as reviewer-approved
+  keep-commits, whichever role drafted them. The rule sorts by class of
+  output; naming roles here would only invite the reading that a
+  Reviewer's product fix is unwelcome, or that a Coder's review thread is
+  fine.
 - Prefer probing in a throwaway clone
   (`git clone --no-hardlinks . /tmp/probe`). That keeps the shared
   worktree untouched and is the only way to test a name the convention
   forbids. When a probe must sit in this worktree, give it a reserved
-  gitignored name — a lower-case `_scratch/` directory or a `.scratch.`
-  infix — and delete it before you report.
+  gitignored name — a lower-case `_scratch/` directory, or a `.scratch`
+  infix or suffix (`Probe.scratch.cs`, `notes.scratch`) — and delete it
+  before you report.
 - Undo a probe that *edited* a tracked file with
   `git checkout -- <exact path>`. Never `git checkout -- .`, never
   `git restore :/`, never `git stash`: the worktree is shared and those
   destroy other roles' in-flight work. Finish with `git status --short`
   clean **of files you created**; anything else, list by path in your
-  report and leave in place. `scripts/check-clean-timeline.sh` enforces
-  this in CI.
+  report and leave in place. Nothing enforces that automatically — a
+  working tree is not observable from CI. `scripts/check-clean-timeline.sh`
+  is the backstop one step later: it rejects a reserved name that reached
+  the index or the branch's history, which is what a forgotten probe turns
+  into once someone runs `git add`.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
 - Reuse existing helpers, scripts, and docs. Do not duplicate them.

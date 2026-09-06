@@ -148,14 +148,32 @@ If the step 3 scan reports a path inside a keep-commit, replaying that
 commit verbatim re-introduces the blob and the scan still reports it.
 The path has to come out of every commit in the range *before* replaying.
 
-**Verify `git status --short` is empty before you start, and do not
-stash to get there.** A history rewrite resets the working tree, and
-the worktree is shared: if another role has uncommitted work, wait for
-it rather than discarding it. This check is the real protection —
-neither tool below will reliably stop you.
+**Do the rewrite in a throwaway clone.** The shared worktree is
+routinely not clean at this point, and it is not supposed to be: the
+pre-publish gate that produces QA's PASS asks only for a status clean
+*of files you created*, so another role's tracked edit can legitimately
+still be sitting there. A rewrite hard-resets the working tree and takes
+that edit with it. Cloning sidesteps the whole question instead of
+asking the Orchestrator to arbitrate someone else's uncommitted work:
 
-Record the old tip first (`old=$(git rev-parse HEAD)`) so the
-content-equality check at the end is possible.
+```
+git clone --no-hardlinks . /tmp/scrub && cd /tmp/scrub
+git remote set-url origin <the real remote>
+git fetch origin
+```
+
+Record the old tip (`old=$(git rev-parse HEAD)`) so the content-equality
+check at the end is possible, and take a backup ref **now**, before
+either command below — the rewrite is not reversible from the reflog
+once the old objects are gone:
+
+```
+git branch -f backup/pre-scrub HEAD
+```
+
+If you rewrite in the shared worktree anyway, `git status --short` must
+be empty first and you must not stash to get there; wait for the owning
+role to commit or revert. Neither tool below will reliably stop you.
 
 ```
 git filter-repo --force --path <path> --invert-paths --refs <integration-base>..HEAD
@@ -201,15 +219,43 @@ should be unchanged: `filter-repo` prunes a commit that becomes empty,
 so a changed count means the path was the commit's only content and the
 commit was not a keep-commit after all.
 
-Then `git push --force-with-lease=<ref>:$old`, which refuses if anyone
-pushed while you were rewriting. Take a local backup ref first
-(`git branch -f backup/pre-scrub HEAD` before step 3); the rewrite is
-not reversible from the reflog once the old objects are gone.
+Then push with a lease against **what the remote actually has**, which
+is not `$old`:
+
+```
+remote_tip=$(git ls-remote origin <branch> | cut -f1)
+git push --force-with-lease=refs/heads/<branch>:$remote_tip origin <branch>
+```
+
+`--force-with-lease=<ref>:$old` looks right and is wrong here. `$old` is
+the local tip before the rewrite, and under One push the remote never
+held it, so the lease names a value the remote never had and git rejects
+the push as `stale info` (verified against a bare remote). The bare
+`--force-with-lease` fails the same way after a rewrite, because the
+remote-tracking ref it reads is itself stale. Reading the remote is also
+what makes the lease meaningful: it still refuses if someone pushed
+between the `ls-remote` and the push.
+
+Once the push succeeds and a fresh `git clone` of the remote passes the
+step 3 scan, delete the backup ref and any other local ref that still
+reaches the stripped blob (`git branch -D backup/pre-scrub`). Leaving it
+keeps the blob alive in the local repo, and a later `git push --all`
+would republish it. Check with
+`git log --diff-filter=A --name-only --format='' --all | grep <path>`;
+the answer has to be empty, not "only reachable from a backup".
 
 4. Push once. If the remote still has the pre-rewrite history,
-   `git push --force-with-lease` (safer than `--force`). The
-   Client authorizes this rewrite for this skill’s final
-   publish only.
+   `git push --force-with-lease=refs/heads/<branch>:$(git ls-remote origin <branch> | cut -f1)`
+   (safer than `--force`). The Client authorizes this rewrite for
+   this skill’s final publish only.
+
+   "Once" is the intent, not a literal count that survives contact with
+   a platform that requires a push per iteration loop. Where the two
+   conflict, the platform wins and the rule degrades to: the *published
+   history* is compressed once, at the end. Intermediate pushes of
+   working commits are expected; they are not licence to publish a
+   commit whose history still holds a stripped blob, which is what step
+   3 is checked against before every push, not just the last one.
 
 That is the only remote push for the skill run. Reviewers still
 compare each Coder rewrite’s Push JSON to the real local

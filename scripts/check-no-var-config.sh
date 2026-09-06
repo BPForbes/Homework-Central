@@ -162,13 +162,70 @@ if [ "$want_web" -eq 1 ]; then
     elif [ ! -d frontend/node_modules ]; then
         skip 'frontend/node_modules absent; eslint probe not run (run npm ci first)'
     else
-        web_files="$(
+        all_web="$(
             git ls-files \
-                'frontend/**/*.ts' 'frontend/**/*.tsx' 'frontend/**/*.mts' 'frontend/**/*.cts' \
-                'frontend/**/*.js' 'frontend/**/*.cjs' 'frontend/**/*.mjs' 'frontend/**/*.jsx' \
-                'frontend/**/*.html' 'frontend/**/*.htm' 'frontend/**/*.xhtml' \
-                | sed 's|^frontend/||'
+                '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.cjs' '*.mjs' '*.jsx' \
+                '*.html' '*.htm' '*.xhtml'
         )"
+        web_files="$(printf '%s\n' "$all_web" | grep '^frontend/' | sed 's|^frontend/||' || true)"
+
+        # Web files outside frontend/ are covered by nothing unless something
+        # says so: eslint refuses to lint above its base path, and reports the
+        # refusal as a *warning* ("File ignored because outside of base path"),
+        # which reads as success. scripts/novar-eslint-probe.mjs sat in exactly
+        # that hole. The root eslint.config.mjs exists for these, and this loop
+        # fails on any that neither config claims.
+        outside="$(printf '%s\n' "$all_web" | grep -v '^frontend/' || true)"
+        if [ -n "$outside" ]; then
+            if [ ! -f eslint.config.mjs ]; then
+                fail "these tracked web files are outside frontend/ and there is no root eslint.config.mjs to cover them:
+$outside"
+            else
+                # Asserted per file with --print-config rather than read off a
+                # lint exit code. eslint reports both "outside of base path" and
+                # "no matching configuration was supplied" as *warnings* and
+                # exits 0, so an unclaimed file in a new directory looked exactly
+                # like a clean lint. Resolving the config per file turns "nothing
+                # claims this" into a hard answer.
+                out_bad=''
+                while IFS= read -r rel; do
+                    [ -n "$rel" ] || continue
+                    rel_cfg="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs --print-config "$rel" 2>&1)"
+                    if ! printf '%s' "$rel_cfg" | grep -q '^{'; then
+                        out_bad="$out_bad
+  $rel: no config resolves for it ($(printf '%s' "$rel_cfg" | head -1))"
+                        continue
+                    fi
+                    rel_verdict="$(
+                        printf '%s' "$rel_cfg" | python3 -c '
+import json, sys
+rules = json.load(sys.stdin).get("rules", {})
+bad = []
+for name in ("no-var", "prefer-const"):
+    entry = rules.get(name)
+    sev = entry[0] if isinstance(entry, list) and entry else entry
+    if sev not in (2, "error"):
+        bad.append("%s=%r" % (name, sev))
+print("; ".join(bad))
+' 2>/dev/null
+                    )"
+                    [ -n "$rel_verdict" ] && out_bad="$out_bad
+  $rel: $rel_verdict"
+                done <<< "$outside"
+
+                out_lint="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs $outside 2>&1)"
+                out_status=$?
+                if [ -n "$out_bad" ]; then
+                    fail "web files outside frontend/ that no root config block covers with error severity:$out_bad
+Add them to eslint.config.mjs, or move them under frontend/."
+                elif [ "$out_status" -ne 0 ]; then
+                    fail "eslint reported problems in web files outside frontend/:
+$out_lint"
+                else
+                    note "root config covers $(printf '%s\n' "$outside" | wc -l | tr -d ' ') web file(s) outside frontend/"
+                fi
+            fi
+        fi
         if [ -z "$web_files" ]; then
             fail 'no tracked web files found; the enumeration globs are wrong'
         else

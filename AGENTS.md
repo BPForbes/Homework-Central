@@ -83,15 +83,50 @@ Hard rules:
     `frontend/eslint.config.js`, and `<!-- vendored --><NoWarn>$(NoWarn);IDE0008
     </NoWarn>` in the root `Directory.Build.props` — that second one compiled a
     real `var z = 1` with "Build succeeded" while every gate stayed green.
-    This script does not grep. It asks MSBuild to evaluate
-    `EnforceCodeStyleInBuild` and `NoWarn` per project, parses the root
-    `.editorconfig` severities (a bare `= false` falls back to *suggestion*,
-    which cannot fail a build), and asks eslint to resolve the config for one
-    file per config block, asserting severity `error`. An evaluated property and
-    a resolved rule severity cannot be spoofed by a comment, a string, odd
-    whitespace, or an unfamiliar extension, because the tool that will act on
-    the config is the one reporting it. It runs with `STRICT=1` in CI, so a
-    missing toolchain fails instead of skipping.
+
+    This script **does not inspect configuration**, because three successive
+    attempts to were each defeated by a route they did not model: a text scan
+    missed the `<NoWarn>` above (the line opens with a comment that closes
+    mid-line); `-getProperty:NoWarn` missed a root `Directory.Build.targets`
+    appending to `NoWarn` inside a *target*, since `-getProperty` reports
+    evaluation-time values; and a parsed `.editorconfig` missed section scoping
+    (`[*.cs]` renamed to `[docs/*.cs]`). Modelling a configuration language is
+    the same treadmill as modelling a programming language with a regex.
+
+    Instead it makes the rule fire. For C# it writes a real
+    `var value = 1;` into **every** tracked `csproj` in turn, builds, and
+    requires `IDE0008`; a build that fails for any *other* reason is a gate
+    failure too, so a broken build cannot masquerade as a working gate. For the
+    web half it resolves the effective config for **every** tracked web file
+    (127 today) via the eslint Node API, checks `isPathIgnored` so an `ignores`
+    entry cannot quietly remove a directory from the lint run, and plants a
+    `var` behind a blanket `/* eslint-disable */` in `frontend/src` and requires
+    `npm run lint:ci` to reject it. Sampling four representative files instead
+    was a complete end-to-end escape: one block scoped to `src/components/**`
+    with `'no-var': 'off'` passed every gate while a `var` sat in a real
+    component. Probe files use the reserved gitignored `.scratch` infix and are
+    removed by an `EXIT` trap.
+
+    Two coverage facts worth keeping straight. First, eslint will not lint above
+    its own base path, and it reports the refusal as a **warning** ("File
+    ignored because outside of base path") while exiting 0 — so a web file in
+    `scripts/` looked exactly like a clean lint. The root `eslint.config.mjs`
+    covers those, and the gate resolves the config per file and fails on any
+    tracked web file that no block claims, because "no matching configuration
+    was supplied" is *also* only a warning. Second, enumerating with
+    `frontend/**/*.ts` silently missed `frontend/index.html`,
+    `frontend/eslint.config.js` and `frontend/vite.config.ts`: `**/` requires an
+    intervening directory, so top-level files never matched. `index.html` is the
+    file whose inline theme script held the original `var`s, so that glob was
+    excluding the most relevant file in the tree. The enumeration is now
+    repo-wide and filtered, and the count is asserted out loud (130 today) so a
+    silent drop is visible.
+
+    Take the `--csharp` and `--web` flags seriously: each needs a different
+    toolchain, and each CI job passes only the flag for the toolchain it has.
+    Asserting the web half from the backend job — which has no `npm ci` step —
+    is what held CI red for five runs. `STRICT=1` in CI turns a skipped half
+    into a failure, and an explicitly requested half never skips.
   - **`scripts/check-no-var.sh` owns only what none of the above can see**: the
     word `var` in a C# pattern position, `dynamic`, and *per-file* suppressions
     (`#pragma warning disable`, `SuppressMessage`) — which no evaluated property
@@ -187,7 +222,13 @@ When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
   broken repository as a pass is how a backstop becomes a rubber stamp. CI
   passes it the **merge base**, not `pull_request.base.sha`, which is the base
   branch tip at PR-open time and drags in unrelated commits once the base
-  moves.
+  moves. To avoid blaming a range for what it inherited, the walk subtracts
+  paths already present in the base — keyed on `(blob, path)`, never on path
+  alone. Path alone exempted an inherited path for any *content*: deleting the
+  base copy of `.cursor/reviews/ai-library-optimization.md`, re-adding that path
+  with a fresh write-up and deleting it again passed cleanly with the new text
+  in history. Inheritance is about the exact bytes already in the base, and the
+  real false positive this suppresses has an identical blob on both sides.
 - Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
 ## UI and styling work
