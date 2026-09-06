@@ -13,7 +13,15 @@
 // fails the gate until it is listed here.
 export default [
     {
-        files: ['scripts/**/*.{js,mjs,cjs}', 'tools/**/*.{js,mjs,cjs}'],
+        files: [
+            // This file is itself a tracked web file outside frontend/, and the
+            // first version of it did not claim itself — CI caught that, which
+            // is the gate working. Root-level configs are listed explicitly
+            // because `**/*` does not match a path with no directory part.
+            '*.{js,mjs,cjs}',
+            'scripts/**/*.{js,mjs,cjs}',
+            'tools/**/*.{js,mjs,cjs}',
+        ],
         languageOptions: {
             ecmaVersion: 2024,
             sourceType: 'module',
