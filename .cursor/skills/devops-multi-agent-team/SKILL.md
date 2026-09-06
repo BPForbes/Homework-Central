@@ -59,19 +59,19 @@ cannot run when required, do not claim it passed and do not publish.
 2. Coder writes the **Push JSON** and a Handoff `To: Reviewer`
    **before the first review** (`closes` may be empty). Schema:
    [push-json.md](references/push-json.md).
-3. Reviewers compare that JSON to `git diff <integration-base>...HEAD`
-   in `.cursor/thoughts/non-finalized/review-<topic>.md`
-   ([review-thread-template.md](references/review-thread-template.md)).
-   An omitted or wrong hunk is a finding.
-4. Coder fixes locally, updates the Push JSON, and notifies Reviewers.
-   Either side may Push again until **Satisfied**. Satisfied does
-   **not** authorize a push.
+3. Reviewers compare that JSON to the **side-branch** tree vs
+   `<integration-base>` ([side-work.md](references/side-work.md))
+   in `.cursor/thoughts/non-finalized/review-<topic>.md`. An
+   omitted or wrong hunk is a finding.
+4. Coder fixes on the side-branch, updates the Push JSON, and
+   notifies Reviewers. Either side may Push again until
+   **Satisfied**. Satisfied does **not** authorize a push.
 5. Then **Security** (Snyk / `/review-security`).
 6. Then **QA**. QA owns
    [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)
    and is the **only** role that may give the OK to push.
-7. After PASS, the Orchestrator **compresses** into **one push**,
-   **keeping reviewer-approved Coder commits**
+7. After PASS, the Orchestrator makes keep-commit(s) from the
+   approved side-branch tree and **one push**
    ([thoughts-layout.md](references/thoughts-layout.md) One push).
    Run `check-clean-timeline.sh --history <integration-base>` after
    any strip. Do not commit process notes.
@@ -146,13 +146,20 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
 - **Researcher** — reuse map; inventory `docs/`; fetch online media;
   then **join the Coder of the same department**.
   Agent: `.cursor/agents/devops-researcher.md`.
-- **Coder** — implement per plan; CodeQL before Reviewers (does not
-  authorize a push); keep local until QA OK; write Push JSON + Handoff
-  **before the first review**.
-- **Reviewers** — compare Push JSON to
-  `git diff <integration-base>...HEAD`; Handoff on send-back
-  ([role-identity.md](references/role-identity.md)); Satisfied does
-  **not** authorize a push. Agent: `.cursor/agents/devops-reviewer.md`.
+- **Coder** — implement on a **skill side-branch** (not a real git
+  branch; no shared-checkout commits until QA PASS). Isolate with
+  a **clone**, not `git worktree add`. Talk to other Coders so
+  side-branches do not collide. Run the change in that clone
+  (VM / tools). CodeQL + CodeRabbit CLI (`cr`) before Reviewers.
+  Write Push JSON, Coder→Reviewer `qa` comments, and a Handoff
+  **before the first review**
+  ([side-work.md](references/side-work.md)).
+- **Reviewers** — compare Push JSON to the side-branch diff vs
+  `<integration-base>`; Handoff on send-back
+  ([role-identity.md](references/role-identity.md)). **Block
+  Satisfied** if CodeRabbit findings are `open` or CR was NOT RUN
+  on a code change; send CR + review notes to the Coder. Satisfied
+  does **not** authorize a push. Agent: `.cursor/agents/devops-reviewer.md`.
 - **QA** — after Satisfied + Security Clear. `/code-review`: look;
   **do not edit**. `/repro` as needed. Fail → VM review, Handoff
   `To: Coder`. When QA is blocked, sends back, or is not pleased:
@@ -161,7 +168,9 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
   ([department-pods.md](references/department-pods.md),
   [triage-template.md](references/triage-template.md)). Follow
   [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md).
-  PASS only when AC + applicable CodeQL hold. Agent:
+  PASS only when AC + applicable CodeQL hold, and CodeRabbit
+  findings are not `open` on a code change
+  ([side-work.md](references/side-work.md)). Agent:
   `.cursor/agents/devops-quality-engineer.md`.
 - **Observability / Optimization / Documentation / Refactoring /
   Security / Performance** — after Satisfied, Security before QA
@@ -192,8 +201,9 @@ repeat    →  until PASS; QA blocked/send-back → triage;
             Research N joins the Coder who picks it up
 ```
 
-Never commit thoughts. After PASS, compress (keep approved Coder
-commits) and push once. Checklists:
+Never commit thoughts. Coders do not commit on the shared
+checkout. After PASS, the Orchestrator makes the keep-commit(s)
+from the approved side-branch tree and pushes once. Checklists:
 [references/devops-loop.md](references/devops-loop.md).
 
 ## Questions and interrupts

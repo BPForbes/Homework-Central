@@ -23,10 +23,13 @@ push.** Satisfied does not authorize a push.
 
 **Block** (Changes requested) if this sprint added rule bloat or
 the skill is over the budget in
-`.cursor/thoughts/non-finalized/goal-skill-slim-qa-triage.md`
-(skill dir + 9 agents **≤1165**; per-file caps there). Compare to
+`.cursor/thoughts/non-finalized/goal-side-work-cr.md`
+(skill dir + 9 agents; required side-work/CR growth may
+exceed 1320). Compare to
 `origin/feature/ticket-rooms`. Agents **read** identity/pods, not
-paste them.
+paste them. **Block Satisfied** if CodeRabbit findings are
+`open` or CR was NOT RUN on a code change
+([side-work.md](../skills/devops-multi-agent-team/references/side-work.md)).
 
 ## Workflow
 
@@ -35,11 +38,13 @@ paste them.
 `/sonar-analyze`.
 
 1. Confirm the Coder Push JSON exists. Do not start without it.
-2. Always `git diff <integration-base>...HEAD`. An omitted hunk is
-   a finding. Label **which reviewer** left each finding.
+2. Diff the **side-branch** tree vs `<integration-base>`. An
+   omitted hunk is a finding. Label **which reviewer** left each
+   finding. Send CR + review notes to the Coder.
 3. Duplicated new code → request-change: import it.
-4. Iterate until all reviewers mark Satisfied and every `qa` row is
-   answered or withdrawn. Then Orchestrator → Security → QA.
+4. Iterate until all reviewers mark Satisfied, every `qa` row is
+   answered or withdrawn, and CR findings are not `open`. Then
+   Orchestrator → Security → QA.
 
 ## Review bar
 

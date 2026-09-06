@@ -29,7 +29,7 @@ research-then-coder queue.
 ## Active loop
 - [ ] Research *N* joins Coder who picked this up (paired, not serial)
 - [ ] Coder rewrite + Push JSON
-- [ ] Reviewers compared JSON to `git diff <integration-base>...HEAD`
+- [ ] Reviewers compared JSON to the side-branch vs `<integration-base>`
 - [ ] Security (after Satisfied)
 - [ ] QA re-check on the VM
 

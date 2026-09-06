@@ -16,9 +16,11 @@ obsolete. Push JSON lives in `non-finalized/`
 ([push-json.md](push-json.md)).
 
 **non-finalized:** `review-<topic>.md`, `goal-*.md`, research
-briefs, `repro-*.md`, handoffs, `push-*.json`, `triage-<id>.md`
-([triage-template.md](triage-template.md)). **finalized** after
-QA PASS: move matching files locally; do not `git add`.
+briefs, `repro-*.md`, handoffs, `push-*.json`, `triage-<id>.md`,
+`side-<dept>.md`, `cr-<topic>.md`
+([triage-template.md](triage-template.md),
+[side-work.md](side-work.md)). **finalized** after QA PASS: move
+matching files locally; do not `git add`.
 
 If a note must survive clones, put it in `docs/` or skill
 `references/`. Do **not** commit “Record Satisfied / Security /
@@ -27,12 +29,13 @@ tokens; prefer exit codes.
 
 ## One push (after PASS)
 
-Keep commits **local**. After Satisfied, Security Clear,
-applicable CodeQL, **and QA marks PASS**:
+Coders do not commit on the shared checkout. After Satisfied,
+Security Clear, applicable CodeQL, **and QA marks PASS**:
 
 1. Move closed thoughts to `finalized/` (local).
-2. Compress. **Keep reviewer-approved Coder commits.** A
-   **keep-commit** since `<integration-base>` includes product,
+2. Compress. **Keep reviewer-approved trees as keep-commits**
+   (Orchestrator). A **keep-commit** since `<integration-base>`
+   includes product,
    pipeline, infra, test, or durable `docs/` marked Satisfied —
    replay in order with original messages. **Fold** the rest so
    the tip tree matches the approved tree.

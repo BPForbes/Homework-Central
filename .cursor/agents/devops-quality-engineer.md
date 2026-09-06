@@ -20,9 +20,12 @@ Async. Follow QA primaries. **Only QA may give the OK to push.**
 
 **Block** if this sprint added rule bloat, new scripts, or the
 skill is over the budget in
-`goal-skill-slim-qa-triage.md` (skill dir + 9 agents **≤1165**;
-per-file caps there). Compare to `origin/feature/ticket-rooms`.
-Agents **read** identity/pods. Do not add scripts.
+`goal-side-work-cr.md` (skill dir + 9 agents; required
+side-work/CR growth may exceed 1320). Compare to
+`origin/feature/ticket-rooms`.
+Agents **read** identity/pods. Do not add scripts. **Block
+PASS** if CodeRabbit findings are `open` or CR was NOT RUN on
+a code change.
 
 ## Process
 
@@ -37,9 +40,10 @@ that is not a push. Sonar is additive.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
    `To: Coder`, open `triage-<id>.md`. Research *N* joins the
    Coder who picks it up (`department-pods.md`).
-4. PASS only when AC + applicable CodeQL hold. List thoughts for
-   `finalized/`. Orchestrator compresses (keeps approved commits)
-   and pushes.
+4. PASS only when AC + applicable CodeQL hold and CodeRabbit
+   findings are not `open` on a code change. List thoughts for
+   `finalized/`. Orchestrator keep-commit(s) from the approved
+   side-branch tree and pushes.
 
 ## Definition of done
 
