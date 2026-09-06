@@ -1,5 +1,6 @@
 using HomeworkCentral.Api.Data;
 using HomeworkCentral.Api.Models;
+using HomeworkCentral.Api.Services;
 using HomeworkCentral.Api.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +14,7 @@ namespace HomeworkCentral.Api.Assessment;
 public sealed class ChatMonitoringNeuralModelWarmupService(
     IServiceScopeFactory scopeFactory,
     IChatMonitoringNeuralModelFactory chatMonitoringModels,
+    IApplicationReadiness readiness,
     ILogger<ChatMonitoringNeuralModelWarmupService> logger) : BackgroundService
 {
     // Seed rows historically used 100 epochs × Full replay; that OuterProduct + FlattenParameters path OOMs on modest hosts.
@@ -27,6 +29,9 @@ public sealed class ChatMonitoringNeuralModelWarmupService(
 
         try
         {
+            if (!await readiness.WaitUntilReadyAsync(stoppingToken))
+                return;
+
             await OperationalExceptionGuard.RunAsync(
                 () => LoadApprovedExamplesAsync(stoppingToken),
                 ex =>
@@ -55,6 +60,7 @@ public sealed class ChatMonitoringNeuralModelWarmupService(
         using IServiceScope scope = scopeFactory.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IVectorDocumentStore vectors = scope.ServiceProvider.GetRequiredService<IVectorDocumentStore>();
+        ILlmClient llm = scope.ServiceProvider.GetRequiredService<ILlmClient>();
         List<TicketModelTrainingExample> examples = await db.TicketModelTrainingExamples
             .AsNoTracking().OrderBy(x => x.ApprovedAtUtc).Take(MaxExamples).ToListAsync(ct);
         Guid[] messageIds = examples.Where(x => x.MessageId.HasValue).Select(x => x.MessageId!.Value).Distinct().ToArray();
@@ -74,7 +80,15 @@ public sealed class ChatMonitoringNeuralModelWarmupService(
 
             string threadContext = row.ContextSnapshot ?? string.Empty;
             IChatMonitoringNeuralModel model = chatMonitoringModels.Get(row.ChatMonitoringKind);
-            ChatMonitoringNeuralModelInput input = new(row.Requirement, threadContext, message, 0, 1, 0, .5f);
+            ChatMonitoringNeuralModelInput input = new(
+                row.Requirement,
+                threadContext,
+                message,
+                0,
+                1,
+                0,
+                .5f,
+                TextEmbedding: await llm.EmbedAsync(message, ct));
             int epochs = row.Source == "Seed" ? SeedEpochs : ApprovedEpochs;
             try
             {

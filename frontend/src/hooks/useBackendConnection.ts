@@ -5,14 +5,16 @@ import {
   probeBackendHealth,
 } from '../utils/healthCheck'
 
-/** Wall-clock budget while the API may still be compiling / warming. */
+/** Budget for the API process to start listening. First-run migrate/seed is not this limit. */
 const DEFAULT_DEADLINE_MS = 180_000
 
 export type BackendConnectionPhase = 'connecting' | 'starting' | 'ready' | 'error'
 
 /**
- * Waits until /healthz reports ready. Uses short probes and backoff while the
- * process is unreachable so Vite does not log hundreds of ECONNREFUSED lines.
+ * Waits until /healthz reports ready. The listen deadline applies only while
+ * probes are unreachable — first-run migrate/seed can stay `starting` longer
+ * than that budget. Backs off while the process is unreachable so Vite does
+ * not log hundreds of ECONNREFUSED lines.
  */
 export function useBackendConnection(deadlineMs = DEFAULT_DEADLINE_MS) {
   const [phase, setPhase] = useState<BackendConnectionPhase>('connecting')
@@ -25,14 +27,6 @@ export function useBackendConnection(deadlineMs = DEFAULT_DEADLINE_MS) {
 
     async function pollUntilReady() {
       while (!controller.signal.aborted) {
-        if (Date.now() > deadline) {
-          setPhase('error')
-          setError(
-            'Could not reach the backend API. Check that it is running and reachable, then reload the page.',
-          )
-          return
-        }
-
         const probe = await probeBackendHealth(undefined, controller.signal)
         if (controller.signal.aborted) {
           return
@@ -58,6 +52,13 @@ export function useBackendConnection(deadlineMs = DEFAULT_DEADLINE_MS) {
             setError(probe.message)
             return
           case 'unreachable':
+            if (Date.now() > deadline) {
+              setPhase('error')
+              setError(
+                'Could not reach the backend API. Check that it is running and reachable, then reload the page.',
+              )
+              return
+            }
             unreachableAttempts += 1
             setPhase('connecting')
             try {

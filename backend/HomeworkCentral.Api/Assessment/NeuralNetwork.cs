@@ -231,6 +231,41 @@ public sealed class NeuralNetwork
     }
 
     /// <summary>
+    /// Mixed-head backprop against a soft category distribution. Softmax cross-entropy's output
+    /// gradient is (prediction - target) whatever the target is, so this is the same arithmetic as
+    /// the index overload with the one-hot replaced by the caller's distribution.
+    ///
+    /// The distribution is used as given: callers normalise. An unnormalised target still produces
+    /// a finite gradient, but one whose magnitude no longer corresponds to a probability, which
+    /// would quietly scale the category head's learning rate.
+    /// </summary>
+    public float[] AccumulateMixedHeadGradients(
+        NeuralNetworkForwardState state,
+        float evidenceTarget,
+        float relevanceTarget,
+        ReadOnlySpan<float> categoryDistribution,
+        NeuralNetworkGradientBuffers gradients,
+        Action<float>? trackGradient = null)
+    {
+        if (_layers[^1].Activation != NeuralLayerActivation.MixedEvidenceRelevanceSoftmax)
+            throw new InvalidOperationException("Mixed-head backprop requires a MixedEvidenceRelevanceSoftmax output layer.");
+
+        float[] output = state.Activations[^1];
+        float[][] activationGradients = new float[state.Activations.Length][];
+        float[] outputGrad = new float[output.Length];
+        outputGrad[0] = output[0] - Math.Clamp(evidenceTarget, 0f, 1f);
+        outputGrad[1] = output[1] - Math.Clamp(relevanceTarget, 0f, 1f);
+        for (int category = 0; category < _categoryLabels.Length; category++)
+        {
+            float target = category < categoryDistribution.Length ? categoryDistribution[category] : 0f;
+            outputGrad[2 + category] = output[2 + category] - target;
+        }
+
+        activationGradients[^1] = outputGrad;
+        return Backpropagate(state, activationGradients, gradients, trackGradient);
+    }
+
+    /// <summary>
     /// Tanh-network backprop from an upstream output gradient (cascade chain rule into f).
     /// </summary>
     public float[] AccumulateFromOutputGradient(
@@ -416,6 +451,32 @@ public sealed class NeuralNetwork
         return -MathF.Log(probability);
     }
 
+    /// <summary>
+    /// Cross-entropy against a full target distribution: -sum(q_i * log p_i). The single-index
+    /// overload above is the q = one-hot case of this, and both agree to floating-point error.
+    /// Zero-probability categories contribute nothing, so a sparse teacher distribution costs
+    /// only the categories it actually names.
+    /// </summary>
+    public float CategoricalCrossEntropy(ReadOnlySpan<float> activations, ReadOnlySpan<float> targetDistribution)
+    {
+        if (_categoryLabels.Length == 0)
+            return 0f;
+
+        float loss = 0f;
+        int count = Math.Min(_categoryLabels.Length, targetDistribution.Length);
+        for (int category = 0; category < count; category++)
+        {
+            float target = targetDistribution[category];
+            if (target <= 0f)
+                continue;
+
+            float probability = Math.Clamp(activations[2 + category], .000001f, .999999f);
+            loss -= target * MathF.Log(probability);
+        }
+
+        return loss;
+    }
+
     public int ArgMaxCategory(ReadOnlySpan<float> activations)
     {
         if (_categoryLabels.Length == 0)
@@ -495,11 +556,40 @@ public sealed class NeuralNetwork
         float[] biases,
         float[] destination)
     {
+        if (RustKernels.TryMultiplyBias(weightsColumnMajor, rows, cols, source, biases, destination))
+            return;
+
+        MultiplyBiasManaged(weightsColumnMajor, rows, cols, source, biases, destination);
+    }
+
+    /// <summary>destination = Wᵀ delta with W stored column-major.</summary>
+    private static void MultiplyTranspose(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] delta,
+        float[] destination)
+    {
+        if (RustKernels.TryMultiplyTranspose(weightsColumnMajor, rows, cols, delta, destination))
+            return;
+
+        MultiplyTransposeManaged(weightsColumnMajor, rows, cols, delta, destination);
+    }
+
+    /// <summary>Managed GEMV used when <c>libhc_kernels</c> is absent.</summary>
+    internal static void MultiplyBiasManaged(
+        float[] weightsColumnMajor,
+        int rows,
+        int cols,
+        float[] source,
+        float[] biases,
+        float[] destination)
+    {
         Array.Copy(biases, destination, rows);
         for (int column = 0; column < cols; column++)
         {
             float sourceValue = source[column];
-            if (sourceValue == 0f)
+            if (IsExactIeeeZero(sourceValue))
                 continue;
             int offset = column * rows;
             for (int row = 0; row < rows; row++)
@@ -507,8 +597,18 @@ public sealed class NeuralNetwork
         }
     }
 
-    /// <summary>destination = Wᵀ delta with W stored column-major.</summary>
-    private static void MultiplyTranspose(
+    /// <summary>
+    /// Exact IEEE +0/−0. The GEMV column skip must treat both as empty sources
+    /// the same way Rust `== 0.0` does, without a C# floating equality test.
+    /// </summary>
+    private static bool IsExactIeeeZero(float value)
+    {
+        int bits = BitConverter.SingleToInt32Bits(value);
+        return bits == 0 || bits == unchecked((int)0x8000_0000);
+    }
+
+    /// <summary>Managed Wᵀδ used when <c>libhc_kernels</c> is absent.</summary>
+    internal static void MultiplyTransposeManaged(
         float[] weightsColumnMajor,
         int rows,
         int cols,

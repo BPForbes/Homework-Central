@@ -27,6 +27,8 @@ public interface IVectorDocumentStore
 /// <summary>
 /// Retrieval-only store. Embeddings are cosine-compared in process (JSON float arrays).
 /// Never returns or stores authoritative candidate quality scores.
+/// Portable twins live in <c>rust/hc-vector-cosine</c> (single and batch JSON);
+/// keep both in lockstep.
 /// </summary>
 public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
 {
@@ -88,19 +90,43 @@ public sealed class VectorDocumentStore(AppDbContext db) : IVectorDocumentStore
             query = query.Where(d => d.PositionId == positionId);
 
         List<VectorDocument> docs = await query.Take(200).ToListAsync(ct);
+        if (RustKernels.TryBatchCosineJson(
+                queryEmbedding,
+                docs.Select(static document => document.EmbeddingJson),
+                out double[] rustScores)
+            && rustScores.Length == docs.Count)
+        {
+            return docs
+                .Select((document, index) => (Doc: document, Score: rustScores[index]))
+                .OrderByDescending(pair => pair.Score)
+                .Take(take)
+                .Select(pair => pair.Doc)
+                .ToList();
+        }
+
         return docs
-            .Select(d => (Doc: d, Score: Cosine(queryEmbedding, Parse(d.EmbeddingJson))))
-            .OrderByDescending(x => x.Score)
+            .Select(document => (Doc: document, Score: Cosine(queryEmbedding, ParseEmbeddingJson(document.EmbeddingJson))))
+            .OrderByDescending(pair => pair.Score)
             .Take(take)
-            .Select(x => x.Doc)
+            .Select(pair => pair.Doc)
             .ToList();
     }
 
-    private static float[] Parse(string json) =>
-        JsonSerializer.Deserialize<float[]>(json) ?? [];
-
-    private static double Cosine(IReadOnlyList<float> a, IReadOnlyList<float> b)
+    internal static float[] ParseEmbeddingJson(string json)
     {
+        if (VectorRetrievalMemo.TryParse(json, out float[]? cached) && cached is not null)
+            return (float[])cached.Clone();
+
+        float[] parsed = JsonSerializer.Deserialize<float[]>(json) ?? [];
+        VectorRetrievalMemo.PutParse(json, (float[])parsed.Clone());
+        return parsed;
+    }
+
+    internal static double Cosine(IReadOnlyList<float> a, IReadOnlyList<float> b)
+    {
+        if (RustKernels.TryCosine(a, b, out double rustScore))
+            return rustScore;
+
         int n = Math.Min(a.Count, b.Count);
         if (n == 0)
             return 0;

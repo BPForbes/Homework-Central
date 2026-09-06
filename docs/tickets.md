@@ -17,7 +17,8 @@ This document owns the feature-level behavior for:
 - assessment ownership between deterministic application code, neural monitors,
   Ollama review, PostgreSQL, and vector retrieval;
 - training examples, reviewer corrections, neural promotion, and retrieval
-  archives.
+  archives;
+- AI tracking lookup/junction/entity storage for built-in and custom ticket ANIs.
 
 Room visibility, tenant scope, and upload scanning stay with their feature docs:
 
@@ -124,6 +125,10 @@ closed, reopened, approved-decision, and deleted lifecycle states.
 - Use [Assessment ownership](#assessment-ownership) and
   [Neural monitors and Ollama blend](#neural-monitors-and-ollama-blend) before
   changing live scoring, reviewer fallback, or confidence movement.
+  Lexical bins, store cosine, column-major GEMV, expertise FNV-1a, HashEmbed,
+  JSON batch cosine, and support-set cosine run in `libhc_kernels` when that
+  library is present (`rust/hc-kernels`). The C# methods stay as the fallback.
+  Encode metadata, hashed-MLP train/replay, and the rest of the API stay in C#.
 - The [Code behavior](#code-behavior) snippets show the transaction used to open
   a ticket, private room access-rule creation, intake answer dispatch, preface
   resolution, score persistence, monitor selection, training session enqueue,
@@ -325,6 +330,29 @@ flowchart LR
 | Moderation cascade | Default for conduct, report, and filter tickets. | Concept-context router using reported moderation concept, related concept count, family one-hot values, and concept/family text matches. | Evidence, relevance, and `100` fine moderation concepts plus catch-all. |
 | Tutoring cascade | Tutor application and subject-help contexts detected from filter name, watch context, tracking instructions, or frozen template text. | Subject-context router using applied subjects, channel subject, exact/related/cross-subject support, and expertise hash bins. | Evidence, relevance, and tutoring subject/competency categories. |
 
+Lexical bins, store cosine, column-major GEMV / `Wᵀδ`, expertise FNV-1a,
+offline HashEmbed, JSON batch cosine, and support-set cosine execute in
+Rust through `rust/hc-kernels` (`libhc_kernels`) when the compile scripts
+have produced that library. Call sites try the native export first and
+keep managed C# implementations as the fallback so the API Docker image
+and the C# CI job do not need `rustc`. New exports bind optionally: a
+stale `libhc_kernels` still serves lexical bins and store cosine.
+Encode metadata, hashed-MLP train/replay, EF, SignalR, and the React app
+stay in C# / TypeScript.
+
+| Kernel | Call site | Contract |
+|---|---|---|
+| Lexical bins | `ChatMonitoringFeatureEncoder.EmbedText` / `AddTokens` | 86-float FNV-1a unigram/bigram bins. |
+| Store cosine | `VectorDocumentStore.Cosine` | Overlapping prefix; empty or zero-norm is `0`; may be negative. |
+| Column-major GEMV / `Wᵀδ` | `NeuralNetwork.MultiplyBias`, `MultiplyTranspose` | Math.NET column-major (`rows` = targets). Silent training still has a LibTorch path. |
+| Batch store cosine + JSON float parse | `VectorDocumentStore.RetrieveSimilarAsync` | Up to 200 `EmbeddingJson` arrays in one marshal; invalid JSON scores `0`. |
+| Expertise FNV-1a bins | `TutoringSubjectContextRouter.AddExpertiseHash` | Same FNV-1a as lexical bins; 32 slots, saturate at 1. |
+| Offline `HashEmbed` | `LlmClient.HashEmbed` | 64-bin UTF-16 histogram + L2 when Ollama is down. |
+| FIFO-free LRU | `HostLru` → `hc_lru_*` (`hc-cache`) | Memo for `EmbedText`, `Encode`, `HashEmbed`, parsed `EmbeddingJson`, and hashed-MLP `Predict`. Evicts the least important address, then inserts left: `D >> [A,B,C] -> [D,A,C]` after A is reused. Managed `LruCache<TKey,TValue>` is the fallback. |
+| Support-set cosine | `ChatMonitoringNeuralModelHashedMlp.Cosine` | Max over the support queue. Clamped to `[0, 1]` — do not merge with store cosine. |
+
+TypeScript compute that is real but should stay client-side (or wasm later, not `libhc_kernels`): `frontend/src/components/neuralNet/meshProject.worker.ts` (`buildMesh` / `project`) and `NeuralNetGraph2D.tsx` `buildDenseGraphTopology`. Those are view-projection and SVG topology, not scoring. Bitmasks, Markdown, and captcha hashing stay in TypeScript.
+
 The stage-2 input layout is shared across both monitors:
 
 | Feature slots | Source |
@@ -435,7 +463,20 @@ Training sessions:
 - select matching-domain tickets plus a configured cross-domain sample;
 - train mini-batches with momentum SGD and cascade chain-rule updates;
 - persist examples and vector mirrors in batches;
-- sample full traces while compacting routine replay frames.
+- sample full traces while compacting routine replay frames;
+- treat the in-memory session as a heap bucket: when
+  `TrainingHeapPressure` says the CLR heap or process working set is
+  about to fill (70% of `GCMemoryInfo.TotalAvailableMemoryBytes`), write
+  the latest weights/bias snapshot to
+  `ChatMonitoringNeuralModelRun.WorkerReplayJson` as
+  `spill-checkpoint-v1` and empty replay traces. Same-process continue
+  keeps the live net; resume or process restart reloads the checkpoint.
+  The same persist-and-empty happens on Stop / pause and when a finite
+  run completes. Mid-run SQL is otherwise still persist-on-stop only. Rust `hc_heap_should_spill`
+  and `hc_heap_top_k_abs` own the watermark and bounded mesh top-K;
+  C# still samples `GC.GetGCMemoryInfo()` because the native library
+  cannot see the CLR heap. After `OutOfMemoryException`, training spills
+  once instead of retrying the same allocating step until the process dies.
 
 ### Readability exception: hashed-MLP mini-batch training
 
@@ -1131,6 +1172,37 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 }
 ```
 
+### AI tracking catalog (lineage, category, session)
+
+Teacher labels and predictions are stored as a 3NF catalog, not as free-text
+names on fact rows:
+
+| Kind | Table | Role |
+|---|---|---|
+| Lookup | `AIModelLineages` | One trainable ANI. Built-in slugs are `moderation` and `tutoring`. Additional rows can bind to a custom ticket portal (`PortalChannelId`). |
+| Lookup | `AICategories` | Category slugs for that lineage. Built-in rows are seeded from `ChatMonitoringCategoryTaxonomy`. |
+| Entity | `AITrackingSessions` | One labeling pass (ticket + message index + model version + lineage). `TicketId` is nullable so a future non-ticket source can reuse the table. |
+| Junction | `AITrackingCategoryWeights` | Session × category teacher weight, plus optional human override onto another category row. |
+| Entity | `AITrackingPredictions` | Trained-model prediction linked to the same category lookups. |
+
+Built-in lineages are upserted at startup from the in-code taxonomies. Custom
+lineages are registered through `POST /api/ai-tracking/lineages` so a custom
+ticket portal can store and later train against its own vocabulary without
+extending `NeuralModelKindChatMonitoring`.
+
+Infrastructure admins query and delete through `/api/ai-tracking`:
+
+- `GET /api/ai-tracking/sessions?lineageSlug=&ticketId=&createdByUserId=&beforeUtc=&limit=`
+- `GET /api/ai-tracking/sessions/{sessionId}`
+- `DELETE /api/ai-tracking/sessions/{sessionId}`
+- `DELETE /api/ai-tracking/tickets/{ticketId}/sessions`
+- `DELETE /api/ai-tracking/lineages/{slug}/sessions`
+- `DELETE /api/ai-tracking/lineages/{slug}` (custom lineages only; built-in rows stay)
+
+Deleting a ticket still cascades its tracking sessions. Deleting a lineage is
+restricted while sessions exist unless the lineage-session purge (or custom
+lineage delete, which purges first) runs.
+
 ## Implementation files
 
 ### Ticket portals, lifecycle, and preface checks
@@ -1163,7 +1235,7 @@ private async Task<MessageVoteDto> BuildDtoAsync(ChatMessage message, Guid viewe
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelContracts.cs) | Chat-monitor model inputs, targets, predictions, traces, telemetry, and factory contracts. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelFactory.cs) | Moderation/tutoring model selection and training-mode resolution. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetwork.cs) | Math.NET Numerics dense network engine (`DenseLayer`, forward/backprop, momentum SGD, parameter flatten). |
-| [backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs](../backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs) | Parallel extraction of live mesh active node/edge indexes from forward/backprop traces. |
+| [backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs](../backend/HomeworkCentral.Api/Assessment/NeuralMeshFrameExtractor.cs) | Sequential top-K extraction of live mesh active node/edge indexes (Rust `hc_heap_top_k_abs` or managed `PriorityQueue`; no Parallel.ForEach). |
 | [backend/HomeworkCentral.Api/Assessment/Node.cs](../backend/HomeworkCentral.Api/Assessment/Node.cs) | Topology node identity/labels for replay and visualizer mapping. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringNeuralModelHashedMlp.cs) | CPU hashed-MLP scorer + cascade wrappers over `NeuralNetwork`; telemetry, topology, and parameter snapshots. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringFeatureEncoder.cs) | Shared 86-float feature encoder and vector embedding helper. |
@@ -1186,7 +1258,14 @@ the next step until Stop. A running session with no live worker is marked stoppe
 admin list cannot strand an unstoppable row.
 `GET /api/neural-net/training` projects replay presence flags rather than the JSON payloads: those
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
-Continuous runs snapshot worker replay every tenth step instead of every step for the same reason.
+Worker replay is not snapshotted every N steps. Persist-on-stop is the default; mid-run SQL is
+an emergency heap spill (`spill-checkpoint-v1` on the run row) that writes **weights only**
+(no example `AddRange` / vector upsert). Traces are emptied before the compact snapshot so
+the GC can reclaim them. After a successful spill the loop waits until the heap falls below
+the 55% skip-trace line before another mid-run persist. Finite complete/fail keep
+`spill-checkpoint-v1` instead of overwriting it with V2 replay. Resume reloads that
+checkpoint before reconstructing replay state. In-memory replay is bounded by
+`ReplayBuilder.MaxFrames` and compact trace sampling.
 
 Synthetic training uses a **single multipurpose training LLM** (`INeuralNetTrainingLlmModule`) for
 scenario generation, embedded self-critique, and revision rewrites (generate+evaluate in one Ollama
@@ -1228,6 +1307,11 @@ the destination layer (forward frames run input-to-output, backward frames outpu
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetFinite.cs) | Finite numeric guards for traces and parameters. |
 | [backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs](../backend/HomeworkCentral.Api/Assessment/ChatMonitoringVectorKeys.cs) | Vector lineage position ids. |
 | [backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs](../backend/HomeworkCentral.Api/Assessment/VectorDocumentStore.cs) | Retrieval mirror storage and similarity lookup. |
+| [backend/HomeworkCentral.Api/Assessment/AITrackingCatalog.cs](../backend/HomeworkCentral.Api/Assessment/AITrackingCatalog.cs) | Built-in lineage slug mapping. |
+| [backend/HomeworkCentral.Api/Assessment/AITrackingCatalogSeedData.cs](../backend/HomeworkCentral.Api/Assessment/AITrackingCatalogSeedData.cs) | Upserts moderation/tutoring lookup rows from the in-code taxonomies. |
+| [backend/HomeworkCentral.Api/Assessment/AITrackingService.cs](../backend/HomeworkCentral.Api/Assessment/AITrackingService.cs) | Record, query, and delete AI tracking sessions. |
+| [backend/HomeworkCentral.Api/Models/AITracking.cs](../backend/HomeworkCentral.Api/Models/AITracking.cs) | Lineage, category, session, weight, and prediction entities. |
+| [backend/HomeworkCentral.Api/Migrations/AddAITracking.cs](../backend/HomeworkCentral.Api/Migrations/AddAITracking.cs) | AI tracking lookup, junction, and entity tables. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticConceptCoverageSampler.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticConceptCoverageSampler.cs) | Least-covered picker over the full moderation/tutoring filterable taxonomies for synthetic tickets. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioGenerator.cs) | Synthetic ticket/thread scenario generation with forced target concepts and taxonomy-aware fallbacks. |
 | [backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs](../backend/HomeworkCentral.Api/Assessment/SyntheticThreadScenarioModels.cs) | Synthetic scenario, message, and training report models. |
@@ -1244,6 +1328,7 @@ the destination layer (forward frames run input-to-output, backward frames outpu
 |---|---|
 | [backend/HomeworkCentral.Api/Controllers/TicketsController.cs](../backend/HomeworkCentral.Api/Controllers/TicketsController.cs) | Ticket HTTP API. |
 | [backend/HomeworkCentral.Api/Controllers/NeuralNetController.cs](../backend/HomeworkCentral.Api/Controllers/NeuralNetController.cs) | Neural administration HTTP API. |
+| [backend/HomeworkCentral.Api/Controllers/AITrackingController.cs](../backend/HomeworkCentral.Api/Controllers/AITrackingController.cs) | AI tracking lineage, session query, and delete API. |
 | [backend/HomeworkCentral.Api/Controllers/ChatController.cs](../backend/HomeworkCentral.Api/Controllers/ChatController.cs) | Chat, attachment, vote, user search, and inbox API used by tickets and messages. |
 | [backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs](../backend/HomeworkCentral.Api/Controllers/InfrastructureController.cs) | Custom channel and portal administration API. |
 | [backend/HomeworkCentral.Api/Data/AppDbContext.cs](../backend/HomeworkCentral.Api/Data/AppDbContext.cs) | EF sets, constraints, relationships, and indexes for ticket/neural tables. |
@@ -1283,6 +1368,8 @@ the destination layer (forward frames run input-to-output, backward frames outpu
 | [frontend/src/utils/neuralNetReplay.ts](../frontend/src/utils/neuralNetReplay.ts) | Replay schema, topology, frame, and size validation. |
 | [frontend/src/pages/ChatRoom.tsx](../frontend/src/pages/ChatRoom.tsx) | Room metadata loading and chat/custom-room panel routing. |
 | [frontend/src/pages/NeuralNet.tsx](../frontend/src/pages/NeuralNet.tsx) | Server Maintenance neural page. |
+| [frontend/src/components/neuralNet/AITrackingDataPanel.tsx](../frontend/src/components/neuralNet/AITrackingDataPanel.tsx) | Query and delete AI tracking lineages and sessions. |
+| [frontend/src/api/aiTrackingApi.ts](../frontend/src/api/aiTrackingApi.ts) | AI tracking HTTP client. |
 | [frontend/src/hooks/useChatRoom.ts](../frontend/src/hooks/useChatRoom.ts) | Message loading, SignalR connection, send, vote, and typing behavior. |
 | [frontend/src/components/neuralNet/ReplayViewer.tsx](../frontend/src/components/neuralNet/ReplayViewer.tsx) | V2 replay visualization and frame inspector. |
 | [frontend/src/components/neuralNet/NeuralNetMesh3D.tsx](../frontend/src/components/neuralNet/NeuralNetMesh3D.tsx) | Architecture-scaled 3D mesh with volume/2D-slice modes (top-down or side) and slice navigation. |

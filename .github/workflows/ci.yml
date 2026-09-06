@@ -5,6 +5,11 @@ on:
     branches:
       - main
   pull_request:
+    # Default types omit `edited`, which fires when the base branch is
+    # retargeted — and the base is exactly what the history scan measures
+    # against, so its verdict can change without a new commit.
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
 
 concurrency:
   # Newer pushes to the same PR/branch cancel in-flight CI for that ref so only
@@ -17,6 +22,60 @@ permissions:
   contents: read
 
 jobs:
+  # Deliberately its own job with no toolchain, no services and no build step.
+  # As part of the backend job it ran only after restore, build and the
+  # out-of-solution build all succeeded — and a PR that does not compile is
+  # exactly the one most likely to carry a stray probe, so the author would get
+  # no hygiene feedback at all.
+  hygiene:
+    name: Clean timeline
+    runs-on: ubuntu-latest
+    # No toolchain and no services, so anything past a couple of minutes means
+    # the job is wedged rather than slow.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          # The history scan walks base..HEAD, which a shallow clone cannot do.
+          fetch-depth: 0
+
+      - name: Reject non-Coder files on the timeline
+        env:
+          # Empty for a push build, where there is no base to compare against;
+          # the script then runs the tip checks only.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A merge_group event carries no pull_request payload, so BASE_SHA is
+          # empty there and the history scan would quietly degrade to the tip
+          # check — in the queue that is the last gate before the base branch.
+          # merge_group.base_sha is the equivalent, so use it when present.
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_SHA" ] && [ -n "$MERGE_GROUP_BASE_SHA" ]; then
+            BASE_SHA="$MERGE_GROUP_BASE_SHA"
+            echo "using merge_group base"
+          fi
+          if [ -n "$BASE_SHA" ]; then
+            # The merge base, not the raw base sha. github.event...base.sha is
+            # the base branch tip when the PR opened; once the base moves on,
+            # a range from it sweeps in commits this PR never touched and the
+            # scan blames the author for someone else's file.
+            # On a pull_request checkout HEAD is GitHub's merge commit, whose
+            # first parent is the base and second is the PR tip. merge-base of
+            # the base against that merge commit resolves back to BASE_SHA, so
+            # the range sweeps in every commit the base gained after the PR
+            # opened -- the false blame the merge-base was meant to prevent.
+            # Compare from the PR tip instead.
+            tip="$(git rev-parse HEAD^2 2>/dev/null || git rev-parse HEAD)"
+            merge_base="$(git merge-base "$BASE_SHA" "$tip")"
+            echo "base=$BASE_SHA tip=$tip merge-base=$merge_base"
+            ./scripts/check-clean-timeline.sh --history "$merge_base"
+          else
+            ./scripts/check-clean-timeline.sh
+          fi
+
   backend:
     name: Backend (.NET 10)
     runs-on: ubuntu-latest
@@ -56,9 +115,30 @@ jobs:
       - name: Build
         run: dotnet build HomeworkCentral.sln --configuration Release --no-restore
 
+      # PostgresHostCheck is not a member of HomeworkCentral.sln, so the solution
+      # build above never compiles it and its IDE0008 gate would never run.
+      - name: Build projects outside the solution
+        run: dotnet build scripts/PostgresHostCheck/PostgresHostCheck.csproj --configuration Release
+
+      # Backstop for C# pattern `var`, `dynamic`, and per-file suppressions.
+      # IDE0008 itself is pinned in .editorconfig + EnforceCodeStyleInBuild.
+      - name: Reject implicitly typed locals
+        run: ./scripts/check-no-var.sh
+
+      # Scoped to the whole repo, not just backend/HomeworkCentral.Api: a new
+      # project was outside the pattern and unscanned. `\s*\(` because a single
+      # space (`FromSqlRaw (`) evaded the previous form, and `-U` so a newline
+      # before the paren does not either.
+      #
+      # This is a lint, not a proof. It cannot see raw ADO.NET at all --
+      # TenantDatabaseProvisioner interpolates a database name into a CREATE
+      # DATABASE statement, which is correct today because the identifier is
+      # escaped by doubling `"` and comes from a fixed catalog rather than
+      # request input, but deleting that escape would not trip this step. Raw
+      # ADO.NET command text stays a review responsibility.
       - name: Reject unparameterized raw SQL
         run: |
-          if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(|ExecuteSqlRawAsync\(|SqlQueryRaw\(' backend/HomeworkCentral.Api --type cs; then
+          if rg -n -U '(FromSqlRaw|ExecuteSqlRaw|ExecuteSqlRawAsync|SqlQueryRaw)\s*\(' --type cs; then
             echo "Unparameterized raw SQL is not allowed. Use FromSqlInterpolated/ExecuteSqlInterpolated/SqlQuery."
             exit 1
           fi
@@ -93,6 +173,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # eslint . --no-inline-config so a blanket disable does not silence no-var.
+      # The plain lint script keeps legitimate warn-level directives.
+      - name: Lint ignoring inline directives
+        run: npm run lint:ci
+
       - name: Build
         run: npm run build
 
@@ -119,3 +204,35 @@ jobs:
             echo "llm-service/Dockerfile must declare OLLAMA_VERSION=<major.minor.patch>."
             exit 1
           fi
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust -> target
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Check
+        run: cargo check --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace

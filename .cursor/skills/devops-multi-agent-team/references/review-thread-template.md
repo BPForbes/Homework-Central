@@ -1,56 +1,60 @@
 # Review thread template
 
-Copy to `.cursor/reviews/<topic>.md` for each change set. Coder and Reviewers communicate **only** through this file for the review gate.
+Copy to `.cursor/thoughts/non-finalized/review-<topic>.md`.
+Local only; do not commit. After QA PASS, move to `finalized/`.
+See [thoughts-layout.md](thoughts-layout.md).
 
 ```markdown
 # Review: <topic>
 
-**Branch:** feature/ticket-rooms (#58)
+**Branch:** <shared checkout; do not invent a real git branch>
+**Side-branch:** `side/<dept>-<topic>` (`side-<dept>.md`)
 **Status:** In review | Changes requested | Satisfied — ready for security | Closed
-**Push policy:** No push until Status is Satisfied and Security has cleared.
+**Push policy:** Only QA may give the OK to push.
 
 ## Research brief
-<!-- Documentation & Research subagent -->
+### Local docs / Online media / Recommendations
+- … · | URL | Takeaway |
 
-### Local docs
-- …
-
-### Online media (fetched)
-| URL | Takeaway |
-|-----|----------|
-| … | … |
-
-### Recommendations
-- …
+## Push JSON
+- Latest: `.cursor/thoughts/non-finalized/push-<topic>.json`
+- Coder writes this **before the first review**. Reviewers compare
+  it to the side-branch tree vs `<integration-base>`.
 
 ## Change summary (Coder)
-- Files:
-- Intent:
+- Files / Intent / Notify (Handoff + Push JSON path)
 
 ## Review round N (Reviewers)
-
 ### Request changes
-- [ ] `path` — finding (cite research/doc/URL)
-
-### Questions
+- [ ] `path` — finding (cite research/doc/URL; label which reviewer)
+### Questions / Suggestions (non-blocking)
 - …
-
-### Suggestions (non-blocking)
-- …
-
 ### Reviewer sign-off
 | Reviewer | Verdict | Notes |
 |----------|---------|-------|
 | reviewer-1 | Changes requested / Satisfied | … |
 
+## CodeRabbit
+- File: `cr-<topic>.md` · CLI: `cr review findings`
+- Open findings **block** Satisfied / PASS. `wontfix` needs `why`.
+
+## Q&A (Coder ↔ Reviewer)
+| Id | From | To | Ask | Answer | Status |
+|----|------|----|-----|--------|--------|
+| q1 | Reviewer | Coder | … | | open |
+| q2 | Coder | Reviewer | … | | open |
+
 ## Coder response (round N)
-- Replies + what changed:
+- Replies + what changed; q-ids closed
+
+## Handoff
+- From / To / Pass-along / Sent back because / Ask
 
 ## Security (after Satisfied)
-- Snyk / review-security results:
 - Verdict: Clear / Blocked
 
 ## QA handoff
-- Commands run:
-- Result:
+- Commands; .NET / TS / Rust validation + CodeQL; clean timeline
+  (`check-clean-timeline.sh --history <base>`); publish gate
+  PASS / BLOCKED; VM send-back; triage ids; thoughts to finalize
 ```

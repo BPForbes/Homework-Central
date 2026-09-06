@@ -10,6 +10,8 @@ DEV_STACK_POSTGRES_PASSWORD="postgres"
 DEV_STACK_POSTGRES_HOST_PORT="5434"
 DEV_STACK_FCAPTCHA_HOST_PORT="3010"
 DEV_STACK_CLAMAV_HOST_PORT="3310"
+# Must match docker-compose.yml's `fcaptcha` service image tag.
+DEV_STACK_FCAPTCHA_IMAGE="homework-central-fcaptcha:1.12.0"
 DEV_STACK_SERVER_REGISTERED=0
 
 trim_dev_env_whitespace() {
@@ -222,13 +224,15 @@ postgres_host_check_dll() {
 }
 
 build_postgres_host_check_if_needed() {
-  local dll project
+  local dll project project_dir
   dll="$(postgres_host_check_dll)"
-  if [[ -f "$dll" ]]; then
+  project="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
+  project_dir="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck"
+
+  if [[ -f "$dll" ]] && ! find "$project_dir" \( -name '*.cs' -o -name '*.csproj' \) -newer "$dll" | grep -q .; then
     return 0
   fi
 
-  project="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
   dotnet build "$project" -c Debug -v q >/dev/null
 }
 
@@ -238,7 +242,7 @@ test_dev_postgres_connection() {
   build_postgres_host_check_if_needed
   dll="$(postgres_host_check_dll)"
   [[ -f "$dll" ]] || return 1
-  dotnet "$dll" "$port" >/dev/null 2>&1
+  dotnet "$dll" "$port" "127.0.0.1" >/dev/null 2>&1
 }
 
 start_dev_stack_postgres_container() {
@@ -273,7 +277,15 @@ start_dev_stack_fcaptcha_container() {
   docker info >/dev/null 2>&1 || return 1
 
   export FCAPTCHA_HOST_PORT="$port"
-  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d --build)
+  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d)
+  # `--build` used to be passed on every start. The build context is a pinned upstream tag that
+  # never changes between runs, so that woke BuildKit — and the memory its daemon holds for the
+  # build graph and cache — for a no-op rebuild each time the dev stack came up. Build only when
+  # the image really is missing, or when HC_FCAPTCHA_REBUILD=1 forces it.
+  if [[ "${HC_FCAPTCHA_REBUILD:-0}" == "1" ]] \
+    || ! docker image inspect "$DEV_STACK_FCAPTCHA_IMAGE" >/dev/null 2>&1; then
+    compose_args+=(--build)
+  fi
   if [[ "$force_recreate" == "1" ]]; then
     compose_args+=(--force-recreate)
   fi
@@ -456,7 +468,7 @@ ensure_dev_postgres_running() {
     return 0
   fi
 
-  printf '==> Starting Docker Postgres on localhost:%s\n' "$port"
+  printf '==> Starting Docker Postgres on 127.0.0.1:%s\n' "$port"
   start_dev_stack_postgres_container "$port" || return 1
   wait_dev_postgres_ready "$port" || return 1
 
@@ -555,4 +567,63 @@ _unregister_dev_stack_server_impl() {
 
 release_dev_stack_postgres() {
   unregister_dev_stack_server
+}
+
+# Builds rust/ including libhc_kernels for EmbedText, store cosine, GEMV, and related kernels.
+# The API loads that library at runtime; C# remains the fallback so the
+# Docker image does not need rustc.
+# rustup puts cargo on PATH via ~/.cargo/bin after `source ~/.cargo/env` or a new shell.
+add_rustup_bin_to_path() {
+  local cargo_bin="$HOME/.cargo/bin"
+  if [[ -d "$cargo_bin" && ":$PATH:" != *":$cargo_bin:"* ]]; then
+    PATH="$cargo_bin:$PATH"
+    export PATH
+  fi
+}
+
+require_rust_cargo() {
+  add_rustup_bin_to_path
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    printf 'error: cargo is required to compile rust/. Install rustup from https://rustup.rs/, then: rustup default stable\n' >&2
+    printf 'error: add ~/.cargo/bin to PATH (source ~/.cargo/env) or open a new shell\n' >&2
+    printf 'error: set HC_SKIP_RUST_BUILD=1 to skip cargo build\n' >&2
+    return 1
+  fi
+
+  if ! command -v rustc >/dev/null 2>&1; then
+    printf 'error: rustc is required to compile rust/. cargo is on PATH but rustc is not — run: rustup default stable\n' >&2
+    printf 'error: set HC_SKIP_RUST_BUILD=1 to skip cargo build\n' >&2
+    return 1
+  fi
+}
+
+build_rust_workspace() {
+  if [[ "${HC_SKIP_RUST_BUILD:-}" == "1" ]]; then
+    printf '==> Skipping Rust build (HC_SKIP_RUST_BUILD=1)\n'
+    return 0
+  fi
+  if [[ "${HC_SKIP_BUILD:-}" == "1" ]]; then
+    printf '==> Skipping Rust build (HC_SKIP_BUILD=1)\n'
+    return 0
+  fi
+
+  require_rust_cargo || return 1
+
+  printf '==> Building Rust workspace (cargo build --workspace)\n'
+  (cd "$DEV_STACK_REPO_ROOT/rust" && cargo build --workspace) || return 1
+  copy_hc_kernels_native
+}
+
+copy_hc_kernels_native() {
+  local dest="$DEV_STACK_REPO_ROOT/backend/HomeworkCentral.Api/native"
+  local debug_dir="$DEV_STACK_REPO_ROOT/rust/target/debug"
+  mkdir -p "$dest"
+  local name
+  for name in libhc_kernels.so hc_kernels.dll libhc_kernels.dylib; do
+    if [[ -f "$debug_dir/$name" ]]; then
+      cp "$debug_dir/$name" "$dest/$name"
+      printf '==> Copied %s into backend/HomeworkCentral.Api/native\n' "$name"
+    fi
+  done
 }

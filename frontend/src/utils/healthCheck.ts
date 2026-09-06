@@ -15,8 +15,11 @@ export type BackendHealthProbe =
   | { kind: 'failed'; health: BackendHealth; message: string }
   | { kind: 'unreachable' }
 
-/** Short probe timeout while the API process may not be listening yet. */
-export const HEALTH_PROBE_TIMEOUT_MS = 800
+/**
+ * First Kestrel requests on a fresh volume can exceed 3s while migrate/seed holds the thread
+ * pool. A sub-second abort looks identical to ECONNREFUSED and trips the connect deadline.
+ */
+export const HEALTH_PROBE_TIMEOUT_MS = 5_000
 
 /**
  * Probes /healthz through the Vite proxy.

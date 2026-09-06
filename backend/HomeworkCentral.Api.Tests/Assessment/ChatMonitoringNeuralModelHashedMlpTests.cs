@@ -64,7 +64,7 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         ChatMonitoringNeuralModelPrediction prediction = tutoring.Predict(input);
         Assert.False(string.IsNullOrWhiteSpace(prediction.Category));
         Assert.True(prediction.Evidence > .4f);
-        Assert.Equal(86, tutoring.GetStateSnapshot().LayerWidths[0]);
+        Assert.Equal(ChatMonitoringFeatureEncoder.FeatureCount, tutoring.GetStateSnapshot().LayerWidths[0]);
         Assert.Contains(tutoring.GetTopologySnapshot().Nodes, node => node.Label == "cascade-context-0");
     }
 
@@ -149,10 +149,14 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         using TutoringChatMonitorNeuralNet tutoring = new();
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
-        // Moderation evidence: 86+48+72+64+56+103 = 429
-        // Tutoring evidence: 86+40+56+48+40+16 = 286
-        Assert.Equal(429, moderationTopology.Nodes.Count);
-        Assert.Equal(286, tutoringTopology.Nodes.Count);
+        // Input + hidden + output. Expressed against FeatureCount rather than a literal so that
+        // tuning ChatMonitoringFeatureEncoder.TextVectorSize does not silently invalidate these.
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 48 + 72 + 64 + 56 + 103,
+            moderationTopology.Nodes.Count);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 40 + 56 + 48 + 40 + 16,
+            tutoringTopology.Nodes.Count);
         Assert.Equal("hc-chat-monitoring-moderation-evidence-v8", moderationTopology.ModelVersion);
         Assert.Equal("hc-chat-monitoring-tutoring-evidence-v8", tutoringTopology.ModelVersion);
         Assert.Equal(100, ChatMonitoringModerationConcepts.Slugs.Count);
@@ -163,14 +167,24 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-history");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-computer-science");
         Assert.Contains(tutoringTopology.Nodes, node => node.Label == "tutoring-business");
-        Assert.Equal([86, 48, 72, 64, 56, 103], moderation.GetStateSnapshot().LayerWidths);
-        Assert.Equal([86, 40, 56, 48, 40, 16], tutoring.GetStateSnapshot().LayerWidths);
+        Assert.Equal(
+            [ChatMonitoringFeatureEncoder.FeatureCount, 48, 72, 64, 56, 103],
+            moderation.GetStateSnapshot().LayerWidths);
+        Assert.Equal(
+            [ChatMonitoringFeatureEncoder.FeatureCount, 40, 56, 48, 40, 16],
+            tutoring.GetStateSnapshot().LayerWidths);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Moderation.Length + 2, moderation.GetStateSnapshot().LayerWidths[^1]);
         Assert.Equal(ChatMonitoringCategoryTaxonomy.Tutoring.Length + 2, tutoring.GetStateSnapshot().LayerWidths[^1]);
         Assert.True(moderationTopology.Edges.Count > tutoringTopology.Edges.Count);
-        // Dense MLP edges exceed the old student-model cap (4096); keep within cascade-aware V2 limits.
-        Assert.Equal(21544, moderationTopology.Edges.Count);
-        Assert.Equal(10928, tutoringTopology.Edges.Count);
+        // Dense MLP edges exceed the old student-model cap (4096); keep within cascade-aware V2
+        // limits. The semantic region dominates this now: the input-to-first-hidden product alone
+        // is FeatureCount x 48, which is why widening the text vector is a real cost, not free.
+        Assert.Equal(
+            (ChatMonitoringFeatureEncoder.FeatureCount * 48) + (48 * 72) + (72 * 64) + (64 * 56) + (56 * 103),
+            moderationTopology.Edges.Count);
+        Assert.Equal(
+            (ChatMonitoringFeatureEncoder.FeatureCount * 40) + (40 * 56) + (56 * 48) + (48 * 40) + (40 * 16),
+            tutoringTopology.Edges.Count);
         Assert.True(moderationTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
         Assert.True(tutoringTopology.Edges.Count <= NeuralNetReplaySerializer.MaxEdges);
         Assert.True(moderationTopology.Nodes.Count <= NeuralNetReplaySerializer.MaxNodes);
@@ -276,8 +290,12 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         NeuralNetTopologySnapshot moderationTopology = moderation.GetTopologySnapshot();
         NeuralNetTopologySnapshot tutoringTopology = tutoring.GetTopologySnapshot();
         Assert.Equal(2, trace.Iterations.Count);
-        Assert.Equal(286, tutoringTopology.Nodes.Count);
-        Assert.Equal(429, moderationTopology.Nodes.Count);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 40 + 56 + 48 + 40 + 16,
+            tutoringTopology.Nodes.Count);
+        Assert.Equal(
+            ChatMonitoringFeatureEncoder.FeatureCount + 48 + 72 + 64 + 56 + 103,
+            moderationTopology.Nodes.Count);
         Assert.Contains(tutoringTopology.Nodes, node => node.LayerId == "learning-thread-history");
         Assert.Contains(moderationTopology.Nodes, node => node.LayerId == "behavior-history");
         Assert.All(trace.Iterations, iteration => Assert.NotEmpty(iteration.Update.Parameters));
@@ -328,6 +346,68 @@ public class ChatMonitoringNeuralModelHashedMlpTests
         ChatMonitoringNeuralModelPrediction after = model.Predict(input);
         Assert.True(after.Evidence > before.Evidence);
         Assert.True(after.Relevance > before.Relevance);
+    }
+
+    [Fact]
+    public void Predict_second_call_is_a_memo_hit()
+    {
+        using ModerationEvidenceScorerNeuralNet model = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for harassment.",
+            "Repeated insults.",
+            "You are worthless.",
+            0, 1f, .6f, .5f);
+        ChatMonitoringNeuralModelPrediction first = model.Predict(input);
+        ChatMonitoringNeuralModelPrediction second = model.Predict(input);
+        Assert.Equal(first.Evidence, second.Evidence);
+        Assert.Equal(first.Relevance, second.Relevance);
+        Assert.Equal(first.Category, second.Category);
+        Assert.DoesNotContain("Cached chat-monitor score", first.Reasoning, StringComparison.Ordinal);
+        Assert.Contains("Cached chat-monitor score", second.Reasoning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Predict_memo_is_invalidated_after_train()
+    {
+        using ModerationEvidenceScorerNeuralNet model = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for harassment.",
+            "Repeated insults in chat.",
+            "You are worthless.",
+            0, 1f, .6f, .5f);
+        ChatMonitoringNeuralModelPrediction before = model.Predict(input);
+        Assert.Contains("Cached chat-monitor score", model.Predict(input).Reasoning, StringComparison.Ordinal);
+        model.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "harassment")), 40);
+        ChatMonitoringNeuralModelPrediction after = model.Predict(input);
+        Assert.True(after.Evidence > before.Evidence);
+        Assert.DoesNotContain("Cached chat-monitor score", after.Reasoning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Predict_memo_is_invalidated_after_load_snapshot()
+    {
+        using ModerationEvidenceScorerNeuralNet source = new();
+        ChatMonitoringNeuralModelInput input = new(
+            "Monitor for cussing.",
+            "Prior conduct was reported.",
+            "That was a rude curse.",
+            0, .9f, .4f, .5f);
+        source.Train(input, new ChatMonitoringNeuralModelTargets(.95f, .9f,
+            ChatMonitoringCategoryTaxonomy.IndexOf(NeuralModelKindChatMonitoring.Moderation, "profanity")), 8);
+        NeuralNetParameterSnapshot snapshot = source.GetParameterSnapshot(4, 8);
+        ChatMonitoringNeuralModelPrediction trained = source.Predict(input);
+
+        using ModerationEvidenceScorerNeuralNet restored = new();
+        ChatMonitoringNeuralModelPrediction untrained = restored.Predict(input);
+        Assert.Contains("Cached chat-monitor score", restored.Predict(input).Reasoning, StringComparison.Ordinal);
+        restored.LoadParameterSnapshot(snapshot);
+        ChatMonitoringNeuralModelPrediction loaded = restored.Predict(input);
+        Assert.Equal(trained.Evidence, loaded.Evidence);
+        Assert.Equal(trained.Relevance, loaded.Relevance);
+        Assert.Equal(trained.Category, loaded.Category);
+        Assert.DoesNotContain("Cached chat-monitor score", loaded.Reasoning, StringComparison.Ordinal);
+        Assert.NotEqual(untrained.Evidence, loaded.Evidence);
     }
 
     [Fact]

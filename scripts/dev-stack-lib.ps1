@@ -15,6 +15,8 @@ $script:DevPostgresPassword = 'postgres'
 $script:DevPostgresHostPort = '5434'
 $script:DevFCaptchaHostPort = '3010'
 $script:DevClamAvHostPort = '3310'
+# Must match docker-compose.yml's `fcaptcha` service image tag.
+$script:DevFCaptchaImage = 'homework-central-fcaptcha:1.12.0'
 $script:DevStackServerRegistered = $false
 
 function New-DevRandomSecret {
@@ -181,11 +183,20 @@ function Get-PostgresHostCheckDll {
 
 function Build-PostgresHostCheckIfNeeded {
     $dll = Get-PostgresHostCheckDll
-    if (Test-Path $dll) {
+    $project = Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
+    $projectDir = Split-Path $project -Parent
+    $needsBuild = -not (Test-Path $dll)
+    if (-not $needsBuild) {
+        $built = Get-Item $dll
+        $sourceFiles = @(Get-Item $project) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
+        $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        $needsBuild = $built.LastWriteTimeUtc -lt $newestSource.LastWriteTimeUtc
+    }
+
+    if (-not $needsBuild) {
         return
     }
 
-    $project = Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
     dotnet build $project -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'PostgresHostCheck build failed'
@@ -199,7 +210,7 @@ function Test-DevPostgresConnection([string]$Port) {
         return $false
     }
 
-    dotnet $dll $Port *> $null
+    dotnet $dll $Port '127.0.0.1' *> $null
     return $LASTEXITCODE -eq 0
 }
 
@@ -229,7 +240,7 @@ function Wait-DevPostgresReady([string]$Port) {
         Start-Sleep -Seconds 1
     }
 
-    throw "Postgres did not become ready on localhost:$Port within 30s"
+    throw "Postgres did not become ready on 127.0.0.1:$Port within 30s"
 }
 
 function Join-DevStackIfManaged([string]$Port) {
@@ -260,7 +271,7 @@ function Ensure-DevPostgresRunning([string]$Port) {
         return
     }
 
-    Write-Host "==> Starting Docker Postgres on localhost:$Port" -ForegroundColor DarkGray
+    Write-Host "==> Starting Docker Postgres on 127.0.0.1:$Port" -ForegroundColor DarkGray
     Start-DevStackPostgresContainer $Port
     Wait-DevPostgresReady $Port
 
@@ -305,7 +316,17 @@ function Start-DevStackFCaptchaContainer([string]$Port, [switch]$ForceRecreate) 
     }
 
     $env:FCAPTCHA_HOST_PORT = $Port
-    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d', '--build')
+    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d')
+
+    # '--build' used to be passed on every start. The build context is a pinned upstream tag that
+    # never changes between runs, so that woke BuildKit — and the memory its daemon holds for the
+    # build graph and cache — for a no-op rebuild each time the dev stack came up. Build only when
+    # the image really is missing, or when HC_FCAPTCHA_REBUILD=1 forces it.
+    docker image inspect $script:DevFCaptchaImage *> $null
+    if ($LASTEXITCODE -ne 0 -or $env:HC_FCAPTCHA_REBUILD -eq '1') {
+        $composeArgs += '--build'
+    }
+
     if ($ForceRecreate) {
         $composeArgs += '--force-recreate'
     }
@@ -648,6 +669,109 @@ function Ensure-FrontendDependencies([string]$FrontendDir) {
         if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
     } else {
         Write-Step 'Frontend dependencies already installed'
+    }
+}
+
+# Builds rust/ including libhc_kernels for EmbedText, store cosine, GEMV, and related kernels.
+# The API loads that library at runtime; C# remains the fallback so the
+# Docker image does not need rustc.
+function Add-RustupBinToPath {
+    $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+    if (-not (Test-Path $cargoBin)) {
+        return
+    }
+
+    $pathEntries = $env:Path -split ';'
+    if ($pathEntries -contains $cargoBin) {
+        return
+    }
+
+    $env:Path = "$cargoBin;$env:Path"
+}
+
+function Require-RustCargo {
+    Add-RustupBinToPath
+
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        throw 'cargo is required to compile rust/. Install rustup from https://rustup.rs/, then: rustup default stable. Add %USERPROFILE%\.cargo\bin to PATH (open a new PowerShell window). Set HC_SKIP_RUST_BUILD=1 to skip cargo build.'
+    }
+
+    if (-not (Get-Command rustc -ErrorAction SilentlyContinue)) {
+        throw 'rustc is required to compile rust/. cargo is on PATH but rustc is not — run: rustup default stable. Windows also needs the MSVC linker (Visual Studio Build Tools, Desktop development with C++). Set HC_SKIP_RUST_BUILD=1 to skip cargo build.'
+    }
+}
+
+function Build-RustWorkspace {
+    if ($env:HC_SKIP_RUST_BUILD -eq '1') {
+        Write-Host '==> Skipping Rust build (HC_SKIP_RUST_BUILD=1)'
+        return
+    }
+    if ($env:HC_SKIP_BUILD -eq '1') {
+        Write-Host '==> Skipping Rust build (HC_SKIP_BUILD=1)'
+        return
+    }
+
+    # Start-Job runspaces do not always inherit rustup PATH; cargo also writes
+    # progress to stderr, which some pwsh hosts treat as a terminating error.
+    if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+
+    Require-RustCargo
+
+    Write-Host '==> Building Rust workspace (cargo build --workspace)'
+    Push-Location (Join-Path $script:RepoRoot 'rust')
+    try {
+        & cargo build --workspace
+        $cargoExitCode = $LASTEXITCODE
+        if ($null -eq $cargoExitCode) {
+            if ($?) { $cargoExitCode = 0 } else { $cargoExitCode = 1 }
+        }
+        if ($cargoExitCode -ne 0) {
+            throw "cargo build --workspace failed with exit code $cargoExitCode"
+        }
+        Copy-HcKernelsNative
+    } finally {
+        Pop-Location
+    }
+}
+
+function Copy-HcKernelsNative {
+    $destination = Join-Path $script:RepoRoot 'backend/HomeworkCentral.Api/native'
+    $debugDirectory = Join-Path $script:RepoRoot 'rust/target/debug'
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    foreach ($name in @('libhc_kernels.so', 'hc_kernels.dll', 'libhc_kernels.dylib')) {
+        $source = Join-Path $debugDirectory $name
+        if (Test-Path $source) {
+            Copy-Item $source (Join-Path $destination $name) -Force
+            Write-Host "==> Copied $name into backend/HomeworkCentral.Api/native"
+        }
+    }
+}
+
+function Write-BackgroundJobStreams($Job) {
+    $jobErrors = @()
+    $output = Receive-Job $Job -ErrorAction SilentlyContinue -ErrorVariable jobErrors
+    foreach ($item in @($output)) {
+        if ($null -ne $item) {
+            Write-Host $item
+        }
+    }
+    foreach ($errorRecord in $jobErrors) {
+        Write-Host $errorRecord.ToString()
+        if ($null -ne $errorRecord.Exception -and $errorRecord.Exception.Message) {
+            Write-Host $errorRecord.Exception.Message
+        }
+    }
+}
+
+function Wait-RustWorkspaceJob($Job) {
+    Wait-Job $Job | Out-Null
+    $failed = $Job.State -eq 'Failed'
+    Write-BackgroundJobStreams -Job $Job
+    Remove-Job $Job -Force
+    if ($failed) {
+        throw 'Rust cargo build --workspace failed'
     }
 }
 

@@ -23,6 +23,7 @@ Install the following before running the project locally.
 | **Node.js** | 18+ | Includes **npm**, used for frontend dependencies. [Download Node.js](https://nodejs.org/). |
 | **PowerShell** | 7+ (`pwsh`) | **Windows only** — required by the `.ps1` scripts. [Install PowerShell](https://learn.microsoft.com/powershell/scripting/install/installing-powershell). |
 | **Bash** | Any recent shell | **Linux / macOS** — used by the `.sh` scripts. |
+| **Rust** | stable | Required by the core compile scripts (`scripts/run-dev.*`, `scripts/start-api-dev.*`, `scripts/build-rust.*`). They run `cargo build --workspace` in `rust/` (`hc-feature-encode`, `hc-vector-cosine`, `hc-gemv`, `hc-kernels`). Install with [rustup](https://rustup.rs/). Set `HC_SKIP_RUST_BUILD=1` to skip. |
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/docker/docker-original.svg" width="40" height="40" alt="Docker" />
@@ -33,6 +34,65 @@ Install the following before running the project locally.
 </p>
 
 > **First-time setup:** Clone the repository, ensure Docker is running, then use one of the run commands below. The scripts create a `.env` file automatically with generated secrets.
+
+---
+
+## Install Rust
+
+The numeric kernels live in [`rust/`](rust/) (`hc-feature-encode`, `hc-vector-cosine`, `hc-gemv`, `hc-kernels`, `hc-cache`). After `cargo build --workspace`, the API loads `libhc_kernels` for lexical bins, store cosine, GEMV, expertise hash, HashEmbed, JSON batch cosine, support-set cosine, and the FIFO-free LRU. The rest of the C# API and the TypeScript app stay as they are. Managed C# implementations run when the native library is absent (Docker publish, C# CI). Install rustup from [rustup.rs](https://rustup.rs/) or [rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
+
+**Where rustup installs**
+
+| Platform | Installer | Default directories |
+|----------|-----------|---------------------|
+| Linux / macOS / WSL | `https://sh.rustup.rs` | `~/.cargo` + `~/.rustup`; `cargo` on `PATH` via `~/.cargo/bin` (`source ~/.cargo/env`) |
+| Windows | [rustup-init.exe (x64)](https://win.rustup.rs/x86_64) or [Arm](https://win.rustup.rs/aarch64) | `%USERPROFILE%\.cargo` (`bin` on `PATH`) and `%USERPROFILE%\.rustup` |
+
+### Linux / macOS / WSL
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Restart the shell, or `source "$HOME/.cargo/env"`. Then pin stable and confirm:
+
+```bash
+rustup default stable
+rustc -V
+cargo -V
+```
+
+### Windows
+
+1. Download [rustup-init.exe](https://win.rustup.rs/x86_64) (or the [Arm build](https://win.rustup.rs/aarch64)).
+2. Run the installer (default host is `*-pc-windows-msvc`; Visual C++ Build Tools if prompted).
+3. Open a new PowerShell 7+ window and run:
+
+```powershell
+rustup default stable
+rustc -V
+cargo -V
+```
+
+### Compile the workspace
+
+From the repository root, the same command the compile scripts run:
+
+```bash
+./scripts/build-rust.sh
+```
+
+```powershell
+.\scripts\build-rust.ps1
+```
+
+Equivalent manual invoke:
+
+```bash
+cd rust && cargo build --workspace
+```
+
+`scripts/run-dev.sh`, `scripts/run-dev.ps1`, `scripts/start-api-dev.sh`, and `scripts/start-api-dev.ps1` call that `cargo build --workspace` during the normal compile path. Skip with `HC_SKIP_RUST_BUILD=1`.
 
 ---
 
@@ -81,7 +141,7 @@ After a successful run, these services are available:
 | **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
 | **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
 | **Health check** | http://localhost:5000/healthz | Listen probe (`starting` while migrate/seed runs, then `healthy`) |
-| **Postgres** | `localhost:5434` (default) | Docker container; port configurable via `.env` |
+| **Postgres** | `127.0.0.1:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |
 
 On **Windows**, the API and frontend each open in a **separate terminal window**. On **Linux/macOS**, both run in the current terminal (use `Ctrl+C` to stop).
@@ -159,6 +219,26 @@ frontend on the host, so Docker limits do not cap those two host processes.
 Override individual ceilings with `POSTGRES_MEMORY_LIMIT`, `CLAMAV_MEMORY_LIMIT`,
 `LLM_MEMORY_LIMIT`, and related keys in `.env` when `docker stats` shows a need.
 
+**Connections are bounded client-side, not by `max_connections`.** Each tenant is a distinct
+`Database=` value, so Npgsql keys one pool *per tenant* — capping a pool's width does not cap
+how many pools exist. `TenantConnectionResolver` therefore also expires idle tenant connections
+after 60s, and one-shot provisioning (create/migrate/seed) runs unpooled so walking all 70 dev
+personas does not retain a server slot per persona. Tune with `Tenancy:MaxPoolSizePerTenant`
+and `Tenancy:ConnectionIdleLifetimeSeconds`.
+
+**Disk is bounded too, not just memory.** Container logs use Docker's `json-file` driver, which
+is unbounded by default — every line any service writes stays on disk until the container is
+removed. Each service is capped at 10 MiB x 3 files, bounding the whole stack at roughly 240 MiB
+of logs. Postgres runs with `wal_compression=on` and `max_wal_size=512MB`, which cuts the bytes
+written to the SSD per checkpoint cycle and bounds `pg_wal`. Canonical neural checkpoints are
+trimmed to the newest `NeuralNetCheckpointStore.RetainedGenerations` (10) per lineage: only the
+newest is ever read, and each row holds a full base64-packed parameter snapshot, so an unbounded
+lineage turned every training publish into permanent disk.
+
+**FCaptcha rebuilds only when its image is missing.** It is pinned to upstream v1.12.0, so the
+dev scripts no longer wake BuildKit for a no-op rebuild on every start; set
+`HC_FCAPTCHA_REBUILD=1` to force one.
+
 **One container per service type.** Compose already defines a single `fcaptcha`,
 `postgres`, `redis`, `backend`, `frontend`, and (with profiles) `llm` / `minio` /
 `clamav`. Reuse that Ollama container for both ticket review and neural synthetic
@@ -171,6 +251,39 @@ Compose; frontend nginx is the only reverse proxy. Packaged nginx caches hashed
 stays `no-cache`. The API compresses large JSON responses (Brotli/gzip) and
 accepts compressed request bodies; neural-net session/feedback lists are cursor-
 paginated (`beforeUtc` + `limit`).
+
+### Running services outside Docker
+
+Docker is a convenience for these services, not a requirement. Anything moved to the host stops
+counting against the Docker VM's memory entirely.
+
+**Ollama is the one worth moving.** It is the largest service in the stack at 1,536 MiB, and a
+host install also gets real GPU acceleration — Metal on macOS, CUDA elsewhere — which Docker
+Desktop cannot pass through on macOS at all, so the container is both the biggest and the slowest
+option. Install Ollama natively, `ollama pull qwen3:0.6b && ollama pull nomic-embed-text`, and
+then just never start the `ai` profile:
+
+- `scripts/run-dev.*` needs no configuration at all: `Llm:BaseUrl` and `Tickets:OllamaBaseUrl`
+  already default to `http://localhost:11434` in `appsettings.json`.
+- For the Compose API container, set `LLM_BASE_URL=http://host.docker.internal:11434` in `.env`.
+
+The API degrades gracefully when no Ollama is reachable — embeddings fall back to a local hash
+embedding and ticket review falls back to the reviewer — so this is safe to try.
+
+**Postgres** can already be skipped with `./scripts/run-dev.sh --skip-docker` (`-SkipDocker` on
+Windows) when you have a local server on `localhost`.
+
+**Redis is optional.** With no `ConnectionStrings:Redis` the API registers an in-process
+distributed cache instead, which is all a single instance needs — Redis matters when several API
+instances have to share cache state. `scripts/run-dev.*` never starts it. To drop it from the
+Compose stack too, set `REDIS_CONNECTION=` (empty) in `.env`.
+
+**Keep FCaptcha and MinIO in Docker.** FCaptcha has no released binary and is built from an
+upstream tag, so a container is the simpler distribution; MinIO is profile-gated and off by
+default, since uploads default to the local `uploads` volume. For ClamAV see the notes below —
+a native `clamd` moves its signature memory out of the WSL cap but does not shrink it.
+
+---
 
 ### WSL caps (Windows Docker Desktop)
 
@@ -216,6 +329,8 @@ Architecture, trust boundaries, and engineering standards live under
 can bind without a duplicate build. It also starts the frontend before the API. The API exposes
 `/healthz` as soon as Kestrel listens (`status: starting` during migrate/seed, then `healthy`),
 so the Vite BackendGate can wait without flooding the proxy with connection-refused errors.
+`http://localhost:5000/` is an intentional 403 landing page, not the app — use
+`http://localhost:5173/login` and keep that tab open until `/healthz` reports `healthy`.
 
 After one successful initialization of the local database, you can skip development migrations
 and seed warmup on repeat starts:
@@ -253,7 +368,7 @@ Homework-Central/
 ├── docs/                          # Architecture and engineering standards
 ├── deploy/                        # Kubernetes and Windows Docker helpers
 ├── scripts/                       # Dev orchestration (.ps1 / .sh)
-├── docker-compose.yml             # Postgres, FCaptcha, and production-style services
+├── docker-compose.yml             # Core services; ClamAV / Ollama / MinIO behind profiles
 ├── HomeworkCentral.sln            # .NET solution
 └── global.json                    # Pinned .NET SDK version
 ```
@@ -263,10 +378,12 @@ Homework-Central/
 ## Troubleshooting
 
 - **Docker not running** — Start Docker Desktop (or the Docker daemon) and retry.
-- **Port already in use** — Another Postgres install may own `5434` on localhost. The run scripts try to pick a free port and update `.env`; you can also set `POSTGRES_HOST_PORT` manually.
+- **Port already in use** — Another Postgres install may own `5434`. The run scripts detect any listener (not only `127.0.0.1`), skip this project's own Docker publish, pick the next free port in `5434–5450`, and write `.env`. They connect as `127.0.0.1` so Windows does not time out on IPv6 `localhost`. You can also set `POSTGRES_HOST_PORT` yourself to a free port — not the one that just failed.
 - **Stale database volume** — Run the reset command above (`reset-dev-db` with `-Yes` / `--yes`), then `run-dev` again.
 - **`Network homework-central_default Resource is still in use`** — Harmless during reset. The `pgdata` volume was still removed; `run-dev` reuses the leftover Docker network. Optional: `docker network inspect homework-central_default` to see what is attached.
 - **Skip Docker** — If you already have Postgres on localhost: `.\scripts\run-dev.ps1 -SkipDocker` (Windows) or `./scripts/run-dev.sh --skip-docker` (Unix).
+- **Rust cargo build --workspace failed** — `run-dev` compiles `rust/` (`libhc_kernels`). Run `cd rust; cargo build --workspace` to see the compiler/linker message. Typical Windows miss: `rustup default stable` plus Visual Studio Build Tools with **Desktop development with C++** (`link.exe`). `cargo` on PATH is not enough if `rustc` or the MSVC linker is missing. Skip with `HC_SKIP_RUST_BUILD=1` (API uses the C# fallback).
+- **403 on http://localhost:5000/** — Expected. That tab is the API, not the React app. Use `http://localhost:5173/login`. Confirm `http://localhost:5000/healthz` returns JSON (`starting` while migrate/seed runs, then `healthy`). First-run EF logs about missing `__EF*MigrationsHistory` or `NeuralNetCanonicalCheckpoints` are normal until the log says the API is ready; reload the frontend after that line if the gate still says it cannot connect.
 
 ---
 

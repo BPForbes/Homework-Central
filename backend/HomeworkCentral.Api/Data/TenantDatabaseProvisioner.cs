@@ -99,6 +99,7 @@ public static class TenantDatabaseProvisioner
         // Ticket portals are NOT seeded here: CustomChannelStore and TicketService only
         // read the master database. DeveloperAccount portals are seeded on master in Program.cs.
         await HomeworkCentral.Api.Assessment.ScoringReferenceSeedData.SeedAsync(tenantDb);
+        await HomeworkCentral.Api.Assessment.AITrackingCatalogSeedData.SeedAsync(tenantDb);
         return await TenantBypassSeedData.SeedPersonaAsync(tenantDb, persona, ct);
     }
 }

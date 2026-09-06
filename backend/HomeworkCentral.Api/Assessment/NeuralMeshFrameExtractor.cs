@@ -1,11 +1,9 @@
-using System.Collections.Concurrent;
-
 namespace HomeworkCentral.Api.Assessment;
 
 /// <summary>
 /// Builds live mesh highlight indexes from forward/backprop traces.
-/// Uses parallel partitions so large activation/gradient bags do not stall the training loop
-/// on the visualization publish path.
+/// Streams <see cref="SparseValue"/>s into a bounded min-heap so a dense
+/// parameter bag never materializes <c>float[n]</c> + <c>int[n]</c>.
 /// </summary>
 public static class NeuralMeshFrameExtractor
 {
@@ -77,63 +75,144 @@ public static class NeuralMeshFrameExtractor
         if (forward is null || forward.NodeActivations.Count == 0)
             return [];
 
-        ConcurrentBag<(int Index, float AbsValue)> candidates = new();
-        Parallel.ForEach(
+        return SelectTopKFromSparse(
             forward.NodeActivations,
-            activation =>
-            {
-                float absolute = MathF.Abs(activation.Value);
-                if (absolute <= ActivationEpsilon)
-                    return;
-                candidates.Add((activation.Index, absolute));
-            });
-
-        return candidates
-            .OrderByDescending(item => item.AbsValue)
-            .Select(item => item.Index)
-            .Distinct()
-            .Take(MaxActiveNodes)
-            .ToList();
+            static value => MathF.Abs(value) > ActivationEpsilon,
+            MaxActiveNodes,
+            distinct: true);
     }
 
     private static List<int> ExtractActiveEdges(ForwardPropagationTrace? forward, BackpropagationTrace? backward)
     {
         if (backward is not null && backward.WeightGradients.Count > 0)
         {
-            return TopParameterIndexes(
+            return SelectTopKFromSparse(
                 backward.WeightGradients,
-                value => MathF.Abs(value) > ActivationEpsilon,
-                MaxActiveEdges);
+                static value => MathF.Abs(value) > ActivationEpsilon,
+                MaxActiveEdges,
+                distinct: false);
         }
 
         if (forward is null || forward.EdgeContributions.Count == 0)
             return [];
 
-        return TopParameterIndexes(
+        return SelectTopKFromSparse(
             forward.EdgeContributions,
-            value => MathF.Abs(value) > ActivationEpsilon,
-            MaxActiveEdges);
+            static value => MathF.Abs(value) > ActivationEpsilon,
+            MaxActiveEdges,
+            distinct: false);
     }
 
-    private static List<int> TopParameterIndexes(
+    /// <summary>
+    /// Streams sparse values into an O(k) min-heap. When <paramref name="distinct"/> is true,
+    /// unique indexes are ranked by max |value| and then capped (old sort → distinct → take).
+    /// </summary>
+    internal static List<int> SelectTopKFromSparse(
+        IReadOnlyList<SparseValue> values,
+        Func<float, bool> include,
+        int take,
+        bool distinct)
+    {
+        if (take <= 0 || values.Count == 0)
+            return [];
+
+        if (distinct)
+            return SelectUniqueThenCap(values, include, take);
+
+        return SelectTopKStreaming(values, include, take);
+    }
+
+    private static List<int> SelectUniqueThenCap(
         IReadOnlyList<SparseValue> values,
         Func<float, bool> include,
         int take)
     {
-        ConcurrentBag<(int Index, float AbsValue)> candidates = new();
-        Parallel.ForEach(
-            values,
-            item =>
-            {
-                if (!include(item.Value))
-                    return;
-                candidates.Add((item.Index, MathF.Abs(item.Value)));
-            });
+        Dictionary<int, float> bestAbs = [];
+        for (int index = 0; index < values.Count; index++)
+        {
+            SparseValue item = values[index];
+            if (!include(item.Value))
+                continue;
 
-        return candidates
-            .OrderByDescending(item => item.AbsValue)
-            .Select(item => item.Index)
-            .Take(take)
-            .ToList();
+            float absolute = MathF.Abs(item.Value);
+            if (!float.IsFinite(absolute) || absolute <= ActivationEpsilon)
+                continue;
+
+            if (!bestAbs.TryGetValue(item.Index, out float existing) || absolute > existing)
+                bestAbs[item.Index] = absolute;
+        }
+
+        if (bestAbs.Count == 0)
+            return [];
+
+        PriorityQueue<int, float> worstKept = new();
+        foreach ((int parameterIndex, float absolute) in bestAbs)
+        {
+            if (worstKept.Count < take)
+            {
+                worstKept.Enqueue(parameterIndex, absolute);
+            }
+            else if (worstKept.TryPeek(out _, out float worst) && absolute > worst)
+            {
+                worstKept.Dequeue();
+                worstKept.Enqueue(parameterIndex, absolute);
+            }
+        }
+
+        return RankDescending(worstKept);
+    }
+
+    private static List<int> SelectTopKStreaming(
+        IReadOnlyList<SparseValue> values,
+        Func<float, bool> include,
+        int take)
+    {
+        PriorityQueue<int, float> worstKept = new();
+        for (int index = 0; index < values.Count; index++)
+        {
+            SparseValue item = values[index];
+            if (!include(item.Value))
+                continue;
+
+            float absolute = MathF.Abs(item.Value);
+            if (!float.IsFinite(absolute) || absolute <= ActivationEpsilon)
+                continue;
+
+            if (worstKept.Count < take)
+            {
+                worstKept.Enqueue(item.Index, absolute);
+            }
+            else if (worstKept.TryPeek(out _, out float worst) && absolute > worst)
+            {
+                worstKept.Dequeue();
+                worstKept.Enqueue(item.Index, absolute);
+            }
+        }
+
+        return RankDescending(worstKept);
+    }
+
+    /// <summary>Managed min-heap of size <paramref name="take"/>; same skip rule as <c>hc_heap_top_k_abs</c>.</summary>
+    internal static List<int> SelectTopKManaged(
+        float[] values,
+        int[] indexes,
+        int take,
+        bool distinct)
+    {
+        List<SparseValue> packed = new(values.Length);
+        for (int index = 0; index < values.Length; index++)
+            packed.Add(new SparseValue(indexes[index], values[index]));
+
+        return SelectTopKFromSparse(packed, static _ => true, take, distinct);
+    }
+
+    private static List<int> RankDescending(PriorityQueue<int, float> worstKept)
+    {
+        List<(int Index, float Abs)> ranked = [];
+        while (worstKept.TryDequeue(out int selected, out float absolute))
+            ranked.Add((selected, absolute));
+
+        ranked.Sort(static (left, right) => right.Abs.CompareTo(left.Abs));
+        return ranked.Select(static item => item.Index).ToList();
     }
 }
