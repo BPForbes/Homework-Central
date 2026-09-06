@@ -112,24 +112,38 @@ report() {
     failed=1
 }
 
-# Reserved scratch names, at any depth. `\.scratch(\.|$)` so an extensionless
-# `Probe.scratch` is covered as well as `Probe.scratch.cs`.
+# Reserved scratch names, at any depth. The three terminators after `.scratch`
+# each cover a form `.gitignore` ignores, and the rule is that this script must
+# match everything `.gitignore` ignores — otherwise `git add -f` publishes a
+# file that nothing else will ever flag:
 #
-# `(\.|$)` deliberately does not match a `.scratch` followed by anything else,
-# which keeps `x.scratchpad` and `docs/scratchpad.md` out of it. One consequence
-# is worth writing down, because it looks like a bypass and is not: a path such
-# as `a.scratch<newline>b` is no longer matched, where the previous
-# line-oriented `grep -Ei` matched it because the newline ended the line and so
-# satisfied `$`. That path is not a reserved name — `.gitignore`'s `**/*.scratch`
-# and `*.scratch.*` do not cover it either — so the gate and the ignore rules now
-# agree, where before the gate rejected something git would happily track. A
-# probe deliberately named to fall outside the convention escapes both
-# mechanisms, which is the standing property of this script: it is a backstop
-# against a force-added *reserved* name, not a detector of arbitrary files.
-scratch_re='(^|/)_scratch/|\.scratch(\.|$)'
+#   `\.`  `Probe.scratch.cs`        via `*.scratch.*`
+#   `$`   `Probe.scratch`           via `**/*.scratch`
+#   `/`   `notes.scratch/review.md` via `**/*.scratch` matching the *directory*
+#
+# That last one was a live bypass. `**/*.scratch` ignores a directory named
+# `notes.scratch`, and ignoring a directory ignores everything beneath it, so
+# `git add -f notes.scratch/review.md` tracked a reviewer write-up that the tip
+# scan then passed. An earlier revision of this comment asserted that
+# `.gitignore` does not cover a `.scratch` followed by anything else; that is
+# true of `x.scratchpad` and false of the directory form, which is exactly the
+# case it needed to be right about.
+#
+# Still deliberately excluded, and consistent with `.gitignore`: `x.scratchpad`,
+# `docs/scratchpad.md`, and `a.scratch<newline>b` — none of which git ignores.
+# A probe named to fall outside the convention escapes both mechanisms, which is
+# the standing property here: this is a backstop against a force-added
+# *reserved* name, not a detector of arbitrary files.
+scratch_re='(^|/)_scratch/|\.scratch(\.|/|$)'
 # Local analysis output. Anchored to any path segment rather than the repository
 # root, matching how .gitignore already treats these directories.
-analysis_re='(^|/)\.codeql-db|\.sarif$|(^|/)\.code-review-graph/|(^|/)\.codegraph/'
+#
+# `\.codeql-db[^/]*/` is directory-shaped on purpose. A bare `(^|/)\.codeql-db`
+# prefix also matched `docs/.codeql-db-notes.md`, which git does not ignore and
+# which is a plausible piece of documentation — a backstop that rejects a legal
+# path is a backstop people learn to route around. The `[^/]*` keeps the
+# per-language databases (`.codeql-db-csharp/`, `.codeql-db-rust/`) covered.
+analysis_re='(^|/)\.codeql-db[^/]*/|\.sarif$|(^|/)\.code-review-graph/|(^|/)\.codegraph/'
 # Thought files. Only the keepfile may be tracked.
 thoughts_re='^\.cursor/thoughts/'
 keepfile='^\.cursor/thoughts/non-finalized/\.gitkeep$'

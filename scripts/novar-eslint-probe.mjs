@@ -140,6 +140,60 @@ for (const [filePath, source] of firingChecks) {
     }
 }
 
+// Finally, lint the real files here, with inline configuration disabled, and
+// report any `var` directly.
+//
+// This is the part that does not depend on package.json. The gate used to prove
+// the rule was *configured*, and then delegate finding actual violations to
+// `npm run lint:ci`, checking that the script rejected a planted probe. But the
+// script is a string in a tracked file, and the probe's name was predictable
+// enough to branch on: a `lint:ci` rewritten to
+//
+//   if ls src/novar_inline_*.scratch.ts; then ls …; exit 1; else eslint .; fi
+//
+// printed the probe's name and exited 1 whenever the probe existed — satisfying
+// both halves of the attribution check — and ran plain `eslint .` otherwise, so
+// a `var` in frontend/src/main.tsx hidden behind a blanket disable written in
+// its description form survived every gate end to end. No assertion about a
+// script's *output* can fix that when the adversary writes the script. Linting
+// the files ourselves can.
+//
+// `allowInlineConfig: false` is the API form of the no-inline-config flag, so a
+// blanket disable, a bare next-line disable, and the description form are all
+// ignored here regardless of what any npm script does.
+//
+// Written without any literal directive syntax on purpose: the text scan in
+// check-no-var.sh matches that syntax, and prose quoting it is a false positive.
+const strict = new ESLint({
+    cwd: process.cwd(),
+    overrideConfigFile,
+    allowInlineConfig: false,
+})
+
+// HTML is included: an inline `<script>` in index.html is where the original
+// `var`s in this repository actually lived, so excluding it would leave the most
+// relevant file unlinted.
+const lintable = files
+if (lintable.length > 0) {
+    let results = []
+    try {
+        results = await strict.lintFiles(lintable)
+    } catch (error) {
+        problems.push(`could not lint the tracked files with inline config disabled: ${error.message}`)
+    }
+    for (const result of results) {
+        for (const message of result.messages) {
+            if (message.ruleId !== 'no-var' && message.ruleId !== 'prefer-const') {
+                continue
+            }
+            problems.push(
+                `${result.filePath}:${message.line}: ${message.ruleId} — ${message.message} ` +
+                    '(found by this gate directly, with inline directives ignored)',
+            )
+        }
+    }
+}
+
 console.log(`checked ${checked}`)
 for (const problem of problems) {
     console.log(`problem ${problem}`)

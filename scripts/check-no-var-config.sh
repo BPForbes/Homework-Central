@@ -181,21 +181,32 @@ if [ "$want_csharp" -eq 1 ]; then
             out="$(dotnet build -c Release --nologo -- "$proj" 2>&1)"
             status=$?
 
-            # Each probe must be named on a line reporting error IDE0008. Not
-            # "IDE0008 appears somewhere", which a forged <Error Text> satisfied.
+            # Each probe must be named on a line reporting error IDE0008 in
+            # MSBuild's diagnostic format — `path(line,col): error IDE0008:` —
+            # not "IDE0008 appears somewhere", which a forged <Error Text>
+            # satisfied.
             missing=()
             for probe in "${planted[@]}"; do
-                if ! printf '%s' "$out" | grep -F "$probe" | grep -q 'error IDE0008'; then
+                if ! printf '%s' "$out" | grep -F "$probe" | grep -Eq '\([0-9]+,[0-9]+\): error IDE0008'; then
                     missing+=("$probe")
                 fi
                 rm -f "$probe"
             done
 
-            if [ "${#missing[@]}" -eq 0 ]; then
-                note "$proj rejected all ${#planted[@]} (IDE0008 attributed to each)"
-            elif [ "$status" -eq 0 ]; then
-                fail "$proj: a real \`var value = 1;\` compiled successfully in ${#missing[@]} of ${#planted[@]} source directories. The IDE0008 analyzer is not in force there:
-$(printf '  %s\n' "${missing[@]}" | head -8)"
+            # A build that *succeeded* is a failure however complete the
+            # attribution looks, and this ordering is the point. Checking
+            # attribution first and treating a full set as a pass let a root
+            # Directory.Build.targets print the expected line for every probe
+            # with a <Message Importance="High"> over @(Compile) items ending in
+            # .scratch.cs, while `dotnet_analyzer_diagnostic` silenced the real
+            # analyzer: 42 of 42 attributed, exit 0, and a genuine `var` compiled
+            # in ApplicationReadiness.cs. A Message cannot fail a build, so
+            # requiring a non-zero status is what separates a diagnostic from a
+            # line of text that looks like one.
+            if [ "$status" -eq 0 ]; then
+                fail "$proj: the build SUCCEEDED with a real \`var value = 1;\` in ${#planted[@]} source directories, so IDE0008 is not in force — regardless of what the output says. Check dotnet_analyzer_diagnostic.category-Style.severity, NoWarn (including target-time appends), EnforceCodeStyleInBuild, and any target that prints diagnostic-shaped text."
+            elif [ "${#missing[@]}" -eq 0 ]; then
+                note "$proj rejected all ${#planted[@]} (IDE0008 attributed to each, build failed)"
             else
                 fail "$proj: the build failed, but IDE0008 was not attributed to ${#missing[@]} of ${#planted[@]} probes, so the probe proves nothing for those directories:
 $(printf '  %s\n' "${missing[@]}" | head -8)
@@ -267,38 +278,113 @@ if [ "$want_web" -eq 1 ]; then
         done
         web_files="${web_files%$'\n'}"
 
-        # An extension the enumeration does not glob is invisible to every gate
-        # here. A tracked frontend/src/RbWidget.vue holding `var x = 1` passed
-        # all four of them, and the summary still read "all 130 tracked web
-        # files" — the fail-closed rule written for files *outside* frontend/
-        # had never been applied to unfamiliar file *types* inside it. The
-        # backstop in check-no-var.sh already carries `--include='*.vue'`, so
-        # the two scripts disagreed about what counts as a web file.
+        # Every tracked file must be classified, and anything unrecognised fails.
         #
-        # These types compile to, or embed, JavaScript. Adding one to the repo
-        # should be a decision, not an accident, so the gate fails until either
-        # the toolchain covers it or it is deliberately listed as harmless.
-        mapfile -d '' -t unclaimed_web < <(
-            git -c core.quotePath=false ls-files -z \
-                '*.vue' '*.svelte' '*.astro' '*.mdx' '*.ejs' '*.hbs' \
-                '*.handlebars' '*.pug' '*.cshtml' '*.razor' '*.php' '*.vbhtml'
+        # This started as a denylist of script-bearing extensions, which is a
+        # shape that cannot be finished: it was case-sensitive and partial, so
+        # `RbWidget.VUE` walked past it, and so did `.es6`, `.jsm` and any other
+        # extension nobody had thought of. Before that it was not there at all,
+        # and a lower-case `.vue` holding `var x = 1` passed all four gates while
+        # the summary read "all 130 tracked web files".
+        #
+        # An allowlist inverts the burden. A new file type in this repository is
+        # now a decision someone has to record here, and until they do the gate
+        # is red. Two lists, both matched on the lower-cased extension:
+        #
+        #   web_ext      eslint parses it, and the enumeration above globs it
+        #   inert_ext    it cannot carry a JavaScript variable declaration, or
+        #                another gate owns it (`.cs` belongs to Roslyn)
+        declare -A web_ext=(
+            [ts]=1 [tsx]=1 [mts]=1 [cts]=1 [js]=1 [cjs]=1 [mjs]=1 [jsx]=1
+            [html]=1 [htm]=1 [xhtml]=1
         )
-        if [ "${#unclaimed_web[@]}" -gt 0 ] && [ -n "${unclaimed_web[0]:-}" ]; then
-            fail "these tracked files carry or compile to JavaScript, and no no-var gate covers their file type:
-$(printf '  %s\n' "${unclaimed_web[@]}")
-Either teach eslint to parse them (a plugin plus a glob in the config, and add
-the extension to the enumeration in this script), or, if they cannot contain a
-variable declaration, add them to the harmless list here with a reason."
+        declare -A inert_ext=(
+            # C# and MSBuild — the Roslyn half of this gate owns these.
+            [cs]=1 [csproj]=1 [sln]=1 [slnlaunch]=1 [props]=1 [targets]=1
+            # Prose.
+            [md]=1 [mdc]=1 [txt]=1
+            # Configuration and data.
+            [json]=1 [yaml]=1 [yml]=1 [toml]=1 [conf]=1 [lock]=1 [example]=1
+            [editorconfig]=1 [gitignore]=1 [gitkeep]=1 [gitattributes]=1
+            [dockerignore]=1 [dockerfile]=1 [env]=1
+            # Other languages, each with its own toolchain.
+            [sh]=1 [ps1]=1 [rs]=1 [py]=1
+            # Styles.
+            [css]=1 [scss]=1
+            # Markup that eslint cannot parse; `svg` is checked for <script>
+            # separately below rather than trusted.
+            [svg]=1 [ico]=1 [png]=1 [jpg]=1 [jpeg]=1 [webp]=1 [woff]=1 [woff2]=1
+        )
+        # Files with no extension at all, matched on the whole lower-cased name.
+        declare -A inert_name=([dockerfile]=1 [makefile]=1 [license]=1 [readme]=1)
+
+        mapfile -d '' -t all_tracked < <(git -c core.quotePath=false ls-files -z)
+        unclassified=()
+        svg_files=()
+        for path in "${all_tracked[@]:-}"; do
+            [ -n "$path" ] || continue
+            base="${path##*/}"
+            lower_base="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+            if [ "$lower_base" = "${lower_base%.*}" ]; then
+                # No dot: classify on the name.
+                [ -n "${inert_name[$lower_base]:-}" ] || unclassified+=("$path")
+                continue
+            fi
+            ext="${lower_base##*.}"
+            [ "$ext" = svg ] && svg_files+=("$path")
+            if [ -z "${web_ext[$ext]:-}" ] && [ -z "${inert_ext[$ext]:-}" ]; then
+                unclassified+=("$path")
+            fi
+        done
+
+        # Classifying a file as eslint-covered is a claim, so check it against
+        # what the enumeration actually collected. The globs above are
+        # case-sensitive (`'*.ts'`), while this classification lower-cases the
+        # extension, so `App.TSX` would be called covered and then never
+        # enumerated, config-checked or linted — the claim and the coverage
+        # drifting apart in the one direction that reads as success.
+        declare -A enumerated=()
+        for path in "${all_web[@]:-}"; do
+            [ -n "$path" ] && enumerated["$path"]=1
+        done
+        claimed_not_enumerated=()
+        for path in "${all_tracked[@]:-}"; do
+            [ -n "$path" ] || continue
+            base="${path##*/}"
+            lower_base="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+            [ "$lower_base" = "${lower_base%.*}" ] && continue
+            ext="${lower_base##*.}"
+            [ -n "${web_ext[$ext]:-}" ] || continue
+            [ -n "${enumerated[$path]:-}" ] || claimed_not_enumerated+=("$path")
+        done
+        if [ "${#claimed_not_enumerated[@]}" -gt 0 ]; then
+            fail "these tracked files have an eslint-covered extension but were not
+picked up by the enumeration globs, so nothing checked them:
+$(printf '  %s\n' "${claimed_not_enumerated[@]}" | head -20)
+The globs are case-sensitive; the classification is not. Either rename the file
+to the conventional lower-case extension, or add the casing to the globs."
         fi
 
-        # SVG is the one script-bearing type deliberately left uncovered: eslint
-        # cannot parse it, and the tracked file is a static icon. Left uncovered,
-        # not unchecked — an SVG may hold a <script> element.
-        mapfile -d '' -t svg_files < <(git -c core.quotePath=false ls-files -z '*.svg')
+        if [ "${#unclassified[@]}" -gt 0 ]; then
+            fail "these tracked files have a type no no-var gate has been told about:
+$(printf '  %s\n' "${unclassified[@]}" | head -20)
+Classify each one in this script. If eslint can parse it, add the extension to
+web_ext *and* to the enumeration globs above, and teach the eslint config to
+lint it. If it cannot hold a JavaScript variable declaration, add it to
+inert_ext with a comment saying why. Leaving it unlisted is the one option the
+gate will not accept, because an unglobbed extension is invisible to every
+check here."
+        fi
+
+        # SVG is inert by declaration, not by inspection: eslint cannot parse it,
+        # so an <svg> holding a <script> element would be covered by nothing. The
+        # match is case-insensitive because `<SCRIPT>` is equally valid HTML, and
+        # the enumeration above is case-insensitive for the same reason — a
+        # tracked `icon.SVG` was skipped entirely while `icon.svg` was checked.
         svg_with_script=()
         for path in "${svg_files[@]:-}"; do
             [ -n "$path" ] || continue
-            grep -lq '<script' -- "$path" 2>/dev/null && svg_with_script+=("$path")
+            grep -liq '<script' -- "$path" 2>/dev/null && svg_with_script+=("$path")
         done
         if [ "${#svg_with_script[@]}" -gt 0 ]; then
             fail "these tracked SVG files contain a <script> element, which no no-var gate can parse:
@@ -379,7 +465,11 @@ $eslint_report"
                     fail "eslint effective config over $checked tracked web files:
 $problems"
                 else
-                    note "eslint: no-var and prefer-const are error for all $checked tracked web files"
+                    # "under frontend/", because the outside-frontend files are
+                    # counted by their own note above. Saying "all 130 tracked
+                    # web files" when 132 are tracked invited the reader to
+                    # assume the two lists were one.
+                    note "eslint: no-var and prefer-const are error for all $checked tracked web files under frontend/, and no var survives with inline directives ignored"
                 fi
             fi
 

@@ -159,7 +159,10 @@ fi
 # 3b. eslint disable directives. Two shapes, and the first one is why this scan
 #     was rewritten: a *blanket* `/* eslint-disable */` or a bare
 #     `// eslint-disable-next-line` names no rule, so a pattern looking for
-#     "no-var" near "eslint-disable" missed it entirely while eslint honoured it
+#     "no-var" near "eslint-disable" missed it entirely while eslint honoured it.
+#     `[[:space:]]*--` covers the description form, `/* eslint-disable -- later */`,
+#     which is still blanket but does not end the comment after the directive and
+#     so slipped past the end-of-line branch
 #     and stopped reporting the var. Verified both ways.
 #
 #     The structural fix is `eslint . --no-inline-config` in CI, which ignores
@@ -171,7 +174,7 @@ eslint_disable_hits="$(
     grep -rn --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.cts' \
         --include='*.js' --include='*.cjs' --include='*.mjs' --include='*.jsx' \
         --include='*.html' --include='*.htm' --include='*.xhtml' --include='*.vue' \
-        -E '(//|/\*)[[:space:]]*eslint-disable(-next-line|-line)?([[:space:]]*(\*/)?[[:space:]]*$|[[:space:]][^*]*(no-var|prefer-const))' \
+        -E '(//|/\*)[[:space:]]*eslint-disable(-next-line|-line)?([[:space:]]*(\*/)?[[:space:]]*$|[[:space:]]*--|[[:space:]][^*]*(no-var|prefer-const))' \
         . 2>/dev/null \
         | grep -v -E '/(obj|bin|node_modules|dist)/'
 )"

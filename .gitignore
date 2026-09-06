@@ -57,6 +57,10 @@ claude-mem/
 .cursor/reviews/
 
 # Local CodeQL CLI databases and SARIF dumps
+# `.codeql-db*/` rather than one line per language: a new language pack creates
+# a directory this file has never heard of, and the point is that no CodeQL
+# database is ever tracked.
+.codeql-db*/
 .codeql-db-csharp/
 .codeql-db-javascript/
 .codeql-db-javascript-typescript/
@@ -64,6 +68,11 @@ claude-mem/
 # Any SARIF, not just codeql-*: a plain results.sarif is analysis output too,
 # and the guard rejects the broader set.
 *.sarif
+# git's globs are case-sensitive on Linux, so `*.sarif` alone leaves `.SARIF`
+# tracked on exactly the platform CI runs. check-clean-timeline.sh matches
+# case-insensitively; this keeps the ignore rules from being the weaker half.
+*.SARIF
+*.Sarif
 
 # Rust
 rust/target/

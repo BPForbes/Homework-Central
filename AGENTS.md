@@ -180,6 +180,29 @@ Hard rules:
     repo-wide and filtered, and the count is asserted out loud (130 today) so a
     silent drop is visible.
 
+    The web half also lints the tracked files itself, with
+    `allowInlineConfig: false`. That is the half that does not depend on
+    `package.json`. Proving the rule is *configured* and then delegating the
+    search for violations to `npm run lint:ci` was defeated by rewriting that
+    script to branch on the probe's name — it printed the probe and exited 1
+    whenever the probe existed, satisfying both halves of the attribution check,
+    and ran a plain `eslint .` otherwise, so a `var` in `frontend/src/main.tsx`
+    behind a blanket disable in its description form passed every gate end to
+    end. No assertion about a script's output survives an adversary who writes
+    the script, so the gate now finds the `var` itself and names the file and
+    line.
+
+    Every tracked file must also be **classified**, and anything unrecognised
+    fails. A denylist of script-bearing extensions cannot be finished: it was
+    case-sensitive and partial, so `RbWidget.VUE` walked past it and so did
+    `.es6` and `.jsm`. Two allowlists replace it — extensions eslint parses, and
+    extensions that cannot hold a JavaScript variable declaration — and a file
+    whose extension is in neither turns the gate red until someone records the
+    decision. A third check asserts the classification against what the
+    enumeration actually collected, because the globs are case-sensitive while
+    the classification is not, so `App.TSX` would otherwise be *called* covered
+    and never linted.
+
     Take the `--csharp` and `--web` flags seriously: each needs a different
     toolchain, and each CI job passes only the flag for the toolchain it has.
     Asserting the web half from the backend job — which has no `npm ci` step —
