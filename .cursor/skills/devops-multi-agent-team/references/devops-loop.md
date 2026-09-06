@@ -1,10 +1,13 @@
 # DevOps development loop — detailed checklists
 
 Use these checklists when executing the orchestrator loop. Persist `/goal`,
-review threads, and `/repro` notes under `.cursor/reviews/` (gitignored).
-Spawn roles with `/create-subagent` asynchronously **in pods** (research,
-review, security, qa), not a linear queue. Command catalog:
-[agent-commands.md](agent-commands.md).
+review threads, and `/repro` notes under
+`.cursor/thoughts/non-finalized/` (local; do not commit). After QA PASS,
+move closed thoughts to `.cursor/thoughts/finalized/` (still local).
+See [thoughts-layout.md](thoughts-layout.md) and
+[role-identity.md](role-identity.md). Spawn roles with `/create-subagent`
+asynchronously **in pods** (`is_background: true` / `run_in_background:
+true`). Command catalog: [agent-commands.md](agent-commands.md).
 
 ## 1. Planner
 
@@ -35,30 +38,51 @@ Before proposing new structure:
 ## 3. Coder
 
 - Implement only what the plan authorizes.
+- Stay on the current non-`main` branch. Do not cut a new branch
+  for each increment (`AGENTS.md` Git branches).
 - Keep secrets out of git; use the repo’s secret mechanism.
 - Make scripts non-interactive for agents (`--yes`, flags, env vars).
 - Prefer idempotent apply/deploy paths and dry-run where available.
 - Show file paths and diffs.
-- **Do not push** until Reviewers are Satisfied (communicate in `.cursor/reviews/<topic>.md`).
+- Run applicable CodeQL on every code change before handing to Reviewers.
+  Developer CodeQL does **not** authorize a push.
+- Keep changes local until **QA gives the OK to push** (communicate in
+  `.cursor/thoughts/non-finalized/review-<topic>.md` and an uncommitted
+  `push-<topic>.json` written **before the first review**). Update that
+  JSON when a later change should close feedback. Only QA may authorize
+  a git push.
+  Ask Researcher for a reuse map before duplicating code.
+  DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR
+  OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 ## 3b. Documentation & Research (online media)
 
-- Inventory `docs/` and authoritative Markdown first.
+- Inventory `docs/` and open thoughts under `.cursor/thoughts/non-finalized/` first.
+  Do not write research dumps into `docs/`.
 - Fetch online media as needed (`WebSearch`, `WebFetch`, browser): vendor docs, releases, issues, articles.
 - Write a research brief into the review thread (URLs + takeaways). Reviewers must use it.
 
 ## 3c. Reviewers (entrypoint before QA)
 
 - PR-style review of local diffs; request improvements like a human PR review.
-- Converse with Coder **in the review thread Markdown** only.
-- Cite research brief, `docs/`, and fetched URLs on each request-change.
+- Converse with Coder in the review thread **and** Push JSON
+  ([push-json.md](push-json.md)). Always compare the JSON to
+  `git diff <integration-base>...HEAD`. Questions and answers use
+  `## Q&A` plus `qa` (same ids). Rounds are not a queue.
+- Cite research brief, reuse map, `docs/`, and fetched URLs.
+  If the Coder duplicated existing code, request an import.
 - Iterate until all reviewers mark Satisfied → then Security → then QA.
+  Reviews may be long; do not rush Satisfied.
+- Satisfied does **not** authorize a push. **Only QA may give the OK to
+  push.**
 - Template: [review-thread-template.md](review-thread-template.md).
 
 ## 4. Security (after Satisfied)
 
 - Snyk / secret scan / `/review-security` on the change surface.
 - Record verdict in the review thread before QA proceeds.
+- Security Clear does **not** authorize a push. **Only QA may give the
+  OK to push.**
 
 ## 5. QA
 
@@ -79,12 +103,24 @@ Minimum validation set:
 - Record exact commands and exit codes
 - Report the Definition of Done summary (PASS / FAIL / NOT RUN / NOT APPLICABLE)
 
-DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL THE APPLICABLE CODEQL ANALYSIS IS SATISFIED.
+**Only QA may give the OK to push.** Coders must still have run applicable
+CodeQL on their own changes. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL
+REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 If CodeQL cannot be executed when required: do not claim CodeQL passed and do
 not automatically publish.
 
-Fail → feedback list for Coder → retest (re-open reviewers if code changes).
+Fail → Handoff `To: Coder` from a **VM** review (quality / bug
+standard). Open `triage-<id>.md` when the item must stay tracked
+([triage-template.md](triage-template.md)). An active item restarts
+research → coder → reviewer → QA. Retest; re-open reviewers if code
+changes.
+After PASS, list thought files to move to finalized, then
+compress the skill workstream into one push (keep
+reviewer-approved Coder commits)
+([thoughts-layout.md](thoughts-layout.md) One push).
+
+Ask the Coder first, then the Reviewer ([role-identity.md](role-identity.md)).
 
 ## 6. Optimization
 
@@ -142,6 +178,8 @@ Capture before/after where possible:
 
 ## Interrupt routing cheat sheet
 
+Human interrupts start a **side sprint from research** (see the skill).
+
 | Human says | Route to |
 |------------|----------|
 | Redo / change plan | Planner |
@@ -150,7 +188,8 @@ Capture before/after where possible:
 | Tighten secrets | Security → Coder → QA |
 | Reduce build time | Performance + Optimization → Coder → QA |
 | Explain strategy | Researcher (Orchestrator summarizes) |
-| Stop | Orchestrator: halt loop; leave plan/code consistent |
+| Stop | Orchestrator: halt loop; leave plan/code consistent; do not push |
+| Push / open PR | Blocked until **QA gives the OK** (Satisfied + Security Clear + developer CodeQL are not enough) |
 
 ## Progress report template
 

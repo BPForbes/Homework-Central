@@ -48,6 +48,25 @@ reviews:
           `if (!condition) continue;` or wrap the body in `if (condition)` as the filter
           (CodeQL `cs/linq/missed-where`). Use explicit loops for multi-step side effects
           on an already-filtered sequence, search-and-return, or tight kernels.
+        - Prefer `!flag` over `flag == false` and `flag` over `flag == true`
+          (CodeQL `cs/simplifiable-boolean-expression`).
+        - Enforce the CodeQL, Validation, and Publish Policy from AGENTS.md /
+          CLAUDE.md / docs/COMMENT_DOCUMENTATION_GUIDE.md and
+          .cursor/agents/devops-quality-engineer.md. Do not approve push, publish,
+          opening or updating a pull request, or merge until applicable CodeQL
+          analysis is satisfied. “CodeQL is satisfied” means the applicable
+          database was created, analysis completed, SARIF was inspected, no
+          unresolved finding introduced or materially affected by the current
+          change remains, and no CodeQL rule, query, path, or security check was
+          disabled, suppressed, excluded, or weakened merely to obtain a passing
+          result. If CodeQL cannot be executed when required, do not treat the
+          change as publish-ready. Compilation, tests, linters, formatters,
+          Roslyn analyzers, ESLint, TypeScript type checking, Clippy, rustfmt,
+          and cargo check do not substitute for required CodeQL analysis. Local
+          analysis must match
+          GitHub Actions (this repo: `.github/codeql/codeql-config.yml` suite
+          `security-and-quality`, including Rust `build-mode: none`). Do not
+          invent scripts that are not defined by the repository.
         - Comments must explain project-specific intent, constraints, trust boundaries, state
           ownership, lifecycle behavior, or non-obvious implementation decisions.
         - Comments must not be self-referential and must not mention an AI agent, prompt,
