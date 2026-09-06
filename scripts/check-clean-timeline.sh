@@ -161,12 +161,28 @@ if [ -n "$history_base" ]; then
         printf 'git log failed over %s..HEAD; cannot verify history\n' "$history_base" >&2
         exit 2
     }
+    # Paths the base already tracks are not this range's doing. The -m flag
+    # above reports, for a merge commit, every path added relative to *each*
+    # parent — so a file that lives on the base branch looks "added" when the
+    # merge is viewed from the other side. Without this subtraction the scan
+    # blamed this branch for .cursor/reviews/ai-library-optimization.md, which
+    # exists at the base and which this branch only deletes.
+    #
+    # It also settles the more general question: a reviewer is answerable for
+    # what their range introduces, not for what they inherited. Cleaning the
+    # base is a separate change against the base.
+    base_tracked="$(git ls-tree -r --name-only "$history_base")" || {
+        printf 'cannot read the tree at %s\n' "$history_base" >&2
+        exit 2
+    }
     history_added="$(
         printf '%s\n' "$history_raw" \
             | grep -Ei "$scratch_re|$analysis_re|$thoughts_re|^\.cursor/reviews/|$nested_gitignore_re" \
             | grep -v -E "$keepfile" \
             | grep -v -E '^\.gitignore$' \
-            | sort -u || true
+            | sort -u \
+            | { [ -n "$base_tracked" ] && grep -Fxv -f <(printf '%s\n' "$base_tracked") || cat; } \
+            || true
     )"
     if [ -n "$history_added" ]; then
         report "Non-Coder output was committed earlier in $history_base..HEAD (the blob ships to every clone even though the tip is clean):" "$history_added"
