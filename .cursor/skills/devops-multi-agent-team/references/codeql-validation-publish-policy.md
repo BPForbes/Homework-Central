@@ -1,582 +1,95 @@
 # CodeQL, Validation, and Publish Policy
 
-This repository contains .NET/C#, TypeScript/JavaScript, and Rust code.
+Repository: .NET/C#, TypeScript/JavaScript, Rust. GitHub Actions runs CodeQL
+for all three. Agents treat CodeQL as a required security gate before publish.
 
-GitHub Actions performs CodeQL analysis for:
+## Core rule
 
-* C# / .NET
-* JavaScript / TypeScript
-* Rust
+**Only QA may give the OK to push.** Review Satisfied, Security Clear,
+compilation, tests, and developer CodeQL do **not** authorize a push.
 
-Agents must treat CodeQL as a required security gate before publishing code.
+Coders / primary developers must run applicable CodeQL on their changes before
+handoff to Reviewers. QA re-checks CodeQL and owns the publish verdict.
 
-## Core Rule
+**CodeQL satisfied** means: database created; analysis completed; SARIF
+inspected; no unresolved finding introduced or materially affected by the
+change; no query/path/rule disabled merely to pass.
 
-**Never push until CodeQL is satisfied.** Review Satisfied, Security
-Clear, compilation, tests, and developer CodeQL do not authorize a push
-by themselves.
+If CodeQL cannot run when required: do not claim pass; do not auto-publish.
+Report what blocked execution.
 
-**Only QA may give the OK to push.** Anyone who changes code (Coder /
-primary developers) must run applicable CodeQL on those changes. QA
-re-checks CodeQL and is the only role that may mark the publish gate
-PASS.
+Fast validation (build, test, lint, format, `cargo check`) does **not**
+substitute for required CodeQL.
 
-DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
+## Development validation (fast)
 
-“CodeQL is satisfied” means:
+**.NET:** `dotnet restore`, `dotnet format --verify-no-changes`,
+`dotnet build --warnaserror`, `dotnet test` (use repo solution if present).
 
-* the applicable CodeQL database was created successfully;
-* CodeQL analysis completed successfully;
-* the generated SARIF results were inspected;
-* no unresolved CodeQL finding introduced or materially affected by the current change remains;
-* no CodeQL rule, query, path, or security check was disabled, suppressed, excluded, or weakened merely to obtain a passing result.
+**TS/JS:** repo package manager + `lint`, `typecheck`, `test` scripts only.
 
-If CodeQL cannot be executed when required, the change must not be automatically published.
+**Rust:** `cargo fmt --check`, `cargo clippy -- -D warnings`,
+`cargo test` (repo-defined).
 
-Compilation, tests, linters, formatters, Roslyn analyzers, ESLint, TypeScript type checking, Clippy, rustfmt, and cargo check do not substitute for required CodeQL analysis.
+Do not invent scripts the repo lacks.
 
----
+## When to run full CodeQL
 
-## Development Validation
+After logical security-sensitive edits; after substantial backend/frontend/Rust
+changes; before substantial commit when practical; before PR update/merge;
+before declaring publish-ready.
 
-During active development, prefer fast validation tools before repeatedly running full CodeQL analysis.
+During minor edits, prefer fast validation — not full DB rebuild every time.
 
-### .NET / C#
+## CodeQL commands (local)
 
-Run the repository-appropriate equivalents of:
+Use repo workflows and `.github/codeql/` config. Typical pattern:
 
-```
-dotnet restore
-dotnet format --verify-no-changes
-dotnet build --warnaserror
-dotnet test
-```
+```bash
+# C# — after successful build
+codeql database create codeql-csharp --language=csharp \
+  --source-root=. --command="dotnet build <solution> --warnaserror"
+codeql database analyze codeql-csharp --format=sarif-latest --output=csharp.sarif
 
-If the repository contains a specific solution or project file, use it explicitly when appropriate:
+# JavaScript/TypeScript
+codeql database create codeql-js --language=javascript-typescript --source-root=.
+codeql database analyze codeql-js --format=sarif-latest --output=js.sarif
 
-```
-dotnet build ProjectName.sln --warnaserror
-dotnet test ProjectName.sln
-```
-
-### TypeScript / JavaScript
-
-Run the repository-defined equivalents of:
-
-```
-npm ci
-npm run lint
-npm run typecheck
-npm test
+# Rust
+codeql database create codeql-rust --language=rust --source-root=.
+codeql database analyze codeql-rust --format=sarif-latest --output=rust.sarif
 ```
 
-If the repository uses another package manager such as pnpm or yarn, use the repository’s existing package manager and scripts instead.
+Inspect SARIF for **new** or **modified/re-exposed** findings. Report
+**existing** unrelated findings without rewriting unrelated code unless in scope.
 
-Do not invent scripts that are not defined by the repository.
+Do not suppress findings or weaken `.github/codeql/codeql-config.yml` /
+`.github/workflows/codeql.yml` to pass.
 
----
+## Finding handling
 
+For each introduced/affected finding: identify rule, file, line, root cause;
+fix underlying issue; re-run build/tests and affected CodeQL; re-inspect SARIF;
+repeat until resolved or documented technical exception.
 
-### Rust
+## Security-sensitive changes
 
-Run the repository-defined equivalents of:
+CodeQL mandatory before publish for auth, authorization, RBAC, sessions,
+tokens, secrets, crypto, HTTP/API input, SQL/ORM, filesystem, uploads,
+command execution, serialization, SSRF/XSS-sensitive paths, security config.
 
-```
-cargo check --workspace --all-targets
-cargo test --workspace
-```
+## Publish gate (QA)
 
-If the repository pins a workspace path, use it (`rust/` in this repository).
-Do not invent cargo features, targets, or scripts that are not defined by the repository.
+**Blocked when any applicable:** CodeQL FAIL or NOT RUN when required; DB
+creation FAIL; SARIF not reviewed; new unresolved finding; required build/test FAIL.
 
----
+**Allowed when:** applicable builds/tests PASS; C#/TS/Rust CodeQL PASS when
+required; SARIF reviewed; zero new unresolved findings; QA marks PASS.
 
-## CodeQL Analysis
+On new finding: stop — fix and re-run. On execution failure: report blocker;
+do not substitute other checks for CodeQL.
 
-Run local CodeQL analysis before publishing substantial changes, security-sensitive changes, and any changes that will be evaluated by the repository’s GitHub CodeQL workflow.
+Sonar and smoke are additive. CI diagnosis → `devops-ci-engineer.md`. QA owns
+the publish verdict.
 
-The local configuration should match the GitHub Actions CodeQL configuration as closely as possible, including query suites and custom queries.
-
----
-
-## C# / .NET CodeQL
-
-Create a fresh C# CodeQL database:
-
-```
-rm -rf .codeql-db-csharp
-codeql database create .codeql-db-csharp \
-  --language=csharp \
-  --command="dotnet build"
-```
-
-If the repository contains a specific solution, prefer building that solution:
-
-```
-codeql database create .codeql-db-csharp \
-  --language=csharp \
-  --command="dotnet build ProjectName.sln"
-```
-
-Analyze the database:
-
-```
-codeql database analyze .codeql-db-csharp \
-  codeql/csharp-queries \
-  --format=sarifv2.1.0 \
-  --output=codeql-csharp.sarif
-```
-
-Inspect:
-
-```
-codeql-csharp.sarif
-```
-
----
-
-## TypeScript / JavaScript CodeQL
-
-CodeQL analyzes TypeScript using the javascript language target.
-
-Create a fresh JavaScript/TypeScript database:
-
-```
-rm -rf .codeql-db-javascript
-codeql database create .codeql-db-javascript \
-  --language=javascript
-```
-
-Analyze the database:
-
-```
-codeql database analyze .codeql-db-javascript \
-  codeql/javascript-queries \
-  --format=sarifv2.1.0 \
-  --output=codeql-javascript.sarif
-```
-
-Inspect:
-
-```
-codeql-javascript.sarif
-```
-
-TypeScript source files are included in the JavaScript CodeQL database.
-
----
-
-### Rust CodeQL
-
-CodeQL analyzes Rust with language identifier `rust` and build-mode `none`.
-A `Cargo.toml` or `rust-project.json` must be present. rustup and cargo must
-be installed. Do not use `--command` / `build-mode: manual` / autobuild;
-Rust extraction ignores a traced cargo build.
-
-Create a fresh Rust CodeQL database:
-
-```
-rm -rf .codeql-db-rust
-codeql database create .codeql-db-rust \
-  --language=rust \
-  --build-mode=none
-```
-
-Analyze the database with the same suite GitHub Actions uses (`security-and-quality`):
-
-```
-codeql database analyze .codeql-db-rust \
-  codeql/rust-queries:codeql-suites/rust-security-and-quality.qls \
-  --format=sarifv2.1.0 \
-  --output=codeql-rust.sarif
-```
-
-Inspect:
-
-```
-codeql-rust.sarif
-```
-
-
----
-
-## GitHub Actions Parity
-
-The local CodeQL analysis should use the same query suite used by GitHub Actions whenever possible.
-
-If the workflow specifies a query suite such as:
-
-```
-default
-security-extended
-security-and-quality
-```
-
-or repository-specific custom queries, the agent must use the equivalent configuration locally.
-
-Do not intentionally run a weaker local CodeQL configuration than the configuration that will run after push.
-
-If the exact CI configuration cannot be reproduced locally, report that limitation explicitly.
-
----
-
-## Which CodeQL Target to Run
-
-### C#-Only Change
-
-If the change affects only C#/.NET code and cannot affect generated frontend code, shared contracts, or cross-stack behavior:
-
-Run:
-- .NET validation
-- C# CodeQL
-
-### TypeScript-Only Change
-
-If the change affects only TypeScript/JavaScript code:
-
-Run:
-- TypeScript validation
-- JavaScript/TypeScript CodeQL
-
-
-### Rust-Only Change
-
-If the change affects only Rust crates and cannot affect generated frontend code, shared contracts, or cross-stack behavior:
-
-Run:
-- Rust validation
-- Rust CodeQL
-
-### Cross-Stack Change
-
-If the change affects both sides of the application or an integration boundary, run both:
-
-Run:
-- .NET validation
-- TypeScript validation
-- Rust validation
-- C# CodeQL
-- JavaScript/TypeScript CodeQL
-- Rust CodeQL
-
-Cross-stack changes include, but are not limited to:
-
-* API contracts;
-* request or response models;
-* DTOs;
-* schemas;
-* authentication;
-* authorization;
-* session behavior;
-* generated clients;
-* serialization formats;
-* shared validation rules;
-* frontend/backend trust boundaries.
-
-### Pre-Publish Rule
-
-Because GitHub Actions analyzes C#, TypeScript, and Rust upon push, the preferred final pre-publish validation is:
-
-C# CodeQL
-+
-JavaScript / TypeScript CodeQL
-+
-Rust CodeQL
-
-Run all three before publishing whenever the environment supports doing so.
-
----
-
-## Required Agent Behavior for Findings
-
-For every CodeQL finding introduced or materially affected by the current change:
-
-1. Identify the CodeQL rule.
-2. Identify the affected source file and line.
-3. Determine the source, sink, data flow, control flow, or behavior responsible for the finding.
-4. Fix the underlying issue rather than hiding the result.
-5. Re-run the relevant compiler, build, linter, and tests.
-6. Re-run the affected CodeQL analysis.
-7. Inspect the new SARIF output.
-8. Repeat until the introduced finding is resolved or there is a documented technical reason it cannot safely be resolved.
-
-Do not suppress, dismiss, exclude, or disable a CodeQL finding merely to obtain a passing result.
-
-Do not modify .github/workflows, CodeQL query suites, CodeQL paths, or repository security configuration solely to hide a newly introduced finding unless the task explicitly requires changing the security-analysis policy.
-
----
-
-## Existing Findings
-
-Do not assume every CodeQL result was caused by the current task.
-
-When possible, classify findings as:
-
-NEW
-EXISTING
-MODIFIED / RE-EXPOSED
-
-### NEW
-
-A finding caused by the current changes.
-
-The agent is responsible for resolving it before publication.
-
-### EXISTING
-
-A finding already present before the current task and unrelated to the modified code.
-
-Report it, but do not automatically rewrite unrelated code unless remediation is within the requested task scope.
-
-### MODIFIED / RE-EXPOSED
-
-A previously existing problem that becomes reachable, analyzable, or materially affected because of the current changes.
-
-Review it as part of the current task and resolve it when the current changes materially contribute to the issue.
-
----
-
-## Security-Sensitive Changes
-
-CodeQL analysis is mandatory before completion and publication for changes involving:
-
-* authentication;
-* authorization;
-* role-based access control;
-* permission checks;
-* trust boundaries;
-* session handling;
-* JWTs;
-* access tokens;
-* refresh tokens;
-* API keys;
-* passwords;
-* secrets;
-* cryptographic keys;
-* cryptography;
-* hashing;
-* signing;
-* certificate handling;
-* HTTP request handling;
-* API endpoints;
-* user-controlled input;
-* database queries;
-* ORM queries;
-* SQL construction;
-* file-system access;
-* file uploads;
-* file downloads;
-* path construction;
-* archive handling;
-* command execution;
-* process spawning;
-* shell invocation;
-* serialization;
-* deserialization;
-* XML processing;
-* URL construction;
-* redirects;
-* outbound HTTP requests;
-* SSRF-sensitive operations;
-* DOM manipulation;
-* raw HTML rendering;
-* XSS-sensitive operations;
-* frontend/backend data validation;
-* sensitive logging;
-* security configuration.
-
----
-
-## Iterative Development
-
-Do not rebuild full CodeQL databases after every minor edit when faster validation is sufficient.
-
-During implementation, prefer:
-
-C#:
-dotnet build
-dotnet test
-Roslyn analyzers
-TypeScript:
-type checking
-linting
-tests
-Rust:
-cargo check
-cargo test
-
-Run full CodeQL:
-
-* after a logical security-sensitive change set;
-* after substantial backend or frontend changes;
-* after substantial Rust changes;
-* before committing a substantial change when practical;
-* before opening or updating a pull request;
-* before merging;
-* before declaring a publish-ready task complete.
-
----
-
-## CodeQL Failure Handling
-
-If CodeQL reports a newly introduced finding:
-
-STOP.
-DO NOT PUSH.
-DO NOT PUBLISH.
-DO NOT OPEN OR UPDATE THE PR.
-DO NOT MERGE.
-
-Fix the issue and rerun CodeQL.
-
-Publication may proceed only after the required findings are resolved.
-
----
-
-## CodeQL Execution Failure
-
-If CodeQL cannot run because:
-
-* the CodeQL CLI is unavailable;
-* a query pack cannot be resolved;
-* database creation fails;
-* the .NET build cannot be extracted;
-* required dependencies are unavailable;
-* the execution environment lacks required tooling;
-* analysis terminates unexpectedly;
-
-then:
-
-DO NOT CLAIM THAT CODEQL PASSED.
-DO NOT CLAIM THAT THE CHANGE IS CODEQL-CLEAN.
-DO NOT AUTOMATICALLY PUBLISH THE CHANGE.
-
-Report exactly what prevented CodeQL from running.
-
-Continue running all other available validation, but do not substitute those checks for CodeQL.
-
-Leave publication blocked unless:
-
-1. CodeQL can subsequently be run successfully; or
-2. the user explicitly instructs the agent to proceed despite CodeQL being unavailable.
-
----
-
-## Publishing Prohibited
-
-The agent must not automatically publish when any applicable state is:
-
-C# CodeQL: FAIL
-TypeScript CodeQL: FAIL
-Rust CodeQL: FAIL
-C# CodeQL: NOT RUN when required
-TypeScript CodeQL: NOT RUN when required
-Rust CodeQL: NOT RUN when required
-CodeQL database creation: FAIL
-CodeQL analysis: INCOMPLETE
-CodeQL SARIF: NOT REVIEWED
-New CodeQL finding: UNRESOLVED
-Required build: FAIL
-Required tests: FAIL
-
----
-
-## Publishing Allowed
-
-For a full-stack or repository-wide validation, the desired state is:
-
-.NET Build: PASS
-.NET Tests: PASS
-TypeScript Validation: PASS
-Frontend Tests: PASS
-Rust Validation: PASS
-Rust Tests: PASS
-C# CodeQL: PASS
-TypeScript CodeQL: PASS
-Rust CodeQL: PASS
-CodeQL SARIF Reviewed: YES
-New Unresolved CodeQL Findings: 0
-
-For a language-specific change, an unaffected target may be marked:
-
-NOT APPLICABLE
-
-unless repository policy or the GitHub Actions configuration requires all applicable targets (C#, JavaScript/TypeScript, and Rust) before every publication.
-
----
-
-## Final Pre-Publish Gate
-
-Immediately before pushing, publishing, opening/updating a PR, or merging, verify:
-
-[ ] .NET restore succeeds
-[ ] .NET formatting check succeeds
-[ ] .NET build succeeds with required warning policy
-[ ] .NET tests succeed
-[ ] TypeScript dependencies are valid
-[ ] TypeScript type checking succeeds
-[ ] frontend linting succeeds
-[ ] frontend tests succeed
-[ ] C# CodeQL database creation succeeds
-[ ] C# CodeQL analysis succeeds
-[ ] C# SARIF results are reviewed
-[ ] JavaScript/TypeScript CodeQL database creation succeeds
-[ ] JavaScript/TypeScript CodeQL analysis succeeds
-[ ] JavaScript/TypeScript SARIF results are reviewed
-[ ] Rust toolchain is valid
-[ ] cargo check succeeds
-[ ] cargo test succeeds
-[ ] Rust CodeQL database creation succeeds
-[ ] Rust CodeQL analysis succeeds
-[ ] Rust SARIF results are reviewed
-[ ] No unresolved CodeQL finding introduced by the current change remains
-[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes,
-    **or** every path it reports is recorded for the Orchestrator to strip
-    at One-push step 3a. The range scan, not the tip check: a net diff
-    cannot see a path added in one commit and deleted in a later one, and
-    that is exactly how a review write-up reached this branch's history.
-    A finding inside a keep-commit is not a Coder send-back — the commit
-    is kept and the path is stripped from the range during compression,
-    so record it and let the gate pass on that basis. The Orchestrator
-    re-runs the same scan after step 3a and must get a clean result
-    before pushing
-[ ] `git status --short` is clean of files you created; anything else is
-    listed by path and left in place
-[ ] `git diff <integration-base>...HEAD --name-only` contains no path
-    outside backend/, frontend/, rust/, scripts/, tools/, llm-service/,
-    docs/, deploy/, .github/, .vscode/, .cursor/ and the tracked root
-    config files (this is every tracked top-level path; regenerate with
-    `git ls-files | awk -F/ 'NF>1{print $1}' | sort -u` if that changes)
-
-If any required item is incomplete or failing:
-
-STOP.
-DO NOT PUSH.
-DO NOT PUBLISH.
-DO NOT OPEN A PULL REQUEST.
-DO NOT UPDATE A PULL REQUEST.
-DO NOT MERGE.
-
----
-
-## Definition of Done
-
-A code change is not considered publish-ready until all applicable validation has succeeded.
-
-When reporting completion, include a concise validation summary:
-
-.NET Build: PASS / FAIL / NOT RUN / NOT APPLICABLE
-.NET Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
-TypeScript Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
-Frontend Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
-Rust Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
-Rust Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
-C# CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
-TypeScript CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
-Rust CodeQL: PASS / FINDINGS / NOT RUN / NOT APPLICABLE
-New unresolved CodeQL findings: N
-Publish gate: PASS / BLOCKED
-
-Never state that code is CodeQL-clean unless the applicable CodeQL analysis was actually executed successfully and its results were reviewed.
-
-Never publish automatically while the publish gate is BLOCKED.
+Full operator detail for this repo may also appear in `AGENTS.md` (pointer only).

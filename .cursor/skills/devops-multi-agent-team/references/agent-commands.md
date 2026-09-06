@@ -1,55 +1,22 @@
 # Agent commands
 
-The Orchestrator and every subagent accept these as `/name` or
-plain wording (`set a goal`, `code review this`, `reproduce it`, `create a
-subagent`). Invocable copies live in `.cursor/commands/`. Use any installed
-`/` skill the same way when it fits the work.
+Orchestrator and subagents accept `/name` or plain wording. Invocable copies:
+`.cursor/commands/`. Shared rules: [role-identity.md](role-identity.md),
+[department-pods.md](department-pods.md), [thoughts-layout.md](thoughts-layout.md).
 
-Working notes, review threads, goal logs, and repro notes are Markdown
-under `.cursor/thoughts/non-finalized/` while the concept is open
-(**do not commit them**). Push JSON lives there too. After QA PASS,
-move them to `.cursor/thoughts/finalized/` (still local). See
-[thoughts-layout.md](thoughts-layout.md) and [push-json.md](push-json.md).
-Do not write thought dumps into `docs/`. Durable history is `docs/`
-or skill `references/` only.
-Stay on the current non-`main` branch. Do not cut a new branch for
-each increment (`AGENTS.md` Git branches).
-After QA PASS, compress the skill workstream into one push
-(keep reviewer-approved Coder commits)
-([thoughts-layout.md](thoughts-layout.md) One push).
-QA `/triage`: [triage-template.md](triage-template.md).
+**Only QA may give the OK to push.**
 
-**Only QA may give the OK to push.** Anyone who changes code (Coder /
-primary developers) must run applicable CodeQL first; that run does not
-authorize a push. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST,
-MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
+## `/goal`
 
-## `/goal` — do until you achieve X
+Write `.cursor/thoughts/non-finalized/goal-<topic>.md` (or `goal-<role>-<topic>.md`).
+Loop the DevOps cycle until done-when is met. Mark complete only when criteria
+are met or the human stops.
 
-Also: `set a goal`, `do until X`, `keep going until X`.
+## `/create-subagent`
 
-1. Write the objective to `.cursor/thoughts/non-finalized/goal-<topic>.md`
-   (acceptance criteria, non-goals, done-when). Each role may also write
-   `goal-<role>-<topic>.md`.
-2. If the human invoked a long-running goal, also use the Cursor goal tools
-   (`CreateGoal` / `UpdateGoal`).
-3. Keep looping the DevOps cycle until X is actually achieved. Do not stop at a
-   plan or a partial implement.
-4. Mark the local goal file (and `UpdateGoal`) complete only when the criteria
-   are met, or the human stops the goal.
-
-## `/create-subagent` — spawn roles asynchronously
-
-Also: `create a subagent`, `spawn`, `Task` tool.
-
-- Spawn roles from `.cursor/agents/devops-*.md` with Cursor `Task`.
-- Run them **asynchronously in pods**. Agent files set `is_background:
-  true`. Cursor `Task` uses `run_in_background: true`. Launch a whole
-  group in one turn; do not queue roles one-by-one.
-- Do not poll a background subagent. Continue other work or end the turn;
-  the completion notification is enough.
-- The Orchestrator synthesizes. Subagents do not push or open PRs.
-  The Orchestrator may push only after **QA gives the OK**.
+Spawn from `.cursor/agents/devops-*.md` with Cursor `Task`,
+`run_in_background: true`. Launch pods together; do not poll. Orchestrator
+synthesizes; subagents do not push.
 
 | Role | Agent file |
 |------|------------|
@@ -63,52 +30,27 @@ Also: `create a subagent`, `spawn`, `Task` tool.
 | Integrator | `devops-integrator.md` |
 | Communicator | `devops-communicator.md` |
 
-## `/code-review` — look at, do not edit
+## `/code-review`
 
-Also: `/review-bugbot`, `review the diff`, `look but don't edit`.
+**Primary owner: QA.** Reviewers use the same inspect-only bar.
 
-**Primary owner: QA.** Reviewers may use the same inspect-only bar.
+Read Coder Push JSON as index; **always** `git diff <integration-base>...HEAD`,
+tests, logs, SARIF. Compare mock and real diff. Write findings to
+`review-<topic>.md`. **Do not edit** product code. Hand fixes to Coder.
 
-- Confirm the Coder Push JSON exists. Read it as an index, then
-  **always** `git diff <integration-base>...HEAD`, tests, logs,
-  and SARIF. Compare mock and real diff. Write findings into
-  `.cursor/thoughts/non-finalized/review-<topic>.md`.
-- **Do not edit product code, workflows, or docs to "fix" findings** while
-  acting as `/code-review`. Hand remediations to the Coder.
-- Probe in a throwaway clone where you can. A probe that must sit in
-  this worktree takes a reserved lower-case name (`_scratch/` or a
-  `.scratch` infix) and is deleted before you report; a probe that
-  edited a tracked file is undone with `git checkout -- <exact path>`.
-  Finish `git status --short` clean of files you created.
-- Do not push. **Only QA may give the OK to push.**
+## `/repro`
 
-## `/repro` — reproduce before declaring a cause
+Reproduce with exact commands and exit codes. Write
+`.cursor/thoughts/non-finalized/repro-<topic>.md`. Probes: throwaway clone or
+reserved name per [role-identity.md](role-identity.md).
 
-Also: `reproduce`, `write a repro`.
-
-- Recreate the failure with exact commands, inputs, and exit codes.
-- Write the repro to `.cursor/thoughts/non-finalized/repro-<topic>.md`.
-- Files the repro *creates* in the project tree are process output and
-  never land: use a throwaway clone, or a reserved lower-case name
-  (`_scratch/`, `.scratch`), and clean up before reporting.
-- Do not claim a root cause until the repro ran (or the environment cannot
-  run it — then say so).
-
-## `/triage` — QA tracks a bug or discovery
-
-Also: `open triage`, `track this bug`.
+## `/triage`
 
 **Owner: QA.** Copy [triage-template.md](triage-template.md) to
-`.cursor/thoughts/non-finalized/triage-<id>.md`. Set State `active`.
-Handoff `To: Coder`. The Orchestrator restarts research → coder →
-reviewer → QA for that id. Invocable copy: `.cursor/commands/triage.md`.
-- Any probe the triage run creates is process output too: throwaway
-  clone, or a reserved lower-case name (`_scratch/`, `.scratch`),
-  deleted before you report.
+`triage-<id>.md`. Active item restarts research → coder → reviewer → QA.
 
 ## Other `/` skills
 
-Orchestrator and subagents may use any installed slash skill when it matches
-the phase: `/buildkite-*`, `/sonar-*`, `/review-security`, `/browser-automation`,
-`/share-video`, `/docs-canvas`, `/loop`, `/babysit`, `/secure-dependency-health-check`,
-and the same names without the slash.
+Use when the phase matches: `/buildkite-*`, `/sonar-*`, `/review-security`,
+`/browser-automation`, `/share-video`, `/docs-canvas`, `/loop`, `/babysit`,
+`/secure-dependency-health-check`.
