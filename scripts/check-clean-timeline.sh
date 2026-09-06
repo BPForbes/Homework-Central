@@ -121,16 +121,48 @@ if [ -n "$nested_gitignore" ]; then
 fi
 
 # 6. History. Skipped unless --history is given, because it needs a base ref and
-#    enough history to walk; a shallow CI clone has neither.
+#    enough history to walk.
 if [ -n "$history_base" ]; then
     if ! git rev-parse --verify --quiet "$history_base" >/dev/null; then
         printf 'unknown base ref: %s\n' "$history_base" >&2
         exit 2
     fi
-    # Every path added anywhere in the range, not the net diff, so a path that
-    # was added and later deleted is still seen.
+
+    # A shallow clone has the tip commits but not the range, so the walk below
+    # returns fewer paths and the check quietly under-reports. Verified: the same
+    # base ref gives exit 1 on a full clone and exit 0 at --depth 2. Refuse
+    # rather than pass, because a silent under-scan is worse than no scan.
+    if [ "$(git rev-parse --is-shallow-repository)" = 'true' ]; then
+        printf 'refusing to scan history in a shallow clone: fetch with fetch-depth 0\n' >&2
+        exit 2
+    fi
+
+    # Every path added anywhere in the range, not the net diff, so a path added
+    # in one commit and deleted in a later one is still seen. Three flags carry
+    # weight here:
+    #
+    #   -c diff.renames=false  a rename is reported as R, not A, so
+    #                          `git mv notes.md leak.scratch.md` slipped past
+    #                          --diff-filter=A entirely while the blob stayed
+    #                          reachable. Disabling detection makes every rename
+    #                          an add of the new path plus a delete of the old.
+    #   -m                     without it `git log --name-only` prints nothing at
+    #                          all for a merge commit, so a path first introduced
+    #                          by a merge was invisible.
+    #   --no-abbrev            paths are what we match on; never let git shorten.
+    #
+    # git failure must not read as "nothing found". Capture the status before the
+    # pipeline, because `|| true` on the whole thing is exactly how a broken
+    # GIT_DIR used to print "passed".
+    history_raw="$(
+        git -c diff.renames=false log -m --diff-filter=A --name-only --no-abbrev \
+            --format='' "$history_base..HEAD"
+    )" || {
+        printf 'git log failed over %s..HEAD; cannot verify history\n' "$history_base" >&2
+        exit 2
+    }
     history_added="$(
-        git log --diff-filter=A --name-only --format='' "$history_base..HEAD" 2>/dev/null \
+        printf '%s\n' "$history_raw" \
             | grep -Ei "$scratch_re|$analysis_re|$thoughts_re|^\.cursor/reviews/|$nested_gitignore_re" \
             | grep -v -E "$keepfile" \
             | grep -v -E '^\.gitignore$' \

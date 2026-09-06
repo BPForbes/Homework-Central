@@ -60,7 +60,7 @@ Hard rules:
     cover every tracked `.cs` file, so this is complete rather than partial.
     (`IDE0007` is the inverse rule and cannot fire while those settings are
     `false`.)
-  - **eslint owns everything web.** `no-var` and `prefer-const` fail
+  - **eslint owns web files it can parse.** `no-var` and `prefer-const` fail
     `npm run lint` for `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.cjs`, `.mjs`,
     `.jsx`, and — through `eslint-plugin-html` — inline `<script>` in `.html`,
     `.htm` and `.xhtml`. The HTML processor hands eslint the real script text,
@@ -68,22 +68,56 @@ Hard rules:
     the plugin is a dependency: a grep over HTML cannot tell a `var` in code
     from one inside a comment or a string, and every filter added to teach it
     the difference became a way to hide a `var` from it.
-  - **`scripts/check-no-var.sh` owns only what neither can see**, and nothing
-    else: the word `var` in a C# pattern position, `dynamic`, and suppressions
-    of the rules in config files (`#pragma`, `NoWarn` including
-    `Directory.Build.targets`, `SuppressMessage`, a `-p:` flag in a workflow,
-    `eslint-disable` aimed at these rules). It also rejects any non-root
-    `.editorconfig` and any non-root `Directory.Build.props`/`.targets`: MSBuild
-    takes the *nearest* such file and does not merge, so a nested copy that
-    merely **omits** `EnforceCodeStyleInBuild` silently disables `IDE0008` for
-    that subtree with no suppression syntax to grep for. The script pins
-    `LC_ALL=C`, because grep word boundaries are locale-sensitive and a gate
-    whose verdict depends on the machine is not a gate.
-  The script is still not claimed to be complete — a `grep` cannot lex C#, and
-  a `dynamic` after a `/* */` that closes mid-line will slip past the comment
-  filter. Reviewers treat any `var` as a blocking finding, must read
-  `var`-shaped lines themselves rather than trusting a green CI, and must not
-  mark a change Satisfied while one remains.
+    Two web surfaces are **not** covered, both currently empty: script inside
+    `.svg`, and an inline event attribute such as `onclick="var x=1"`, which the
+    HTML processor does not extract. Adding either means adding a gate.
+  - **`npm run lint:ci` re-runs eslint with `--no-inline-config`.** A blanket
+    `/* eslint-disable */` or a bare `// eslint-disable-next-line` names no rule,
+    so it silences `no-var` while a scan looking for the rule name beside the
+    directive sees nothing. `--no-inline-config` ignores every directive, which
+    is why it is a separate script: the plain `npm run lint` keeps the one
+    legitimate warn-level `react-hooks/exhaustive-deps` directive working.
+  - **`scripts/check-no-var-config.sh` asserts the analyzers are on at all.**
+    The three gates above all assume that, and nothing checked it. Two verified
+    bypasses were one word deep: `'no-var': 'error'` to `'off'` in
+    `frontend/eslint.config.js`, and `<!-- vendored --><NoWarn>$(NoWarn);IDE0008
+    </NoWarn>` in the root `Directory.Build.props` — that second one compiled a
+    real `var z = 1` with "Build succeeded" while every gate stayed green.
+    This script does not grep. It asks MSBuild to evaluate
+    `EnforceCodeStyleInBuild` and `NoWarn` per project, parses the root
+    `.editorconfig` severities (a bare `= false` falls back to *suggestion*,
+    which cannot fail a build), and asks eslint to resolve the config for one
+    file per config block, asserting severity `error`. An evaluated property and
+    a resolved rule severity cannot be spoofed by a comment, a string, odd
+    whitespace, or an unfamiliar extension, because the tool that will act on
+    the config is the one reporting it. It runs with `STRICT=1` in CI, so a
+    missing toolchain fails instead of skipping.
+  - **`scripts/check-no-var.sh` owns only what none of the above can see**: the
+    word `var` in a C# pattern position, `dynamic`, and *per-file* suppressions
+    (`#pragma warning disable`, `SuppressMessage`) — which no evaluated property
+    can show, because they are scoped to a file rather than to the build. It
+    also rejects any non-root `.editorconfig` and any non-root
+    `Directory.Build.props`/`.targets`: MSBuild takes the *nearest* such file and
+    does not merge, so a nested copy that merely **omits**
+    `EnforceCodeStyleInBuild` silently disables `IDE0008` for that subtree with
+    no suppression syntax to grep for. It pins `LC_ALL=C`, because grep word
+    boundaries are locale-sensitive and a gate whose verdict depends on the
+    machine is not a gate. It never discards grep's stderr: a single file named
+    `-dash.cs` made grep parse a path as flags, abort, and leave every file
+    unscanned while the gate printed "passed", so the script now separates "no
+    matches" (stdout empty) from "could not run" (stderr non-empty, exit 2).
+  Everything build-wide moved to the config probe on purpose. The text scan for
+  it produced a false positive, a fix, and then a new bypass in three
+  consecutive review rounds; the comment filter that caused the last one is gone
+  rather than given a fourth branch. What remains here is safe to scan blind:
+  C# requires `#pragma` to be the first token on its line, so the mid-line
+  `/* */` trick is a compile error, and the words "pragma warning" and
+  "SuppressMessage" appear in zero tracked `.cs` files.
+  The gates are still not claimed to be complete — a `grep` cannot lex C#, and a
+  `dynamic` after a `/* */` that closes mid-line will slip past the one
+  remaining comment filter. Reviewers treat any `var` as a blocking finding,
+  must read `var`-shaped lines themselves rather than trusting a green CI, and
+  must not mark a change Satisfied while one remains.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
@@ -144,7 +178,16 @@ When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
   rest. Its `--history <base>` form additionally scans every commit in a range,
   which the tip check and `git diff <base>...HEAD` both miss: a path added in
   one commit and deleted in a later one has a net delta of zero yet its blob
-  ships to every clone.
+  ships to every clone. That walk disables rename detection (a `git mv` to a
+  reserved name is reported as `R`, not `A`, and slipped past a
+  `--diff-filter=A` walk entirely) and passes `-m` (without it `git log
+  --name-only` prints nothing at all for a merge commit). It refuses to run in
+  a shallow clone rather than under-report, and treats a failing `git log` as
+  "cannot verify" with exit 2 rather than as "nothing found" — reporting a
+  broken repository as a pass is how a backstop becomes a rubber stamp. CI
+  passes it the **merge base**, not `pull_request.base.sha`, which is the base
+  branch tip at PR-open time and drags in unrelated commits once the base
+  moves.
 - Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
 ## UI and styling work

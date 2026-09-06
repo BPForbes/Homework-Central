@@ -5,6 +5,11 @@ on:
     branches:
       - main
   pull_request:
+    # Default types omit `edited`, which fires when the base branch is
+    # retargeted — and the base is exactly what the history scan measures
+    # against, so its verdict can change without a new commit.
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
 
 concurrency:
   # Newer pushes to the same PR/branch cancel in-flight CI for that ref so only
@@ -25,6 +30,9 @@ jobs:
   hygiene:
     name: Clean timeline
     runs-on: ubuntu-latest
+    # No toolchain and no services, so anything past a couple of minutes means
+    # the job is wedged rather than slow.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -39,8 +47,15 @@ jobs:
           # the script then runs the tip checks only.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          set -euo pipefail
           if [ -n "$BASE_SHA" ]; then
-            ./scripts/check-clean-timeline.sh --history "$BASE_SHA"
+            # The merge base, not the raw base sha. github.event...base.sha is
+            # the base branch tip when the PR opened; once the base moves on,
+            # a range from it sweeps in commits this PR never touched and the
+            # scan blames the author for someone else's file.
+            merge_base="$(git merge-base "$BASE_SHA" HEAD)"
+            echo "base=$BASE_SHA merge-base=$merge_base"
+            ./scripts/check-clean-timeline.sh --history "$merge_base"
           else
             ./scripts/check-clean-timeline.sh
           fi
@@ -92,6 +107,16 @@ jobs:
       - name: Reject implicitly typed locals
         run: ./scripts/check-no-var.sh
 
+      # Asserts the analyzers are actually ON, by asking MSBuild to evaluate the
+      # properties and parsing the .editorconfig severities. A text scan could
+      # not see `<!-- vendored --><NoWarn>$(NoWarn);IDE0008</NoWarn>`, which
+      # compiled a real implicitly typed local with "Build succeeded".
+      # STRICT=1 because a probe that skips itself in CI is not a gate.
+      - name: Verify the no-var analyzers are enabled
+        env:
+          STRICT: '1'
+        run: ./scripts/check-no-var-config.sh
+
       - name: Reject unparameterized raw SQL
         run: |
           if rg -n 'FromSqlRaw\(|ExecuteSqlRaw\(|ExecuteSqlRawAsync\(|SqlQueryRaw\(' backend/HomeworkCentral.Api --type cs; then
@@ -128,6 +153,20 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # Ignores every inline directive. A blanket `/* eslint-disable */` or a
+      # bare `// eslint-disable-next-line` names no rule, so it silenced no-var
+      # while a scan looking for the rule name near the directive saw nothing.
+      - name: Lint ignoring inline directives
+        run: npm run lint:ci
+
+      # Resolves the flat config the way a lint run would and asserts both rules
+      # come out as error. One word in eslint.config.js ('error' -> 'off') turned
+      # the whole web half of the rule off with every other gate still green.
+      - name: Verify the no-var rules are enabled
+        env:
+          STRICT: '1'
+        run: ../scripts/check-no-var-config.sh
 
       - name: Build
         run: npm run build
