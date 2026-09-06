@@ -41,6 +41,10 @@ claude-mem/
 **/_scratch/
 **/*.scratch.*
 
+# Review write-ups. These are thought-process output and belong under
+# .cursor/thoughts/non-finalized/, not in tracked history.
+.cursor/reviews/
+
 # Local CodeQL CLI databases and SARIF dumps
 .codeql-db-csharp/
 .codeql-db-javascript/

@@ -3,6 +3,15 @@
 When editing C# files under `backend/`:
 
 - Do not use `var`. Always write explicit types for locals, foreach variables, and deconstruction targets.
+  This also covers pattern positions — write the real type in `is` and `case` patterns rather than
+  `is var x` / `case var x`. The one unavoidable exception is an anonymous type assigned to a local,
+  which has no nameable type; prefer keeping anonymous types inline so the exception does not arise.
+- Do not use `dynamic` for locals or fields. `var` is statically typed and merely inferred, whereas
+  `dynamic` defers binding to runtime.
+- Enforced, not advisory: `csharp_style_var_*` is `error` in `.editorconfig` and
+  `EnforceCodeStyleInBuild` is on, so an implicitly typed local fails `dotnet build` as `IDE0008`,
+  and `scripts/check-no-var.sh` runs in CI for the cases the compiler cannot see. Do not suppress
+  either — see `AGENTS.md` for the full rule.
 - Prefer pattern matching (`switch` expressions, property/relational patterns) over large `if` / `else if` chains for closed-set decisions such as intake types, scan statuses, and account classes.
 - Match existing naming, primary constructors, and file-scoped namespaces in the project.
 - Before adding or changing comments, XML docs, Markdown, naming, or function structure, read and follow the Comment Documentation Guide at [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](../../docs/COMMENT_DOCUMENTATION_GUIDE.md).

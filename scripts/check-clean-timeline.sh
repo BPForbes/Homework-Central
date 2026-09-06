@@ -47,6 +47,12 @@ if [ -n "$analysis_tracked" ]; then
     report 'Local analysis output is committed:' "$analysis_tracked"
 fi
 
+# 4. Review write-ups. These belong in .cursor/thoughts/non-finalized/.
+reviews_tracked="$(git ls-files | grep -E '^\.cursor/reviews/' || true)"
+if [ -n "$reviews_tracked" ]; then
+    report 'Review write-ups are committed (use .cursor/thoughts/non-finalized/):' "$reviews_tracked"
+fi
+
 if [ "$failed" -ne 0 ]; then
     printf '\nclean-timeline check failed. Delete the file and amend, or add it to\n'
     printf '.gitignore if it is genuinely transient. See AGENTS.md.\n'
