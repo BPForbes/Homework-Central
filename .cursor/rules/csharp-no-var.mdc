@@ -14,8 +14,7 @@ When editing C# anywhere in this repository (`backend/`, `scripts/`, `tools/`):
   assigned to a local, which has no nameable type; prefer keeping anonymous types inline so the
   exception does not arise.
 - Do not write the word `var` in prose either — comments, XML docs and string literals included.
-  Write "implicitly typed local". The CI scan matches the bare word, which is what lets it stay
-  simple and complete.
+  Write "implicitly typed local". The backstop scan matches the bare word.
 - Do not use `dynamic` for locals, fields, parameters, return types or type arguments. `var` is
   statically typed and merely inferred, whereas `dynamic` defers binding to runtime. Unlike `var`,
   "dynamic" *is* allowed in prose — the risk engine's "dynamic threshold" is a real domain term.
@@ -28,10 +27,13 @@ When editing C# anywhere in this repository (`backend/`, `scripts/`, `tools/`):
   [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](../../docs/COMMENT_DOCUMENTATION_GUIDE.md).
 
 - Never suppress the rule. No `#pragma warning disable IDE0008`, `<NoWarn>`, `[SuppressMessage]`,
-  `eslint-disable`, nested `.editorconfig`, or nested `Directory.Build.props`/`.targets` — a nested
-  MSBuild file shadows the root one and silently disables the check for that subtree. CI rejects
-  all of these.
+  nested `.editorconfig`, or nested `Directory.Build.props`/`.targets` — a nested MSBuild file
+  shadows the root one and silently disables the check for that subtree.
 
-Enforced at build and in CI. The canonical statement of the rule, its exceptions, and which gate
-owns which case live in [`AGENTS.md`](../../AGENTS.md) — do not restate the enforcement chain here,
-because a second copy drifts.
+**Enforcement:** Pinned in `.editorconfig` (`csharp_style_var_* = false:error`) and
+`Directory.Build.props` (`EnforceCodeStyleInBuild`), so implicitly typed locals fail `dotnet build`
+as IDE0008. A short `scripts/check-no-var.sh` backstop covers pattern `var`, `dynamic`, and
+file-scoped suppressions the compiler does not evaluate at build time.
+
+The canonical rule statement and CI steps live in [`AGENTS.md`](../../AGENTS.md) — do not restate
+the full enforcement chain here.
