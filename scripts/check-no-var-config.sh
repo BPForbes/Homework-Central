@@ -162,12 +162,27 @@ if [ "$want_web" -eq 1 ]; then
     elif [ ! -d frontend/node_modules ]; then
         skip 'frontend/node_modules absent; eslint probe not run (run npm ci first)'
     else
-        all_web="$(
-            git ls-files \
+        # NUL-delimited into an array. A newline-separated string plus an
+        # unquoted expansion split `scripts/two words.mjs` into two arguments
+        # and eslint reported `No files matching the pattern "scripts/two"`.
+        # That failed closed, but a legitimate filename with a space should not
+        # break the gate, and a path can also contain a glob character or a
+        # newline.
+        mapfile -d '' -t all_web < <(
+            git ls-files -z \
                 '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.cjs' '*.mjs' '*.jsx' \
                 '*.html' '*.htm' '*.xhtml'
-        )"
-        web_files="$(printf '%s\n' "$all_web" | grep '^frontend/' | sed 's|^frontend/||' || true)"
+        )
+        web_files=''
+        outside_files=()
+        for path in "${all_web[@]:-}"; do
+            [ -n "$path" ] || continue
+            case "$path" in
+                frontend/*) web_files="$web_files${path#frontend/}"$'\n' ;;
+                *) outside_files+=("$path") ;;
+            esac
+        done
+        web_files="${web_files%$'\n'}"
 
         # Web files outside frontend/ are covered by nothing unless something
         # says so: eslint refuses to lint above its base path, and reports the
@@ -175,8 +190,8 @@ if [ "$want_web" -eq 1 ]; then
         # which reads as success. scripts/novar-eslint-probe.mjs sat in exactly
         # that hole. The root eslint.config.mjs exists for these, and this loop
         # fails on any that neither config claims.
-        outside="$(printf '%s\n' "$all_web" | grep -v '^frontend/' || true)"
-        if [ -n "$outside" ]; then
+        if [ "${#outside_files[@]}" -gt 0 ]; then
+            outside="$(printf '%s\n' "${outside_files[@]}")"
             if [ ! -f eslint.config.mjs ]; then
                 fail "these tracked web files are outside frontend/ and there is no root eslint.config.mjs to cover them:
 $outside"
@@ -188,9 +203,13 @@ $outside"
                 # like a clean lint. Resolving the config per file turns "nothing
                 # claims this" into a hard answer.
                 out_bad=''
-                while IFS= read -r rel; do
+                for rel in "${outside_files[@]}"; do
                     [ -n "$rel" ] || continue
-                    rel_cfg="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs --print-config "$rel" 2>&1)"
+                    # `--print-config=<path>`, not `--print-config -- <path>`:
+                    # the flag takes the path as its own value, so `--` would be
+                    # consumed as that value. The `=` form is also what keeps a
+                    # dash-prefixed path from being read as another option.
+                    rel_cfg="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs "--print-config=$rel" 2>&1)"
                     if ! printf '%s' "$rel_cfg" | grep -q '^{'; then
                         out_bad="$out_bad
   $rel: no config resolves for it ($(printf '%s' "$rel_cfg" | head -1))"
@@ -211,9 +230,9 @@ print("; ".join(bad))
                     )"
                     [ -n "$rel_verdict" ] && out_bad="$out_bad
   $rel: $rel_verdict"
-                done <<< "$outside"
+                done
 
-                out_lint="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs $outside 2>&1)"
+                out_lint="$(./frontend/node_modules/.bin/eslint --config eslint.config.mjs -- "${outside_files[@]}" 2>&1)"
                 out_status=$?
                 if [ -n "$out_bad" ]; then
                     fail "web files outside frontend/ that no root config block covers with error severity:$out_bad
@@ -222,7 +241,7 @@ Add them to eslint.config.mjs, or move them under frontend/."
                     fail "eslint reported problems in web files outside frontend/:
 $out_lint"
                 else
-                    note "root config covers $(printf '%s\n' "$outside" | wc -l | tr -d ' ') web file(s) outside frontend/"
+                    note "root config covers ${#outside_files[@]} web file(s) outside frontend/"
                 fi
             fi
         fi
