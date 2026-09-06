@@ -25,11 +25,25 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - After QA PASS on this concept, the Orchestrator moves those files to
   `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
   Do not put thought dumps in `docs/`.
-- A probe file that must sit inside a real project directory uses a
-  reserved gitignored name — a `_scratch/` directory or a `.scratch.`
-  infix — and must be deleted before you report, leaving
-  `git status --short` clean. Only Coder edits land on the committed
-  timeline; `scripts/check-clean-timeline.sh` enforces that in CI.
+- Reviewer, Security and QA **process output** never lands on the
+  committed timeline: review threads, Push JSON, triage and repro notes,
+  probe files, CodeQL databases and SARIF dumps. Product, pipeline,
+  infra, test code and durable `docs/` updates *do* land, as
+  reviewer-approved keep-commits, whichever role drafted them. The rule
+  is about the class of output, not about who typed it.
+- Prefer probing in a throwaway clone
+  (`git clone --no-hardlinks . /tmp/probe`). That keeps the shared
+  worktree untouched and is the only way to test a name the convention
+  forbids. When a probe must sit in this worktree, give it a reserved
+  gitignored name — a lower-case `_scratch/` directory or a `.scratch.`
+  infix — and delete it before you report.
+- Undo a probe that *edited* a tracked file with
+  `git checkout -- <exact path>`. Never `git checkout -- .`, never
+  `git restore :/`, never `git stash`: the worktree is shared and those
+  destroy other roles' in-flight work. Finish with `git status --short`
+  clean **of files you created**; anything else, list by path in your
+  report and leave in place. `scripts/check-clean-timeline.sh` enforces
+  this in CI.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
 - Reuse existing helpers, scripts, and docs. Do not duplicate them.
@@ -104,26 +118,50 @@ Ground every finding in evidence from:
    PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR OTHERWISE SUBMIT
    CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
-## Your files never land on the timeline
+## Your process output never lands on the timeline
 
-Only Coder edits belong in history. You will often need a probe file
-to prove a gate fires — a `.cs` that has to sit inside a real project
-to exercise the compiler, a nested MSBuild file, a throwaway `.js`.
+Review threads, Push JSON, repro notes, probe files and SARIF dumps
+stay out of history. Product, pipeline, infra, test code and durable
+`docs/` updates do land, whichever role drafted them — the rule is
+about the class of output, not who typed it.
 
-- Name every probe with a reserved name: put it in a `_scratch/`
-  directory, or give it a `.scratch.` infix (`Probe.scratch.cs`).
-  Both are gitignored anywhere in the tree, so a probe cannot be
-  added by accident.
-- **Delete every probe when you are done** and finish with
-  `git status --short` showing a clean tree. Say so in your report.
+You will often need a probe to prove a gate fires: a `.cs` that has to
+sit inside a real project to exercise the compiler, a nested MSBuild
+file, a throwaway `.js`.
+
+- **Prefer a throwaway clone**: `git clone --no-hardlinks . /tmp/probe`.
+  The shared worktree stays untouched, and it is the only way to test a
+  filename the convention forbids.
+- When a probe must sit in this worktree, use a reserved name: a
+  lower-case `_scratch/` directory or a `.scratch.` infix
+  (`Probe.scratch.cs`). Both are gitignored at any depth. Write them
+  lower-case — `.gitignore` cannot case-fold portably, so `_Scratch/`
+  is ignored on macOS but not on Linux; the CI guard rejects any
+  casing so the mistake fails loudly instead of silently.
+- A few probes have **fixed names** and cannot be reserved:
+  `.editorconfig`, `Directory.Build.props`/`.targets`, `.gitignore`,
+  `global.json`, `eslint.config.js`/`.eslintrc*`, `.gitattributes`,
+  and anything under `frontend/public/` that must keep a servable
+  name. Delete those immediately and say so. A nested `.gitignore` is
+  the sharpest case — it can re-include the reserved names for a whole
+  subtree — so the guard rejects any non-root one.
+- Many probes are **edits to tracked files**, not new files: flipping a
+  `csharp_style_var_*` severity, adding `<NoWarn>`, adding an
+  `eslint-disable`. Undo those with `git checkout -- <exact path>`.
+  Never `git checkout -- .`, never `git restore :/`, never
+  `git stash` — the worktree is shared and those destroy other roles'
+  uncommitted work.
+- Finish with `git status --short` clean **of files you created**.
+  Another role's probe or in-flight edit may appear while you work:
+  list it by path in your report and leave it in place. Do not revert
+  or delete a path you did not touch.
 - Never `git add -f` a probe, a thought file, or a CodeQL database.
-  `scripts/check-clean-timeline.sh` runs in CI and will fail the build.
+  `scripts/check-clean-timeline.sh` runs in CI and will fail the build,
+  including on a blob that was added and later deleted in the same
+  branch.
 - Findings go in the review thread and your Push JSON under
   `.cursor/thoughts/non-finalized/`, which is gitignored. Do not write
   findings into `docs/` or any tracked file.
-- Reviewers share one working tree. Another reviewer's probe may
-  appear while you work — do not delete files you did not create;
-  report them instead so the Coder can confirm before the push.
 
 ## Review bar (like a PR)
 

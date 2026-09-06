@@ -1,21 +1,32 @@
-# C# style rules for Homework Central backend
+---
+description: Homework Central C# style — no var, no dynamic, explicit types, pattern matching
+globs: ["backend/**/*.cs", "scripts/**/*.cs", "tools/**/*.cs"]
+alwaysApply: false
+---
 
-When editing C# files under `backend/`:
+# C# style rules for Homework Central
 
-- Do not use `var`. Always write explicit types for locals, foreach variables, and deconstruction targets.
-  This also covers pattern positions — write the real type in `is` and `case` patterns rather than
-  `is var x` / `case var x`. The one unavoidable exception is an anonymous type assigned to a local,
-  which has no nameable type; prefer keeping anonymous types inline so the exception does not arise.
-- Do not use `dynamic` for locals or fields. `var` is statically typed and merely inferred, whereas
-  `dynamic` defers binding to runtime.
+When editing C# anywhere in this repository (`backend/`, `scripts/`, `tools/`):
+
+- Do not use `var`. Always write explicit types for locals, foreach variables, and deconstruction
+  targets. This also covers pattern positions — write the real type in `is` and `case` patterns
+  rather than `is var x` / `case var x`. The one unavoidable exception is an anonymous type
+  assigned to a local, which has no nameable type; prefer keeping anonymous types inline so the
+  exception does not arise.
 - Do not write the word `var` in prose either — comments, XML docs and string literals included.
   Write "implicitly typed local". The CI scan matches the bare word, which is what lets it stay
-  simple and complete. "dynamic" is fine in prose (the risk engine's "dynamic threshold").
-- Enforced, not advisory: `csharp_style_var_*` is `error` in `.editorconfig` and
-  `EnforceCodeStyleInBuild` is on, so an implicitly typed local fails `dotnet build` as `IDE0008`,
-  and `scripts/check-no-var.sh` runs in CI for the cases the compiler cannot see. Do not suppress
-  either, and do not add a nested `Directory.Build.props` — MSBuild takes the nearest one and does
-  not merge, so it silently disables the check for that subtree. See `AGENTS.md` for the full rule.
-- Prefer pattern matching (`switch` expressions, property/relational patterns) over large `if` / `else if` chains for closed-set decisions such as intake types, scan statuses, and account classes.
+  simple and complete.
+- Do not use `dynamic` for locals, fields, parameters, return types or type arguments. `var` is
+  statically typed and merely inferred, whereas `dynamic` defers binding to runtime. Unlike `var`,
+  "dynamic" *is* allowed in prose — the risk engine's "dynamic threshold" is a real domain term.
+- Prefer pattern matching (`switch` expressions, property/relational patterns) over large `if` /
+  `else if` chains for closed-set decisions such as intake types, scan statuses, and account
+  classes.
 - Match existing naming, primary constructors, and file-scoped namespaces in the project.
-- Before adding or changing comments, XML docs, Markdown, naming, or function structure, read and follow the Comment Documentation Guide at [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](../../docs/COMMENT_DOCUMENTATION_GUIDE.md).
+- Before adding or changing comments, XML docs, Markdown, naming, or function structure, read and
+  follow the Comment Documentation Guide at
+  [`docs/COMMENT_DOCUMENTATION_GUIDE.md`](../../docs/COMMENT_DOCUMENTATION_GUIDE.md).
+
+Enforced at build and in CI. The canonical statement of the rule, its exceptions, and which gate
+owns which case live in [`AGENTS.md`](../../AGENTS.md) — do not restate the enforcement chain here,
+because a second copy drifts.

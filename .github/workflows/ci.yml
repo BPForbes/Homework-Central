@@ -17,6 +17,34 @@ permissions:
   contents: read
 
 jobs:
+  # Deliberately its own job with no toolchain, no services and no build step.
+  # As part of the backend job it ran only after restore, build and the
+  # out-of-solution build all succeeded — and a PR that does not compile is
+  # exactly the one most likely to carry a stray probe, so the author would get
+  # no hygiene feedback at all.
+  hygiene:
+    name: Clean timeline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          # The history scan walks base..HEAD, which a shallow clone cannot do.
+          fetch-depth: 0
+
+      - name: Reject non-Coder files on the timeline
+        env:
+          # Empty for a push build, where there is no base to compare against;
+          # the script then runs the tip checks only.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            ./scripts/check-clean-timeline.sh --history "$BASE_SHA"
+          else
+            ./scripts/check-clean-timeline.sh
+          fi
+
   backend:
     name: Backend (.NET 10)
     runs-on: ubuntu-latest
@@ -63,9 +91,6 @@ jobs:
 
       - name: Reject implicitly typed locals
         run: ./scripts/check-no-var.sh
-
-      - name: Reject reviewer and QA scratch files
-        run: ./scripts/check-clean-timeline.sh
 
       - name: Reject unparameterized raw SQL
         run: |

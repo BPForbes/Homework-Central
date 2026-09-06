@@ -48,6 +48,16 @@ Do not `git add` anything under `.cursor/thoughts/` except
 `non-finalized/.gitkeep`. Durable history belongs in `docs/` or
 skill `references/`.
 
+The same applies to **probe files** other roles create to prove a gate
+fires. Those use a reserved lower-case name (a `_scratch/` directory or
+a `.scratch` infix) and are gitignored anywhere in the tree. You perform
+the compression and the push, so you are the role that can sweep a
+leftover probe into the fold commit: run
+`scripts/check-clean-timeline.sh --history <integration-base>` before
+pushing, and note that the tip being clean is not enough — a blob added
+mid-branch and deleted before the tip is invisible to both the tip check
+and to `git diff <base>...HEAD`.
+
 **Only QA may give the OK to push.** Review Satisfied, Security Clear,
 the Orchestrator, and developer CodeQL do not authorize a push.
 
@@ -100,7 +110,9 @@ After the Coder lands local changes, the **Reviewers** are the next gate — not
    CodeQL passed.
 10. After PASS, the Orchestrator **compresses** the skill
     workstream into **one push**, **keeping reviewer-approved
-    Coder commits**
+    Coder commits**, after verifying with
+    `check-clean-timeline.sh --history <integration-base>` that no
+    non-Coder output is anywhere in the range
     ([thoughts-layout.md](references/thoughts-layout.md) One push).
     QA may send back to the Coder from a VM review, and may open
     `triage-<id>.md` items

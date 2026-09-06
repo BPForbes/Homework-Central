@@ -75,6 +75,11 @@ Also: `/review-bugbot`, `review the diff`, `look but don't edit`.
   `.cursor/thoughts/non-finalized/review-<topic>.md`.
 - **Do not edit product code, workflows, or docs to "fix" findings** while
   acting as `/code-review`. Hand remediations to the Coder.
+- Probe in a throwaway clone where you can. A probe that must sit in
+  this worktree takes a reserved lower-case name (`_scratch/` or a
+  `.scratch` infix) and is deleted before you report; a probe that
+  edited a tracked file is undone with `git checkout -- <exact path>`.
+  Finish `git status --short` clean of files you created.
 - Do not push. **Only QA may give the OK to push.**
 
 ## `/repro` — reproduce before declaring a cause
@@ -83,6 +88,9 @@ Also: `reproduce`, `write a repro`.
 
 - Recreate the failure with exact commands, inputs, and exit codes.
 - Write the repro to `.cursor/thoughts/non-finalized/repro-<topic>.md`.
+- Files the repro *creates* in the project tree are process output and
+  never land: use a throwaway clone, or a reserved lower-case name
+  (`_scratch/`, `.scratch`), and clean up before reporting.
 - Do not claim a root cause until the repro ran (or the environment cannot
   run it — then say so).
 

@@ -30,16 +30,27 @@ claude-mem/
 # Transient DevOps thoughts (review, repro, research, goals, Push JSON).
 # Never commit these. Moving them to finalized later does not remove
 # blobs from already-pushed commits. Keepfile only.
-.cursor/thoughts/non-finalized/**
+# The whole subtree is ignored rather than the two known subdirectories, so a
+# file dropped straight into .cursor/thoughts/ is covered too. The directory
+# re-include is required: without it the .gitkeep negation cannot be reached.
+.cursor/thoughts/**
+!.cursor/thoughts/non-finalized/
 !.cursor/thoughts/non-finalized/.gitkeep
-.cursor/thoughts/finalized/**
 
 # Reviewer / Security / QA scratch files. A probe that exercises the compiler
 # or a linter has to sit inside a real project directory, so it cannot live
 # under .cursor/thoughts/. These reserved names may appear anywhere and are
-# never committed: only Coder edits belong on the submitted timeline.
+# never committed: reviewer, Security and QA process output does not belong on
+# the submitted timeline.
+#
+# Write them lower-case. These patterns are case-sensitive on Linux and on CI,
+# but core.ignorecase defaults to true on macOS and Windows, so `_Scratch/`
+# would be silently ignored there and tracked here. scripts/check-clean-timeline.sh
+# matches case-insensitively so any casing still fails the build rather than
+# behaving differently per platform.
 **/_scratch/
 **/*.scratch.*
+**/*.scratch
 
 # Review write-ups. These are thought-process output and belong under
 # .cursor/thoughts/non-finalized/, not in tracked history.
@@ -50,7 +61,9 @@ claude-mem/
 .codeql-db-javascript/
 .codeql-db-javascript-typescript/
 .codeql-db-rust/
-codeql-*.sarif
+# Any SARIF, not just codeql-*: a plain results.sarif is analysis output too,
+# and the guard rejects the broader set.
+*.sarif
 
 # Rust
 rust/target/

@@ -96,6 +96,7 @@ Either side may add a row. Answer in the same row (and in Push JSON
 - Rust Validation: PASS / FAIL / NOT RUN / NOT APPLICABLE
 - Rust Tests: PASS / FAIL / NOT RUN / NOT APPLICABLE
 - New unresolved CodeQL findings: N
+- Clean timeline (`check-clean-timeline.sh --history <base>`): PASS / FAIL / NOT RUN
 - Publish gate: PASS / BLOCKED
 - VM review / send-back to Coder:
 - Triage items (`triage-<id>.md`):

@@ -100,6 +100,9 @@ Minimum validation set:
 - Policy / secret scanning if available in repo CI
 - Smoke: health endpoints or `kubectl`/`compose` readiness
 - Rollback drill notes (or actual rollback dry-run)
+- Clean timeline: `scripts/check-clean-timeline.sh --history <integration-base>`
+  (the range scan, not the tip check — a net diff cannot see a path added
+  and later deleted)
 - Record exact commands and exit codes
 - Report the Definition of Done summary (PASS / FAIL / NOT RUN / NOT APPLICABLE)
 

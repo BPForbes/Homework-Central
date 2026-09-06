@@ -125,14 +125,49 @@ Clear, applicable CodeQL is satisfied, **and QA marks PASS**:
      `<integration-base>` (cherry-pick or rebase, dropping
      fold-only commits), then commit any remaining tip-tree
      delta as the fold commit.
-3. **Verify only Coder edits are landing.** Every path in
-   `git diff <integration-base>...HEAD --name-only` must be a Coder
-   edit. Reviewer, Security and QA output never lands: no review
-   thread, Push JSON, triage note, repro note, probe file, CodeQL
-   database, or SARIF dump. Run `scripts/check-clean-timeline.sh`
-   and confirm `git status --short` is clean, so no probe from any
-   role is swept into the fold commit. A probe found here means the
-   role that made it did not clean up — delete it and say so.
+3. **Verify no non-Coder output is in the range.** Run
+
+   ```
+   scripts/check-clean-timeline.sh --history <integration-base>
+   ```
+
+   Use the `--history` form, not the tip check and not
+   `git diff <integration-base>...HEAD --name-only`. Both of those are
+   blind to the case that actually happened here: a path added in one
+   commit and deleted in a later one has a net delta of zero, so it
+   appears in neither, while its blob still ships to every clone.
+   `.cursor/reviews/rust-optimization.md` reached this branch exactly
+   that way.
+
+   Also confirm `git status --short` is clean of files you created, so
+   no probe is swept into the fold commit.
+
+3a. **If the scan reports a path inside a keep-commit**, replaying that
+   commit verbatim would re-introduce the blob and step 3 would still
+   report clean. Strip the path from every commit in the range *before*
+   replaying:
+
+   ```
+   git filter-repo --path <path> --invert-paths --refs <integration-base>..HEAD
+   ```
+
+   `git filter-repo` is the supported tool
+   ([git-filter-branch warns and points at it](https://git-scm.com/docs/git-filter-branch)).
+   Where it is not installed:
+
+   ```
+   git filter-branch -f --index-filter \
+     'git rm -r --cached --ignore-unmatch <path>' \
+     --prune-empty <integration-base>..HEAD
+   ```
+
+   Both refuse to run with a dirty worktree (`Cannot rewrite branches:
+   You have unstaged changes`), so commit or stash first.
+
+   Then re-run the step 3 scan, and confirm `git diff` between the old
+   and new tip is **empty** — the rewrite must change history only, not
+   content.
+
 4. Push once. If the remote still has the pre-rewrite history,
    `git push --force-with-lease` (safer than `--force`). The
    Client authorizes this rewrite for this skill’s final
@@ -142,24 +177,55 @@ That is the only remote push for the skill run. Reviewers still
 compare each Coder rewrite’s Push JSON to the real local
 `git diff <integration-base>...HEAD` before that rewrite.
 
-## Scratch files (all non-Coder roles)
+## Scratch files (Reviewer, Security, QA)
 
-A probe that exercises a compiler or linter cannot live under
-`.cursor/thoughts/` — it has to sit inside a real project directory.
-So two reserved names are gitignored **anywhere** in the tree:
+The rule is about the **class of output**, not who typed it. Review
+threads, Push JSON, triage and repro notes, probe files, CodeQL
+databases and SARIF dumps never land. Product, pipeline, infra, test
+code and durable `docs/` updates do land as keep-commits, whichever
+role drafted them.
+
+**Prefer a throwaway clone**: `git clone --no-hardlinks . /tmp/probe`.
+The shared worktree is untouched, other roles' in-flight work is safe,
+and it is the only way to test a filename the convention forbids. Use
+a reserved name only when the probe must sit in this worktree — for
+instance when it needs the existing build artifacts.
+
+Two reserved names are gitignored **anywhere** in the tree:
 
 | Form | Example |
 |------|---------|
 | `_scratch/` directory | `backend/HomeworkCentral.Api/_scratch/Probe.cs` |
-| `.scratch.` infix | `backend/HomeworkCentral.Api/Probe.scratch.cs` |
+| `.scratch` infix or suffix | `backend/HomeworkCentral.Api/Probe.scratch.cs` |
 
-Reviewers, Security and QA must use one of these for every probe and
-must delete them before reporting. `.gitignore` stops an accidental
-`git add`; `scripts/check-clean-timeline.sh` runs in CI and fails the
-build on a force-added probe, a tracked thought file, or a committed
-CodeQL database or SARIF dump.
+Write them **lower-case**. `.gitignore` cannot case-fold portably, and
+`core.ignorecase` defaults to true on macOS and Windows, so `_Scratch/`
+would be silently ignored there and tracked on Linux and CI.
+`scripts/check-clean-timeline.sh` matches case-insensitively, so any
+casing fails the build rather than behaving differently per platform.
 
-A fixed-name probe (a nested `.editorconfig`, `Directory.Build.props`
-or `Directory.Build.targets`) cannot take a reserved name. Delete
-those immediately after the probe — a nested `.editorconfig` is
-independently rejected by `scripts/check-no-var.sh`.
+Delete a probe before reporting. A probe that **edited a tracked file**
+is undone with `git checkout -- <exact path>` — never
+`git checkout -- .`, `git restore :/` or `git stash`, which destroy
+other roles' uncommitted work. Finish with `git status --short` clean
+**of files you created**; list anything else by path and leave it.
+
+`.gitignore` stops an accidental `git add`;
+`scripts/check-clean-timeline.sh` is the CI backstop for a `git add -f`,
+and with `--history` it also catches a blob that was added and later
+deleted within the branch.
+
+### Fixed-name probes
+
+Some probes cannot take a reserved name because the tool only reads a
+fixed filename: `.editorconfig`, `Directory.Build.props`/`.targets`,
+`.gitignore`, `global.json`, `eslint.config.js`/`.eslintrc*`,
+`.gitattributes`, and anything under `frontend/public/` that must keep
+a servable name. Delete these immediately after the probe and say so.
+
+Three are independently rejected so a leftover cannot go unnoticed: a
+non-root `.editorconfig` and a non-root `Directory.Build.props`/
+`.targets` by `scripts/check-no-var.sh`, and a non-root `.gitignore` by
+`scripts/check-clean-timeline.sh`. That last one matters most — a
+nested `.gitignore` containing `!*.scratch.*` re-includes both reserved
+names for its entire subtree and defeats the first layer outright.

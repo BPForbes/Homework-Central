@@ -23,11 +23,25 @@ and `.cursor/skills/devops-multi-agent-team/references/thoughts-layout.md`.
 - After QA PASS on this concept, the Orchestrator moves those files to
   `.cursor/thoughts/finalized/` (still local). Do not `git add` thoughts.
   Do not put thought dumps in `docs/`.
-- A probe file that must sit inside a real project directory uses a
-  reserved gitignored name — a `_scratch/` directory or a `.scratch.`
-  infix — and must be deleted before you report, leaving
-  `git status --short` clean. Only Coder edits land on the committed
-  timeline; `scripts/check-clean-timeline.sh` enforces that in CI.
+- Reviewer, Security and QA **process output** never lands on the
+  committed timeline: review threads, Push JSON, triage and repro notes,
+  probe files, CodeQL databases and SARIF dumps. Product, pipeline,
+  infra, test code and durable `docs/` updates *do* land, as
+  reviewer-approved keep-commits, whichever role drafted them. The rule
+  is about the class of output, not about who typed it.
+- Prefer probing in a throwaway clone
+  (`git clone --no-hardlinks . /tmp/probe`). That keeps the shared
+  worktree untouched and is the only way to test a name the convention
+  forbids. When a probe must sit in this worktree, give it a reserved
+  gitignored name — a lower-case `_scratch/` directory or a `.scratch.`
+  infix — and delete it before you report.
+- Undo a probe that *edited* a tracked file with
+  `git checkout -- <exact path>`. Never `git checkout -- .`, never
+  `git restore :/`, never `git stash`: the worktree is shared and those
+  destroy other roles' in-flight work. Finish with `git status --short`
+  clean **of files you created**; anything else, list by path in your
+  report and leave in place. `scripts/check-clean-timeline.sh` enforces
+  this in CI.
 - When sending or bouncing work, append a **Handoff** block (From, To,
   Pass-along, Sent back because, Ask).
 - Reuse existing helpers, scripts, and docs. Do not duplicate them.
@@ -595,19 +609,30 @@ unless repository policy or the GitHub Actions configuration requires all applic
 
 ---
 
-## Your files never land on the timeline
+## Your process output never lands on the timeline
 
-Only Coder edits belong in history. Your reproductions, probes, VM
-notes and SARIF dumps do not.
+Your reproductions, probes, VM notes and SARIF dumps stay out of
+history. Product, pipeline, infra, test code and durable `docs/`
+updates do land, whichever role drafted them.
 
-- Name any probe with a reserved gitignored name: a `_scratch/`
+- Prefer probing in a throwaway clone
+  (`git clone --no-hardlinks . /tmp/probe`). When a probe must sit in
+  this worktree, use a reserved lower-case name: a `_scratch/`
   directory or a `.scratch.` infix (`Repro.scratch.cs`).
-- Delete every probe before you give a verdict.
+- Delete every probe before you give a verdict. Undo a probe that
+  edited a tracked file with `git checkout -- <exact path>` — never
+  `git checkout -- .`, `git restore :/` or `git stash`, because the
+  worktree is shared.
+- Finish with `git status --short` clean **of files you created**.
+  List anything else by path in your verdict and leave it in place;
+  you are the role most likely to clobber another's in-flight work.
 - Verdicts, repro notes and triage items go under
   `.cursor/thoughts/non-finalized/`, which is gitignored. Never
   `git add -f` one, and never write them into `docs/`.
-- You own the last look before the push: confirm the diff contains
-  Coder edits only. See the Final Pre-Publish Gate below.
+- You own the last look before the push. The tip being clean is not
+  enough: a blob added mid-branch and deleted before the tip is absent
+  from both the tip and from `git diff <base>...HEAD`, yet ships to
+  every clone. Run the history scan. See the Final Pre-Publish Gate.
 
 ## Final Pre-Publish Gate
 
@@ -634,12 +659,21 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] Rust CodeQL analysis succeeds
 [ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
-[ ] `scripts/check-clean-timeline.sh` passes
-[ ] `git status --short` is clean — no probe file from you, a Reviewer,
-    or Security is left in the tree
-[ ] Every path in `git diff <integration-base>...HEAD --name-only` is a
-    Coder edit. No review thread, Push JSON, triage note, probe,
-    CodeQL database or SARIF dump is in the diff
+[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes.
+    This is the range scan, not the tip check: no reserved scratch name,
+    `.cursor/reviews/` path, thought file other than `.gitkeep`, CodeQL
+    database or SARIF dump was added in ANY commit in the range. A net
+    diff cannot see a path that was added and later deleted, and that is
+    the exact way a review write-up reached this branch's history
+[ ] `git status --short` is clean of files you created. Anything else is
+    listed by path in your verdict and left in place
+[ ] `git diff <integration-base>...HEAD --name-only` contains no path
+    outside `backend/`, `frontend/`, `rust/`, `scripts/`, `docs/`,
+    `deploy/`, `.github/`, `.cursor/` and the tracked root config files.
+    Anything else is escalated to the Orchestrator rather than judged
+    here. ("Is this a Coder edit?" is not decidable from git — every
+    commit carries the same committer — so this is an allowlist sweep
+    plus the range scan above, not an authorship check)
 
 If any required item is incomplete or failing:
 

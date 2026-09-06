@@ -1687,6 +1687,15 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] Rust CodeQL analysis succeeds
 [ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
+[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes.
+    The range scan, not the tip check: a net diff cannot see a path that
+    was added in one commit and deleted in a later one, and that is
+    exactly how a review write-up reached this branch's history
+[ ] `git status --short` is clean of files you created; anything else is
+    listed by path and left in place
+[ ] `git diff <integration-base>...HEAD --name-only` contains no path
+    outside backend/, frontend/, rust/, scripts/, docs/, deploy/,
+    .github/, .cursor/ and the tracked root config files
 
 If any required item is incomplete or failing:
 

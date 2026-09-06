@@ -118,13 +118,33 @@ When CodeGraph / Graphify are installed (see [`SETUP.md`](./SETUP.md)):
   `claude-mem/`, `node_modules/`, `.codeql-db-csharp/`, `.codeql-db-javascript/`,
   `.codeql-db-rust/`, `.cursor/thoughts/`).
 - Do not commit local CodeQL SARIF dumps (`codeql-*.sarif`).
-- Only Coder edits belong on the committed timeline. Reviewer, Security and QA
-  output never lands: review threads, Push JSON, triage and repro notes, probe
-  files, CodeQL databases and SARIF dumps. Probes that must sit inside a real
-  project directory use a reserved gitignored name — a `_scratch/` directory or
-  a `.scratch.` infix — and the role that created one deletes it before
-  reporting. `scripts/check-clean-timeline.sh` runs in CI and fails the build on
-  a force-added probe, a tracked thought file, or a committed CodeQL database.
+- Reviewer, Security and QA **process output** never lands on the committed
+  timeline: review threads, Push JSON, triage and repro notes, probe files,
+  CodeQL databases and SARIF dumps. Product, pipeline, infra, test code and
+  durable `docs/` updates *do* land, as reviewer-approved keep-commits,
+  whichever role drafted them — the rule is about the class of output, not who
+  typed it.
+- Probe in a throwaway clone (`git clone --no-hardlinks . /tmp/probe`) where
+  you can; the shared worktree stays untouched and it is the only way to test a
+  filename the convention forbids. When a probe must sit in this worktree, give
+  it a reserved lower-case name — a `_scratch/` directory or a `.scratch` infix
+  — and delete it before reporting. Undo a probe that *edited* a tracked file
+  with `git checkout -- <exact path>`, never `git checkout -- .`,
+  `git restore :/` or `git stash`. Write reserved names lower-case:
+  `.gitignore` cannot case-fold portably, so `_Scratch/` is silently ignored on
+  macOS and tracked on Linux.
+- `scripts/check-clean-timeline.sh` is the CI backstop, and it is name-based,
+  not intent-based. It rejects a **tracked** file matching a reserved scratch
+  name (any casing), a thought file other than `.gitkeep`, a `.cursor/reviews/`
+  write-up, a CodeQL database, a `.sarif` dump, `.code-review-graph/`,
+  `.codegraph/`, and any non-root `.gitignore` — a nested one can re-include
+  the reserved names for its whole subtree. It does **not** detect a probe that
+  simply used an ordinary filename, so the naming convention protects only
+  reviewers who follow it; the review bar, not the grep, is what catches the
+  rest. Its `--history <base>` form additionally scans every commit in a range,
+  which the tip check and `git diff <base>...HEAD` both miss: a path added in
+  one commit and deleted in a later one has a net delta of zero yet its blob
+  ships to every clone.
 - Confirm destructive actions (deletes, force-pushes, hard resets) with the user.
 
 ## UI and styling work
@@ -712,6 +732,15 @@ Immediately before pushing, publishing, opening/updating a PR, or merging, verif
 [ ] Rust CodeQL analysis succeeds
 [ ] Rust SARIF results are reviewed
 [ ] No unresolved CodeQL finding introduced by the current change remains
+[ ] `scripts/check-clean-timeline.sh --history <integration-base>` passes.
+    The range scan, not the tip check: a net diff cannot see a path that
+    was added in one commit and deleted in a later one, and that is
+    exactly how a review write-up reached this branch's history
+[ ] `git status --short` is clean of files you created; anything else is
+    listed by path and left in place
+[ ] `git diff <integration-base>...HEAD --name-only` contains no path
+    outside backend/, frontend/, rust/, scripts/, docs/, deploy/,
+    .github/, .cursor/ and the tracked root config files
 
 If any required item is incomplete or failing:
 

@@ -103,6 +103,30 @@ thread. Either side may ask or answer. If there is no tree
 change, keep `files` as `{}` and do not commit. An **active**
 item restarts research → coder → reviewer → QA for that id.
 
+## What lands on the committed timeline
+
+The rule is about the **class of output**, not who typed it.
+
+Reviewer, Security and QA **process output** never lands: review
+threads, Push JSON, triage and repro notes, probe files, CodeQL
+databases and SARIF dumps. Product, pipeline, infra, test code and
+durable `docs/` updates *do* land as reviewer-approved keep-commits,
+whichever role drafted them.
+
+Prefer probing in a throwaway clone
+(`git clone --no-hardlinks . /tmp/probe`). When a probe must sit in the
+shared worktree, use a reserved lower-case name — a `_scratch/`
+directory or a `.scratch` infix — and delete it before reporting. Undo
+a probe that edited a tracked file with `git checkout -- <exact path>`,
+never `git checkout -- .`, `git restore :/` or `git stash`. Finish with
+`git status --short` clean **of files you created**; list anything else
+by path and leave it in place.
+
+`scripts/check-clean-timeline.sh` enforces this in CI, and its
+`--history <base>` form also catches a blob added and later deleted
+inside the branch. Details and the fixed-name probe list:
+[thoughts-layout.md](thoughts-layout.md).
+
 ## Reuse existing structures
 
 Every role searches for an existing helper, script, workflow, or
