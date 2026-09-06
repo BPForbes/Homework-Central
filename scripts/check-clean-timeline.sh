@@ -114,6 +114,18 @@ report() {
 
 # Reserved scratch names, at any depth. `\.scratch(\.|$)` so an extensionless
 # `Probe.scratch` is covered as well as `Probe.scratch.cs`.
+#
+# `(\.|$)` deliberately does not match a `.scratch` followed by anything else,
+# which keeps `x.scratchpad` and `docs/scratchpad.md` out of it. One consequence
+# is worth writing down, because it looks like a bypass and is not: a path such
+# as `a.scratch<newline>b` is no longer matched, where the previous
+# line-oriented `grep -Ei` matched it because the newline ended the line and so
+# satisfied `$`. That path is not a reserved name — `.gitignore`'s `**/*.scratch`
+# and `*.scratch.*` do not cover it either — so the gate and the ignore rules now
+# agree, where before the gate rejected something git would happily track. A
+# probe deliberately named to fall outside the convention escapes both
+# mechanisms, which is the standing property of this script: it is a backstop
+# against a force-added *reserved* name, not a detector of arbitrary files.
 scratch_re='(^|/)_scratch/|\.scratch(\.|$)'
 # Local analysis output. Anchored to any path segment rather than the repository
 # root, matching how .gitignore already treats these directories.
