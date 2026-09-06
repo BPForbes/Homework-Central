@@ -23,9 +23,11 @@ Push JSON `qa` (same ids).
 ## Interrupt, goals, Handoff
 
 Pause only conflicting work. Start from research, then code.
-Stay on the current branch. An interrupt does **not** authorize
-a push. Write `goal-<role>-<topic>.md` under `non-finalized/`;
-move to `finalized/` after QA. See [thoughts-layout.md](thoughts-layout.md).
+Stay on the current **real** branch; Coders use a skill
+**side-branch** ([side-work.md](side-work.md)). An interrupt does
+**not** authorize a push. Write `goal-<role>-<topic>.md` under
+`non-finalized/`; move to `finalized/` after QA. See
+[thoughts-layout.md](thoughts-layout.md).
 
 ```markdown
 ## Handoff
@@ -40,9 +42,13 @@ A send-back without **Sent back because** is incomplete.
 
 Coder writes `push-<topic>.json` and a Handoff `To: Reviewer`
 **before the first review** ([push-json.md](push-json.md)).
-Update on every rewrite. Reviewers compare it to
-`git diff <integration-base>...HEAD`. Satisfied does **not**
-authorize a git push.
+Coders may open `qa` rows to Reviewers for clarification.
+Update on every rewrite. Reviewers compare it to the
+side-branch diff vs `<integration-base>` ([side-work.md](side-work.md)).
+Satisfied does **not** authorize a git push. **Block** if
+CodeRabbit findings are `open` or CR was NOT RUN on a code change;
+send those notes to the Coder. Either role may `wontfix` a CR
+finding with `why`.
 
 Quality or bug-standard fail → VM review, Handoff `To: Coder`.
 QA blocked / send-back / not pleased → `triage-<id>.md`;

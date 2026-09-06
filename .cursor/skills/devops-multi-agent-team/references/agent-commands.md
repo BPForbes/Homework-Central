@@ -22,8 +22,9 @@ do not push. Orchestrator pushes only after QA PASS. Agent table:
 
 ## `/code-review`
 
-**Owner: QA.** Inspect only. Confirm Coder Push JSON. Always
-`git diff <integration-base>...HEAD`. Write `review-<topic>.md`.
+**Owner: QA.** Inspect only. Confirm Coder Push JSON and
+`cr-<topic>.md`. Diff the side-branch vs `<integration-base>`
+([side-work.md](side-work.md)). Write `review-<topic>.md`.
 **Do not edit** product code. Probes:
 [thoughts-layout.md](thoughts-layout.md).
 

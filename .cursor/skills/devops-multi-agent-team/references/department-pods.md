@@ -74,4 +74,6 @@ helping on another item.
 - Do not start Coder *N* before Research *N* is done (new work).
 - Record primaries, finish-the-line handoffs, and QA swaps.
 - Gates: no push while review is open; Security before publish;
-  **only QA may give the OK to push.**
+  **only QA may give the OK to push.** Coders cut a skill
+  side-branch; no shared commits until QA PASS
+  ([side-work.md](side-work.md)).

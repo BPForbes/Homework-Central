@@ -7,7 +7,8 @@ See [thoughts-layout.md](thoughts-layout.md).
 ```markdown
 # Review: <topic>
 
-**Branch:** <current checkout; do not invent a new name>
+**Branch:** <shared checkout; do not invent a real git branch>
+**Side-branch:** `side/<dept>-<topic>` (`side-<dept>.md`)
 **Status:** In review | Changes requested | Satisfied — ready for security | Closed
 **Push policy:** Only QA may give the OK to push.
 
@@ -18,7 +19,7 @@ See [thoughts-layout.md](thoughts-layout.md).
 ## Push JSON
 - Latest: `.cursor/thoughts/non-finalized/push-<topic>.json`
 - Coder writes this **before the first review**. Reviewers compare
-  it to `git diff <integration-base>...HEAD`.
+  it to the side-branch tree vs `<integration-base>`.
 
 ## Change summary (Coder)
 - Files / Intent / Notify (Handoff + Push JSON path)
@@ -33,10 +34,15 @@ See [thoughts-layout.md](thoughts-layout.md).
 |----------|---------|-------|
 | reviewer-1 | Changes requested / Satisfied | … |
 
+## CodeRabbit
+- File: `cr-<topic>.md` · CLI: `cr review findings`
+- Open findings **block** Satisfied / PASS. `wontfix` needs `why`.
+
 ## Q&A (Coder ↔ Reviewer)
 | Id | From | To | Ask | Answer | Status |
 |----|------|----|-----|--------|--------|
 | q1 | Reviewer | Coder | … | | open |
+| q2 | Coder | Reviewer | … | | open |
 
 ## Coder response (round N)
 - Replies + what changed; q-ids closed

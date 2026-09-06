@@ -25,12 +25,16 @@ picks the item up ([department-pods.md](department-pods.md)).
 
 ## 3. Coder
 
-Implement only what the plan authorizes. Stay on the current
-non-`main` branch. Keep secrets out of git. Prefer idempotent,
-non-interactive scripts. Run applicable CodeQL before Reviewers
-(does **not** authorize a push). Keep changes local until **QA
-gives the OK**. Write `push-<topic>.json` **before the first
-review**. Ask Researcher for a reuse map before duplicating code.
+Implement only what the plan authorizes. **Cut a skill
+side-branch** (not `git checkout -b`); edit in that clone / VM
+([side-work.md](side-work.md)). Do not commit on the shared
+checkout. Keep secrets out of git. Prefer idempotent,
+non-interactive scripts. Run applicable CodeQL and CodeRabbit
+(`cr review --agent --uncommitted --include-untracked --base
+<integration-base>`) before Reviewers — neither authorizes a
+push. Write `push-<topic>.json` and any Coder→Reviewer `qa`
+rows **before the first review**. Ask Researcher for a reuse
+map before duplicating code.
 
 ## 3b. Documentation & Research (online media)
 
@@ -40,13 +44,15 @@ review thread.
 
 ## 3c. Reviewers (entrypoint before QA)
 
-PR-style review. Compare Push JSON to
-`git diff <integration-base>...HEAD` ([push-json.md](push-json.md)).
-Cite research brief, reuse map, `docs/`, and fetched URLs.
-Duplicated code → request an import. Iterate until Satisfied.
-Satisfied does **not** authorize a push. Primaries:
-[department-pods.md](department-pods.md). Template:
-[review-thread-template.md](review-thread-template.md).
+PR-style review. Compare Push JSON to the side-branch tree vs
+`<integration-base>` ([side-work.md](side-work.md),
+[push-json.md](push-json.md)). **Block Satisfied** if CodeRabbit
+findings are `open` or CR was NOT RUN on a code change; send
+CR + review notes to the Coder. Cite research brief, reuse map,
+`docs/`, and fetched URLs. Duplicated code → request an import.
+Iterate until Satisfied. Satisfied does **not** authorize a
+push. Primaries: [department-pods.md](department-pods.md).
+Template: [review-thread-template.md](review-thread-template.md).
 
 ## 4. Security (after Satisfied)
 
@@ -66,8 +72,9 @@ Done. **Only QA may give the OK to push.** Fail → Handoff
 `To: Coder` from a **VM** review. Open `triage-<id>.md` when
 blocked / sent back / not pleased; Research *N* joins the Coder
 who picks it up ([triage-template.md](triage-template.md)). After
-PASS, list thoughts to finalize, then one push that **keeps
-reviewer-approved Coder commits**.
+PASS, list thoughts to finalize. Orchestrator keep-commit(s)
+from the approved side-branch tree, then one push. **Block
+PASS** if CodeRabbit findings are `open` on a code change.
 
 ## 6–11. Later passes
 

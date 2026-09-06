@@ -12,12 +12,14 @@ Also: `/review-bugbot`, `review the diff`, `look but don't edit`.
 Primary owner: **QA** (`.cursor/agents/devops-quality-engineer.md`). Reviewers may use the same inspect-only bar.
 
 1. Confirm the Coder Push JSON exists (required before the first
-   review). Read it as an index, then **always** read the real
-   `git diff <integration-base>...HEAD`, tests, logs, and SARIF.
-   Compare the JSON `files` and `delta`s to that three-dot name
-   list and `--numstat`, not to `git show HEAD` alone. An omitted
-   or wrong hunk is a finding. Do not mark the review done from
-   the JSON alone.
+   review). Read it as an index, then **always** read the
+   side-branch tree vs `<integration-base>` (see
+   `.cursor/skills/devops-multi-agent-team/references/side-work.md`),
+   plus tests, logs, and SARIF. Compare the JSON `files` and
+   `delta`s to that name list and `--numstat`, not to
+   `git show HEAD` alone. An omitted or wrong hunk is a finding.
+   Do not mark the review done from the JSON alone. Confirm
+   `cr-<topic>.md` on a code change; open CR findings block.
 2. Scan the diff for implicitly typed locals first. A `var` in C# or
    TypeScript is a **blocking** finding: record it with the file and
    line and the explicit type the Coder should use. Do not mark a
