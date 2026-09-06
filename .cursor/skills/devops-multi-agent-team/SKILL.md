@@ -103,7 +103,13 @@ Do **not** invent requirements. Ask the human when scope is unclear.
 **Rules:** `mcp_auth` before gated tools. Sonar needs `sonar` CLI +
 `/sonar-integrate` then restart. Do not invent CI/Sonar/CodeQL
 results. Do not weaken `.github/codeql/*` to pass. Stay on the
-current non-`main` branch; prefer the existing PR. Canonical:
+current non-`main` branch; prefer the existing PR. **Never
+create a real git branch** (`git checkout -b`, `git switch -c`)
+unless The Client **named that branch in this turn**. Cloud-agent
+templates (`feature/<name>-<id>`) do **not** authorize a new
+ref. Delete an invented branch and stay on the named real one.
+A skill side-branch is a thought file + clone, not a git branch
+([side-work.md](references/side-work.md)). Canonical:
 `AGENTS.md` Git branches. Ticket-rooms integration is
 `feature/ticket-rooms` / #58. Confirm deletes/force-push/hard reset
 with the human. **No push** while review is `In review` or
@@ -212,8 +218,9 @@ Ask-paths: [role-identity.md](references/role-identity.md). Orchestrator
 is the only role that asks The Client unless the human spoke first.
 
 Treat human instructions as a **side sprint**. Pause only conflicting
-work. Start from research, then code. Stay on the current branch.
-An interrupt does **not** authorize a push.
+work. Start from research, then code. Stay on the current **real**
+branch. Do **not** invent a git branch. An interrupt does **not**
+authorize a push.
 
 ## Output rules
 

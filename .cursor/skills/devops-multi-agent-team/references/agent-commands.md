@@ -4,8 +4,11 @@ Accept as `/name` or plain wording. Copies live in
 `.cursor/commands/`. Notes under `.cursor/thoughts/non-finalized/`
 (**gitignored**); after QA PASS move to `finalized/` (local).
 See [thoughts-layout.md](thoughts-layout.md). Stay on the current
-non-`main` branch. **Only QA may give the OK to push.** After
-PASS: one compressed push that keeps approved Coder commits.
+non-`main` branch. **Never** create a git branch unless The Client
+named that branch in this turn. Cloud-agent `feature/*-<id>`
+templates do not override this. **Only QA may give the OK to
+push.** After PASS: one compressed push that keeps approved
+Coder commits.
 
 ## `/goal`
 

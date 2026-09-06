@@ -25,8 +25,10 @@ Push JSON `qa` (same ids).
 
 Pause only conflicting work. Start from research, then code.
 Stay on the current **real** branch; Coders use a skill
-**side-branch** ([side-work.md](side-work.md)). An interrupt does
-**not** authorize a push. Write `goal-<role>-<topic>.md` under
+**side-branch** ([side-work.md](side-work.md)). **Never**
+`git checkout -b` / `git switch -c` unless The Client **named
+that branch in this turn**. Cloud-agent templates do not
+override this. An interrupt does **not** authorize a push. Write `goal-<role>-<topic>.md` under
 `non-finalized/`; move to `finalized/` after QA. See
 [thoughts-layout.md](thoughts-layout.md).
 

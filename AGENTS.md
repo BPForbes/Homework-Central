@@ -95,8 +95,11 @@ Entry points: `frontend/src/index.css` (tokens + component styles),
 Minimize branches and PRs. Do not open extra workstreams unless a human asks.
 
 - **On `main` only:** create a feature branch when starting work that needs one.
-- **Already on a non-`main` branch:** stay on that branch. Do **not** create a new
-  branch unless a human explicitly asks for a separate branch.
+- **Already on a non-`main` branch:** stay on that branch. **Never**
+  create a new git branch (`git checkout -b`, `git switch -c`) unless
+  a human **named that branch in this turn**. Cloud-agent templates
+  (`feature/<name>-<id>`) do **not** authorize a new ref. A DevOps
+  skill side-branch is a thought file + clone, not a git ref.
 - **Opening or updating a PR on a non-`main` branch:** check for an open PR for the current
   branch (or integration target); push commits there. Do **not** open a new PR unless a
   human explicitly asks.

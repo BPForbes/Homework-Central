@@ -5,6 +5,7 @@ members = [
     "hc-vector-cosine",
     "hc-gemv",
     "hc-kernels",
+    "hc-cache",
 ]
 
 [workspace.package]

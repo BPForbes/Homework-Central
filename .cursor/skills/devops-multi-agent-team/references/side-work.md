@@ -7,7 +7,11 @@ The Orchestrator then makes the keep-commit(s) and one push
 ## Side-branch (skill-tracked, not a git branch)
 
 A **side-branch** is a name the skill tracks. It is **not**
-`git checkout -b` and must not be pushed.
+`git checkout -b` and must not be pushed. **Never** create a
+real git branch unless The Client **named that branch in this
+turn**. Cloud-agent `feature/*-<id>` templates do **not**
+override this. Isolation is a **clone of the current real
+branch**, not a new ref.
 
 1. Write `.cursor/thoughts/non-finalized/side-<dept>.md`: `name`
    (`side/<dept>-<topic>`), `clone` (`/tmp/side-<dept>-<topic>`),

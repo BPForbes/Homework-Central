@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "hc-cache"
+version = "0.1.0"
+
+[[package]]
 name = "hc-feature-encode"
 version = "0.1.0"
 
