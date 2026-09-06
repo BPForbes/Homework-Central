@@ -32,9 +32,9 @@ Hard rules:
   has no nameable type; prefer keeping anonymous types inline (as every current
   call site does) so the exception does not arise.
 - Do not write the word `var` in C# **prose** either — comments, XML docs and
-  string literals included. Write "implicitly typed local". The gate matches the
-  bare word, which is what lets it be simple and complete (see below); the word
-  occurs nowhere in the current C# sources, so this costs nothing today.
+  string literals included. Write "implicitly typed local". The backstop script
+  matches the bare word; the word occurs nowhere in the current C# sources, so
+  this costs nothing today.
 - Do not use C# `dynamic` for locals, fields, parameters, return types or type
   arguments. `var` is statically typed and merely inferred; `dynamic` defers
   binding to runtime, so it is the one construct genuinely less typed than
@@ -49,191 +49,22 @@ Hard rules:
   `@typescript-eslint/no-explicit-any` rejects the explicit form, so inference
   there is already fully checked. Requiring annotations would add churn without
   adding type safety.
-- These rules are enforced, not advisory. Three gates split the work by what
-  each can actually parse, which matters more than it sounds: two review rounds
-  spent trading regex false positives against regex bypasses one line at a time
-  before the work was divided this way.
-  - **Roslyn owns every C# declaration.** `csharp_style_var_*` is `error` in
-    `.editorconfig` and `EnforceCodeStyleInBuild` is on in
-    `Directory.Build.props`, so an implicitly typed local fails `dotnet build`
-    and CI as `IDE0008`. CI compiles all four `csproj`, which between them
-    cover every tracked `.cs` file, so this is complete rather than partial.
-    (`IDE0007` is the inverse rule and cannot fire while those settings are
-    `false`.)
-  - **eslint owns web files it can parse.** `no-var` and `prefer-const` fail
-    `npm run lint` for `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.cjs`, `.mjs`,
-    `.jsx`, and — through `eslint-plugin-html` — inline `<script>` in `.html`,
-    `.htm` and `.xhtml`. The HTML processor hands eslint the real script text,
-    so it is parsed, not pattern-matched. That distinction is the whole reason
-    the plugin is a dependency: a grep over HTML cannot tell a `var` in code
-    from one inside a comment or a string, and every filter added to teach it
-    the difference became a way to hide a `var` from it.
-    Two web surfaces are **not** covered, both currently empty: script inside
-    `.svg`, and an inline event attribute such as `onclick="var x=1"`, which the
-    HTML processor does not extract. Adding either means adding a gate.
-    Scope matters as much as extension: `npm run lint` and `lint:ci` run with
-    `working-directory: frontend`, so they cover `frontend/` and nothing else.
-    Web files elsewhere are covered by the root `eslint.config.mjs`, and
-    `check-no-var-config.sh --web` fails on any tracked web file that neither
-    config claims — which is what keeps "eslint owns every web file" from
-    quietly becoming false the next time someone adds a directory.
-  - **`npm run lint:ci` re-runs eslint with `--no-inline-config`.** A blanket
-    `/* eslint-disable */` or a bare `// eslint-disable-next-line` names no rule,
-    so it silences `no-var` while a scan looking for the rule name beside the
-    directive sees nothing. `--no-inline-config` ignores every directive, which
-    is why it is a separate script: the plain `npm run lint` keeps the one
-    legitimate warn-level `react-hooks/exhaustive-deps` directive working.
-    `check-no-var-config.sh --web` proves that script still works by planting a
-    `var` behind a blanket disable and requiring `lint:ci` to name **that probe**
-    in its output. A bare non-zero exit was not enough: any pre-existing error
-    in the tree satisfied it, so with a real `var` behind a blanket disable in
-    `frontend/src/main.tsx`, `lint:ci` failed because of *that* `var` and the
-    gate read its own probe as rejected. Same forged-signal shape as the C#
-    `<Error Text="IDE0008">`, same answer. The probe's name is random per run
-    for the same reason the C# one is.
-  - **`scripts/check-no-var-config.sh` asserts the analyzers are on at all.**
-    The three gates above all assume that, and nothing checked it. Two verified
-    bypasses were one word deep: `'no-var': 'error'` to `'off'` in
-    `frontend/eslint.config.js`, and `<!-- vendored --><NoWarn>$(NoWarn);IDE0008
-    </NoWarn>` in the root `Directory.Build.props` — that second one compiled a
-    real `var z = 1` with "Build succeeded" while every gate stayed green.
-
-    This script **does not inspect configuration**, because three successive
-    attempts to were each defeated by a route they did not model: a text scan
-    missed the `<NoWarn>` above (the line opens with a comment that closes
-    mid-line); `-getProperty:NoWarn` missed a root `Directory.Build.targets`
-    appending to `NoWarn` inside a *target*, since `-getProperty` reports
-    evaluation-time values; and a parsed `.editorconfig` missed section scoping
-    (`[*.cs]` renamed to `[docs/*.cs]`). Modelling a configuration language is
-    the same treadmill as modelling a programming language with a regex.
-
-    Instead it makes the rule fire. For C# it writes a real `var value = 1;`
-    into **every directory that holds tracked source** — 42 probes across four
-    projects, all in one build per project — and requires `error IDE0008` on a
-    line naming each probe by path. Three properties of that shape are each
-    load-bearing, because a single probe at the project root was routed around
-    four ways while a real `var` compiled in shipping `Services/` code:
-
-      - *Per directory*, because a severity can be scoped to a subtree
-        (`[**/Services/*.cs] dotnet_diagnostic.IDE0008.severity = none`, the
-        same section with `generated_code = true`, or
-        `<Compile Remove="Services/**/*.cs" />`) and the project root is
-        precisely where no real source file lives.
-      - *A random name per run*, because a fixed one is an address: a
-        `Directory.Build.targets` target can be conditioned on
-        `Exists(.../NoVarAnalyzerProbe.scratch.cs)`.
-      - *Attributed by path*, because that same target can emit a forged
-        `<Error Text="error IDE0008..." />`, which satisfied a check that only
-        looked for the string `IDE0008` somewhere in the output — while
-        `NoWarn` kept the real analyzer silent.
-
-    A build that fails for any *other* reason is a gate failure too, so a broken
-    build cannot masquerade as a working gate.
-
-    For the web half it resolves the effective config for **every** tracked web
-    file (130 today) via the eslint Node API, checks `isPathIgnored` so an
-    `ignores` entry cannot quietly remove a directory from the lint run, and
-    plants a `var` behind a blanket `/* eslint-disable */` in `frontend/src` and
-    requires `npm run lint:ci` to reject it. Sampling four representative files
-    instead was a complete end-to-end escape: one block scoped to
-    `src/components/**` with `'no-var': 'off'` passed every gate while a `var`
-    sat in a real component. Nothing is exempt from the `isPathIgnored` check,
-    including `dist/` — an unconditional exemption let a tracked path under any
-    `dist/` be skipped while still counting toward the total, so coverage fell
-    as the reported number rose. Probe files use the reserved gitignored
-    `.scratch` infix and are removed by an `EXIT` trap.
-
-    The web verdict is rendered by the same interpreter that computes it.
-    `scripts/novar-eslint-probe.mjs` prints plain `checked`/`problem`/`verdict`
-    lines, and the shell requires the `verdict` line to be present and the
-    count to be a positive integer. It used to print JSON that the caller read
-    with `python3 -c '...' 2>/dev/null`, unguarded and with no preflight: with
-    `python3` unavailable both reads came back empty, empty was taken to mean
-    "no problems", and the gate passed while announcing "error for all&nbsp;
-    tracked web files" with the count silently missing. `node` was already
-    mandatory, so the extra interpreter bought nothing and could only fail open.
-
-    A file type the enumeration does not glob is invisible to every gate here,
-    so an unfamiliar one now fails closed. A tracked `frontend/src/RbWidget.vue`
-    holding `var x = 1` passed all four gates while the summary still read "all
-    130 tracked web files": the fail-closed rule written for files *outside*
-    `frontend/` had never been applied to unfamiliar file *types* inside it, and
-    `check-no-var.sh` already carried `--include='*.vue'`, so the two scripts
-    disagreed about what a web file is. `.vue`, `.svelte`, `.astro`, `.mdx`,
-    `.ejs`, `.hbs`, `.pug`, `.cshtml`, `.razor` and `.php` are rejected on
-    sight until the toolchain covers them. `.svg` stays deliberately uncovered —
-    eslint cannot parse it — but is no longer unchecked: a tracked `.svg`
-    containing `<script` fails.
-
-    Two coverage facts worth keeping straight. First, eslint will not lint above
-    its own base path, and it reports the refusal as a **warning** ("File
-    ignored because outside of base path") while exiting 0 — so a web file in
-    `scripts/` looked exactly like a clean lint. The root `eslint.config.mjs`
-    covers those, and the gate resolves the config per file and fails on any
-    tracked web file that no block claims, because "no matching configuration
-    was supplied" is *also* only a warning. Second, enumerating with
-    `frontend/**/*.ts` silently missed `frontend/index.html`,
-    `frontend/eslint.config.js` and `frontend/vite.config.ts`: `**/` requires an
-    intervening directory, so top-level files never matched. `index.html` is the
-    file whose inline theme script held the original `var`s, so that glob was
-    excluding the most relevant file in the tree. The enumeration is now
-    repo-wide and filtered, and the count is asserted out loud (130 today) so a
-    silent drop is visible.
-
-    The web half also lints the tracked files itself, with
-    `allowInlineConfig: false`. That is the half that does not depend on
-    `package.json`. Proving the rule is *configured* and then delegating the
-    search for violations to `npm run lint:ci` was defeated by rewriting that
-    script to branch on the probe's name — it printed the probe and exited 1
-    whenever the probe existed, satisfying both halves of the attribution check,
-    and ran a plain `eslint .` otherwise, so a `var` in `frontend/src/main.tsx`
-    behind a blanket disable in its description form passed every gate end to
-    end. No assertion about a script's output survives an adversary who writes
-    the script, so the gate now finds the `var` itself and names the file and
-    line.
-
-    Every tracked file must also be **classified**, and anything unrecognised
-    fails. A denylist of script-bearing extensions cannot be finished: it was
-    case-sensitive and partial, so `RbWidget.VUE` walked past it and so did
-    `.es6` and `.jsm`. Two allowlists replace it — extensions eslint parses, and
-    extensions that cannot hold a JavaScript variable declaration — and a file
-    whose extension is in neither turns the gate red until someone records the
-    decision. A third check asserts the classification against what the
-    enumeration actually collected, because the globs are case-sensitive while
-    the classification is not, so `App.TSX` would otherwise be *called* covered
-    and never linted.
-
-    Take the `--csharp` and `--web` flags seriously: each needs a different
-    toolchain, and each CI job passes only the flag for the toolchain it has.
-    Asserting the web half from the backend job — which has no `npm ci` step —
-    is what held CI red for five runs. `STRICT=1` in CI turns a skipped half
-    into a failure, and an explicitly requested half never skips.
-  - **`scripts/check-no-var.sh` owns only what none of the above can see**: the
-    word `var` in a C# pattern position, `dynamic`, and *per-file* suppressions
-    (`#pragma warning disable`, `SuppressMessage`) — which no evaluated property
-    can show, because they are scoped to a file rather than to the build. It
-    also rejects any non-root `.editorconfig` and any non-root
-    `Directory.Build.props`/`.targets`: MSBuild takes the *nearest* such file and
-    does not merge, so a nested copy that merely **omits**
-    `EnforceCodeStyleInBuild` silently disables `IDE0008` for that subtree with
-    no suppression syntax to grep for. It pins `LC_ALL=C`, because grep word
-    boundaries are locale-sensitive and a gate whose verdict depends on the
-    machine is not a gate. It never discards grep's stderr: a single file named
-    `-dash.cs` made grep parse a path as flags, abort, and leave every file
-    unscanned while the gate printed "passed", so the script now separates "no
-    matches" (stdout empty) from "could not run" (stderr non-empty, exit 2).
-  Everything build-wide moved to the config probe on purpose. The text scan for
-  it produced a false positive, a fix, and then a new bypass in three
-  consecutive review rounds; the comment filter that caused the last one is gone
-  rather than given a fourth branch. What remains here is safe to scan blind:
-  C# requires `#pragma` to be the first token on its line, so the mid-line
-  `/* */` trick is a compile error, and the words "pragma warning" and
-  "SuppressMessage" appear in zero tracked `.cs` files.
-  The gates are still not claimed to be complete — a `grep` cannot lex C#, and a
-  `dynamic` after a `/* */` that closes mid-line will slip past the one
-  remaining comment filter. Reviewers treat any `var` as a blocking finding,
-  must read `var`-shaped lines themselves rather than trusting a green CI, and
-  must not mark a change Satisfied while one remains.
+- These rules are enforced in toolchain config, not advisory:
+  - **C# — Roslyn:** `.editorconfig` sets `csharp_style_var_* = false:error`.
+    `Directory.Build.props` enables `EnforceCodeStyleInBuild`, so an implicitly
+    typed local fails `dotnet build` as `IDE0008`.
+  - **Web — eslint:** `no-var` and `prefer-const` are error in
+    `frontend/eslint.config.js` and root `eslint.config.mjs`. `npm run lint`
+    covers `frontend/`; the root config covers other tracked web sources.
+    `npm run lint:ci` adds `--no-inline-config` so blanket disables cannot
+    silence these rules. Inline `<script>` in `.html`, `.htm`, and `.xhtml` is
+    parsed via `eslint-plugin-html`.
+  - **Backstop — `scripts/check-no-var.sh`:** grep for C# pattern `var`,
+    `dynamic`, per-file suppressions (`#pragma warning disable`, `SuppressMessage`),
+    and nested `.editorconfig` or `Directory.Build.props` copies that would bypass
+    Roslyn. This is a short backstop, not a second linter.
+  Reviewers treat any `var` as a blocking finding regardless of green CI and must
+  not mark a change Satisfied while one remains.
 - Prefer pattern matching over large `if` / `else if` chains for closed-set decisions.
 - Prefer **fail-first** control flow: validate and return/throw early; keep the happy path
   unindented at the end of the function.
