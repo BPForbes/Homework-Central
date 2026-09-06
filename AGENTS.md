@@ -83,6 +83,14 @@ Hard rules:
     directive sees nothing. `--no-inline-config` ignores every directive, which
     is why it is a separate script: the plain `npm run lint` keeps the one
     legitimate warn-level `react-hooks/exhaustive-deps` directive working.
+    `check-no-var-config.sh --web` proves that script still works by planting a
+    `var` behind a blanket disable and requiring `lint:ci` to name **that probe**
+    in its output. A bare non-zero exit was not enough: any pre-existing error
+    in the tree satisfied it, so with a real `var` behind a blanket disable in
+    `frontend/src/main.tsx`, `lint:ci` failed because of *that* `var` and the
+    gate read its own probe as rejected. Same forged-signal shape as the C#
+    `<Error Text="IDE0008">`, same answer. The probe's name is random per run
+    for the same reason the C# one is.
   - **`scripts/check-no-var-config.sh` asserts the analyzers are on at all.**
     The three gates above all assume that, and nothing checked it. Two verified
     bypasses were one word deep: `'no-var': 'error'` to `'off'` in

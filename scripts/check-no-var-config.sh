@@ -390,20 +390,33 @@ $problems"
             # the real source tree and running the real script means the
             # assertion fails if the script stops covering that tree — whether by
             # narrowing its arguments or by ignoring the directory.
-            inline_probe='frontend/src/novar_inline_probe.scratch.ts'
+            #
+            # The rejection has to be attributed to the probe by name. A bare
+            # "lint:ci exited non-zero" was satisfied by *any* pre-existing
+            # error in the tree: with a real `var` behind a blanket disable in
+            # frontend/src/main.tsx, lint:ci failed because of that var, and the
+            # gate read its own probe as rejected and printed the reassuring
+            # note. That is the same forged-signal shape as the C# probe's
+            # `<Error Text="IDE0008">`, and it wants the same answer — require
+            # the probe's own path in the output.
+            # Random name, for the reason the C# probe has one: a fixed path is
+            # an address that an `ignores` entry or a narrowed lint argument can
+            # name. Attribution alone already fails closed if the probe goes
+            # unmentioned, but there is no reason to hand out the address.
+            inline_probe="frontend/src/novar_inline_$(od -An -tx1 -N4 /dev/urandom 2>/dev/null | tr -cd '[:alnum:]' || printf '%s' "$$").scratch.ts"
             probe_files+=("$inline_probe")
             printf '/* eslint-disable */\nvar x = 1;\nexport default x;\n' > "$inline_probe"
-            if ! (cd frontend && npm run --silent lint:ci) >/dev/null 2>&1; then
-                note 'npm run lint:ci rejects a blanket /* eslint-disable */ hiding a var'
-            else
-                fail 'npm run lint:ci accepted a blanket /* eslint-disable */ hiding a `var` in frontend/src. Either it is missing --no-inline-config, or it no longer lints the whole source tree.'
-            fi
+            inline_out="$(cd frontend && npm run --silent lint:ci 2>&1)"
+            inline_status=$?
             rm -f "$inline_probe"
 
-            # And the plain lint script must stay clean, so the probe above is
-            # measuring the flag rather than a pre-existing failure.
-            if ! (cd frontend && npm run --silent lint) >/dev/null 2>&1; then
-                fail 'npm run lint fails on the unmodified tree, so the lint:ci result above is not attributable to --no-inline-config'
+            if [ "$inline_status" -eq 0 ]; then
+                fail 'npm run lint:ci accepted a blanket /* eslint-disable */ hiding a `var` in frontend/src. Either it is missing --no-inline-config, or it no longer lints the whole source tree.'
+            elif ! printf '%s' "$inline_out" | grep -F "$(basename -- "$inline_probe")" | grep -q .; then
+                fail "npm run lint:ci failed, but never mentioned the probe, so its failure proves nothing about --no-inline-config:
+$(printf '%s' "$inline_out" | grep -E 'error|Error' | head -5)"
+            else
+                note 'npm run lint:ci rejects a blanket /* eslint-disable */ hiding a var'
             fi
         fi
     fi
