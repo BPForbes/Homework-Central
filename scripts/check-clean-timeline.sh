@@ -171,18 +171,36 @@ if [ -n "$history_base" ]; then
     # It also settles the more general question: a reviewer is answerable for
     # what their range introduces, not for what they inherited. Cleaning the
     # base is a separate change against the base.
-    base_tracked="$(git ls-tree -r --name-only "$history_base")" || {
+    #
+    # Keyed on (blob, path), never on path alone. Exempting a path outright
+    # exempts it for any *content*: deleting the inherited file, re-adding the
+    # same path with a fresh write-up, and deleting it again passed with the new
+    # text sitting in history. Inheritance is about the exact bytes already in
+    # the base, so compare object ids — the real false positive this fixes has an
+    # identical blob on both sides.
+    base_blobs="$(git ls-tree -r "$history_base" | awk '{print $3 "\t" substr($0, index($0, $4))}')" || {
         printf 'cannot read the tree at %s\n' "$history_base" >&2
         exit 2
     }
+    # Same walk as history_raw, but carrying the blob id of each added path so
+    # the pairs can be compared. --raw gives ':mode mode preoid postoid A\tpath'.
+    history_pairs="$(
+        git -c diff.renames=false log -m --diff-filter=A --raw --no-abbrev \
+            --format='' "$history_base..HEAD"
+    )" || {
+        printf 'git log failed over %s..HEAD; cannot verify history\n' "$history_base" >&2
+        exit 2
+    }
     history_added="$(
-        printf '%s\n' "$history_raw" \
+        printf '%s\n' "$history_pairs" \
+            | awk -F'\t' 'NF>1 { split($1, f, " "); print f[4] "\t" $2 }' \
+            | sort -u \
+            | { [ -n "$base_blobs" ] && grep -Fxv -f <(printf '%s\n' "$base_blobs") || cat; } \
+            | cut -f2- \
             | grep -Ei "$scratch_re|$analysis_re|$thoughts_re|^\.cursor/reviews/|$nested_gitignore_re" \
             | grep -v -E "$keepfile" \
             | grep -v -E '^\.gitignore$' \
-            | sort -u \
-            | { [ -n "$base_tracked" ] && grep -Fxv -f <(printf '%s\n' "$base_tracked") || cat; } \
-            || true
+            | sort -u || true
     )"
     if [ -n "$history_added" ]; then
         report "Non-Coder output was committed earlier in $history_base..HEAD (the blob ships to every clone even though the tip is clean):" "$history_added"

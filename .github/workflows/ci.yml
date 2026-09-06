@@ -107,15 +107,19 @@ jobs:
       - name: Reject implicitly typed locals
         run: ./scripts/check-no-var.sh
 
-      # Asserts the analyzers are actually ON, by asking MSBuild to evaluate the
-      # properties and parsing the .editorconfig severities. A text scan could
-      # not see `<!-- vendored --><NoWarn>$(NoWarn);IDE0008</NoWarn>`, which
-      # compiled a real implicitly typed local with "Build succeeded".
-      # STRICT=1 because a probe that skips itself in CI is not a gate.
-      - name: Verify the no-var analyzers are enabled
+      # Plants a real `var` in every tracked project and requires the compiler
+      # to reject it. Inspecting the configuration instead was defeated three
+      # times running: a text scan missed `<!-- vendored --><NoWarn>…`,
+      # -getProperty missed a target-time NoWarn append, and a parsed
+      # .editorconfig missed section scoping. Building the code cannot miss any
+      # of them, because the compiler is the thing being asked.
+      #
+      # --csharp, not both halves: this job has dotnet and no node_modules, and
+      # asserting the web half from here is what turned the branch red.
+      - name: Verify the no-var analyzers reject a var
         env:
           STRICT: '1'
-        run: ./scripts/check-no-var-config.sh
+        run: ./scripts/check-no-var-config.sh --csharp
 
       - name: Reject unparameterized raw SQL
         run: |
@@ -160,13 +164,17 @@ jobs:
       - name: Lint ignoring inline directives
         run: npm run lint:ci
 
-      # Resolves the flat config the way a lint run would and asserts both rules
-      # come out as error. One word in eslint.config.js ('error' -> 'off') turned
-      # the whole web half of the rule off with every other gate still green.
-      - name: Verify the no-var rules are enabled
+      # Resolves the effective config for every tracked web file and requires
+      # both rules to come out as error, then plants a var behind a blanket
+      # /* eslint-disable */ and requires lint:ci to reject it. Sampling four
+      # representative files instead was a complete escape: a block scoped to
+      # src/components/** with 'no-var': 'off' passed every gate end to end.
+      #
+      # --web, not both halves: this job has node and no setup-dotnet step.
+      - name: Verify the no-var rules cover every web file
         env:
           STRICT: '1'
-        run: ../scripts/check-no-var-config.sh
+        run: ../scripts/check-no-var-config.sh --web
 
       - name: Build
         run: npm run build
