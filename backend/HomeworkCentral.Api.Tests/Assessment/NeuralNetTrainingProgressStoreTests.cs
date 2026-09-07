@@ -43,7 +43,7 @@ public sealed class NeuralNetTrainingProgressStoreTests
         store.Upsert(TrainingHeapSpill.BoundAfterCancel(store.Get(sessionId)!));
 
         Assert.False(store.HasActiveTraining());
-        Assert.Equal("Cancelled", store.Get(sessionId)?.Phase);
+        Assert.Equal("Paused", store.Get(sessionId)?.Phase);
         Assert.Empty(store.Get(sessionId)!.WeightUpdateFeed);
     }
 

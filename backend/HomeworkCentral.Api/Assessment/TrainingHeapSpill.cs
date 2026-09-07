@@ -51,6 +51,43 @@ internal static class TrainingHeapSpill
         return true;
     }
 
+    /// <summary>
+    /// Ticket cursor stored with the weights. Resume must continue from this
+    /// count so a paused continuous session does not look empty.
+    /// </summary>
+    public static int TicketsProcessedFromCheckpoint(string? workerReplayJson)
+    {
+        if (!TrainingSpillCheckpoint.TryParse(workerReplayJson, out TrainingSpillCheckpoint? checkpoint)
+            || checkpoint is null)
+        {
+            return 0;
+        }
+
+        return checkpoint.TicketsProcessed;
+    }
+
+    /// <summary>
+    /// Continue cursor: leftover in-process progress wins when the spill
+    /// write missed; otherwise the highest checkpoint ticket count.
+    /// Messages and examples stay leftover (0 when only a checkpoint exists).
+    /// </summary>
+    public static ContinuousResumeSeed SeedContinuousResume(
+        int leftoverTicketsProcessed,
+        int leftoverMessagesProcessed,
+        int leftoverExamplesPersisted,
+        IEnumerable<string?> workerReplayJsons)
+    {
+        ArgumentNullException.ThrowIfNull(workerReplayJsons);
+        int fromCheckpoints = workerReplayJsons
+            .Select(TicketsProcessedFromCheckpoint)
+            .DefaultIfEmpty(0)
+            .Max();
+        return new ContinuousResumeSeed(
+            Math.Max(leftoverTicketsProcessed, fromCheckpoints),
+            leftoverMessagesProcessed,
+            leftoverExamplesPersisted);
+    }
+
     public static TrainingStepAfterSpill AfterOutOfMemory(bool spillSucceeded) =>
         spillSucceeded ? TrainingStepAfterSpill.AdvanceWithoutRetry : TrainingStepAfterSpill.Stop;
 
@@ -99,7 +136,7 @@ internal static class TrainingHeapSpill
     public static NeuralNetTrainingLiveProgress BoundAfterCancel(NeuralNetTrainingLiveProgress progress) =>
         progress with
         {
-            Phase = "Cancelled",
+            Phase = "Paused",
             WeightUpdateFeed = [],
             ActiveNodeIndexes = [],
             ActiveEdgeParameterIndexes = [],
@@ -112,6 +149,11 @@ internal static class TrainingHeapSpill
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max];
 }
+
+internal readonly record struct ContinuousResumeSeed(
+    int TicketsProcessed,
+    int MessagesProcessed,
+    int ExamplesPersisted);
 
 internal readonly record struct TrainingHeapSpillPrepareResult(
     bool Succeeded,

@@ -10,7 +10,7 @@ namespace HomeworkCentral.Api.Assessment;
 public static class TrainingPersistencePolicy
 {
     public const string HeapElevatedMessage =
-        "The training heap is elevated. Stop the running session before starting or resuming another.";
+        "The training heap is elevated. Pause the running session before starting or resuming another.";
 
     public static bool CanResumeContinuousTraining(string status, int requestedTicketCount) =>
         requestedTicketCount == 0 &&
@@ -34,6 +34,7 @@ public static class TrainingPersistencePolicy
 
         return !phase.Equals("Completed", StringComparison.OrdinalIgnoreCase)
             && !phase.Contains("Cancelled", StringComparison.OrdinalIgnoreCase)
+            && !phase.Contains("Paused", StringComparison.OrdinalIgnoreCase)
             && !phase.Contains("Failed", StringComparison.OrdinalIgnoreCase);
     }
 }

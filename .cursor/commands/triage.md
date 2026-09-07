@@ -18,8 +18,6 @@ Also: `open triage`, `track this bug`, `QA triage`.
    change, leave Push JSON `files` as `{}` and do not commit.
 4. Handoff `To: Coder` with **Sent back because**. The Orchestrator
    starts research → coder → reviewer → QA for that id.
-5. Do not `git add` the file. Do not push. Any probe the triage run
-   creates is process output too: throwaway clone, or a reserved
-   lower-case name (`_scratch/`, `.scratch`), deleted before you report.
+5. Do not `git add` the file. Do not push.
 
 Catalog: `.cursor/skills/devops-multi-agent-team/references/agent-commands.md`.

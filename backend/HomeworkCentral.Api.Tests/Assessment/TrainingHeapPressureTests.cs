@@ -230,8 +230,51 @@ public sealed class TrainingHeapSpillTests
         NeuralNetParameterSnapshot? loaded = null;
         Assert.True(TrainingHeapSpill.TryRestore(json, snapshot => loaded = snapshot));
         Assert.Equal(spilled.PackedValues, loaded?.PackedValues);
+        Assert.Equal(12, TrainingHeapSpill.TicketsProcessedFromCheckpoint(json));
+        Assert.Equal(0, TrainingHeapSpill.TicketsProcessedFromCheckpoint("{ \"schemaVersion\": \"2.0\" }"));
         Assert.True(TrainingHeapSpill.ShouldKeepSpillCheckpoint(json));
         Assert.False(TrainingHeapSpill.ShouldKeepSpillCheckpoint("{ \"schemaVersion\": \"2.0\" }"));
+    }
+
+    [Fact]
+    public void SeedContinuousResume_keeps_leftover_when_checkpoint_is_missing()
+    {
+        ContinuousResumeSeed leftoverOnly = TrainingHeapSpill.SeedContinuousResume(
+            15_000,
+            9_000,
+            40,
+            ["{ \"schemaVersion\": \"2.0\" }", null]);
+        Assert.Equal(15_000, leftoverOnly.TicketsProcessed);
+        Assert.Equal(9_000, leftoverOnly.MessagesProcessed);
+        Assert.Equal(40, leftoverOnly.ExamplesPersisted);
+
+        string checkpoint169 = TrainingSpillCheckpoint.Serialize(
+            Guid.NewGuid(),
+            NeuralModelKindChatMonitoring.Moderation,
+            169,
+            SampleSnapshot("resume169"));
+        ContinuousResumeSeed checkpointOnly = TrainingHeapSpill.SeedContinuousResume(
+            0,
+            0,
+            0,
+            [checkpoint169]);
+        Assert.Equal(169, checkpointOnly.TicketsProcessed);
+        Assert.Equal(0, checkpointOnly.MessagesProcessed);
+        Assert.Equal(0, checkpointOnly.ExamplesPersisted);
+
+        string checkpoint15000 = TrainingSpillCheckpoint.Serialize(
+            Guid.NewGuid(),
+            NeuralModelKindChatMonitoring.Moderation,
+            15_000,
+            SampleSnapshot("resume15k"));
+        ContinuousResumeSeed maxOfBoth = TrainingHeapSpill.SeedContinuousResume(
+            100,
+            80,
+            3,
+            [checkpoint169, checkpoint15000]);
+        Assert.Equal(15_000, maxOfBoth.TicketsProcessed);
+        Assert.Equal(80, maxOfBoth.MessagesProcessed);
+        Assert.Equal(3, maxOfBoth.ExamplesPersisted);
     }
 
     [Fact]
@@ -272,7 +315,8 @@ public sealed class TrainingHeapSpillTests
         Assert.DoesNotContain("replay", bounded.LatestTrainingLlmSummary ?? "", StringComparison.OrdinalIgnoreCase);
 
         NeuralNetTrainingLiveProgress cancelled = TrainingHeapSpill.BoundAfterCancel(progress);
-        Assert.Equal("Cancelled", cancelled.Phase);
+        Assert.Equal("Paused", cancelled.Phase);
+        Assert.Equal(10, cancelled.TicketsProcessed);
         Assert.False(TrainingPersistencePolicy.IsActiveLivePhase(cancelled.Phase));
         Assert.Empty(cancelled.WeightUpdateFeed);
     }

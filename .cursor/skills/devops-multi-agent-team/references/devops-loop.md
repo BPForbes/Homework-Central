@@ -1,110 +1,201 @@
 # DevOps development loop — detailed checklists
 
-Use with the orchestrator loop. Persist `/goal`, review threads, and
-`/repro` notes under `.cursor/thoughts/non-finalized/` (local; do
-not commit). After QA PASS, move closed thoughts to `finalized/`
-(still local). See [thoughts-layout.md](thoughts-layout.md),
-[role-identity.md](role-identity.md), and
-[department-pods.md](department-pods.md). Spawn roles
-asynchronously **in pods**. Commands:
-[agent-commands.md](agent-commands.md).
+Use these checklists when executing the orchestrator loop. Persist `/goal`,
+review threads, and `/repro` notes under
+`.cursor/thoughts/non-finalized/` (local; do not commit). After QA PASS,
+move closed thoughts to `.cursor/thoughts/finalized/` (still local).
+See [thoughts-layout.md](thoughts-layout.md) and
+[role-identity.md](role-identity.md). Spawn roles with `/create-subagent`
+asynchronously **in pods** (`is_background: true` / `run_in_background:
+true`). Command catalog: [agent-commands.md](agent-commands.md).
 
 ## 1. Planner
 
-Goal and non-goals; environments; components; CI/CD stages and
-gates; deploy + rollback; observability; security constraints;
-testable acceptance criteria; open questions for the human.
+Deliver a plan that includes:
+
+- Goal and non-goals
+- Environments (dev / staging / prod or repo-specific)
+- Components touched (apps, infra modules, workflows)
+- CI/CD stages and gates
+- Deployment strategy and rollback
+- Observability requirements (signals + alerts)
+- Security constraints (secrets, IAM, network)
+- Acceptance criteria (testable)
+- Open questions for the human
 
 ## 2. Researcher / Architect
 
-Inventory pipelines, compose/k8s, IaC, scripts, and docs. Prefer
-reuse. Cite why a new tool is needed. Produce: target architecture;
-reuse map; risks and rollback. When the brief is done, **join the
-Coder of the same department**. On QA triage, join the Coder who
-picks the item up ([department-pods.md](department-pods.md)).
+Before proposing new structure:
+
+1. Inventory existing pipelines, compose/k8s manifests, IaC, scripts, and docs.
+2. Prefer reuse or incremental extension.
+3. If introducing a tool/pattern, briefly cite why existing options are insufficient (and optionally external best practice).
+4. Produce:
+   - Target architecture ( Mermaid or structured notes )
+   - Reuse map (existing → reused / extended / replaced)
+   - Risks and rollback notes for the Planner
 
 ## 3. Coder
 
-Implement only what the plan authorizes. **Cut a skill
-side-branch** (never a real git branch unless The Client named
-that branch in this turn; cloud-agent templates do not
-override this); isolate with a **clone**, not `git worktree add`; talk to
-other Coders so owned paths do not collide
-([side-work.md](side-work.md)). Do not commit on the shared
-checkout. Keep secrets out of git. Prefer idempotent,
-non-interactive scripts. Run applicable CodeQL and CodeRabbit
-(`cr review --agent --uncommitted --include-untracked --base
-<integration-base>`) before Reviewers — neither authorizes a
-push. Write `push-<topic>.json` and any Coder→Reviewer `qa`
-rows **before the first review**. Ask Researcher for a reuse
-map before duplicating code.
+- Implement only what the plan authorizes.
+- Stay on the current non-`main` branch. Do not cut a new branch
+  for each increment (`AGENTS.md` Git branches).
+- Keep secrets out of git; use the repo’s secret mechanism.
+- Make scripts non-interactive for agents (`--yes`, flags, env vars).
+- Prefer idempotent apply/deploy paths and dry-run where available.
+- Show file paths and diffs.
+- Run applicable CodeQL on every code change before handing to Reviewers.
+  Developer CodeQL does **not** authorize a push.
+- Keep changes local until **QA gives the OK to push** (communicate in
+  `.cursor/thoughts/non-finalized/review-<topic>.md` and an uncommitted
+  `push-<topic>.json` written **before the first review**). Update that
+  JSON when a later change should close feedback. Only QA may authorize
+  a git push.
+  Ask Researcher for a reuse map before duplicating code.
+  DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST, MERGE, OR
+  OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
 ## 3b. Documentation & Research (online media)
 
-Inventory `docs/` and open thoughts first. Do not dump research
-into `docs/`. Fetch online media as needed. Write a brief into the
-review thread.
+- Inventory `docs/` and open thoughts under `.cursor/thoughts/non-finalized/` first.
+  Do not write research dumps into `docs/`.
+- Fetch online media as needed (`WebSearch`, `WebFetch`, browser): vendor docs, releases, issues, articles.
+- Write a research brief into the review thread (URLs + takeaways). Reviewers must use it.
 
 ## 3c. Reviewers (entrypoint before QA)
 
-PR-style review. Compare Push JSON to the side-branch tree vs
-`<integration-base>` ([side-work.md](side-work.md),
-[push-json.md](push-json.md)). **Block Satisfied** if CodeRabbit
-findings are `open` or CR was NOT RUN on a code change; send
-CR + review notes to the Coder. Cite research brief, reuse map,
-`docs/`, and fetched URLs. Duplicated code → request an import.
-Iterate until Satisfied. Satisfied does **not** authorize a
-push. Primaries: [department-pods.md](department-pods.md).
-Template: [review-thread-template.md](review-thread-template.md).
+- PR-style review of local diffs; request improvements like a human PR review.
+- Converse with Coder in the review thread **and** Push JSON
+  ([push-json.md](push-json.md)). Always compare the JSON to
+  `git diff <integration-base>...HEAD`. Questions and answers use
+  `## Q&A` plus `qa` (same ids). Rounds are not a queue.
+- Cite research brief, reuse map, `docs/`, and fetched URLs.
+  If the Coder duplicated existing code, request an import.
+- Iterate until all reviewers mark Satisfied → then Security → then QA.
+  Reviews may be long; do not rush Satisfied.
+- Satisfied does **not** authorize a push. **Only QA may give the OK to
+  push.**
+- Template: [review-thread-template.md](review-thread-template.md).
 
 ## 4. Security (after Satisfied)
 
-Snyk / secret scan / `/review-security` on the change surface.
-Record verdict in the review thread. Security Clear does **not**
-authorize a push.
+- Snyk / secret scan / `/review-security` on the change surface.
+- Record verdict in the review thread before QA proceeds.
+- Security Clear does **not** authorize a push. **Only QA may give the
+  OK to push.**
 
 ## 5. QA
 
-Owns [codeql-validation-publish-policy.md](codeql-validation-publish-policy.md).
-`/code-review`: inspect; **do not edit**. `/repro` when needed.
-Minimum: repo-appropriate fast validation; applicable CodeQL +
-SARIF; workflow / chart / Terraform lint; secret scan if in CI;
-smoke; rollback notes; `scripts/check-clean-timeline.sh --history
-<integration-base>`; exact commands and exit codes; Definition of
-Done. **Only QA may give the OK to push.** Fail → Handoff
-`To: Coder` from a **VM** review. Open `triage-<id>.md` when
-blocked / sent back / not pleased; Research *N* joins the Coder
-who picks it up ([triage-template.md](triage-template.md)). After
-PASS, list thoughts to finalize. Orchestrator keep-commit(s)
-from the approved side-branch tree, then one push. **Block
-PASS** if CodeRabbit findings are `open` on a code change.
+QA (`devops-quality-engineer`) owns **CodeQL, Validation, and Publish Policy**.
+`/code-review`: inspect the change, tests, logs, and SARIF;
+**do not edit**. `/repro` when a failure needs a concrete reproduction.
+Follow [codeql-validation-publish-policy.md](codeql-validation-publish-policy.md)
+exactly.
 
-## 6–11. Later passes
+Minimum validation set:
 
-- **Optimization** — what dominates wall-clock; parallel jobs;
-  oversized non-prod; measurable proposals.
-- **Observability** — golden signals or RED/USE; log labels;
-  symptom alerts + runbook links; SLI/SLO only if asked.
-- **Documentation** — deploy / promote, rollback, failures,
-  ownership; match final paths.
-- **Refactoring** — naming with existing `deploy/` / workflow
-  conventions; extract via existing patterns; no behavior change
-  unless the plan says so.
-- **Security (detail)** — privileged containers; unpinned
-  actions/images; secrets in logs; public endpoints without auth;
-  over-broad CI `contents: write`.
-- **Performance** — before/after job durations, image size / pull
-  time, deploy reconcile, hot app paths only if in scope.
+- Repository-appropriate .NET / TypeScript fast validation (do not invent scripts)
+- Applicable CodeQL database create + analyze + SARIF inspect
+- Workflow / chart / Terraform lint or validate
+- Policy / secret scanning if available in repo CI
+- Smoke: health endpoints or `kubectl`/`compose` readiness
+- Rollback drill notes (or actual rollback dry-run)
+- Record exact commands and exit codes
+- Report the Definition of Done summary (PASS / FAIL / NOT RUN / NOT APPLICABLE)
 
-## Interrupt routing
+**Only QA may give the OK to push.** Coders must still have run applicable
+CodeQL on their own changes. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL
+REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 
-Human interrupts start a **side sprint from research**. Ask-paths:
-[role-identity.md](role-identity.md). Stop → halt; leave plan/code
-consistent; do not push. Push / open PR → blocked until **QA gives
-the OK**.
+If CodeQL cannot be executed when required: do not claim CodeQL passed and do
+not automatically publish.
+
+Fail → Handoff `To: Coder` from a **VM** review (quality / bug
+standard). Open `triage-<id>.md` when the item must stay tracked
+([triage-template.md](triage-template.md)). An active item restarts
+research → coder → reviewer → QA. Retest; re-open reviewers if code
+changes.
+After PASS, list thought files to move to finalized, then squash
+the skill workstream to one commit and one push
+([thoughts-layout.md](thoughts-layout.md) One push).
+
+Ask the Coder first, then the Reviewer ([role-identity.md](role-identity.md)).
+
+## 6. Optimization
+
+Ask:
+
+- What dominates wall-clock (restore cache, image pull, test suite, apply)?
+- Can jobs parallelize safely?
+- Are resources oversized for non-prod?
+- Any redundant rebuilds or layer invalidation?
+
+Propose measurable changes (e.g. “cache key X should cut Y”).
+
+## 7. Observability
+
+- Golden signals or RED/USE as appropriate
+- Log labels/fields needed for incident triage
+- Alert: symptom-based, with runbook link when docs exist
+- Define SLI/SLO only when the human wants them (do not invent targets)
+
+## 8. Documentation
+
+Update or add:
+
+- Deploy / promote steps
+- Rollback
+- Common failures and fixes
+- Ownership / when to page
+
+Match final paths and flags from the implementation. Keep the research brief current for Reviewers.
+
+## 9. Refactoring
+
+- Consistent naming and layout with existing `deploy/` / workflow conventions
+- Extract repeated YAML/HCL via existing patterns (not new frameworks unless planned)
+- No behavior change unless the plan says so
+
+## 10. Security (checklist detail)
+
+Review for:
+
+- Privileged containers / cluster-admin sprawl
+- Unpinned actions or base images (flag; fix if plan allows)
+- Secrets in logs, PR output, or committed files
+- Public endpoints without auth
+- Over-broad CI permissions (`contents: write`, etc.)
+
+## 11. Performance profiling
+
+Capture before/after where possible:
+
+- Pipeline job durations
+- Image size / pull time
+- Deploy reconcile time
+- Hot app paths only if in scope
+
+## Interrupt routing cheat sheet
+
+Human interrupts start a **side sprint from research** (see the skill).
+
+| Human says | Route to |
+|------------|----------|
+| Redo / change plan | Planner |
+| Switch Compose ↔ K8s, GHA ↔ GitLab | Researcher then Planner then Coder |
+| Add environment | Planner → Architect → Coder → QA |
+| Tighten secrets | Security → Coder → QA |
+| Reduce build time | Performance + Optimization → Coder → QA |
+| Explain strategy | Researcher (Orchestrator summarizes) |
+| Stop | Orchestrator: halt loop; leave plan/code consistent; do not push |
+| Push / open PR | Blocked until **QA gives the OK** (Satisfied + Security Clear + developer CodeQL are not enough) |
+
+## Progress report template
 
 ```text
 [Orchestrator] Status
-- Done: …  · In progress: … ([Role])
-- Blocked / questions: …  · Next: …
+- Done: …
+- In progress: … ([Role])
+- Blocked / questions: …
+- Next: …
 ```

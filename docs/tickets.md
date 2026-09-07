@@ -572,6 +572,10 @@ route path selects one of four views:
 `ReplayViewer.tsx` filters replay frames by ticket, supports step/playback
 controls, respects `prefers-reduced-motion`, renders recorded topology and active
 parameters, and exposes the selected frame payload for inspection.
+Training shortcuts (Training view, not while typing in a field): Ctrl/Cmd+S
+pauses or continues the first Running/Queued or resumable paused session;
+Ctrl/Cmd+Enter starts a new training session. Replay shortcuts: Space or Ctrl/Cmd+S play/pause,
+arrow keys step, Home/End jump.
 `neuralNetApi.ts` is the typed Axios boundary, and `types/neuralNet.ts`,
 `types/neuralNetReplay.ts`, and `utils/neuralNetReplay.ts` define the page
 contracts and replay import limits.
@@ -1250,21 +1254,26 @@ lineage delete, which purges first) runs.
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs) | Synthetic training speed/quality knobs: generator-audit sampling, deterministic teacher labels, epochs, batching, compact replay. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs) | Per-session stop tokens for mid-run and continuous training. |
 
-Only an explicit stop (`POST /api/neural-net/training/{id}/stop`) ends a continuous session.
-Continuous mode stores `RequestedTicketCount = 0` (also accepted when the client sends
+Only an explicit pause (`POST /api/neural-net/training/{id}/stop`, or Ctrl/Cmd+S on the Training view) ends a continuous session.
+The stored status remains `Cancelled` so existing Resume clients keep working; the Training UI
+labels that row **Paused** and the action **Continue**. Continuous mode stores
+`RequestedTicketCount = 0` (also accepted when the client sends
 `ticketCount <= 0`). Generator failures, self-critique REVISE loops, train-step exceptions, and
 replay-snapshot memory pressure never mark the session Completed or Failed — the worker retries
-the next step until Stop. A running session with no live worker is marked stopped directly so the
-admin list cannot strand an unstoppable row.
+the next step until Pause. A running session with no live worker is marked paused directly so the
+admin list cannot strand an unpausable row.
 `GET /api/neural-net/training` projects replay presence flags rather than the JSON payloads: those
 blobs reach tens of megabytes once layer frames accumulate, and selecting them exhausted API memory.
-Worker replay is not snapshotted every N steps. Persist-on-stop is the default; mid-run SQL is
-an emergency heap spill (`spill-checkpoint-v1` on the run row) that writes **weights only**
-(no example `AddRange` / vector upsert). Traces are emptied before the compact snapshot so
+Worker replay is not snapshotted every N steps. Persist-on-pause is the default; mid-run SQL is
+an emergency heap spill (`spill-checkpoint-v1` on the run row) that writes **weights and the
+ticket cursor** (no example `AddRange` / vector upsert). Traces are emptied before the compact snapshot so
 the GC can reclaim them. After a successful spill the loop waits until the heap falls below
 the 55% skip-trace line before another mid-run persist. Finite complete/fail keep
-`spill-checkpoint-v1` instead of overwriting it with V2 replay. Resume reloads that
-checkpoint before reconstructing replay state. In-memory replay is bounded by
+`spill-checkpoint-v1` instead of overwriting it with V2 replay. Continue reloads that
+checkpoint — weights **and** `TicketsProcessed` — before reconstructing replay state so a
+15k-ticket pause does not restart at zero. Continue seeds the ticket cursor as
+`max(leftover live progress, max spill-checkpoint TicketsProcessed)` and does not invent
+message or example counts from that cursor. In-memory replay is bounded by
 `ReplayBuilder.MaxFrames` and compact trace sampling.
 
 Synthetic training uses a **single multipurpose training LLM** (`INeuralNetTrainingLlmModule`) for
