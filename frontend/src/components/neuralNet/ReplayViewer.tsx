@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 import type { NeuralNetReplay, ReplayEdge, ReplayNode, ReplayParameter } from '../../types/neuralNetReplay'
 import { normalizeReplayPhase, payloadCollectionForPhase } from '../../utils/neuralNetReplay'
-import { isEditableKeyboardTarget, isSaveChord } from '../../utils/keyboardShortcuts'
+import { isEditableKeyboardTarget, isInteractiveKeyboardTarget, isSaveChord } from '../../utils/keyboardShortcuts'
 import {
   NeuralNetMesh3D,
   edgeKeysFromDenseParameterIndexes,
@@ -148,6 +148,9 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
       if (event.repeat)
         return
       if (isEditableKeyboardTarget(event.target))
+        return
+
+      if (event.code === 'Space' && isInteractiveKeyboardTarget(event.target))
         return
 
       if (isSaveChord(event) || event.code === 'Space') {

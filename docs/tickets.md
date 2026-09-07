@@ -574,7 +574,8 @@ controls, respects `prefers-reduced-motion`, renders recorded topology and activ
 parameters, and exposes the selected frame payload for inspection.
 Training shortcuts (Training view, not while typing in a field): Ctrl/Cmd+S
 pauses or continues the first Running/Queued or resumable paused session;
-Ctrl/Cmd+Enter starts a new training session. Replay shortcuts: Space or Ctrl/Cmd+S play/pause,
+Ctrl/Cmd+Enter starts a new training session. Replay shortcuts: Space or Ctrl/Cmd+S play/pause
+(Space is ignored when a replay button or other control is focused),
 arrow keys step, Home/End jump.
 `neuralNetApi.ts` is the typed Axios boundary, and `types/neuralNet.ts`,
 `types/neuralNetReplay.ts`, and `utils/neuralNetReplay.ts` define the page
