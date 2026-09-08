@@ -224,7 +224,7 @@ public sealed class NeuralNetTrainingService(
     public async Task<NeuralNetTrainingSessionDto> StartSyntheticSessionAsync(
         StartNeuralNetTrainingRequest request, Guid actorUserId, CancellationToken ct = default)
     {
-        // Continuous = train until Stop. Prefer the flag; TicketCount <= 0 is also continuous
+        // Continuous = train until Pause. Prefer the flag; TicketCount <= 0 is also continuous
         // so a dropped `continuous` boolean still cannot collapse into a one-shot finite run.
         bool continuous = ResolveContinuousTraining(request.Continuous, request.TicketCount);
         if (TrainingPersistencePolicy.IsTrainingStartBlocked(
@@ -580,7 +580,7 @@ public sealed class NeuralNetTrainingService(
         // Queued, or Running with no live worker (the process that owned it went away). Mark the
         // session stopped directly so the admin UI is not stuck on an unstoppable row.
         queue.TryRemove(sessionId);
-        string reason = queued ? "Training stopped before start." : "Training stopped by an administrator.";
+        string reason = queued ? "Training paused before start." : "Training paused by an administrator.";
         DateTime stoppedAt = DateTime.UtcNow;
         session.Status = "Cancelled";
         session.CompletedAtUtc = stoppedAt;
@@ -599,10 +599,11 @@ public sealed class NeuralNetTrainingService(
     }
 
     /// <summary>
-    /// Trains one synthetic ticket (single message) at a time until Stop cancels the session token.
+    /// Trains one synthetic ticket (single message) at a time until Pause cancels the session token.
     /// Generator failures and train-step exceptions never complete or fail the session.
-    /// SQL is persist-on-stop except for a weights-only heap spill. Replay JSON is not
-    /// written mid-run; continuous Stop keeps <c>spill-checkpoint-v1</c>.
+    /// SQL is persist-on-pause except for a weights-only heap spill. Replay JSON is not
+    /// written mid-run; continuous Pause keeps <c>spill-checkpoint-v1</c> so Continue
+    /// reloads weights and the ticket cursor.
     /// </summary>
     private async Task RunContinuousSyntheticSessionAsync(
         NeuralNetTrainingSession session,
@@ -636,20 +637,27 @@ public sealed class NeuralNetTrainingService(
                 feedback));
         }
 
+        NeuralNetTrainingLiveProgress? leftover = progressStore.Get(session.SessionId);
+        ContinuousResumeSeed seed = TrainingHeapSpill.SeedContinuousResume(
+            leftover?.TicketsProcessed ?? 0,
+            leftover?.MessagesProcessed ?? 0,
+            leftover?.ExamplesPersisted ?? 0,
+            runs.Select(run => run.WorkerReplayJson));
+        int ticketIndex = seed.TicketsProcessed;
+
         PublishProgress(session, progress => progress with
         {
-            Phase = "Continuous training",
-            TicketsRequested = 0,
-            TicketsGenerated = 0,
-            TicketsProcessed = 0,
-            MessagesProcessed = 0,
+            Phase = ticketIndex > 0 ? "Continuous training · resumed" : "Continuous training",
+            TicketsRequested = Math.Max(progress.TicketsRequested, ticketIndex),
+            TicketsGenerated = Math.Max(progress.TicketsGenerated, ticketIndex),
+            TicketsProcessed = ticketIndex,
+            MessagesProcessed = seed.MessagesProcessed,
+            ExamplesPersisted = seed.ExamplesPersisted,
             GeneratorHints = feedback.Hints.ToList(),
         });
-
-        int ticketIndex = 0;
         try
         {
-            // Continuous has no ticket budget — only session cancel (Stop) or host shutdown exits.
+            // Continuous has no ticket budget — only session cancel (Pause) or host shutdown exits.
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
@@ -741,7 +749,7 @@ public sealed class NeuralNetTrainingService(
                         runContext.PendingTrain.Clear();
                         runContext.Run.Status = "Cancelled";
                         runContext.Run.CompletedAtUtc = DateTime.UtcNow;
-                        runContext.Run.FailureReason ??= "Training cancelled.";
+                        runContext.Run.FailureReason ??= "Training paused.";
                         // Release traces first so GetParameterSnapshot can allocate on a dying heap.
                         if (!WriteSpillCheckpoint(session, runContext, ticketIndex, releaseHeapFirst: true))
                         {
@@ -1242,7 +1250,7 @@ public sealed class NeuralNetTrainingService(
     {
         session.Status = "Cancelled";
         session.CompletedAtUtc = DateTime.UtcNow;
-        session.FailureReason = "Training cancelled.";
+        session.FailureReason = "Training paused.";
         session.ReportJson = SerializeTrainingReport(timings);
         List<ChatMonitoringNeuralModelRun> runningRuns = await db.ChatMonitoringNeuralModelRuns
             .Where(x => x.SessionId == session.SessionId && x.Status == "Running")
@@ -1251,7 +1259,7 @@ public sealed class NeuralNetTrainingService(
         {
             run.Status = "Cancelled";
             run.CompletedAtUtc = DateTime.UtcNow;
-            run.FailureReason ??= "Training cancelled.";
+            run.FailureReason ??= "Training paused.";
         }
 
         await db.SaveChangesAsync(CancellationToken.None);

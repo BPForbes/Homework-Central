@@ -33,6 +33,8 @@ public sealed class TrainingPersistencePolicyTests
     [InlineData("Completed", false)]
     [InlineData("completed", false)]
     [InlineData("Cancelled", false)]
+    [InlineData("Paused", false)]
+    [InlineData("Continuous training · resumed", true)]
     [InlineData("Stop cancelled", false)]
     [InlineData("Failed", false)]
     [InlineData("Worker failed", false)]
