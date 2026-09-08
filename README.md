@@ -333,8 +333,12 @@ Architecture, trust boundaries, and engineering standards live under
 
 ### Fast repeat starts
 
-`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
-can bind without a duplicate build. The frontend typecheck is incremental: `tsconfig.app.json`
+`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child. On the
+default watch path the child still compiles at startup: `dotnet watch` owns recompiling later
+edits, so it cannot take `--no-build` the way the one-shot path does, and the flag instead drops
+the restore that startup build would otherwise repeat. `HC_API_WATCH=0` takes the one-shot path,
+where the child runs `--no-build` and does not compile at all — Kestrel binds seconds sooner, at
+the cost of not rebuilding on edits. The frontend typecheck is incremental: `tsconfig.app.json`
 and `tsconfig.node.json` pair `incremental` with `tsBuildInfoFile`, because both set `noEmit` and
 `tsc -b` otherwise looks for emitted `.js` files that never exist and re-checks every file on
 every start. `run-dev` also starts the frontend before the API. Docker Postgres

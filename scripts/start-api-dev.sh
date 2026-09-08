@@ -103,10 +103,22 @@ fi
 # 0x18000000 = 384 MiB. Set this after the build so only the API runtime is
 # constrained; preserve an explicit caller override.
 export DOTNET_GCHeapHardLimit="${DOTNET_GCHeapHardLimit:-18000000}"
+
+# --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+API_WATCH_ARGS=(--non-interactive)
+# Watch owns recompiling every later edit, so it cannot take --no-build the way the one-shot
+# branch below does — its startup build repeats the compile the caller just did. Skipping the
+# restore is the one part that can be dropped without leaving watch unable to rebuild, and
+# HC_SKIP_DOTNET_BUILD means a build (and therefore a restore) already succeeded against this
+# tree. Adding a PackageReference mid-session then needs a restart rather than a hot reload.
+if [[ "${HC_SKIP_DOTNET_BUILD:-0}" == "1" ]]; then
+  API_WATCH_ARGS+=(--no-restore)
+fi
+API_WATCH_ARGS+=(run)
+
 set +e
 if [[ "$USE_WATCH" == "1" ]]; then
-  # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
-  dotnet watch --non-interactive run --project "$API_PROJECT" --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+  dotnet watch "${API_WATCH_ARGS[@]}" --project "$API_PROJECT" --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 else
   dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 fi

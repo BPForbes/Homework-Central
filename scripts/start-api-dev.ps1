@@ -107,9 +107,20 @@ try {
         $env:DOTNET_GCHeapHardLimit = '18000000'
     }
 
+    # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+    $apiWatchArgs = @('--non-interactive')
+    # Watch owns recompiling every later edit, so it cannot take --no-build the way the one-shot
+    # branch below does — its startup build repeats the compile the caller just did. Skipping the
+    # restore is the one part that can be dropped without leaving watch unable to rebuild, and
+    # HC_SKIP_DOTNET_BUILD means a build (and therefore a restore) already succeeded against this
+    # tree. Adding a PackageReference mid-session then needs a restart rather than a hot reload.
+    if ($env:HC_SKIP_DOTNET_BUILD -eq '1') {
+        $apiWatchArgs += '--no-restore'
+    }
+    $apiWatchArgs += 'run'
+
     if ($useWatch) {
-        # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
-        dotnet watch --non-interactive run --project $ApiProject --no-launch-profile --urls http://localhost:5000 2>&1 |
+        dotnet watch @apiWatchArgs --project $ApiProject --no-launch-profile --urls http://localhost:5000 2>&1 |
             Tee-Object -FilePath $errorLog
     }
     else {
