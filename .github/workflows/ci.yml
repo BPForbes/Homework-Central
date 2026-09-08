@@ -120,6 +120,31 @@ jobs:
       - name: Build projects outside the solution
         run: dotnet build scripts/PostgresHostCheck/PostgresHostCheck.csproj --configuration Release
 
+      # The dev-stack readiness waits in scripts/dev-stack-lib.* branch on these exit codes.
+      # Reporting "a server answered and rejected the connection" as "nothing answers here" is
+      # what made run-dev abort for 60s against a freshly wiped Postgres volume.
+      - name: Verify PostgresHostCheck exit codes
+        run: |
+          set -uo pipefail
+          dll=scripts/PostgresHostCheck/bin/Release/net10.0/PostgresHostCheck.dll
+          expect_exit() {
+            local label="$1"
+            local expected="$2"
+            shift 2
+            local status=0
+            dotnet "$dll" "$@" >/dev/null 2>&1 || status=$?
+            if [[ "$status" != "$expected" ]]; then
+              echo "$label: expected exit $expected, got $status"
+              exit 1
+            fi
+            echo "$label: exit $status"
+          }
+          expect_exit "bad usage" 2 not-a-port
+          # 5599 is not published by any service container in this job.
+          expect_exit "nothing listening" 1 5599
+          # The job's postgres service holds homework_central_test, not homework_central_master.
+          expect_exit "server answered, master database missing" 3 5432
+
       # Backstop for C# pattern `var`, `dynamic`, and per-file suppressions.
       # IDE0008 itself is pinned in .editorconfig + EnforceCodeStyleInBuild.
       - name: Reject implicitly typed locals

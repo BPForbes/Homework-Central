@@ -28,8 +28,6 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
-$PostgresHostCheckProject = Join-Path $RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
-$PostgresHostCheckDll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
@@ -248,23 +246,17 @@ function Test-PostgresHostConnection([hashtable]$EnvValues) {
         return $false
     }
 
-    Build-PostgresHostCheckIfNeeded
-
     # Same 127.0.0.1 path the API uses. Host=localhost prefers ::1 on Windows and
     # times out against Docker Desktop's IPv4-only publish.
-    $stderr = ''
     for ($attempt = 1; $attempt -le 10; $attempt++) {
-        $output = & dotnet $PostgresHostCheckDll $port $DevPostgresConnectHost 2>&1
-        $hostCheckExit = $LASTEXITCODE
-        $stderr = $output | Out-String
-        if ($hostCheckExit -eq 0) {
+        if (Test-DevPostgresConnection $port) {
             return $true
         }
         Start-Sleep -Seconds 1
     }
 
     Write-Step "Cannot connect to homework_central_master on ${DevPostgresConnectHost}:$port from the host"
-    $detail = $stderr.Trim()
+    $detail = Get-DevPostgresHostCheckDetail
     if ($detail) {
         Write-Host "       $detail" -ForegroundColor DarkGray
     }
@@ -357,20 +349,22 @@ function Reset-PostgresVolume {
 
 function Wait-CoreBeforeApi([hashtable]$EnvValues) {
     Write-Step 'Waiting for Postgres (FCaptcha continues in the background)'
-    Wait-ForPostgres -EnvValues $EnvValues
+    return Wait-ForPostgres -EnvValues $EnvValues
 }
 
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
     Start-CoreContainers -EnvValues $EnvValues
-    Wait-CoreBeforeApi -EnvValues $EnvValues
+    if ((Wait-CoreBeforeApi -EnvValues $EnvValues) -ne 'Ready') {
+        Repair-PostgresHostReachability $EnvValues
+    }
 
     if (-not (Test-PostgresAuth -Database 'postgres')) {
         Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
         Reset-PostgresVolume
         Start-CoreContainers -EnvValues $EnvValues
-        Wait-CoreBeforeApi -EnvValues $EnvValues
+        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
         if (-not (Test-PostgresAuth -Database 'postgres')) {
             throw 'Postgres password verification failed after recreating the Docker volume'
         }
@@ -380,7 +374,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
         Reset-PostgresVolume
         Start-CoreContainers -EnvValues $EnvValues
-        Wait-CoreBeforeApi -EnvValues $EnvValues
+        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
 
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master inside the Docker Postgres container'
@@ -415,7 +409,7 @@ function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     if (Test-OurPostgresPublishedOn $port) {
         Write-Step "Host cannot reach Docker Postgres on ${DevPostgresConnectHost}:$port; recreating the container"
         Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
-        Wait-CoreBeforeApi -EnvValues $EnvValues
+        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master after recreating Docker Postgres'
         }
@@ -434,7 +428,7 @@ function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     Set-PostgresHostPortValue $EnvValues $freePort
     Set-ComposeEnv $EnvValues
     Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
-    Wait-CoreBeforeApi -EnvValues $EnvValues
+    $null = Wait-CoreBeforeApi -EnvValues $EnvValues
     if (-not (Prepare-HomeworkCentralDatabase)) {
         throw 'Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT'
     }
@@ -448,6 +442,12 @@ function Ensure-EnvFile {
     return Ensure-DevEnvFile
 }
 
+# Returns 'Ready' or 'HostUnreachable'; throws when Postgres never came up inside the
+# container, which no caller can repair.
+#
+# Readiness here is host reachability, not a usable homework_central_master: this wait runs
+# before Prepare-HomeworkCentralDatabase creates that database and before Test-PostgresAuth
+# resets a volume whose password does not match, so requiring either would never clear.
 function Wait-ForPostgres {
     param([hashtable]$EnvValues)
 
@@ -456,16 +456,34 @@ function Wait-ForPostgres {
         $port = $EnvValues['POSTGRES_HOST_PORT']
     }
 
-    $attempts = 60
-    for ($i = 1; $i -le $attempts; $i++) {
+    [int]$timeoutSeconds = 60
+    [datetime]$deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    # Sticky: once Postgres has answered inside the container, a later pg_isready blip does not
+    # turn this into a container problem. The remaining fault is host reachability, which is the
+    # one Repair-PostgresHostReachability can act on.
+    [bool]$everReadyInContainer = $false
+    do {
         docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
-        $readyInContainer = $LASTEXITCODE -eq 0
-        if ($readyInContainer -and (Test-DevPostgresConnection $port)) {
-            return
+        if ($LASTEXITCODE -eq 0) {
+            $everReadyInContainer = $true
+            if (Test-DevPostgresHostReachable $port) {
+                return 'Ready'
+            }
         }
         Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+
+    if (-not $everReadyInContainer) {
+        throw "Postgres did not become ready inside the Docker container within ${timeoutSeconds}s. Check: docker compose logs postgres"
     }
-    throw "Postgres did not become ready on ${DevPostgresConnectHost}:$port within ${attempts}s"
+
+    # In-container Postgres is up but the published port does not reach it. Report instead of
+    # throwing: Ensure-PostgresReady hands this to Repair-PostgresHostReachability, which
+    # recreates the container or moves POSTGRES_HOST_PORT to a free port.
+    $detail = Get-DevPostgresHostCheckDetail
+    $suffix = if ($detail) { ": $detail" } else { '' }
+    Write-Step "Postgres is ready in the container but ${DevPostgresConnectHost}:${port} does not reach it$suffix"
+    return 'HostUnreachable'
 }
 
 function Assert-DockerRunning {
@@ -498,38 +516,6 @@ function Start-ClamAv {
     Assert-DockerRunning
 
     Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
-}
-
-function Build-PostgresHostCheck {
-    dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
-}
-
-function Test-PostgresHostCheckFresh {
-    $dll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
-    if (-not (Test-Path $dll)) {
-        return $false
-    }
-
-    $built = Get-Item $dll
-
-    # Compare against the project file *and* every .cs source under it, not just the .csproj —
-    # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
-    # this script keeps running the stale compiled checker.
-    $projectDir = Split-Path $PostgresHostCheckProject -Parent
-    $sourceFiles = @(Get-Item $PostgresHostCheckProject) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
-    $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-
-    return $built.LastWriteTimeUtc -ge $newestSource.LastWriteTimeUtc
-}
-
-function Build-PostgresHostCheckIfNeeded {
-    if (Test-PostgresHostCheckFresh) {
-        Write-Step 'Postgres host check already built'
-        return
-    }
-
-    Build-PostgresHostCheck
 }
 
 function Build-Projects {

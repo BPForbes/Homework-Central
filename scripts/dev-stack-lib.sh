@@ -13,6 +13,17 @@ DEV_STACK_CLAMAV_HOST_PORT="3310"
 # Must match docker-compose.yml's `fcaptcha` service image tag.
 DEV_STACK_FCAPTCHA_IMAGE="homework-central-fcaptcha:1.12.0"
 DEV_STACK_SERVER_REGISTERED=0
+# 127.0.0.1 rather than localhost: localhost prefers ::1 on Windows and burns the whole connect
+# timeout while Docker Desktop has published IPv4 only.
+#
+# Assigned unconditionally, not defaulted from the environment: the probe carries the dev
+# Postgres credentials, and an exported value would aim it — and the "already running" check
+# that clears on any answer — at an address the developer never chose. A sourcing script that
+# wants a different host still reassigns it after the source, which is what run-dev.sh does.
+DEV_POSTGRES_CONNECT_HOST="127.0.0.1"
+# Last stdout/stderr from PostgresHostCheck, surfaced by readiness waits when they time out.
+DEV_POSTGRES_HOST_CHECK_DETAIL=""
+DEV_POSTGRES_HOST_CHECK_BUILD_FAILED=0
 
 trim_dev_env_whitespace() {
   local value="$1"
@@ -224,25 +235,103 @@ postgres_host_check_dll() {
 }
 
 build_postgres_host_check_if_needed() {
+  # A build that already failed will not start succeeding on its own, and the readiness loops
+  # call this once per attempt: without this the failing build — and its log line — would
+  # repeat every second for as long as a wait runs.
+  if [[ "$DEV_POSTGRES_HOST_CHECK_BUILD_FAILED" == "1" ]]; then
+    return 1
+  fi
+
   local dll project project_dir
   dll="$(postgres_host_check_dll)"
   project="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
   project_dir="$DEV_STACK_REPO_ROOT/scripts/PostgresHostCheck"
 
-  if [[ -f "$dll" ]] && ! find "$project_dir" \( -name '*.cs' -o -name '*.csproj' \) -newer "$dll" | grep -q .; then
-    return 0
+  # Only hand-written sources count. bin/ and obj/ hold MSBuild-generated .cs files, and a
+  # Release build (CI, CodeQL) leaves them newer than this Debug output forever, which would
+  # make every readiness attempt rebuild the checker.
+  #
+  # Command substitution rather than `find ... | grep -q`: grep closes the pipe on its first
+  # match, and the SIGPIPE that find then takes surfaces as 141 under `pipefail`, which the
+  # negation would read as "nothing newer" and skip a rebuild the sources do need.
+  if [[ -f "$dll" ]]; then
+    local newer_source
+    newer_source="$(find "$project_dir" \
+      \( -type d \( -name bin -o -name obj \) -prune \) -o \
+      \( -type f \( -name '*.cs' -o -name '*.csproj' \) -newer "$dll" -print -quit \))"
+    if [[ -z "$newer_source" ]]; then
+      return 0
+    fi
   fi
 
-  dotnet build "$project" -c Debug -v q >/dev/null
+  # Logged only on the rebuild path: the readiness loops call this helper once per attempt,
+  # so an "already built" line would repeat for as long as a wait runs.
+  printf '==> Building Postgres host check\n'
+  if ! dotnet build "$project" -c Debug -v q >/dev/null; then
+    DEV_POSTGRES_HOST_CHECK_BUILD_FAILED=1
+    return 1
+  fi
+}
+
+# Sets DEV_POSTGRES_HOST_CHECK_DETAIL and returns the checker's exit code. See
+# scripts/PostgresHostCheck/Program.cs for the meaning of each code.
+invoke_dev_postgres_host_check() {
+  local port="$1"
+  local dll
+  if ! build_postgres_host_check_if_needed; then
+    DEV_POSTGRES_HOST_CHECK_DETAIL="PostgresHostCheck build failed"
+    return 1
+  fi
+
+  dll="$(postgres_host_check_dll)"
+  if [[ ! -f "$dll" ]]; then
+    DEV_POSTGRES_HOST_CHECK_DETAIL="PostgresHostCheck is not built"
+    return 1
+  fi
+
+  local output status=0
+  output="$(dotnet "$dll" "$port" "$DEV_POSTGRES_CONNECT_HOST" 2>&1)" || status=$?
+  DEV_POSTGRES_HOST_CHECK_DETAIL="$output"
+  return "$status"
 }
 
 test_dev_postgres_connection() {
+  invoke_dev_postgres_host_check "$1"
+}
+
+# Readiness gate for "the host can reach Docker Postgres on this published port".
+# Exit code 3 means a server answered and rejected the connection — no master database on a
+# fresh volume, or credentials that do not match the dev ones. Both still prove the published
+# port reaches Postgres, and run-dev creates the database and resets a mismatched volume only
+# after this wait, so treating 3 as not-ready deadlocks the wait against its own repair.
+# Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on its own.
+#
+# Silent, because polling loops call it once per second. One-shot callers should prefer
+# test_dev_postgres_already_running, which names the rejection.
+test_dev_postgres_host_reachable() {
+  local status=0
+  invoke_dev_postgres_host_check "$1" || status=$?
+  [[ "$status" -eq 0 || "$status" -eq 3 ]]
+}
+
+report_dev_postgres_rejected() {
   local port="$1"
-  local dll
-  build_postgres_host_check_if_needed
-  dll="$(postgres_host_check_dll)"
-  [[ -f "$dll" ]] || return 1
-  dotnet "$dll" "$port" "127.0.0.1" >/dev/null 2>&1
+  printf '==> Postgres answered on %s:%s but rejected the check: %s\n' \
+    "$DEV_POSTGRES_CONNECT_HOST" "$port" "${DEV_POSTGRES_HOST_CHECK_DETAIL:-no detail}"
+}
+
+# One-shot "Postgres is already up on this published port" check, for the callers that skip
+# starting a container. It names a rejected connection rather than swallowing it: nothing on
+# this path resets a volume whose password does not match, so an unreported 28P01 would
+# resurface as an opaque API startup failure well after the cause scrolled away.
+test_dev_postgres_already_running() {
+  local port="$1"
+  local status=0
+  invoke_dev_postgres_host_check "$port" || status=$?
+  if [[ "$status" -eq 3 ]]; then
+    report_dev_postgres_rejected "$port"
+  fi
+  [[ "$status" -eq 0 || "$status" -eq 3 ]]
 }
 
 start_dev_stack_postgres_container() {
@@ -263,13 +352,29 @@ start_dev_stack_postgres_container() {
 
 wait_dev_postgres_ready() {
   local port="$1"
-  local attempt
-  for ((attempt = 1; attempt <= 30; attempt++)); do
-    if test_dev_postgres_connection "$port"; then
+  local timeout_seconds=30
+  local deadline=$((SECONDS + timeout_seconds))
+  local status
+  while true; do
+    status=0
+    invoke_dev_postgres_host_check "$port" || status=$?
+    if [[ "$status" -eq 0 ]]; then
       return 0
+    fi
+    if [[ "$status" -eq 3 ]]; then
+      # Nothing repairs the volume behind this wait — start-api-dev only starts the
+      # container — so name the rejection instead of leaving the API to fail on it.
+      report_dev_postgres_rejected "$port"
+      return 0
+    fi
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      break
     fi
     sleep 1
   done
+  printf 'error: Postgres did not become ready on %s:%s within %ss: %s\n' \
+    "$DEV_POSTGRES_CONNECT_HOST" "$port" "$timeout_seconds" \
+    "${DEV_POSTGRES_HOST_CHECK_DETAIL:-no detail}" >&2
   return 1
 }
 
@@ -364,7 +469,8 @@ ensure_dev_stack_core_running() {
   local postgres_port="$1"
   local fcaptcha_port="$2"
 
-  if test_dev_postgres_connection "$postgres_port"; then
+  # Reachability, not homework_central_master: see ensure_dev_postgres_running.
+  if test_dev_postgres_already_running "$postgres_port"; then
     if test_dev_fcaptcha_connection "$fcaptcha_port" && test_dev_fcaptcha_secret_aligned; then
       with_dev_stack_lock _join_dev_stack_if_managed "$postgres_port"
       return 0
@@ -508,12 +614,15 @@ _join_dev_stack_if_managed() {
 
 ensure_dev_postgres_running() {
   local port="$1"
-  if test_dev_postgres_connection "$port"; then
+  # "Already running" is a reachability question, not a homework_central_master question:
+  # on a freshly wiped volume the server is up before that database exists, and starting a
+  # second time would skip the refcount join that keeps the container alive for both servers.
+  if test_dev_postgres_already_running "$port"; then
     with_dev_stack_lock _join_dev_stack_if_managed "$port"
     return 0
   fi
 
-  printf '==> Starting Docker Postgres on 127.0.0.1:%s\n' "$port"
+  printf '==> Starting Docker Postgres on %s:%s\n' "$DEV_POSTGRES_CONNECT_HOST" "$port"
   start_dev_stack_postgres_container "$port" || return 1
   wait_dev_postgres_ready "$port" || return 1
 

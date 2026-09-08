@@ -21,8 +21,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/dev-stack-lib.sh
 source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
-POSTGRES_HOST_CHECK_PROJECT="$REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
-POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
@@ -268,8 +266,6 @@ get_postgres_published_port() {
 test_postgres_host_connection() {
   local published
   local attempt
-  local output
-  local status
 
   published="$(get_postgres_published_port || true)"
   if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
@@ -277,22 +273,16 @@ test_postgres_host_connection() {
     return 1
   fi
 
-  if [[ ! -f "$POSTGRES_HOST_CHECK_DLL" ]]; then
-    build_postgres_host_check
-  fi
-
   for ((attempt = 1; attempt <= 10; attempt++)); do
-    output="$(dotnet "$POSTGRES_HOST_CHECK_DLL" "$POSTGRES_HOST_PORT" "$DEV_POSTGRES_CONNECT_HOST" 2>&1)"
-    status=$?
-    if [[ $status -eq 0 ]]; then
+    if test_dev_postgres_connection "$POSTGRES_HOST_PORT"; then
       return 0
     fi
     sleep 1
   done
 
   log "Cannot connect to homework_central_master on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} from the host"
-  if [[ -n "$output" ]]; then
-    printf '       %s\n' "$output"
+  if [[ -n "${DEV_POSTGRES_HOST_CHECK_DETAIL:-}" ]]; then
+    printf '       %s\n' "$DEV_POSTGRES_HOST_CHECK_DETAIL"
   fi
   return 1
 }
@@ -374,13 +364,15 @@ ensure_postgres_ready() {
   set_compose_env
 
   start_core_containers || fail "Failed to start Postgres. Check: docker compose logs"
-  wait_core_before_api
+  if ! wait_core_before_api; then
+    repair_postgres_host_reachability
+  fi
 
   if ! test_postgres_auth postgres; then
     log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
     reset_postgres_volume
     start_core_containers || true
-    wait_core_before_api
+    wait_core_before_api || true
     if ! test_postgres_auth postgres; then
       fail "Postgres password verification failed after recreating the Docker volume"
     fi
@@ -390,7 +382,7 @@ ensure_postgres_ready() {
     log "Postgres volume is unhealthy (collation mismatch); recreating"
     reset_postgres_volume
     start_core_containers || true
-    wait_core_before_api
+    wait_core_before_api || true
 
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master inside the Docker Postgres container"
@@ -420,7 +412,7 @@ repair_postgres_host_reachability() {
   if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
     log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
     start_core_containers 1 || fail "Failed to recreate Postgres. Check: docker compose logs"
-    wait_core_before_api
+    wait_core_before_api || true
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master after recreating Docker Postgres"
     fi
@@ -441,7 +433,7 @@ repair_postgres_host_reachability() {
   set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
   set_compose_env
   start_core_containers 1 || fail "Failed to start Postgres after changing POSTGRES_HOST_PORT. Check: docker compose logs"
-  wait_core_before_api
+  wait_core_before_api || true
   if ! prepare_homework_central_master_database; then
     fail "Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT"
   fi
@@ -450,18 +442,41 @@ repair_postgres_host_reachability() {
   fi
 }
 
+# Returns 0 when the host reaches Postgres, 1 when in-container Postgres is up but the
+# published port does not reach it, and `fail`s when Postgres never came up inside the
+# container, which no caller can repair.
+#
+# Readiness here is host reachability, not a usable homework_central_master: this wait runs
+# before prepare_homework_central_master_database creates that database and before
+# test_postgres_auth resets a volume whose password does not match, so requiring either
+# would never clear.
 wait_for_postgres() {
-  local attempts=60
-  local i
-  for ((i = 1; i <= attempts; i++)); do
+  local timeout_seconds=60
+  local deadline=$((SECONDS + timeout_seconds))
+  local ready_in_container=false
+  while true; do
     if docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres \
-      pg_isready -U postgres -d postgres >/dev/null 2>&1 \
-      && test_dev_postgres_connection "$POSTGRES_HOST_PORT"; then
-      return 0
+      pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+      ready_in_container=true
+      if test_dev_postgres_host_reachable "$POSTGRES_HOST_PORT"; then
+        return 0
+      fi
+    fi
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      break
     fi
     sleep 1
   done
-  fail "Postgres did not become ready on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} within ${attempts}s"
+
+  if [[ "$ready_in_container" == false ]]; then
+    fail "Postgres did not become ready inside the Docker container within ${timeout_seconds}s. Check: docker compose logs postgres"
+  fi
+
+  # In-container Postgres is up but the published port does not reach it. Report instead of
+  # failing: ensure_postgres_ready hands this to repair_postgres_host_reachability, which
+  # recreates the container or moves POSTGRES_HOST_PORT to a free port.
+  log "Postgres is ready in the container but ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} does not reach it: ${DEV_POSTGRES_HOST_CHECK_DETAIL:-no detail}"
+  return 1
 }
 
 start_postgres() {
@@ -488,35 +503,6 @@ start_clamav() {
   log "Starting ClamAV (Docker) on localhost:${DEV_STACK_CLAMAV_HOST_PORT}"
   ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" \
     || fail "Failed to start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Check: docker compose logs clamav"
-}
-
-build_postgres_host_check() {
-  dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
-}
-
-build_postgres_host_check_if_needed() {
-  local dll="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
-  # Compare against the project file *and* every .cs source under it, not just the .csproj —
-  # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
-  # this script keeps running the stale compiled checker.
-  if [[ -f "$dll" ]]; then
-    local project_dir
-    project_dir="$(dirname "$POSTGRES_HOST_CHECK_PROJECT")"
-    local stale=false
-    while IFS= read -r -d '' source_file; do
-      if [[ "$source_file" -nt "$dll" ]]; then
-        stale=true
-        break
-      fi
-    done < <(find "$project_dir" -name '*.cs' -print0)
-
-    if [[ "$stale" == false && ! "$POSTGRES_HOST_CHECK_PROJECT" -nt "$dll" ]]; then
-      log "Postgres host check already built"
-      return
-    fi
-  fi
-
-  build_postgres_host_check
 }
 
 build_projects() {

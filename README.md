@@ -336,9 +336,13 @@ Architecture, trust boundaries, and engineering standards live under
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
 can bind without a duplicate build. It also starts the frontend before the API. Docker Postgres
 starts with the existing helper; FCaptcha continues in the background and is not joined before
-the API. `run-dev` waits until Postgres is ready in the container and accepts
-connections on `127.0.0.1:<POSTGRES_HOST_PORT>` before launching the API. `start-api-dev` does not wait for
-them again when `run-dev` already did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
+the API. `run-dev` waits until Postgres is ready in the container and answers on
+`127.0.0.1:<POSTGRES_HOST_PORT>` before launching the API. A server that answers and rejects the
+connection counts as reachable, because a freshly wiped volume has no `homework_central_master`
+yet and `run-dev` creates it — and resets a volume whose password does not match — right after
+that wait. If the container is up but the published port never answers, `run-dev` recreates the
+container or moves `POSTGRES_HOST_PORT` to a free port instead of giving up. `start-api-dev`
+does not wait for them again when `run-dev` already did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
 ticket portals and neural catalogs finish after that so the Vite BackendGate is not held
 on catalog seed. Production finishes those catalogs before Ready.
 Do not run `scripts/reset-dev-db.ps1` / `scripts/reset-dev-db.sh` in a second terminal while

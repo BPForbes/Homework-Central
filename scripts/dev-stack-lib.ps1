@@ -18,6 +18,19 @@ $script:DevClamAvHostPort = '3310'
 # Must match docker-compose.yml's `fcaptcha` service image tag.
 $script:DevFCaptchaImage = 'homework-central-fcaptcha:1.12.0'
 $script:DevStackServerRegistered = $false
+# Last stdout/stderr from PostgresHostCheck, surfaced by readiness waits when they time out.
+$script:DevPostgresHostCheckDetail = ''
+
+# 127.0.0.1 rather than localhost: localhost prefers ::1 on Windows and burns the whole connect
+# timeout while Docker Desktop has published IPv4 only.
+#
+# Deliberately reads only the caller's script scope, never $env:. run-dev.ps1 assigns this
+# before it dot-sources this file, so the guard preserves that value; start-api-dev.ps1 does
+# not, so it gets the loopback default. The probe carries the dev Postgres credentials, and the
+# "already running" check clears on any answer, so neither may be aimed by the environment.
+if (-not (Get-Variable -Name DevPostgresConnectHost -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:DevPostgresConnectHost = '127.0.0.1'
+}
 
 function New-DevRandomSecret {
     $bytes = New-Object byte[] 48
@@ -185,34 +198,108 @@ function Build-PostgresHostCheckIfNeeded {
     $dll = Get-PostgresHostCheckDll
     $project = Join-Path $script:RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
     $projectDir = Split-Path $project -Parent
-    $needsBuild = -not (Test-Path $dll)
-    if (-not $needsBuild) {
-        $built = Get-Item $dll
-        $sourceFiles = @(Get-Item $project) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
-        $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-        $needsBuild = $built.LastWriteTimeUtc -lt $newestSource.LastWriteTimeUtc
-    }
-
-    if (-not $needsBuild) {
+    if (-not (Test-Path $dll)) {
+        Build-PostgresHostCheck -Project $project
         return
     }
 
-    dotnet build $project -c Debug -v q *> $null
+    # Only hand-written sources count. bin/ and obj/ hold MSBuild-generated .cs files, and a
+    # Release build (CI, CodeQL) leaves them newer than this Debug output forever, which would
+    # make every readiness attempt rebuild the checker.
+    #
+    # The bin/obj test runs on each path relative to the project directory, never the full
+    # path: a checkout whose own ancestors include a directory named bin or obj would otherwise
+    # filter out every hand-written source, and a Program.cs edit would never look stale.
+    [System.IO.FileInfo]$built = Get-Item $dll
+    [int]$projectDirLength = $projectDir.Length
+    $sourceFiles = @(Get-Item $project) + @(
+        Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse -File |
+            Where-Object { $_.FullName.Substring($projectDirLength) -notmatch '[\\/](bin|obj)[\\/]' }
+    )
+    $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    if ($built.LastWriteTimeUtc -ge $newestSource.LastWriteTimeUtc) {
+        return
+    }
+
+    Build-PostgresHostCheck -Project $project
+}
+
+function Build-PostgresHostCheck {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Project
+    )
+
+    # Logged only on the rebuild path: the readiness loops call the staleness check once per
+    # attempt, so an "already built" line would repeat for as long as a wait runs.
+    Write-Host '==> Building Postgres host check' -ForegroundColor DarkGray
+    dotnet build $Project -c Debug -v q *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'PostgresHostCheck build failed'
     }
 }
 
-function Test-DevPostgresConnection([string]$Port) {
+# Returns the checker's exit code and records its output in
+# $script:DevPostgresHostCheckDetail. See scripts/PostgresHostCheck/Program.cs for the
+# meaning of each code.
+function Invoke-DevPostgresHostCheck([string]$Port) {
     Build-PostgresHostCheckIfNeeded
     $dll = Get-PostgresHostCheckDll
     if (-not (Test-Path $dll)) {
-        return $false
+        $script:DevPostgresHostCheckDetail = 'PostgresHostCheck is not built'
+        return 1
     }
 
-    $output = & dotnet $dll $Port '127.0.0.1' 2>&1
-    $hostCheckExit = $LASTEXITCODE
-    return $hostCheckExit -eq 0
+    # $LASTEXITCODE must be read straight off the native call; a redirection or a
+    # pipeline stage in between can overwrite it with the cmdlet's own status.
+    $output = & dotnet $dll $Port $script:DevPostgresConnectHost 2>&1
+    [int]$hostCheckExit = $LASTEXITCODE
+    $script:DevPostgresHostCheckDetail = ($output | Out-String).Trim()
+    return $hostCheckExit
+}
+
+function Test-DevPostgresConnection([string]$Port) {
+    return (Invoke-DevPostgresHostCheck $Port) -eq 0
+}
+
+# Readiness gate for "the host can reach Docker Postgres on this published port".
+# Exit code 3 means a server answered and rejected the connection — no master database on a
+# fresh volume, or credentials that do not match the dev ones. Both still prove the published
+# port reaches Postgres, and run-dev creates the database and resets a mismatched volume only
+# after this wait, so treating 3 as not-ready deadlocks the wait against its own repair.
+# Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on its own.
+#
+# Silent, because polling loops call it once per second. One-shot callers should prefer
+# Test-DevPostgresAlreadyRunning, which names the rejection.
+function Test-DevPostgresHostReachable([string]$Port) {
+    [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
+    return $hostCheckExit -eq 0 -or $hostCheckExit -eq 3
+}
+
+function Write-DevPostgresRejected([string]$Port) {
+    [string]$detail = Get-DevPostgresHostCheckDetail
+    if (-not $detail) {
+        $detail = 'no detail'
+    }
+
+    Write-Host "==> Postgres answered on ${script:DevPostgresConnectHost}:${Port} but rejected the check: $detail" -ForegroundColor DarkGray
+}
+
+# One-shot "Postgres is already up on this published port" check, for the callers that skip
+# starting a container. It names a rejected connection rather than swallowing it: nothing on
+# this path resets a volume whose password does not match, so an unreported 28P01 would
+# resurface as an opaque API startup failure well after the cause scrolled away.
+function Test-DevPostgresAlreadyRunning([string]$Port) {
+    [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
+    if ($hostCheckExit -eq 3) {
+        Write-DevPostgresRejected $Port
+    }
+
+    return $hostCheckExit -eq 0 -or $hostCheckExit -eq 3
+}
+
+function Get-DevPostgresHostCheckDetail {
+    return $script:DevPostgresHostCheckDetail
 }
 
 function Start-DevStackPostgresContainer {
@@ -245,14 +332,27 @@ function Start-DevStackPostgresContainer {
 }
 
 function Wait-DevPostgresReady([string]$Port) {
-    for ($attempt = 1; $attempt -le 30; $attempt++) {
-        if (Test-DevPostgresConnection $Port) {
+    [int]$timeoutSeconds = 30
+    [datetime]$deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    do {
+        [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
+        if ($hostCheckExit -eq 0) {
             return
         }
-        Start-Sleep -Seconds 1
-    }
 
-    throw "Postgres did not become ready on 127.0.0.1:$Port within 30s"
+        if ($hostCheckExit -eq 3) {
+            # Nothing repairs the volume behind this wait — start-api-dev only starts the
+            # container — so name the rejection instead of leaving the API to fail on it.
+            Write-DevPostgresRejected $Port
+            return
+        }
+
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+
+    $detail = Get-DevPostgresHostCheckDetail
+    $suffix = if ($detail) { ": $detail" } else { '' }
+    throw "Postgres did not become ready on ${script:DevPostgresConnectHost}:${Port} within ${timeoutSeconds}s$suffix"
 }
 
 function Join-DevStackIfManaged([string]$Port) {
@@ -278,12 +378,15 @@ function Join-DevStackIfManaged([string]$Port) {
 }
 
 function Ensure-DevPostgresRunning([string]$Port) {
-    if (Test-DevPostgresConnection $Port) {
+    # "Already running" is a reachability question, not a homework_central_master question:
+    # on a freshly wiped volume the server is up before that database exists, and starting a
+    # second time would skip the refcount join that keeps the container alive for both servers.
+    if (Test-DevPostgresAlreadyRunning $Port) {
         Join-DevStackIfManaged -Port $Port
         return
     }
 
-    Write-Host "==> Starting Docker Postgres on 127.0.0.1:$Port" -ForegroundColor DarkGray
+    Write-Host "==> Starting Docker Postgres on ${script:DevPostgresConnectHost}:$Port" -ForegroundColor DarkGray
     Start-DevStackPostgresContainer $Port
     Wait-DevPostgresReady $Port
 
@@ -438,7 +541,8 @@ function Ensure-DevStackCoreRunning {
         [string]$FCaptchaPort
     )
 
-    if (Test-DevPostgresConnection $PostgresPort) {
+    # Reachability, not homework_central_master: see Ensure-DevPostgresRunning.
+    if (Test-DevPostgresAlreadyRunning $PostgresPort) {
         if ((Test-DevFCaptchaConnection $FCaptchaPort) -and (Test-DevFCaptchaSecretAligned)) {
             Join-DevStackIfManaged -Port $PostgresPort
             return
