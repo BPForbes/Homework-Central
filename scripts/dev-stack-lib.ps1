@@ -210,8 +210,9 @@ function Test-DevPostgresConnection([string]$Port) {
         return $false
     }
 
-    dotnet $dll $Port '127.0.0.1' *> $null
-    return $LASTEXITCODE -eq 0
+    $output = & dotnet $dll $Port '127.0.0.1' 2>&1
+    $hostCheckExit = $LASTEXITCODE
+    return $hostCheckExit -eq 0
 }
 
 function Start-DevStackPostgresContainer {
@@ -348,45 +349,6 @@ function Start-DevStackFCaptchaContainer([string]$Port, [switch]$ForceRecreate) 
     }
 }
 
-function Start-DevStackCoreContainers {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$PostgresPort,
-        [Parameter(Mandatory = $true)]
-        [string]$FCaptchaPort,
-        [switch]$ForceRecreate
-    )
-
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        throw 'Docker CLI not found. Install Docker Desktop or run scripts/run-dev.ps1 first.'
-    }
-
-    docker info *> $null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Docker is not running. Start Docker Desktop and retry.'
-    }
-
-    $env:POSTGRES_PASSWORD = $script:DevPostgresPassword
-    $env:POSTGRES_HOST_PORT = $PostgresPort
-    $env:FCAPTCHA_HOST_PORT = $FCaptchaPort
-    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d')
-
-    docker image inspect $script:DevFCaptchaImage *> $null
-    if ($LASTEXITCODE -ne 0 -or $env:HC_FCAPTCHA_REBUILD -eq '1') {
-        $composeArgs += '--build'
-    }
-
-    if ($ForceRecreate) {
-        $composeArgs += '--force-recreate'
-    }
-
-    $composeArgs += @('postgres', 'fcaptcha')
-    docker compose @composeArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw 'docker compose up postgres fcaptcha failed (first run builds FCaptcha from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)'
-    }
-}
-
 # Postgres helper first, then the existing FCaptcha helper in the background.
 # /healthz only needs the master database; login captcha can finish after Ready.
 function Start-DevStackPostgresThenFCaptchaBackground {
@@ -476,89 +438,38 @@ function Ensure-DevStackCoreRunning {
         [string]$FCaptchaPort
     )
 
-    if ($env:HC_DEV_STRIPPED -eq '1') {
-        if (Test-DevPostgresConnection $PostgresPort) {
-            if ((Test-DevFCaptchaConnection $FCaptchaPort) -and (Test-DevFCaptchaSecretAligned)) {
-                Join-DevStackIfManaged -Port $PostgresPort
-                return
-            }
-
-            $libPath = Join-Path $PSScriptRoot 'dev-stack-lib.ps1'
-            if (Test-DevFCaptchaConnection $FCaptchaPort) {
-                Write-Host '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)' -ForegroundColor DarkGray
-                Start-Job -ScriptBlock {
-                    param($LibPath, $Port, $Path)
-                    $env:Path = $Path
-                    . $LibPath
-                    Start-DevStackFCaptchaContainer -Port $Port -ForceRecreate
-                } -ArgumentList $libPath, $FCaptchaPort, $env:Path | Out-Null
-            }
-            else {
-                Start-Job -ScriptBlock {
-                    param($LibPath, $Port, $Path)
-                    $env:Path = $Path
-                    . $LibPath
-                    Start-DevStackFCaptchaContainer -Port $Port
-                } -ArgumentList $libPath, $FCaptchaPort, $env:Path | Out-Null
-            }
-
+    if (Test-DevPostgresConnection $PostgresPort) {
+        if ((Test-DevFCaptchaConnection $FCaptchaPort) -and (Test-DevFCaptchaSecretAligned)) {
             Join-DevStackIfManaged -Port $PostgresPort
             return
         }
 
-        Write-Host "==> Starting Docker Postgres on 127.0.0.1:$PostgresPort (FCaptcha continues in the background)" -ForegroundColor DarkGray
-        Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $PostgresPort -FCaptchaPort $FCaptchaPort
-        Wait-DevPostgresReady $PostgresPort
-        Invoke-DevStackStateUpdate {
-            $state = Read-DevStackState
-            if ($null -eq $state) {
-                Write-DevStackState @{
-                    managed_postgres = '1'
-                    postgres_port    = $PostgresPort
-                    refcount         = '1'
-                }
-                $script:DevStackServerRegistered = $true
-            }
+        $libPath = Join-Path $PSScriptRoot 'dev-stack-lib.ps1'
+        if (Test-DevFCaptchaConnection $FCaptchaPort) {
+            Write-Host '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)' -ForegroundColor DarkGray
+            Start-Job -ScriptBlock {
+                param($LibPath, $Port, $Path)
+                $env:Path = $Path
+                . $LibPath
+                Start-DevStackFCaptchaContainer -Port $Port -ForceRecreate
+            } -ArgumentList $libPath, $FCaptchaPort, $env:Path | Out-Null
         }
+        else {
+            Start-Job -ScriptBlock {
+                param($LibPath, $Port, $Path)
+                $env:Path = $Path
+                . $LibPath
+                Start-DevStackFCaptchaContainer -Port $Port
+            } -ArgumentList $libPath, $FCaptchaPort, $env:Path | Out-Null
+        }
+
+        Join-DevStackIfManaged -Port $PostgresPort
         return
     }
 
-    $forceRecreate = $false
-    if ((Test-DevPostgresConnection $PostgresPort) -and (Test-DevFCaptchaConnection $FCaptchaPort)) {
-        if (Test-DevFCaptchaSecretAligned) {
-            Join-DevStackIfManaged -Port $PostgresPort
-            return
-        }
-        $forceRecreate = $true
-        Write-Host '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)' -ForegroundColor DarkGray
-    }
-
-    Write-Host "==> Starting Docker Postgres and FCaptcha together (127.0.0.1:$PostgresPort, localhost:$FCaptchaPort)" -ForegroundColor DarkGray
-    Start-DevStackCoreContainers -PostgresPort $PostgresPort -FCaptchaPort $FCaptchaPort -ForceRecreate:$forceRecreate
-
-    $libPath = Join-Path $PSScriptRoot 'dev-stack-lib.ps1'
-    $postgresJob = Start-Job -ScriptBlock {
-        param($LibPath, $Port, $Path)
-        $env:Path = $Path
-        . $LibPath
-        Wait-DevPostgresReady $Port
-    } -ArgumentList $libPath, $PostgresPort, $env:Path
-    $fcaptchaJob = Start-Job -ScriptBlock {
-        param($LibPath, $Port, $Path)
-        $env:Path = $Path
-        . $LibPath
-        Wait-DevFCaptchaReady $Port
-    } -ArgumentList $libPath, $FCaptchaPort, $env:Path
-
-    try {
-        Wait-Job $postgresJob, $fcaptchaJob | Out-Null
-        Receive-Job $postgresJob -ErrorAction Stop | Out-Null
-        Receive-Job $fcaptchaJob -ErrorAction Stop | Out-Null
-    }
-    finally {
-        Remove-Job $postgresJob, $fcaptchaJob -Force -ErrorAction SilentlyContinue
-    }
-
+    Write-Host "==> Starting Docker Postgres on 127.0.0.1:$PostgresPort (FCaptcha continues in the background)" -ForegroundColor DarkGray
+    Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $PostgresPort -FCaptchaPort $FCaptchaPort
+    Wait-DevPostgresReady $PostgresPort
     Invoke-DevStackStateUpdate {
         $state = Read-DevStackState
         if ($null -eq $state) {

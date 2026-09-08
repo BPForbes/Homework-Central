@@ -335,11 +335,14 @@ Architecture, trust boundaries, and engineering standards live under
 
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
 can bind without a duplicate build. It also starts the frontend before the API. Docker Postgres
-and FCaptcha start together. `--stripped` / `-Stripped` starts Postgres with the existing helper
-and does not join the FCaptcha image build before the API. `start-api-dev` does not wait for
+starts with the existing helper; FCaptcha continues in the background and is not joined before
+the API. `run-dev` waits until Postgres is ready in the container and accepts
+connections on `127.0.0.1:<POSTGRES_HOST_PORT>` before launching the API. `start-api-dev` does not wait for
 them again when `run-dev` already did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
 ticket portals and neural catalogs finish after that so the Vite BackendGate is not held
 on catalog seed. Production finishes those catalogs before Ready.
+Do not run `scripts/reset-dev-db.ps1` / `scripts/reset-dev-db.sh` in a second terminal while
+`run-dev` is up — `docker compose down -v` stops the published Postgres port.
 `http://localhost:5000/` is an intentional 403 landing page, not the app — use
 `http://localhost:5173/login` and keep that tab open until `/healthz` reports `healthy`.
 

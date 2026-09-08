@@ -43,13 +43,25 @@ public static class ApplicationStartupWarmup
                         ILogger<Program> logger = services.GetRequiredService<ILogger<Program>>();
                         ITenantConnectionResolver resolver =
                             services.GetRequiredService<ITenantConnectionResolver>();
-                        logger.LogCritical(
-                            ex,
-                            "Database migration failed for master database '{DatabaseName}'. "
-                            + "If you upgraded from the single-database layout, reset the local Docker volume: "
-                            + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
-                            + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
-                            resolver.MasterDatabaseName);
+                        if (DatabaseStartup.IsHostUnreachable(ex))
+                        {
+                            logger.LogCritical(
+                                ex,
+                                "Database migration failed for master database '{DatabaseName}': "
+                                + "Postgres is not accepting host connections. Start or keep Docker Postgres "
+                                + "(`scripts/run-dev.ps1` / `scripts/run-dev.sh`). Do not reset the volume for a refused connection.",
+                                resolver.MasterDatabaseName);
+                        }
+                        else
+                        {
+                            logger.LogCritical(
+                                ex,
+                                "Database migration failed for master database '{DatabaseName}'. "
+                                + "If you upgraded from the single-database layout, reset the local Docker volume: "
+                                + "scripts/reset-dev-db.ps1 -Yes (PowerShell) or scripts/reset-dev-db.sh --yes (bash), "
+                                + "then run scripts/run-dev.ps1 or scripts/run-dev.sh.",
+                                resolver.MasterDatabaseName);
+                        }
                         return Task.CompletedTask;
                     });
             }

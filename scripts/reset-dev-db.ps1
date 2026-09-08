@@ -1,5 +1,8 @@
 # Wipe the local Docker Postgres volume (removes all registered accounts and seed data).
 #
+# `docker compose down -v` stops the published 127.0.0.1 Postgres port. Run this
+# before scripts/run-dev.ps1, not in a second terminal while run-dev is up.
+#
 # Usage:
 #   scripts/reset-dev-db.ps1
 #   scripts/reset-dev-db.ps1 -Yes
@@ -19,6 +22,7 @@ $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
 
 if (-not $Yes) {
     Write-Host 'This removes the pgdata Docker volume and all local account data.'
+    Write-Host 'Stop run-dev first, or run this before starting the API. A live API keeps retrying until Postgres is back.'
     Write-Host 'Re-run with -Yes to continue: scripts/reset-dev-db.ps1 -Yes'
     exit 1
 }
@@ -30,6 +34,8 @@ $env:POSTGRES_HOST_PORT = $envValues['POSTGRES_HOST_PORT']
 $env:FCAPTCHA_SECRET = $envValues['FCAPTCHA_SECRET']
 $env:JWT_SECRET = $envValues['JWT_SECRET']
 $env:FCAPTCHA_HOST_PORT = $envValues['FCAPTCHA_HOST_PORT']
+
+Write-Host 'Stopping Docker Postgres (and optional profile containers) and removing the pgdata volume. Do not run this beside a live run-dev.'
 
 # Include optional profiles so clamav/llm/minio containers (if started) release the compose network.
 $composeArgs = @('-f', $ComposeFile, '--env-file', $script:DevStackEnvFile, '--profile', 'antivirus', '--profile', 'ai', '--profile', 'object-storage')

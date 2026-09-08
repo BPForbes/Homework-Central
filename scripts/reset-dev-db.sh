@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Wipe the local Docker Postgres volume (removes all registered accounts and seed data).
 #
+# `docker compose down -v` stops the published 127.0.0.1 Postgres port. Run this
+# before scripts/run-dev.sh, not in a second terminal while run-dev is up.
+#
 # Usage:
 #   scripts/reset-dev-db.sh
 #   scripts/reset-dev-db.sh --yes
@@ -14,11 +17,14 @@ source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 
 if [[ "${1:-}" != "--yes" ]]; then
   printf 'This removes the pgdata Docker volume and all local account data.\n'
+  printf 'Stop run-dev first, or run this before starting the API. A live API keeps retrying until Postgres is back.\n'
   printf 'Re-run with --yes to continue: scripts/reset-dev-db.sh --yes\n'
   exit 1
 fi
 
 ensure_dev_env_file 1
+
+printf 'Stopping Docker Postgres (and optional profile containers) and removing the pgdata volume. Do not run this beside a live run-dev.\n'
 
 # Include optional profiles so clamav/llm/minio containers (if started) release the compose network.
 compose_args=(-f "$COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" --profile antivirus --profile ai --profile object-storage)

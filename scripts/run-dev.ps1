@@ -1,8 +1,8 @@
 # Start the full Homework Central local dev stack (Postgres, API, frontend).
 #
 # Usage:
-#   scripts/run-dev.ps1              # build + run everything
-#   scripts/run-dev.ps1 -Stripped    # pause neural environments; FCaptcha not joined before API
+#   scripts/run-dev.ps1              # build + run; Postgres first, FCaptcha not joined before API
+#   scripts/run-dev.ps1 -Stripped    # also pause neural environments; FCaptcha not joined before API
 #   scripts/run-dev.ps1 -BuildOnly   # compile only (no servers)
 #   scripts/run-dev.ps1 -Help
 #
@@ -54,10 +54,13 @@ Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Stripped     Pause leftover neural training and skip neural warmup/refresh
-                (also set HC_DEV_STRIPPED=1). Postgres starts with the existing
-                helper; FCaptcha is started in the background and is not joined
-                before the API.
+                (also set HC_DEV_STRIPPED=1). Does not change Docker start order.
   -Help         Show this help
+
+Default start brings Postgres up with the existing helper and backgrounds
+FCaptcha so a cold captcha image build is not joined before the API. The API
+does not start until Postgres accepts connections on
+127.0.0.1:<POSTGRES_HOST_PORT>.
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
 development migrations and seeds. Unset it after pulling migrations/catalog changes
@@ -251,8 +254,10 @@ function Test-PostgresHostConnection([hashtable]$EnvValues) {
     # times out against Docker Desktop's IPv4-only publish.
     $stderr = ''
     for ($attempt = 1; $attempt -le 10; $attempt++) {
-        $stderr = dotnet $PostgresHostCheckDll $port $DevPostgresConnectHost 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
+        $output = & dotnet $PostgresHostCheckDll $port $DevPostgresConnectHost 2>&1
+        $hostCheckExit = $LASTEXITCODE
+        $stderr = $output | Out-String
+        if ($hostCheckExit -eq 0) {
             return $true
         }
         Start-Sleep -Seconds 1
@@ -338,14 +343,8 @@ function Start-CoreContainers {
         Write-Step 'Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)'
     }
 
-    if ($Stripped -or $env:HC_DEV_STRIPPED -eq '1') {
-        Write-Step "Starting Postgres (${DevPostgresConnectHost}:$expectedPort); FCaptcha continues in the background"
-        Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
-        return
-    }
-
-    Write-Step "Starting Postgres and FCaptcha together (${DevPostgresConnectHost}:$expectedPort, localhost:$fcaptchaPort)"
-    Start-DevStackCoreContainers -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
+    Write-Step "Starting Postgres (${DevPostgresConnectHost}:$expectedPort); FCaptcha continues in the background"
+    Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
 }
 
 function Reset-PostgresVolume {
@@ -357,14 +356,8 @@ function Reset-PostgresVolume {
 }
 
 function Wait-CoreBeforeApi([hashtable]$EnvValues) {
-    if ($Stripped -or $env:HC_DEV_STRIPPED -eq '1') {
-        Write-Step 'Waiting for Postgres (FCaptcha continues in the background)'
-        Wait-ForPostgres
-        return
-    }
-
-    Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
-    Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+    Write-Step 'Waiting for Postgres (FCaptcha continues in the background)'
+    Wait-ForPostgres -EnvValues $EnvValues
 }
 
 function Ensure-PostgresReady([hashtable]$EnvValues) {
@@ -456,47 +449,23 @@ function Ensure-EnvFile {
 }
 
 function Wait-ForPostgres {
-    $attempts = 30
+    param([hashtable]$EnvValues)
+
+    $port = $DevPostgresHostPort
+    if ($null -ne $EnvValues -and -not [string]::IsNullOrWhiteSpace($EnvValues['POSTGRES_HOST_PORT'])) {
+        $port = $EnvValues['POSTGRES_HOST_PORT']
+    }
+
+    $attempts = 60
     for ($i = 1; $i -le $attempts; $i++) {
         docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
-        if ($LASTEXITCODE -eq 0) { return }
+        $readyInContainer = $LASTEXITCODE -eq 0
+        if ($readyInContainer -and (Test-DevPostgresConnection $port)) {
+            return
+        }
         Start-Sleep -Seconds 1
     }
-    throw "Postgres did not become ready within ${attempts}s"
-}
-
-function Wait-PostgresAndFCaptcha([hashtable]$EnvValues) {
-    $port = $EnvValues['FCAPTCHA_HOST_PORT']
-    if ([string]::IsNullOrWhiteSpace($port)) {
-        $port = $script:DevFCaptchaHostPort
-    }
-
-    $postgresJob = Start-Job -ScriptBlock {
-        param($ComposeFile, $Path)
-        $env:Path = $Path
-        for ($i = 1; $i -le 30; $i++) {
-            docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
-            if ($LASTEXITCODE -eq 0) { return }
-            Start-Sleep -Seconds 1
-        }
-        throw 'Postgres did not become ready within 30s'
-    } -ArgumentList $ComposeFile, $env:Path
-
-    $fcaptchaJob = Start-Job -ScriptBlock {
-        param($ScriptRoot, $Port, $Path)
-        $env:Path = $Path
-        . (Join-Path $ScriptRoot 'dev-stack-lib.ps1')
-        Wait-DevFCaptchaReady $Port
-    } -ArgumentList $PSScriptRoot, $port, $env:Path
-
-    try {
-        Wait-Job $postgresJob, $fcaptchaJob | Out-Null
-        Receive-Job $postgresJob -ErrorAction Stop | Out-Null
-        Receive-Job $fcaptchaJob -ErrorAction Stop | Out-Null
-    }
-    finally {
-        Remove-Job $postgresJob, $fcaptchaJob -Force -ErrorAction SilentlyContinue
-    }
+    throw "Postgres did not become ready on ${DevPostgresConnectHost}:$port within ${attempts}s"
 }
 
 function Assert-DockerRunning {

@@ -33,7 +33,9 @@ public sealed class ApplicationStartupWarmupHostedService(
 
         try
         {
-            // Operational failures mark /healthz failed and stop the host; unexpected bugs still bubble.
+            // Non-transient operational failures mark /healthz failed and stop the host.
+            // Development retries unreachable Postgres until this token cancels, so a
+            // refused 127.0.0.1 connection does not take the API down.
             await OperationalExceptionGuard.RunAsync(
                 () => ApplicationStartupWarmup.RunAsync(
                     services,

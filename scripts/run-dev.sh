@@ -2,8 +2,8 @@
 # Start the full Homework Central local dev stack (Postgres, API, frontend).
 #
 # Usage:
-#   scripts/run-dev.sh              # build + run everything
-#   scripts/run-dev.sh --stripped   # pause neural environments; overlap Docker waits
+#   scripts/run-dev.sh              # build + run; Postgres first, FCaptcha not joined before API
+#   scripts/run-dev.sh --stripped   # also pause neural environments; FCaptcha not joined before API
 #   scripts/run-dev.sh --build-only # compile only (no servers)
 #   scripts/run-dev.sh --help
 #
@@ -54,10 +54,13 @@ Options:
   --build-only   Compile the API and install frontend deps; do not start servers
   --skip-docker  Do not start Postgres via Docker (expects DB on localhost)
   --stripped     Pause leftover neural training and skip neural warmup/refresh
-                 (also set HC_DEV_STRIPPED=1). Postgres starts with the existing
-                 helper; FCaptcha is started in the background and is not joined
-                 before the API.
+                 (also set HC_DEV_STRIPPED=1). Does not change Docker start order.
   --help         Show this help
+
+Default start brings Postgres up with the existing helper and backgrounds
+FCaptcha so a cold captcha image build is not joined before the API. The API
+does not start until Postgres accepts connections on
+127.0.0.1:<POSTGRES_HOST_PORT>.
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
 development migrations and seeds. Unset it after pulling migrations/catalog changes
@@ -348,44 +351,13 @@ start_core_containers() {
   fi
 
   if [[ "$force_recreate" == "1" || ( -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ) ]]; then
-    if [[ "$STRIPPED" == true ]]; then
-      log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
-      start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
-      return 0
-    fi
-    log "Starting Postgres and FCaptcha together (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}, localhost:${FCAPTCHA_HOST_PORT})"
-    start_dev_stack_core_containers "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
+    log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
+    start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
     return 0
   fi
 
-  if [[ "$STRIPPED" == true ]]; then
-    log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
-    start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0 || return 1
-    return
-  fi
-
-  log "Starting Postgres and FCaptcha together (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}, localhost:${FCAPTCHA_HOST_PORT})"
-  start_dev_stack_core_containers "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0
-}
-
-wait_postgres_and_fcaptcha() {
-  local postgres_status=0
-  local fcaptcha_status=0
-
-  wait_for_postgres &
-  local postgres_wait_pid=$!
-  wait_dev_fcaptcha_ready "$FCAPTCHA_HOST_PORT" &
-  local fcaptcha_wait_pid=$!
-
-  wait "$postgres_wait_pid" || postgres_status=$?
-  wait "$fcaptcha_wait_pid" || fcaptcha_status=$?
-
-  if [[ "$postgres_status" -ne 0 ]]; then
-    fail "Postgres did not become ready within 30s"
-  fi
-  if [[ "$fcaptcha_status" -ne 0 ]]; then
-    fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
-  fi
+  log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
+  start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0 || return 1
 }
 
 reset_postgres_volume() {
@@ -394,19 +366,14 @@ reset_postgres_volume() {
 }
 
 wait_core_before_api() {
-  if [[ "$STRIPPED" == true ]]; then
-    log "Waiting for Postgres (FCaptcha continues in the background)"
-    wait_for_postgres
-    return
-  fi
-  log "Waiting for Postgres and FCaptcha (in parallel)"
-  wait_postgres_and_fcaptcha
+  log "Waiting for Postgres (FCaptcha continues in the background)"
+  wait_for_postgres
 }
 
 ensure_postgres_ready() {
   set_compose_env
 
-  start_core_containers || fail "Failed to start Postgres and FCaptcha. Check: docker compose logs"
+  start_core_containers || fail "Failed to start Postgres. Check: docker compose logs"
   wait_core_before_api
 
   if ! test_postgres_auth postgres; then
@@ -452,7 +419,7 @@ postgres_host_failure_message() {
 repair_postgres_host_reachability() {
   if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
     log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
-    start_core_containers 1 || fail "Failed to recreate Postgres and FCaptcha. Check: docker compose logs"
+    start_core_containers 1 || fail "Failed to recreate Postgres. Check: docker compose logs"
     wait_core_before_api
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master after recreating Docker Postgres"
@@ -473,7 +440,7 @@ repair_postgres_host_reachability() {
   POSTGRES_HOST_PORT="$free_port"
   set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
   set_compose_env
-  start_core_containers 1 || fail "Failed to start Postgres and FCaptcha after changing POSTGRES_HOST_PORT. Check: docker compose logs"
+  start_core_containers 1 || fail "Failed to start Postgres after changing POSTGRES_HOST_PORT. Check: docker compose logs"
   wait_core_before_api
   if ! prepare_homework_central_master_database; then
     fail "Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT"
@@ -484,16 +451,17 @@ repair_postgres_host_reachability() {
 }
 
 wait_for_postgres() {
-  local attempts=30
+  local attempts=60
   local i
   for ((i = 1; i <= attempts; i++)); do
     if docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres \
-      pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+      pg_isready -U postgres -d postgres >/dev/null 2>&1 \
+      && test_dev_postgres_connection "$POSTGRES_HOST_PORT"; then
       return 0
     fi
     sleep 1
   done
-  fail "Postgres did not become ready within ${attempts}s"
+  fail "Postgres did not become ready on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} within ${attempts}s"
 }
 
 start_postgres() {
