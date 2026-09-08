@@ -200,12 +200,17 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingC
 // API pods can host visualization/polling while KEDA ScaledJobs own training execution.
 bool disableInProcessTrainingWorker =
     builder.Configuration.GetValue<bool>("KubernetesTraining:DisableInProcessWorker");
-if (!disableInProcessTrainingWorker)
+bool pauseNeuralEnvironments =
+    HomeworkCentral.Api.Dev.DevNeuralEnvironmentPause.ShouldPause(builder.Configuration, builder.Environment);
+if (!disableInProcessTrainingWorker && !pauseNeuralEnvironments)
 {
     builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetTrainingWorker>();
 }
-builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
-builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelWarmupService>();
+if (!pauseNeuralEnvironments)
+{
+    builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
+    builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelWarmupService>();
+}
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAssessmentPipelineService, HomeworkCentral.Api.Assessment.AssessmentPipelineService>();

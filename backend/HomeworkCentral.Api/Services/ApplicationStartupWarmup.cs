@@ -10,8 +10,8 @@ using Microsoft.EntityFrameworkCore;
 namespace HomeworkCentral.Api.Services;
 
 /// <summary>
-/// Master-database migrate/seed work that must finish before authenticated API traffic is safe.
-/// Kept off the Kestrel listen path so /healthz can answer while warmup runs.
+/// Master-database migrate and auth seed that must finish before /devlogin is safe.
+/// Ticket/neural catalogs continue after /healthz is ready. Kept off the Kestrel listen path.
 /// </summary>
 public static class ApplicationStartupWarmup
 {
@@ -57,6 +57,19 @@ public static class ApplicationStartupWarmup
         if (skipDevStartupWarmup)
             return;
 
+        await RunEssentialAuthSeedAsync(services, devBypassEnabled, eagerPersonaProvisioning, ct);
+    }
+
+    /// <summary>
+    /// Auth, role masks, and /devlogin seed. Ticket portals and neural catalogs are
+    /// <see cref="RunDeferredCatalogSeedAsync"/> so /healthz can become ready sooner.
+    /// </summary>
+    public static async Task RunEssentialAuthSeedAsync(
+        IServiceProvider services,
+        bool devBypassEnabled,
+        bool eagerPersonaProvisioning,
+        CancellationToken ct = default)
+    {
         using IServiceScope seedScope = services.CreateScope();
         IServiceProvider sp = seedScope.ServiceProvider;
         ITenantConnectionResolver connectionResolver = sp.GetRequiredService<ITenantConnectionResolver>();
@@ -77,6 +90,36 @@ public static class ApplicationStartupWarmup
         foreach (Guid userId in customRoleUserIds)
             await EffectiveMaskService.RebuildOnContextAsync(seedDb, userId);
 
+        if (!devBypassEnabled)
+            return;
+
+        await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
+        await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
+
+        startupLogger.LogInformation(
+            eagerPersonaProvisioning
+                ? "Essential auth seed complete. Ticket catalogs continue after /healthz is ready. Persona databases provision in the background."
+                : "Essential auth seed complete. Ticket catalogs continue after /healthz is ready. Persona databases provision on demand at dev login.");
+    }
+
+    /// <summary>
+    /// Ticket portals, scoring/AI-tracking catalogs, and channel refresh. Safe after
+    /// <see cref="IApplicationReadiness.MarkReady"/>; login does not need these rows.
+    /// </summary>
+    public static async Task RunDeferredCatalogSeedAsync(
+        IServiceProvider services,
+        bool skipDevStartupWarmup,
+        bool devBypassEnabled,
+        CancellationToken ct = default)
+    {
+        if (skipDevStartupWarmup)
+            return;
+
+        using IServiceScope seedScope = services.CreateScope();
+        IServiceProvider sp = seedScope.ServiceProvider;
+        AppDbContext seedDb = sp.GetRequiredService<AppDbContext>();
+        ILogger<Program> startupLogger = sp.GetRequiredService<ILogger<Program>>();
+
         // Custom channels / ticket portals live on the master DB and are filtered by
         // OwnerAccountClass (real vs developer). Seed both classes here — persona tenant DBs
         // are not consulted by CustomChannelStore or TicketService.
@@ -90,15 +133,7 @@ public static class ApplicationStartupWarmup
         if (!devBypassEnabled)
             return;
 
-        await TenantRegistrySeedData.SeedAsync(masterRegistry, connectionResolver);
-        await DevBypassSeedData.SeedAsync(seedDb, effectiveMaskService);
-
         IDevPersonaProvisioner personaProvisioner = sp.GetRequiredService<IDevPersonaProvisioner>();
         await personaProvisioner.InitializeFromExistingDatabasesAsync();
-
-        startupLogger.LogInformation(
-            eagerPersonaProvisioning
-                ? "Essential dev seed complete. Persona databases continue provisioning in the background."
-                : "Essential dev seed complete. Persona databases provision on demand at dev login.");
     }
 }

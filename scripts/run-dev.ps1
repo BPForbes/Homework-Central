@@ -2,6 +2,7 @@
 #
 # Usage:
 #   scripts/run-dev.ps1              # build + run everything
+#   scripts/run-dev.ps1 -Stripped    # pause neural environments; overlap Docker waits
 #   scripts/run-dev.ps1 -BuildOnly   # compile only (no servers)
 #   scripts/run-dev.ps1 -Help
 #
@@ -10,11 +11,13 @@
 #   HC_SKIP_RUST_BUILD=1    Skip cargo build --workspace in rust/
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 #   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
+#   HC_DEV_STRIPPED=1       Pause leftover neural training and skip neural warmup/refresh
 # Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
 [CmdletBinding()]
 param(
     [switch]$BuildOnly,
     [switch]$SkipDocker,
+    [switch]$Stripped,
     [switch]$Help
 )
 
@@ -50,6 +53,8 @@ Usage:
 Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
+  -Stripped     Pause leftover neural training and skip neural warmup/refresh
+                (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha start together.
   -Help         Show this help
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
@@ -342,16 +347,17 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
     Start-PostgresContainer -EnvValues $EnvValues
-
-    Write-Step 'Waiting for Postgres to accept connections'
-    Wait-ForPostgres
+    Start-FCaptchaContainerAsync -EnvValues $EnvValues
+    Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
+    Wait-PostgresAndFCaptcha -EnvValues $EnvValues
 
     if (-not (Test-PostgresAuth -Database 'postgres')) {
         Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
         Reset-PostgresVolume
         Start-PostgresContainer -EnvValues $EnvValues
-        Write-Step 'Waiting for Postgres to accept connections'
-        Wait-ForPostgres
+        Start-FCaptchaContainerAsync -EnvValues $EnvValues
+        Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
+        Wait-PostgresAndFCaptcha -EnvValues $EnvValues
         if (-not (Test-PostgresAuth -Database 'postgres')) {
             throw 'Postgres password verification failed after recreating the Docker volume'
         }
@@ -361,8 +367,9 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
         Reset-PostgresVolume
         Start-PostgresContainer -EnvValues $EnvValues
-        Write-Step 'Waiting for Postgres to accept connections'
-        Wait-ForPostgres
+        Start-FCaptchaContainerAsync -EnvValues $EnvValues
+        Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
+        Wait-PostgresAndFCaptcha -EnvValues $EnvValues
 
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master inside the Docker Postgres container'
@@ -442,6 +449,58 @@ function Wait-ForPostgres {
     throw "Postgres did not become ready within ${attempts}s"
 }
 
+function Start-FCaptchaContainerAsync([hashtable]$EnvValues) {
+    $port = $EnvValues['FCAPTCHA_HOST_PORT']
+    if ([string]::IsNullOrWhiteSpace($port)) {
+        $port = $script:DevFCaptchaHostPort
+    }
+
+    if (Test-DevFCaptchaConnection $port) {
+        if (-not (Test-DevFCaptchaSecretAligned)) {
+            Write-Step 'Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)'
+            Start-DevStackFCaptchaContainer -Port $port -ForceRecreate
+        }
+        return
+    }
+
+    Write-Step "Starting FCaptcha (Docker) on localhost:$port"
+    Start-DevStackFCaptchaContainer -Port $port
+}
+
+function Wait-PostgresAndFCaptcha([hashtable]$EnvValues) {
+    $port = $EnvValues['FCAPTCHA_HOST_PORT']
+    if ([string]::IsNullOrWhiteSpace($port)) {
+        $port = $script:DevFCaptchaHostPort
+    }
+
+    $postgresJob = Start-Job -ScriptBlock {
+        param($ComposeFile, $Path)
+        $env:Path = $Path
+        for ($i = 1; $i -le 30; $i++) {
+            docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
+            if ($LASTEXITCODE -eq 0) { return }
+            Start-Sleep -Seconds 1
+        }
+        throw 'Postgres did not become ready within 30s'
+    } -ArgumentList $ComposeFile, $env:Path
+
+    $fcaptchaJob = Start-Job -ScriptBlock {
+        param($ScriptRoot, $Port, $Path)
+        $env:Path = $Path
+        . (Join-Path $ScriptRoot 'dev-stack-lib.ps1')
+        Wait-DevFCaptchaReady $Port
+    } -ArgumentList $PSScriptRoot, $port, $env:Path
+
+    try {
+        Wait-Job $postgresJob, $fcaptchaJob | Out-Null
+        Receive-Job $postgresJob -ErrorAction Stop | Out-Null
+        Receive-Job $fcaptchaJob -ErrorAction Stop | Out-Null
+    }
+    finally {
+        Remove-Job $postgresJob, $fcaptchaJob -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Assert-DockerRunning {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw 'Docker CLI not found. Install Docker Desktop and ensure docker is on PATH.'
@@ -467,6 +526,11 @@ function Start-FCaptcha {
     $port = $EnvValues['FCAPTCHA_HOST_PORT']
     if ([string]::IsNullOrWhiteSpace($port)) {
         $port = $script:DevFCaptchaHostPort
+    }
+
+    if ((Test-DevFCaptchaConnection $port) -and (Test-DevFCaptchaSecretAligned)) {
+        Write-Step "FCaptcha already ready on localhost:$port"
+        return
     }
 
     Write-Step "Starting FCaptcha (Docker) on localhost:$port"
@@ -644,8 +708,12 @@ function Start-DevStack([hashtable]$EnvValues) {
         # process before Kestrel can bind. Preserve an explicitly supplied value afterwards.
         $previousSkipDotnetBuild = $env:HC_SKIP_DOTNET_BUILD
         $previousSkipRustBuild = $env:HC_SKIP_RUST_BUILD
+        $previousStripped = $env:HC_DEV_STRIPPED
         $env:HC_SKIP_DOTNET_BUILD = '1'
         $env:HC_SKIP_RUST_BUILD = '1'
+        if ($Stripped -or $env:HC_DEV_STRIPPED -eq '1') {
+            $env:HC_DEV_STRIPPED = '1'
+        }
         try {
             Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
         } finally {
@@ -658,6 +726,11 @@ function Start-DevStack([hashtable]$EnvValues) {
                 Remove-Item Env:HC_SKIP_RUST_BUILD -ErrorAction SilentlyContinue
             } else {
                 $env:HC_SKIP_RUST_BUILD = $previousSkipRustBuild
+            }
+            if ($null -eq $previousStripped) {
+                Remove-Item Env:HC_DEV_STRIPPED -ErrorAction SilentlyContinue
+            } else {
+                $env:HC_DEV_STRIPPED = $previousStripped
             }
         }
     } else {
@@ -728,8 +801,17 @@ if ($env:HC_SKIP_DOCKER -eq '1') {
     $SkipDocker = $true
 }
 
+if ($env:HC_DEV_STRIPPED -eq '1') {
+    $Stripped = $true
+}
+
 Push-Location $RepoRoot
 try {
+    if ($Stripped) {
+        $env:HC_DEV_STRIPPED = '1'
+        Write-Step 'Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start'
+    }
+
     $envValues = Get-EnvValues
     Build-Projects
 

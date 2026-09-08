@@ -1255,6 +1255,11 @@ lineage delete, which purges first) runs.
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingOptions.cs) | Synthetic training speed/quality knobs: generator-audit sampling, deterministic teacher labels, epochs, batching, compact replay. |
 | [backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs](../backend/HomeworkCentral.Api/Assessment/NeuralNetTrainingCancellationRegistry.cs) | Per-session stop tokens for mid-run and continuous training. |
 
+Local `scripts/run-dev.sh --stripped` / `scripts/run-dev.ps1 -Stripped` (or `HC_DEV_STRIPPED=1`)
+pauses every Queued or Running session through the same stop path, skips chat-monitor warmup
+and canonical checkpoint refresh, and does not start the in-process training worker. Production
+never reads that flag.
+
 Only an explicit pause (`POST /api/neural-net/training/{id}/stop`, or Ctrl/Cmd+S on the Training view) ends a continuous session.
 The stored status remains `Cancelled` so existing Resume clients keep working; the Training UI
 labels that row **Paused** and the action **Continue**. Continuous mode stores
@@ -1298,6 +1303,7 @@ audits are off (`AuditSampleRate=0`).
 | LLM cost | One Ollama chat per scenario (+ optional training-LLM rewrite). GPU belongs on Ollama only. |
 | LLM container ops | `llm-service/` pins `ollama/ollama` (not `:latest`), healthchecks with `ollama list` (no `curl` in the image), and ensures chat + embed models on boot (`LLM_CHAT_MODEL` / `LLM_EMBED_MODEL`, defaults `qwen3:0.6b` + `nomic-embed-text`) — **skipping pull when already cached** for faster restarts. Compose profile `ai` mirrors those env vars. `LlmClient` prefers `POST /api/embed` (with `truncate`), remembers a 404 so later calls skip straight to legacy `/api/embeddings`, then HashEmbed. K8s `deploy/k8s/llm` runs non-root with dropped capabilities and stores models under `$HOME/.ollama` on the PVC. |
 | Docker duplicates | Compose defines **one** container each for postgres, fcaptcha, redis, backend, frontend, llm. Do not run Compose `backend`/`frontend` at the same time as `scripts/run-dev*` host processes. |
+| Stripped run-dev | `scripts/run-dev.* --stripped` / `-Stripped` sets `HC_DEV_STRIPPED=1`: leftover Queued/Running sessions are paused via `StopTrainingSessionAsync`, and neural warmup/refresh/in-process worker do not start. Postgres and FCaptcha wait in parallel; `start-api-dev` skips a second Docker wait when `run-dev` already registered the stack. |
 | API gateway / LB | **Not present.** Frontend nginx proxies `/api/` locally; Kubernetes has no Ingress/Gateway yet. API HPA scales HTTP; KEDA ScaledJobs orchestrate training tasks. |
 | Asset cache | Water UI is canvas/CSS, not large media. Packaged nginx caches Vite `/assets/*` for 365d (`immutable`) and keeps `index.html` at `no-cache` (CDN-like edge behavior without a third-party CDN). |
 | Object storage | Optional free MinIO (`docker compose --profile object-storage`) behind `Uploads:Backend=S3`. Chat/ticket attachment bytes use `IAttachmentBlobStore`; metadata stays in Postgres. |

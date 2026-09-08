@@ -3,6 +3,7 @@
 #
 # Usage:
 #   scripts/run-dev.sh              # build + run everything
+#   scripts/run-dev.sh --stripped   # pause neural environments; overlap Docker waits
 #   scripts/run-dev.sh --build-only # compile only (no servers)
 #   scripts/run-dev.sh --help
 #
@@ -11,6 +12,7 @@
 #   HC_SKIP_RUST_BUILD=1    Skip cargo build --workspace in rust/
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 #   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
+#   HC_DEV_STRIPPED=1       Pause leftover neural training and skip neural warmup/refresh
 #   HC_DEV_BYPASS=1         Set for the API child process (enables /devlogin backend)
 #   VITE_HC_DEV_BYPASS=true Set for the frontend (enables /devlogin route)
 set -euo pipefail
@@ -34,6 +36,7 @@ DEV_POSTGRES_CONNECT_HOST="127.0.0.1"
 FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 BUILD_ONLY=false
 SKIP_DOCKER=false
+STRIPPED=false
 HC_API_BUILD_FAILED=0
 JWT_SECRET=""
 FCAPTCHA_SECRET=""
@@ -50,6 +53,8 @@ Usage:
 Options:
   --build-only   Compile the API and install frontend deps; do not start servers
   --skip-docker  Do not start Postgres via Docker (expects DB on localhost)
+  --stripped     Pause leftover neural training and skip neural warmup/refresh
+                 (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha start together.
   --help         Show this help
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
@@ -93,6 +98,10 @@ parse_args() {
         SKIP_DOCKER=true
         shift
         ;;
+      --stripped)
+        STRIPPED=true
+        shift
+        ;;
       --help|-h)
         usage
         exit 0
@@ -105,6 +114,10 @@ parse_args() {
 
   if [[ "${HC_SKIP_DOCKER:-}" == "1" ]]; then
     SKIP_DOCKER=true
+  fi
+
+  if [[ "${HC_DEV_STRIPPED:-}" == "1" ]]; then
+    STRIPPED=true
   fi
 }
 
@@ -333,6 +346,39 @@ start_postgres_container() {
   fi
 }
 
+start_fcaptcha_container_async() {
+  if test_dev_fcaptcha_connection "$FCAPTCHA_HOST_PORT"; then
+    if ! test_dev_fcaptcha_secret_aligned; then
+      log "Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)"
+      start_dev_stack_fcaptcha_container "$FCAPTCHA_HOST_PORT" 1 || return 1
+    fi
+    return 0
+  fi
+
+  log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
+  start_dev_stack_fcaptcha_container "$FCAPTCHA_HOST_PORT" 0
+}
+
+wait_postgres_and_fcaptcha() {
+  local postgres_status=0
+  local fcaptcha_status=0
+
+  wait_for_postgres &
+  local postgres_wait_pid=$!
+  wait_dev_fcaptcha_ready "$FCAPTCHA_HOST_PORT" &
+  local fcaptcha_wait_pid=$!
+
+  wait "$postgres_wait_pid" || postgres_status=$?
+  wait "$fcaptcha_wait_pid" || fcaptcha_status=$?
+
+  if [[ "$postgres_status" -ne 0 ]]; then
+    fail "Postgres did not become ready within 30s"
+  fi
+  if [[ "$fcaptcha_status" -ne 0 ]]; then
+    fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
+  fi
+}
+
 reset_postgres_volume() {
   log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
@@ -342,15 +388,17 @@ ensure_postgres_ready() {
   set_compose_env
 
   start_postgres_container
-  log "Waiting for Postgres to accept connections"
-  wait_for_postgres
+  start_fcaptcha_container_async || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
+  log "Waiting for Postgres and FCaptcha (in parallel)"
+  wait_postgres_and_fcaptcha
 
   if ! test_postgres_auth postgres; then
     log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
     reset_postgres_volume
     start_postgres_container
-    log "Waiting for Postgres to accept connections"
-    wait_for_postgres
+    start_fcaptcha_container_async || true
+    log "Waiting for Postgres and FCaptcha (in parallel)"
+    wait_postgres_and_fcaptcha
     if ! test_postgres_auth postgres; then
       fail "Postgres password verification failed after recreating the Docker volume"
     fi
@@ -360,8 +408,9 @@ ensure_postgres_ready() {
     log "Postgres volume is unhealthy (collation mismatch); recreating"
     reset_postgres_volume
     start_postgres_container
-    log "Waiting for Postgres to accept connections"
-    wait_for_postgres
+    start_fcaptcha_container_async || true
+    log "Waiting for Postgres and FCaptcha (in parallel)"
+    wait_postgres_and_fcaptcha
 
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master inside the Docker Postgres container"
@@ -447,6 +496,11 @@ start_postgres() {
 }
 
 start_fcaptcha() {
+  if test_dev_fcaptcha_connection "$FCAPTCHA_HOST_PORT" && test_dev_fcaptcha_secret_aligned; then
+    log "FCaptcha already ready on localhost:${FCAPTCHA_HOST_PORT}"
+    return 0
+  fi
+
   require_cmd docker
   if ! docker info >/dev/null 2>&1; then
     fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
@@ -641,9 +695,11 @@ run_stack() {
   if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
     log "Starting API on http://localhost:5000"
     if [[ "$SKIP_DOCKER" == true ]]; then
-      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 \
+        HC_DEV_STRIPPED="${HC_DEV_STRIPPED}" "$REPO_ROOT/scripts/start-api-dev.sh" &
     else
-      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 \
+        HC_DEV_STRIPPED="${HC_DEV_STRIPPED}" "$REPO_ROOT/scripts/start-api-dev.sh" &
     fi
     BACKEND_PID=$!
     api_ready=1
@@ -702,6 +758,11 @@ main() {
 
   require_cmd dotnet
   require_cmd npm
+
+  if [[ "$STRIPPED" == true ]]; then
+    export HC_DEV_STRIPPED=1
+    log "Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start"
+  fi
 
   ensure_env_file
   build_projects

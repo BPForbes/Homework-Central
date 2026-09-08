@@ -54,6 +54,12 @@ public interface INeuralNetTrainingService
     /// evaluator feedback and generator failures never terminate training.
     /// </summary>
     Task<bool> StopTrainingSessionAsync(Guid sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Pause every Queued or Running session using <see cref="StopTrainingSessionAsync"/>.
+    /// Stripped local run-dev calls this so leftover workers do not resume on boot.
+    /// </summary>
+    Task<int> PauseAllActiveTrainingSessionsAsync(CancellationToken ct = default);
 }
 
 public sealed class NeuralNetTrainingService(
@@ -596,6 +602,24 @@ public sealed class NeuralNetTrainingService(
         await db.SaveChangesAsync(ct);
         progressStore.Clear(sessionId);
         return true;
+    }
+
+    public async Task<int> PauseAllActiveTrainingSessionsAsync(CancellationToken ct = default)
+    {
+        List<Guid> sessionIds = await db.NeuralNetTrainingSessions
+            .Where(session => session.Status == "Queued" || session.Status == "Running")
+            .OrderBy(session => session.CreatedAtUtc)
+            .Select(session => session.SessionId)
+            .ToListAsync(ct);
+
+        int paused = 0;
+        foreach (Guid sessionId in sessionIds)
+        {
+            if (await StopTrainingSessionAsync(sessionId, ct))
+                paused++;
+        }
+
+        return paused;
     }
 
     /// <summary>

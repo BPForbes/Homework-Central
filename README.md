@@ -105,6 +105,9 @@ From the repository root in **PowerShell 7+**:
 ```powershell
 # Start the full dev environment (Postgres, FCaptcha, API, frontend)
 .\scripts\run-dev.ps1
+
+# Lean start: pause leftover neural training and skip neural warmup/refresh
+.\scripts\run-dev.ps1 -Stripped
 ```
 
 To **wipe the local database** (removes all registered accounts and seed data) and start fresh:
@@ -120,6 +123,9 @@ From the repository root:
 ```bash
 # Start the full dev environment
 ./scripts/run-dev.sh
+
+# Lean start: pause leftover neural training and skip neural warmup/refresh
+./scripts/run-dev.sh --stripped
 ```
 
 To **reset the database** and start fresh:
@@ -160,6 +166,8 @@ The API uses **`dotnet watch`** by default so a `git pull` (or local edits) rebu
 |----------|---------|
 | Windows | `.\scripts\run-dev.ps1` |
 | Linux / macOS | `./scripts/run-dev.sh` |
+| Windows (pause neural envs) | `.\scripts\run-dev.ps1 -Stripped` |
+| Linux / macOS (pause neural envs) | `./scripts/run-dev.sh --stripped` |
 
 ### Reset database, then run
 
@@ -326,11 +334,17 @@ Architecture, trust boundaries, and engineering standards live under
 ### Fast repeat starts
 
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
-can bind without a duplicate build. It also starts the frontend before the API. The API exposes
-`/healthz` as soon as Kestrel listens (`status: starting` during migrate/seed, then `healthy`),
-so the Vite BackendGate can wait without flooding the proxy with connection-refused errors.
+can bind without a duplicate build. It also starts the frontend before the API. Docker Postgres
+and FCaptcha start together; `start-api-dev` does not wait for them again when `run-dev` already
+did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed; ticket portals and
+neural catalogs finish after that so the Vite BackendGate is not held on catalog seed.
 `http://localhost:5000/` is an intentional 403 landing page, not the app — use
 `http://localhost:5173/login` and keep that tab open until `/healthz` reports `healthy`.
+
+`-Stripped` / `--stripped` (or `HC_DEV_STRIPPED=1`) pauses leftover Queued/Running neural
+training sessions on boot and does not start neural model warmup, checkpoint refresh, or the
+in-process training worker. Continue a session from Server Maintenance when you want training
+again.
 
 After one successful initialization of the local database, you can skip development migrations
 and seed warmup on repeat starts:
