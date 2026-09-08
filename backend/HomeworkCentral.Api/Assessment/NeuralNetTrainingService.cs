@@ -566,8 +566,8 @@ public sealed class NeuralNetTrainingService(
         int paused = 0;
         foreach (Guid sessionId in sessionIds)
         {
-            if (await stop(sessionId))
-                paused++;
+            bool stopped = await stop(sessionId);
+            paused += stopped ? 1 : 0;
         }
 
         return paused;
