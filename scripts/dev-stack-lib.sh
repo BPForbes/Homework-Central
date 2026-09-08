@@ -484,8 +484,8 @@ ensure_dev_stack_core_running() {
     with_dev_stack_lock _join_dev_stack_if_managed "$postgres_port"
     return 0
   fi
-  printf '==> Starting Docker Postgres on 127.0.0.1:%s (FCaptcha continues in the background)\n' \
-    "$postgres_port"
+  printf '==> Starting Docker Postgres on %s:%s (FCaptcha continues in the background)\n' \
+    "$DEV_POSTGRES_CONNECT_HOST" "$postgres_port"
   start_dev_stack_postgres_then_fcaptcha_background "$postgres_port" "$fcaptcha_port" 0 || return 1
   wait_dev_postgres_ready "$postgres_port" || return 1
   with_dev_stack_lock _ensure_dev_postgres_state "$postgres_port"
