@@ -1,0 +1,11 @@
+[package]
+name = "hc-vector-cosine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "In-process cosine top-k matching VectorDocumentStore.RetrieveSimilarAsync"
+
+[lib]
+name = "hc_vector_cosine"
+path = "src/lib.rs"

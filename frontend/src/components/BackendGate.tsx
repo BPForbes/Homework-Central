@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { BackendConnectingLoader } from './BackendConnectingLoader'
 import { useBackendConnection } from '../hooks/useBackendConnection'
 
-/** Blocks the shell until /healthz reports ready (migrate/seed finished). */
+/** Blocks the shell until /healthz reports ready (migrate and auth seed finished). */
 export function BackendGate({ children }: { children: ReactNode }) {
   const { isConnected, phase, error } = useBackendConnection()
 

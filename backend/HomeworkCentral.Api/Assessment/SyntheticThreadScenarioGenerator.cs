@@ -13,6 +13,9 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
         "You are the input data generator for neural-net training (not the output reviewer). "
         + "Generate a fictional school-chat ticket scenario only. Return JSON with category, requirement, initialContext, messages, and selfCritique. "
         + "Each message needs authorId, authorRole, channel, content, isDistractor, channelRelevance (0..1), expectedScore (0..1 evidence teacher label), expectedRelevance (0..1), proposedApproval (0..1), proposedVoterCount (1..200), controversy (0..1), reasons array. "
+        + "Each message also needs categoryWeights: an object mapping taxonomy slugs to weights summing to about 1, e.g. {\"harassment\": 0.7, \"moderation-general\": 0.3}. "
+        + "Name only the two or three slugs that genuinely apply and split the weight to reflect real ambiguity — a borderline message should not be given a single category at weight 1. "
+        + "This is the training label, so an honest split teaches more than a confident guess. Omit slugs that do not apply rather than assigning them near-zero weight. "
         + "selfCritique must be an object with verdict (LGTM or REVISE) and feedback (short objection if REVISE, otherwise a one-line confirmation). "
         + "Use REVISE when the thread is weak for the target category, drifts off-concept, or lacks a clear non-distractor signal; otherwise LGTM. "
         + "Set category exactly to the kebab-case slug supplied in the user prompt from the ChatMonitoring taxonomy. "
@@ -275,7 +278,39 @@ public sealed class SyntheticThreadScenarioGenerator(ILlmClient llm)
             OptionalUnit(item, "expectedScore"),
             ReadTeacherRelevance(item, channelRelevance),
             OptionalUnit(item, "proposedApproval"),
-            OptionalUnit(item, "evaluatorConfidence"));
+            OptionalUnit(item, "evaluatorConfidence"),
+            ReadCategoryWeights(item));
+    }
+
+    /// <summary>
+    /// Reads the teacher's soft category label: <c>"categoryWeights": {"harassment": 0.7, ...}</c>.
+    /// Non-numeric and non-positive entries are dropped here; whether a name is a real category is
+    /// decided later by the taxonomy, which is the only thing that knows.
+    /// </summary>
+    private static IReadOnlyDictionary<string, double>? ReadCategoryWeights(JsonElement item)
+    {
+        if (!item.TryGetProperty("categoryWeights", out JsonElement weights)
+            || weights.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        Dictionary<string, double> parsed = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty weight in weights.EnumerateObject())
+        {
+            if (weight.Value.ValueKind != JsonValueKind.Number
+                || !weight.Value.TryGetDouble(out double value)
+                || double.IsNaN(value)
+                || double.IsInfinity(value)
+                || value <= 0)
+            {
+                continue;
+            }
+
+            parsed[weight.Name] = value;
+        }
+
+        return parsed.Count > 0 ? parsed : null;
     }
 
     private static SyntheticCommunityIntent ReadCommunityIntent(JsonElement item)

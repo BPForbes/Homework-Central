@@ -12,7 +12,7 @@ namespace HomeworkCentral.Api.Assessment;
 /// Worker candidates are diagnostic only; promotion retrains a fresh session-local
 /// hashed-MLP model from approved examples before replacing the canonical checkpoint.
 /// </summary>
-public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpointStore checkpoints)
+public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpointStore checkpoints, ILlmClient llm)
 {
     private const string StatusPending = "Pending";
     private const string StatusRetryPending = "RetryPending";
@@ -49,8 +49,9 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
 
     /// <summary>
     /// Claims the oldest eligible promotion lease and publishes one canonical
-    /// generation. A false return means no pending, expired retry, or expired
-    /// promoting lease was available to the worker.
+    /// generation. A false return means either that no pending, expired retry, or expired
+    /// promoting lease was available to the worker, or that a claimed candidate was rejected
+    /// for regressing against the held-out set.
     /// </summary>
     public async Task<bool> PromoteNextAsync(CancellationToken ct)
     {
@@ -63,9 +64,27 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
             {
                 List<TicketModelTrainingExample> examples =
                     await LoadUnpromotedExamplesAsync(promotionLease, ct);
+                List<ChatMonitoringEvaluationExample> heldOut =
+                    await LoadHeldOutExamplesAsync(promotionLease.ChatMonitoringKind, ct);
                 RetrainedSessionModel retrainedModel =
                     await RetrainSessionLocalModelAsync(promotionLease, examples, ct);
-                await PublishAndMarkExamplesAsync(promotionLease, examples, retrainedModel, ct);
+
+                ChatMonitoringEvaluation candidate =
+                    ChatMonitoringModelEvaluator.Evaluate(retrainedModel.Model, heldOut);
+                ChatMonitoringEvaluation incumbent =
+                    await EvaluateIncumbentAsync(promotionLease.ChatMonitoringKind, heldOut, ct);
+
+                if (ChatMonitoringModelEvaluator.IsRegression(candidate, incumbent))
+                {
+                    // Rejected, not retried: the candidate is a finished model that measured worse
+                    // than the one in place, so running the same promotion again cannot help.
+                    await MarkPromotionRejectedAsync(promotionLease, candidate, incumbent, ct);
+                    retrainedModel.Model.Dispose();
+                    return false;
+                }
+
+                await PublishAndMarkExamplesAsync(
+                    promotionLease, examples, retrainedModel, candidate, incumbent, ct);
                 retrainedModel.Model.Dispose();
                 return true;
             },
@@ -227,23 +246,19 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         if (current is not null)
             model.LoadParameterSnapshot(initial);
 
+        int trained = 0;
         foreach (TicketModelTrainingExample example in examples)
         {
-            ChatMonitoringNeuralModelInput input = new(
-                example.Requirement,
-                example.ContextSnapshot ?? string.Empty,
-                example.BootstrapMessage ?? string.Empty,
-                0,
-                1,
-                0,
-                .5f);
-            ChatMonitoringNeuralModelTargets targets = new(
-                (float)example.TargetScore,
-                (float)example.TargetRelevance);
-            model.Train(input, targets);
+            // Held-out rows are skipped here and only ever used for scoring. Training on them
+            // would make the evaluation measure memorisation instead of generalisation.
+            if (ChatMonitoringHoldout.IsHeldOut(example.TrainingExampleId))
+                continue;
+
+            model.Train(await BuildModelInputAsync(example, ct), BuildTargets(example));
+            trained++;
         }
 
-        NeuralNetParameterSnapshot snapshot = model.GetParameterSnapshot(null, examples.Count);
+        NeuralNetParameterSnapshot snapshot = model.GetParameterSnapshot(null, trained);
         return new RetrainedSessionModel(model, current, initial, snapshot);
     }
 
@@ -251,6 +266,8 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         PromotionLease promotionLease,
         IReadOnlyList<TicketModelTrainingExample> examples,
         RetrainedSessionModel retrainedModel,
+        ChatMonitoringEvaluation candidate,
+        ChatMonitoringEvaluation incumbent,
         CancellationToken ct)
     {
         await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
@@ -277,14 +294,30 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
             .SingleOrDefaultAsync(x => x.SessionId == promotionLease.SessionId
                                        && x.ChatMonitoringKind == promotionLease.ChatMonitoringKind, ct);
         string sourceChecksum = NeuralNetReplaySerializer.ComputeSha256(sourceRun?.WorkerReplayJson ?? string.Empty);
+        // Provenance rules answer "was this produced correctly"; the held-out comparison answers
+        // "is it any good". Both are recorded so a promotion's history shows what was actually
+        // checked rather than an unconditional pass.
+        List<string> passedRules =
+        [
+            "Ordered lease held",
+            "Examples not previously promoted",
+            "Hashed MLP replayed approved examples",
+            candidate.IsInconclusive
+                ? $"Held-out set too small to gate ({candidate.ExampleCount} < {ChatMonitoringHoldout.MinimumForGating})"
+                : $"Held-out fitness {candidate.Fitness:F4} vs canonical {incumbent.Fitness:F4} "
+                  + $"over {candidate.ExampleCount} examples",
+        ];
+
         PromotionValidationResult validation = new(
             true,
-            ["Ordered lease held", "Examples not previously promoted", "Hashed MLP replayed approved examples"],
+            passedRules,
             [],
             retrainedModel.CurrentCheckpoint?.Checksum ?? retrainedModel.Initial.Checksum,
             retrainedModel.Snapshot.Checksum,
-            examples.Count,
-            examples.Count * 12);
+            // Trained count, not loaded count: held-out rows are loaded and marked but never
+            // trained on. LocalRevision carries it out of RetrainSessionLocalModelAsync.
+            retrainedModel.Snapshot.LocalRevision,
+            retrainedModel.Snapshot.LocalRevision * 12);
         ReplayIntegrity integrity = new(
             "hc-replay-canonical-json-v1",
             "sha-256",
@@ -326,6 +359,110 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         promotion.LeaseExpiresAtUtc = null;
         await db.SaveChangesAsync(CancellationToken.None);
     }
+
+    /// <summary>
+    /// The held-out slice across every approved example for this lineage, not just this session's.
+    /// A session can contribute only a handful of rows; scoring against the whole accumulated
+    /// holdout is what makes successive generations comparable to each other.
+    /// </summary>
+    private async Task<List<ChatMonitoringEvaluationExample>> LoadHeldOutExamplesAsync(
+        NeuralModelKindChatMonitoring chatMonitoringKind,
+        CancellationToken ct)
+    {
+        List<TicketModelTrainingExample> approved = await db.TicketModelTrainingExamples
+            .AsNoTracking()
+            .Where(x => x.ChatMonitoringKind == chatMonitoringKind)
+            .OrderBy(x => x.ApprovedAtUtc)
+            .ThenBy(x => x.TrainingExampleId)
+            .ToListAsync(ct);
+
+        // Bucketing is a local hash of the id, so it cannot be pushed into SQL.
+        List<TicketModelTrainingExample> heldOut = approved
+            .Where(example => ChatMonitoringHoldout.IsHeldOut(example.TrainingExampleId))
+            .ToList();
+
+        List<ChatMonitoringEvaluationExample> evaluationExamples = new(heldOut.Count);
+        foreach (TicketModelTrainingExample example in heldOut)
+        {
+            evaluationExamples.Add(new ChatMonitoringEvaluationExample(
+                await BuildModelInputAsync(example, ct),
+                (float)example.TargetScore,
+                (float)example.TargetRelevance));
+        }
+
+        return evaluationExamples;
+    }
+
+    /// <summary>
+    /// Scores the generation currently in place on the same held-out examples, so the comparison
+    /// is like for like. Returns an empty evaluation when there is no incumbent yet, which
+    /// <see cref="ChatMonitoringModelEvaluator.IsRegression"/> treats as "nothing to regress from".
+    /// </summary>
+    private async Task<ChatMonitoringEvaluation> EvaluateIncumbentAsync(
+        NeuralModelKindChatMonitoring chatMonitoringKind,
+        IReadOnlyList<ChatMonitoringEvaluationExample> heldOut,
+        CancellationToken ct)
+    {
+        if (heldOut.Count == 0)
+            return ChatMonitoringEvaluation.Empty;
+
+        NeuralNetCanonicalCheckpoint? current = await checkpoints.GetCurrentAsync(chatMonitoringKind, ct);
+        if (current is null)
+            return ChatMonitoringEvaluation.Empty;
+
+        using IChatMonitoringNeuralModelTelemetry incumbent = CreateSessionLocalModel(chatMonitoringKind);
+        incumbent.LoadParameterSnapshot(new NeuralNetParameterSnapshot(
+            current.Generation,
+            0,
+            "ieee754-float32-le",
+            "dense-base64",
+            incumbent.GetTopologySnapshot().Parameters.Count,
+            current.ParametersBase64,
+            current.Checksum));
+
+        return ChatMonitoringModelEvaluator.Evaluate(incumbent, heldOut);
+    }
+
+    private async Task MarkPromotionRejectedAsync(
+        PromotionLease promotionLease,
+        ChatMonitoringEvaluation candidate,
+        ChatMonitoringEvaluation incumbent,
+        CancellationToken ct)
+    {
+        NeuralNetTrainingPromotion promotion = await db.NeuralNetTrainingPromotions
+            .SingleAsync(x => x.PromotionId == promotionLease.PromotionId, ct);
+        promotion.Status = StatusRejected;
+        promotion.FailureReason =
+            $"Held-out fitness regressed: candidate {candidate.Fitness:F4} vs canonical "
+            + $"{incumbent.Fitness:F4} over {candidate.ExampleCount} held-out examples.";
+        promotion.LeaseExpiresAtUtc = null;
+        promotion.CompletedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Builds a training/scoring input, embedding the same field inference embeds (the message)
+    /// with the same client, so both paths land in one vector space. LlmClient falls back to its
+    /// own hashed vector when Ollama is unreachable, so this never returns a null embedding.
+    /// </summary>
+    private async Task<ChatMonitoringNeuralModelInput> BuildModelInputAsync(
+        TicketModelTrainingExample example,
+        CancellationToken ct)
+    {
+        string message = example.BootstrapMessage ?? string.Empty;
+        return new ChatMonitoringNeuralModelInput(
+            example.Requirement,
+            example.ContextSnapshot ?? string.Empty,
+            message,
+            0,
+            1,
+            0,
+            .5f,
+            TextEmbedding: await llm.EmbedAsync(message, ct));
+    }
+
+    private static ChatMonitoringNeuralModelTargets BuildTargets(TicketModelTrainingExample example) =>
+        new((float)example.TargetScore, (float)example.TargetRelevance);
 
     private static IChatMonitoringNeuralModelTelemetry CreateSessionLocalModel(NeuralModelKindChatMonitoring chatMonitoringKind) => chatMonitoringKind switch
     {

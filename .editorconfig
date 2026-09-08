@@ -1,3 +1,7 @@
+# Stops editors and analyzers walking past the repository root for further
+# .editorconfig files, which could relax the rules below from outside the repo.
+root = true
+
 # Prefer explicit types instead of var in C#.
 # See docs/COMMENT_DOCUMENTATION_GUIDE.md.
 [*.cs]

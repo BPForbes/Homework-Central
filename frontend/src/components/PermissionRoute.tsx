@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { getAccessToken } from '../api/tokenManager'
 import { useAuth } from '../context/useAuth'
 import { LoadingBars } from './LoadingBars'
 
@@ -10,7 +11,7 @@ interface Props {
 
 /** Redirects to dashboard when the signed-in user lacks a moderation permission bit. */
 export function PermissionRoute({ permissionBit, children }: Props) {
-  const { hasPermission, isLoading } = useAuth()
+  const { hasPermission, isLoading, user } = useAuth()
 
   if (isLoading) {
     return (
@@ -21,6 +22,13 @@ export function PermissionRoute({ permissionBit, children }: Props) {
   }
 
   if (!hasPermission(permissionBit)) {
+    if (getAccessToken() && !user) {
+      return (
+        <div className="loading-screen">
+          <LoadingBars message="Reconnecting…" />
+        </div>
+      )
+    }
     return <Navigate to="/dashboard" replace />
   }
 

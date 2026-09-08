@@ -14,10 +14,19 @@ public interface IApplicationReadiness
     string? FailureMessage { get; }
     void MarkReady();
     void MarkFailed(string message);
+
+    /// <summary>
+    /// Waits until migrate/seed marks the process ready.
+    /// Background workers must not query tenant tables before this returns true,
+    /// or they race <c>__EFAppMigrationsHistory</c> and missing relations on a fresh volume.
+    /// </summary>
+    Task<bool> WaitUntilReadyAsync(CancellationToken ct);
 }
 
 public sealed class ApplicationReadiness : IApplicationReadiness
 {
+    private static readonly TimeSpan ReadyPollInterval = TimeSpan.FromMilliseconds(200);
+
     private readonly object _gate = new();
     private ApplicationReadyState _state = ApplicationReadyState.Starting;
     private string? _failureMessage;
@@ -55,6 +64,24 @@ public sealed class ApplicationReadiness : IApplicationReadiness
         {
             _state = ApplicationReadyState.Failed;
             _failureMessage = message;
+        }
+    }
+
+    public async Task<bool> WaitUntilReadyAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            switch (State)
+            {
+                case ApplicationReadyState.Ready:
+                    return true;
+                case ApplicationReadyState.Failed:
+                    return false;
+                default:
+                    await Task.Delay(ReadyPollInterval, ct);
+                    break;
+            }
         }
     }
 }

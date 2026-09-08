@@ -13,9 +13,20 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public static class NeuralNetReplaySerializer
 {
-    /// <summary>Moderation evidence scorer is 429 nodes today; leave headroom for taxonomy growth.</summary>
+    /// <summary>Moderation evidence scorer is 1,197 nodes today; leave headroom for taxonomy growth.</summary>
     public const int MaxNodes = 2048;
-    /// <summary>Dense layer edges for the largest cascade scorer (~21k) plus headroom.</summary>
+    /// <summary>
+    /// Dense layer edges for the largest cascade scorer. This is now tight: the moderation scorer
+    /// sits at 58,408 of 65,536 (about 11% spare) because the input layer carries
+    /// <see cref="ChatMonitoringFeatureEncoder.FeatureCount"/> features, of which
+    /// <see cref="ChatMonitoringFeatureEncoder.TextVectorSize"/> is the semantic region and the
+    /// input-to-first-hidden product dominates the total.
+    ///
+    /// Anything that widens the input or the first hidden layer eats that margin fast — a text
+    /// vector beyond about 916 pushes moderation past this cap, at which point ValidateV2 rejects
+    /// the replay outright rather than degrading. Raise this constant deliberately if the text
+    /// vector grows, and remember replay JSON size grows with it.
+    /// </summary>
     public const int MaxEdges = 65536;
     public const int MaxFrames = 100_000;
 

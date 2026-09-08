@@ -73,4 +73,19 @@ public sealed class RiskOptions
     /// (half-life in hours), so trust built up long ago doesn't linger indefinitely on a dormant
     /// identity that then reappears.</summary>
     public int TrustDecayHalfLifeHours { get; set; } = 72;
+
+    /// <summary>
+    /// How long an idle identity's profile is kept in memory. One entry accrues per identity ever
+    /// seen and each is held for this long, so it is the term that decides the resident size of
+    /// the profile cache.
+    ///
+    /// The default is deliberately tied to <see cref="TrustDecayHalfLifeHours"/>: at a 72h
+    /// half-life, seven days is 2.3 half-lives, by which point a profile retains about a fifth of
+    /// its deviation from neutral — the previous 30 days was ten half-lives, where what is being
+    /// held in memory is arithmetically indistinguishable from a fresh profile.
+    ///
+    /// The tradeoff is that an identity dormant longer than this reappears as new and picks up
+    /// <see cref="NewIdentityPenalty"/> again. Raise it if that matters more than the memory.
+    /// </summary>
+    public int ProfileRetentionDays { get; set; } = 7;
 }

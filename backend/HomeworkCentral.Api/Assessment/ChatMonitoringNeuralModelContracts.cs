@@ -25,7 +25,12 @@ public sealed record ChatMonitoringNeuralModelInput(
     float CrossSubjectSupport = 0f,
     IReadOnlyList<float>? AppliedSubjectMultiHot = null,
     IReadOnlyList<float>? ChannelSubjectMultiHot = null,
-    IReadOnlyList<float>? CascadeContext = null)
+    IReadOnlyList<float>? CascadeContext = null,
+    /// <summary>
+    /// Sentence embedding of <see cref="Message"/>, from the same embedder in training and
+    /// inference so both occupy one vector space. Null leaves the model's semantic region zeroed.
+    /// </summary>
+    IReadOnlyList<float>? TextEmbedding = null)
 {
     public static ChatMonitoringNeuralModelInput Create(
         string requirement,
@@ -35,7 +40,8 @@ public sealed record ChatMonitoringNeuralModelInput(
         float threadContinuity,
         float priorScore,
         SubjectSignalSnapshot subjects,
-        IReadOnlyList<float>? cascadeContext = null) =>
+        IReadOnlyList<float>? cascadeContext = null,
+        IReadOnlyList<float>? textEmbedding = null) =>
         new(
             requirement,
             threadContext,
@@ -50,7 +56,8 @@ public sealed record ChatMonitoringNeuralModelInput(
             subjects.CrossSubjectSupport,
             ToMultiHot(subjects.AppliedGenerals),
             ToMultiHot(subjects.ChannelGeneral is null ? [] : [subjects.ChannelGeneral]),
-            cascadeContext);
+            cascadeContext,
+            textEmbedding);
 
     private static float[] ToMultiHot(IReadOnlyList<string> generals)
     {
@@ -67,11 +74,23 @@ public sealed record ChatMonitoringNeuralModelInput(
 }
 
 /// <summary>
-/// Supervised targets. Evidence/relevance use sigmoid+BCE; <see cref="CategoryIndex"/> uses
-/// softmax + categorical cross-entropy (3Blue1Brown multi-class cost). Use -1 to derive the
-/// index from the training example category string.
+/// Supervised targets. Evidence/relevance use sigmoid+BCE; the category head uses softmax +
+/// categorical cross-entropy (3Blue1Brown multi-class cost).
+///
+/// <paramref name="CategoryIndex"/> is the hard label; -1 derives it from the training example's
+/// category string. <paramref name="CategoryDistribution"/> is the soft alternative: a teacher's
+/// probability over every category rather than a single winner. A soft target carries far more
+/// information per label — "0.7 harassment, 0.2 general, 0.1 staff-impersonation" says something a
+/// one-hot cannot — which is the point of having an LLM produce them. When it is supplied it wins;
+/// otherwise the index is used and the two are mathematically identical, since softmax
+/// cross-entropy's gradient is (prediction - target) for any target distribution and a one-hot is
+/// just one such distribution.
 /// </summary>
-public sealed record ChatMonitoringNeuralModelTargets(float Evidence, float Relevance, int CategoryIndex = -1);
+public sealed record ChatMonitoringNeuralModelTargets(
+    float Evidence,
+    float Relevance,
+    int CategoryIndex = -1,
+    IReadOnlyList<float>? CategoryDistribution = null);
 
 /// <summary>Evidence/relevance/confidence are probabilities in <c>[0, 1]</c>.</summary>
 public sealed record ChatMonitoringNeuralModelPrediction(

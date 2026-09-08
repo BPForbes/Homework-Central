@@ -1,19 +1,23 @@
 # Start the full Homework Central local dev stack (Postgres, API, frontend).
 #
 # Usage:
-#   scripts/run-dev.ps1              # build + run everything
+#   scripts/run-dev.ps1              # build + run; Postgres first, FCaptcha not joined before API
+#   scripts/run-dev.ps1 -Stripped    # also pause neural environments; FCaptcha not joined before API
 #   scripts/run-dev.ps1 -BuildOnly   # compile only (no servers)
 #   scripts/run-dev.ps1 -Help
 #
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
+#   HC_SKIP_RUST_BUILD=1    Skip cargo build --workspace in rust/
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 #   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
+#   HC_DEV_STRIPPED=1       Pause leftover neural training and skip neural warmup/refresh
 # Dev bypass (HC_DEV_BYPASS / VITE_HC_DEV_BYPASS) is set by start-api-dev.ps1 and start-frontend-dev.ps1.
 [CmdletBinding()]
 param(
     [switch]$BuildOnly,
     [switch]$SkipDocker,
+    [switch]$Stripped,
     [switch]$Help
 )
 
@@ -24,8 +28,6 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ApiProject = Join-Path $RepoRoot 'backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj'
-$PostgresHostCheckProject = Join-Path $RepoRoot 'scripts/PostgresHostCheck/PostgresHostCheck.csproj'
-$PostgresHostCheckDll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
 $FrontendDir = Join-Path $RepoRoot 'frontend'
 $EnvFile = Join-Path $RepoRoot '.env'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
@@ -34,6 +36,7 @@ $DevPostgresPassword = 'postgres'
 $DevPostgresHostPort = '5434'
 $DevPostgresHostPortMin = 5434
 $DevPostgresHostPortMax = 5450
+$DevPostgresConnectHost = '127.0.0.1'
 $script:ApiBuildFailed = $false
 
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
@@ -48,7 +51,14 @@ Usage:
 Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
+  -Stripped     Pause leftover neural training and skip neural warmup/refresh
+                (also set HC_DEV_STRIPPED=1). Does not change Docker start order.
   -Help         Show this help
+
+Default start brings Postgres up with the existing helper and backgrounds
+FCaptcha so a cold captcha image build is not joined before the API. The API
+does not start until Postgres accepts connections on
+127.0.0.1:<POSTGRES_HOST_PORT>.
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
 development migrations and seeds. Unset it after pulling migrations/catalog changes
@@ -64,7 +74,7 @@ Stop:
   Closing both API and frontend terminals stops Docker Postgres and frees its port.
   Restarting the API alone will auto-start Postgres if needed.
 
-Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, PowerShell 7+ (pwsh)
+Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, Rust stable (rustup; cargo build --workspace), PowerShell 7+ (pwsh)
 '@ | Write-Output
 }
 
@@ -90,75 +100,115 @@ function Test-IsWindowsHost {
     return $IsWindows -or $env:OS -match '(?i)Windows'
 }
 
-function Test-LoopbackPortListener([int]$Port) {
-    if (-not (Test-IsWindowsHost)) {
-        return $false
-    }
-
-    try {
-        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-    } catch {
-        $listeners = @()
-    }
-
-    if ($listeners.Count -eq 0) {
-        $pattern = ":$Port\s"
-        $listeners = netstat -ano | Select-String 'LISTENING' | Select-String $pattern
-        foreach ($line in $listeners) {
-            $text = $line.ToString()
-            if ($text -match '127\.0\.0\.1:' -or $text -match '\[::1\]:') {
+function Test-HostPortListener([int]$Port) {
+    if (Test-IsWindowsHost) {
+        try {
+            $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+            if ($listeners.Count -gt 0) {
                 return $true
             }
-        }
-        return $false
-    }
-
-    return $null -ne ($listeners | Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') } | Select-Object -First 1)
-}
-
-function Find-FreePostgresHostPort {
-    for ($port = $DevPostgresHostPortMin; $port -le $DevPostgresHostPortMax; $port++) {
-        if (Test-LoopbackPortListener $port) {
-            continue
-        }
-
-        $listeners = @()
-        try {
-            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
         } catch {
             $listeners = @()
         }
 
-        if ($listeners.Count -eq 0) {
-            return "$port"
+        $pattern = ":$Port\s"
+        $lines = @(netstat -ano | Select-String 'LISTENING' | Select-String $pattern)
+        return $lines.Count -gt 0
+    }
+
+    if (Get-Command ss -ErrorAction SilentlyContinue) {
+        $ss = ss -ltn 2>$null | Out-String
+        return $ss -match ":$Port(\s|$)"
+    }
+
+    if (Get-Command lsof -ErrorAction SilentlyContinue) {
+        lsof -nP -iTCP:"$Port" -sTCP:LISTEN *> $null
+        return $LASTEXITCODE -eq 0
+    }
+
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $async = $client.BeginConnect($DevPostgresConnectHost, $Port, $null, $null)
+        $connected = $async.AsyncWaitHandle.WaitOne(200) -and $client.Connected
+        $client.Close()
+        return $connected
+    } catch {
+        return $false
+    }
+}
+
+function Find-FreePostgresHostPort {
+    param([int]$ExcludePort = 0)
+
+    for ($port = $DevPostgresHostPortMin; $port -le $DevPostgresHostPortMax; $port++) {
+        if ($port -eq $ExcludePort) {
+            continue
         }
+
+        if (Test-HostPortListener $port) {
+            continue
+        }
+
+        return "$port"
     }
 
     return $null
 }
 
+function Get-SuggestedPostgresHostPort([int]$FailedPort) {
+    $freePort = Find-FreePostgresHostPort -ExcludePort $FailedPort
+    if (-not [string]::IsNullOrWhiteSpace($freePort)) {
+        return $freePort
+    }
+
+    $fallback = [Math]::Min($FailedPort + 1, $DevPostgresHostPortMax)
+    if ($fallback -eq $FailedPort) {
+        $fallback = $DevPostgresHostPortMin
+    }
+
+    return "$fallback"
+}
+
+function Test-OurPostgresPublishedOn([string]$Port) {
+    $published = Get-PostgresPublishedPort
+    return $published -eq $Port
+}
+
+function Set-PostgresHostPortValue([hashtable]$Values, [string]$Port) {
+    $Values['POSTGRES_HOST_PORT'] = $Port
+    Update-EnvFileValues @{ POSTGRES_HOST_PORT = $Port }
+    $fresh = Read-EnvFile
+    foreach ($key in @($fresh.Keys)) {
+        $Values[$key] = $fresh[$key]
+    }
+}
+
 function Resolve-PostgresHostPort([hashtable]$Values) {
     $port = [int]$Values['POSTGRES_HOST_PORT']
 
-    if (-not (Test-LoopbackPortListener $port)) {
+    if (Test-OurPostgresPublishedOn "$port") {
         return $Values
     }
 
-    Write-Step "Port $port is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
-    $freePort = Find-FreePostgresHostPort
+    if (-not (Test-HostPortListener $port)) {
+        return $Values
+    }
+
+    Write-Step "Port $port is already in use on this machine (127.0.0.1 would not reach Docker)"
+    $freePort = Find-FreePostgresHostPort -ExcludePort $port
     if ([string]::IsNullOrWhiteSpace($freePort)) {
         throw "No free Postgres host port found between $DevPostgresHostPortMin and $DevPostgresHostPortMax"
     }
 
     Write-Step "Using POSTGRES_HOST_PORT=$freePort instead"
-    $Values['POSTGRES_HOST_PORT'] = $freePort
-    Update-EnvFileValues @{ POSTGRES_HOST_PORT = $freePort }
-    return (Read-EnvFile)
+    Set-PostgresHostPortValue $Values $freePort
+    return $Values
 }
 
 function Set-ComposeEnv([hashtable]$EnvValues) {
     $env:POSTGRES_PASSWORD = $DevPostgresPassword
     $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
+    $env:FCAPTCHA_HOST_PORT = $EnvValues['FCAPTCHA_HOST_PORT']
 }
 
 function Invoke-PostgresAdminSql {
@@ -192,26 +242,21 @@ function Test-PostgresHostConnection([hashtable]$EnvValues) {
     $port = $EnvValues['POSTGRES_HOST_PORT']
     $published = Get-PostgresPublishedPort
     if ($published -and $published -ne $port) {
-        Write-Step "Docker Postgres is not published on localhost:$port (container maps to ${published})"
+        Write-Step "Docker Postgres is not published on ${DevPostgresConnectHost}:$port (container maps to ${published})"
         return $false
     }
 
-    if (-not (Test-Path $PostgresHostCheckDll)) {
-        Build-PostgresHostCheck
-    }
-
-    # Same localhost path the API uses (docker run + host.docker.internal is unreliable on Windows).
-    $stderr = ''
+    # Same 127.0.0.1 path the API uses. Host=localhost prefers ::1 on Windows and
+    # times out against Docker Desktop's IPv4-only publish.
     for ($attempt = 1; $attempt -le 10; $attempt++) {
-        $stderr = dotnet $PostgresHostCheckDll $port 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
+        if (Test-DevPostgresConnection $port) {
             return $true
         }
         Start-Sleep -Seconds 1
     }
 
-    Write-Step "Cannot connect to homework_central_master on localhost:$port from the host"
-    $detail = $stderr.Trim()
+    Write-Step "Cannot connect to homework_central_master on ${DevPostgresConnectHost}:$port from the host"
+    $detail = Get-DevPostgresHostCheckDetail
     if ($detail) {
         Write-Host "       $detail" -ForegroundColor DarkGray
     }
@@ -270,18 +315,28 @@ function Prepare-HomeworkCentralDatabase {
     return $true
 }
 
-function Start-PostgresContainer([hashtable]$EnvValues) {
-    $expectedPort = $EnvValues['POSTGRES_HOST_PORT']
-    $published = Get-PostgresPublishedPort
+function Start-CoreContainers {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$EnvValues,
+        [switch]$ForceRecreate
+    )
 
-    if ($published -and $published -ne $expectedPort) {
-        Write-Step "Recreating Postgres container for localhost:$expectedPort"
-        docker compose -f $ComposeFile --env-file $EnvFile up -d --force-recreate postgres
-    } else {
-        docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    $expectedPort = $EnvValues['POSTGRES_HOST_PORT']
+    $fcaptchaPort = $EnvValues['FCAPTCHA_HOST_PORT']
+    if ([string]::IsNullOrWhiteSpace($fcaptchaPort)) {
+        $fcaptchaPort = $script:DevFCaptchaHostPort
     }
 
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+    $published = Get-PostgresPublishedPort
+    $recreate = $ForceRecreate -or ($published -and $published -ne $expectedPort)
+    if (-not $recreate -and (Test-DevFCaptchaConnection $fcaptchaPort) -and -not (Test-DevFCaptchaSecretAligned)) {
+        $recreate = $true
+        Write-Step 'Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)'
+    }
+
+    Write-Step "Starting Postgres (${DevPostgresConnectHost}:$expectedPort); FCaptcha continues in the background"
+    Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
 }
 
 function Reset-PostgresVolume {
@@ -292,20 +347,24 @@ function Reset-PostgresVolume {
     }
 }
 
+function Wait-CoreBeforeApi([hashtable]$EnvValues) {
+    Write-Step 'Waiting for Postgres (FCaptcha continues in the background)'
+    return Wait-ForPostgres -EnvValues $EnvValues
+}
+
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
-    Start-PostgresContainer -EnvValues $EnvValues
-
-    Write-Step 'Waiting for Postgres to accept connections'
-    Wait-ForPostgres
+    Start-CoreContainers -EnvValues $EnvValues
+    if ((Wait-CoreBeforeApi -EnvValues $EnvValues) -ne 'Ready') {
+        Repair-PostgresHostReachability $EnvValues
+    }
 
     if (-not (Test-PostgresAuth -Database 'postgres')) {
         Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
         Reset-PostgresVolume
-        Start-PostgresContainer -EnvValues $EnvValues
-        Write-Step 'Waiting for Postgres to accept connections'
-        Wait-ForPostgres
+        Start-CoreContainers -EnvValues $EnvValues
+        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
         if (-not (Test-PostgresAuth -Database 'postgres')) {
             throw 'Postgres password verification failed after recreating the Docker volume'
         }
@@ -314,9 +373,8 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     if (-not (Prepare-HomeworkCentralDatabase)) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
         Reset-PostgresVolume
-        Start-PostgresContainer -EnvValues $EnvValues
-        Write-Step 'Waiting for Postgres to accept connections'
-        Wait-ForPostgres
+        Start-CoreContainers -EnvValues $EnvValues
+        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
 
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master inside the Docker Postgres container'
@@ -324,17 +382,59 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     }
 
     if (-not (Test-PostgresHostConnection $EnvValues)) {
-        $port = $EnvValues['POSTGRES_HOST_PORT']
-        $loopbackHint = ''
-        if (Test-LoopbackPortListener ([int]$port)) {
-            $loopbackHint = "`nPort $port is bound on 127.0.0.1 by another PostgreSQL install, so localhost does not reach Docker."
-        }
-        throw @"
-Failed to reach homework_central_master on localhost:$port.$loopbackHint
-Pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run:
+        Repair-PostgresHostReachability $EnvValues
+    }
+}
+
+function Get-PostgresHostFailureMessage([string]$Port) {
+    $example = Get-SuggestedPostgresHostPort ([int]$Port)
+    $hint = ''
+    if (Test-OurPostgresPublishedOn $Port) {
+        $hint = "`nDocker published ${DevPostgresConnectHost}:$Port but the host still cannot open homework_central_master."
+    } elseif (Test-HostPortListener ([int]$Port)) {
+        $hint = "`nPort $Port is already in use on this machine, so ${DevPostgresConnectHost} does not reach the Docker container."
+    }
+
+    return @"
+Failed to reach homework_central_master on ${DevPostgresConnectHost}:$Port.$hint
+Pick a free port in .env (for example POSTGRES_HOST_PORT=$example), then run:
   docker compose down -v
   pwsh .\scripts\run-dev.ps1
 "@
+}
+
+function Repair-PostgresHostReachability([hashtable]$EnvValues) {
+    $port = $EnvValues['POSTGRES_HOST_PORT']
+
+    if (Test-OurPostgresPublishedOn $port) {
+        Write-Step "Host cannot reach Docker Postgres on ${DevPostgresConnectHost}:$port; recreating the container"
+        Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
+        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
+        if (-not (Prepare-HomeworkCentralDatabase)) {
+            throw 'Failed to prepare homework_central_master after recreating Docker Postgres'
+        }
+
+        if (Test-PostgresHostConnection $EnvValues) {
+            return
+        }
+    }
+
+    $freePort = Find-FreePostgresHostPort -ExcludePort ([int]$port)
+    if ([string]::IsNullOrWhiteSpace($freePort)) {
+        throw (Get-PostgresHostFailureMessage $port)
+    }
+
+    Write-Step "Host cannot reach homework_central_master on ${DevPostgresConnectHost}:$port. Using POSTGRES_HOST_PORT=$freePort instead"
+    Set-PostgresHostPortValue $EnvValues $freePort
+    Set-ComposeEnv $EnvValues
+    Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
+    $null = Wait-CoreBeforeApi -EnvValues $EnvValues
+    if (-not (Prepare-HomeworkCentralDatabase)) {
+        throw 'Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT'
+    }
+
+    if (-not (Test-PostgresHostConnection $EnvValues)) {
+        throw (Get-PostgresHostFailureMessage $freePort)
     }
 }
 
@@ -342,14 +442,48 @@ function Ensure-EnvFile {
     return Ensure-DevEnvFile
 }
 
+# Returns 'Ready' or 'HostUnreachable'; throws when Postgres never came up inside the
+# container, which no caller can repair.
+#
+# Readiness here is host reachability, not a usable homework_central_master: this wait runs
+# before Prepare-HomeworkCentralDatabase creates that database and before Test-PostgresAuth
+# resets a volume whose password does not match, so requiring either would never clear.
 function Wait-ForPostgres {
-    $attempts = 30
-    for ($i = 1; $i -le $attempts; $i++) {
-        docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
-        if ($LASTEXITCODE -eq 0) { return }
-        Start-Sleep -Seconds 1
+    param([hashtable]$EnvValues)
+
+    $port = $DevPostgresHostPort
+    if ($null -ne $EnvValues -and -not [string]::IsNullOrWhiteSpace($EnvValues['POSTGRES_HOST_PORT'])) {
+        $port = $EnvValues['POSTGRES_HOST_PORT']
     }
-    throw "Postgres did not become ready within ${attempts}s"
+
+    [int]$timeoutSeconds = 60
+    [datetime]$deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    # Sticky: once Postgres has answered inside the container, a later pg_isready blip does not
+    # turn this into a container problem. The remaining fault is host reachability, which is the
+    # one Repair-PostgresHostReachability can act on.
+    [bool]$everReadyInContainer = $false
+    do {
+        docker compose -f $ComposeFile exec -T postgres pg_isready -U postgres -d postgres *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $everReadyInContainer = $true
+            if (Test-DevPostgresHostReachable $port) {
+                return 'Ready'
+            }
+        }
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+
+    if (-not $everReadyInContainer) {
+        throw "Postgres did not become ready inside the Docker container within ${timeoutSeconds}s. Check: docker compose logs postgres"
+    }
+
+    # In-container Postgres is up but the published port does not reach it. Report instead of
+    # throwing: Ensure-PostgresReady hands this to Repair-PostgresHostReachability, which
+    # recreates the container or moves POSTGRES_HOST_PORT to a free port.
+    $detail = Get-DevPostgresHostCheckDetail
+    $suffix = if ($detail) { ": $detail" } else { '' }
+    Write-Step "Postgres is ready in the container but ${DevPostgresConnectHost}:${port} does not reach it$suffix"
+    return 'HostUnreachable'
 }
 
 function Assert-DockerRunning {
@@ -364,26 +498,11 @@ function Assert-DockerRunning {
 }
 
 function Start-Postgres([hashtable]$EnvValues) {
-    Write-Step "Starting Postgres (Docker) on localhost:$($EnvValues['POSTGRES_HOST_PORT'])"
+    Write-Step "Starting Postgres (Docker) on ${DevPostgresConnectHost}:$($EnvValues['POSTGRES_HOST_PORT'])"
 
     Assert-DockerRunning
 
     Ensure-PostgresReady $EnvValues
-}
-
-function Start-FCaptcha {
-    param([hashtable]$EnvValues)
-
-    $port = $EnvValues['FCAPTCHA_HOST_PORT']
-    if ([string]::IsNullOrWhiteSpace($port)) {
-        $port = $script:DevFCaptchaHostPort
-    }
-
-    Write-Step "Starting FCaptcha (Docker) on localhost:$port"
-
-    Assert-DockerRunning
-
-    Ensure-DevFCaptchaRunning -Port $port
 }
 
 function Start-ClamAv {
@@ -399,50 +518,29 @@ function Start-ClamAv {
     Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
 }
 
-function Build-PostgresHostCheck {
-    dotnet build $PostgresHostCheckProject -c Debug -v q *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'PostgresHostCheck build failed' }
-}
-
-function Test-PostgresHostCheckFresh {
-    $dll = Join-Path $RepoRoot 'scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll'
-    if (-not (Test-Path $dll)) {
-        return $false
-    }
-
-    $built = Get-Item $dll
-
-    # Compare against the project file *and* every .cs source under it, not just the .csproj —
-    # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
-    # this script keeps running the stale compiled checker.
-    $projectDir = Split-Path $PostgresHostCheckProject -Parent
-    $sourceFiles = @(Get-Item $PostgresHostCheckProject) + @(Get-ChildItem -Path $projectDir -Filter '*.cs' -Recurse)
-    $newestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-
-    return $built.LastWriteTimeUtc -ge $newestSource.LastWriteTimeUtc
-}
-
-function Build-PostgresHostCheckIfNeeded {
-    if (Test-PostgresHostCheckFresh) {
-        Write-Step 'Postgres host check already built'
-        return
-    }
-
-    Build-PostgresHostCheck
-}
-
 function Build-Projects {
     $script:ApiBuildFailed = $false
     $skipDotnet = $env:HC_SKIP_DOTNET_BUILD -eq '1' -or $env:HC_SKIP_BUILD -eq '1'
     $apiBuildLog = Join-Path ([System.IO.Path]::GetTempPath()) 'hc-api-build-errors.log'
     $apiBuildJob = $null
+    $rustBuildJob = $null
 
     Ensure-FrontendDependencies -FrontendDir $FrontendDir
+
+    if ($env:HC_SKIP_RUST_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        Require-RustCargo
+        $rustBuildJob = Start-Job -ScriptBlock {
+            param($ScriptRoot, $Path)
+            $env:Path = $Path
+            . (Join-Path $ScriptRoot 'dev-stack-lib.ps1')
+            Build-RustWorkspace
+        } -ArgumentList $PSScriptRoot, $env:Path
+    }
 
     if ($skipDotnet) {
         Write-Step 'Skipping API build (HC_SKIP_DOTNET_BUILD=1)'
     } else {
-        Write-Step 'Building API (parallel with frontend typecheck)'
+        Write-Step 'Building API (parallel with frontend typecheck and Rust)'
         $apiBuildJob = Start-Job -ScriptBlock {
             param($Project, $Log)
             dotnet build $Project -c Debug 2>&1 | Tee-Object -FilePath $Log
@@ -458,6 +556,7 @@ function Build-Projects {
     # drains Wait-FrontendTypecheckJob before the API build job wait/cleanup below runs.
     $hostCheckFailed = $false
     $frontendTypecheckFailed = $false
+    $rustBuildFailed = $false
     try {
         try {
             Build-PostgresHostCheckIfNeeded
@@ -488,10 +587,23 @@ function Build-Projects {
                 Remove-Job $apiBuildJob -Force
             }
         }
+
+        if ($null -ne $rustBuildJob) {
+            try {
+                Wait-RustWorkspaceJob -Job $rustBuildJob
+            } catch {
+                Write-Host $_.Exception.Message
+                $rustBuildFailed = $true
+            }
+        }
     }
 
     if ($frontendTypecheckFailed) {
         throw 'Frontend typecheck failed'
+    }
+
+    if ($rustBuildFailed) {
+        throw 'Rust cargo build --workspace failed'
     }
 
     if ($hostCheckFailed) {
@@ -528,7 +640,13 @@ function Start-DevStack([hashtable]$EnvValues) {
         # The parent has just completed the API build, so avoid rebuilding it in the child
         # process before Kestrel can bind. Preserve an explicitly supplied value afterwards.
         $previousSkipDotnetBuild = $env:HC_SKIP_DOTNET_BUILD
+        $previousSkipRustBuild = $env:HC_SKIP_RUST_BUILD
+        $previousStripped = $env:HC_DEV_STRIPPED
         $env:HC_SKIP_DOTNET_BUILD = '1'
+        $env:HC_SKIP_RUST_BUILD = '1'
+        if ($Stripped -or $env:HC_DEV_STRIPPED -eq '1') {
+            $env:HC_DEV_STRIPPED = '1'
+        }
         try {
             Start-DevStackPowerShellProcess -ArgumentList $apiArgs -WorkingDirectory $RepoRoot
         } finally {
@@ -537,20 +655,22 @@ function Start-DevStack([hashtable]$EnvValues) {
             } else {
                 $env:HC_SKIP_DOTNET_BUILD = $previousSkipDotnetBuild
             }
+            if ($null -eq $previousSkipRustBuild) {
+                Remove-Item Env:HC_SKIP_RUST_BUILD -ErrorAction SilentlyContinue
+            } else {
+                $env:HC_SKIP_RUST_BUILD = $previousSkipRustBuild
+            }
+            if ($null -eq $previousStripped) {
+                Remove-Item Env:HC_DEV_STRIPPED -ErrorAction SilentlyContinue
+            } else {
+                $env:HC_DEV_STRIPPED = $previousStripped
+            }
         }
     } else {
         Write-Step 'Skipping API start because the build failed (see API Build Errors browser tab)'
     }
 
-    Write-Step 'Opening browser tabs when servers are ready'
-    if (-not $script:ApiBuildFailed) {
-        Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
-            '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
-            '-Url', 'http://localhost:5000/',
-            '-Label', 'API',
-            '-MaxAttempts', '300'
-        ) -WorkingDirectory $RepoRoot
-    }
+    Write-Step 'Opening the frontend when Vite is ready (API root is a 403 landing page, not the app)'
     Start-DevStackPowerShellProcess -WindowStyle Hidden -ArgumentList @(
         '-File', (Join-Path $PSScriptRoot 'wait-and-open-browser.ps1'),
         '-Url', 'http://localhost:5173/login',
@@ -568,7 +688,7 @@ function Start-DevStack([hashtable]$EnvValues) {
         Write-Host '  API:      unavailable (check API Build Errors browser tab)'
     }
     if (-not $SkipDocker) {
-        Write-Host '  Postgres: localhost:' -NoNewline
+        Write-Host "  Postgres: ${DevPostgresConnectHost}:" -NoNewline
         Write-Host $EnvValues['POSTGRES_HOST_PORT'] -NoNewline
         Write-Host ' (Docker; stops when both terminals are closed)'
         $fcaptchaPort = $EnvValues['FCAPTCHA_HOST_PORT']
@@ -596,7 +716,6 @@ function Start-RunPhase([hashtable]$EnvValues) {
 
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
-        Start-FCaptcha -EnvValues $EnvValues
         Start-ClamAv
     } else {
         Write-Step 'Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / -SkipDocker)'
@@ -614,8 +733,17 @@ if ($env:HC_SKIP_DOCKER -eq '1') {
     $SkipDocker = $true
 }
 
+if ($env:HC_DEV_STRIPPED -eq '1') {
+    $Stripped = $true
+}
+
 Push-Location $RepoRoot
 try {
+    if ($Stripped) {
+        $env:HC_DEV_STRIPPED = '1'
+        Write-Step 'Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start; FCaptcha is not joined before the API'
+    }
+
     $envValues = Get-EnvValues
     Build-Projects
 

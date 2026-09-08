@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { byPrefixAndName } from '../../icons/byPrefixAndName'
 import type { NeuralNetReplay, ReplayEdge, ReplayNode, ReplayParameter } from '../../types/neuralNetReplay'
 import { normalizeReplayPhase, payloadCollectionForPhase } from '../../utils/neuralNetReplay'
+import { isEditableKeyboardTarget, isInteractiveKeyboardTarget, isSaveChord } from '../../utils/keyboardShortcuts'
 import {
   NeuralNetMesh3D,
   edgeKeysFromDenseParameterIndexes,
@@ -141,6 +142,59 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
     query.addEventListener('change', change)
     return () => query.removeEventListener('change', change)
   }, [])
+
+  useEffect(() => {
+    function onReplayShortcut(event: KeyboardEvent) {
+      if (event.repeat)
+        return
+      if (isEditableKeyboardTarget(event.target))
+        return
+
+      if (event.code === 'Space' && isInteractiveKeyboardTarget(event.target))
+        return
+
+      if (isSaveChord(event) || event.code === 'Space') {
+        if (frames.length === 0 || reducedMotion)
+          return
+        event.preventDefault()
+        setPlaying((value) => !value)
+        return
+      }
+
+      if (frames.length === 0)
+        return
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        setPlaying(false)
+        setFrameIndex((value) => Math.max(0, value - 1))
+        return
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        setPlaying(false)
+        setFrameIndex((value) => Math.min(frames.length - 1, value + 1))
+        return
+      }
+
+      if (event.key === 'Home') {
+        event.preventDefault()
+        setPlaying(false)
+        setFrameIndex(0)
+        return
+      }
+
+      if (event.key === 'End') {
+        event.preventDefault()
+        setPlaying(false)
+        setFrameIndex(Math.max(0, frames.length - 1))
+      }
+    }
+
+    document.addEventListener('keydown', onReplayShortcut)
+    return () => document.removeEventListener('keydown', onReplayShortcut)
+  }, [frames.length, reducedMotion])
 
   useEffect(() => {
     if (!playing || reducedMotion) return
@@ -492,6 +546,7 @@ export function ReplayViewer({ replay }: { replay: NeuralNetReplay }) {
             ? `Max quality · all ${totalNodeCount} nodes · ${layerEdges.length} curve-fit edges · color thought path`
             : `Preview · ≤${shownCap} nodes/layer · sampled curve-fit edges · color thought path`}
         {reducedMotion ? ' · Playback disabled by reduced-motion preference' : ''}
+        {' · Space or Ctrl/Cmd+S play/pause · arrows step · Home/End jump'}
       </p>
       <p className="neural-path-legend" aria-label="Thought path color legend">
         <span>

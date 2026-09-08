@@ -22,16 +22,21 @@ public class TenantDbContextFactory(
         return Build(databaseName);
     }
 
+    /// <summary>
+    /// Context for one-shot provisioning (create/migrate/seed), built on a non-pooled connection
+    /// string so the tenant's pool does not retain a server connection once this context is
+    /// disposed. See <see cref="ITenantConnectionResolver.BuildProvisioningConnectionString"/>.
+    /// </summary>
     internal static AppDbContext BuildProvisioningContext(ITenantConnectionResolver connectionResolver, string databaseName) =>
-        Build(connectionResolver, databaseName);
+        BuildFromConnectionString(connectionResolver.BuildProvisioningConnectionString(databaseName));
 
     private AppDbContext Build(string databaseName) =>
-        Build(connectionResolver, databaseName);
+        BuildFromConnectionString(connectionResolver.BuildConnectionString(databaseName));
 
-    private static AppDbContext Build(ITenantConnectionResolver connectionResolver, string databaseName)
+    private static AppDbContext BuildFromConnectionString(string connectionString)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(connectionResolver.BuildConnectionString(databaseName), npgsql =>
+            .UseNpgsql(connectionString, npgsql =>
                 npgsql.MigrationsHistoryTable(TenancyConstants.AppMigrationsHistoryTable))
             .Options;
         return new AppDbContext(options);

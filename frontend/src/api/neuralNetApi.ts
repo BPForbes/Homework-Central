@@ -4,6 +4,7 @@ import type {
   NeuralModelKindChatMonitoring,
   NeuralNetDataManagement,
   NeuralNetTrainingFeedback,
+  NeuralNetTrainingLiveProgress,
   NeuralNetTrainingSession,
   NeuralNetVisualizer,
   PagedResult,
@@ -38,6 +39,9 @@ export const neuralNetApi = {
         limit: params?.limit ?? 50,
       },
     }),
+  listLiveProgress: () => api.get<NeuralNetTrainingLiveProgress[]>('/training/live'),
+  resumeTrainingSession: (sessionId: string) =>
+    api.post<NeuralNetTrainingSession>(`/training/${sessionId}/resume`),
   removeTrainingSession: (sessionId: string) => api.delete(`/training/${sessionId}`),
   stopTrainingSession: (sessionId: string) => api.post(`/training/${sessionId}/stop`),
   downloadTrainingReport: (sessionId: string, chatMonitoringKind?: NeuralModelKindChatMonitoring) =>

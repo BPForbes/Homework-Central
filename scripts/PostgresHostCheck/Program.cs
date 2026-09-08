@@ -1,13 +1,40 @@
+using System.Net.Sockets;
 using Npgsql;
 
-if (args.Length != 1 || !int.TryParse(args[0], out int port) || port <= 0 || port > 65535)
+// Exit codes are a contract with scripts/dev-stack-lib.* and scripts/run-dev.*:
+//   0 — homework_central_master accepted the connection and answered a query.
+//   1 — the host cannot reach a Postgres server on this address at all.
+//   2 — bad usage.
+//   3 — a server answered on this address and rejected this connection: the master
+//       database does not exist yet, or the volume's credentials are not the dev
+//       ones. Readiness waits accept this as "the published port reaches Docker
+//       Postgres", because run-dev creates the database and resets a mismatched
+//       volume only after the wait returns.
+//   4 — a server answered with 57P03: it is starting up or shutting down and is not taking
+//       sessions yet. Readiness waits keep waiting, since that state clears on its own.
+
+if (args.Length is < 1 or > 2
+    || !int.TryParse(args[0], out int port)
+    || port is <= 0 or > 65535)
 {
-    Console.Error.WriteLine("Usage: PostgresHostCheck <port>");
+    Console.Error.WriteLine("Usage: PostgresHostCheck <port> [host]");
+    return 2;
+}
+
+// 127.0.0.1 — not localhost — so Windows does not spend the connect timeout on ::1
+// while Docker Desktop has published IPv4 only.
+string host = args.Length == 2 && !string.IsNullOrWhiteSpace(args[1])
+    ? args[1].Trim()
+    : "127.0.0.1";
+
+if (!IsSafeHost(host))
+{
+    Console.Error.WriteLine("Host must be a hostname or IP address.");
     return 2;
 }
 
 string connectionString =
-    $"Host=localhost;Port={port};Database=homework_central_master;Username=postgres;Password=postgres;Timeout=5";
+    $"Host={host};Port={port};Database=homework_central_master;Username=postgres;Password=postgres;Timeout=5";
 
 try
 {
@@ -15,10 +42,57 @@ try
     await connection.OpenAsync();
     await using NpgsqlCommand command = new("SELECT 1", connection);
     object? result = await command.ExecuteScalarAsync();
-    return result?.ToString() == "1" ? 0 : 1;
+    if (result?.ToString() == "1")
+    {
+        return 0;
+    }
+
+    // The session opened, so the address reaches Postgres; only the query result is
+    // unexpected. Report that as "answered but unusable" rather than "unreachable".
+    Console.Error.WriteLine($"SELECT 1 returned '{result}'");
+    return 3;
 }
-catch (Exception ex)
+catch (PostgresException ex)
 {
-    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine(Describe(ex));
+    return ex.SqlState == PostgresErrorCodes.CannotConnectNow ? 4 : 3;
+}
+catch (NpgsqlException ex)
+{
+    Console.Error.WriteLine(Describe(ex));
     return 1;
+}
+catch (TimeoutException ex)
+{
+    Console.Error.WriteLine(Describe(ex));
+    return 1;
+}
+catch (SocketException ex)
+{
+    Console.Error.WriteLine(Describe(ex));
+    return 1;
+}
+
+static bool IsSafeHost(string host)
+{
+    if (host.Length == 0
+        || !host.All(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or ':' or '[' or ']'))
+    {
+        return false;
+    }
+
+    // A colon is allowed only for a bracketed IPv6 literal. Npgsql also reads `Host=name:port`,
+    // so a bare colon here would let the host argument reach a port that the numeric check on
+    // args[0] already rejected.
+    return (host.StartsWith('[') && host.EndsWith(']')) || !host.Contains(':');
+}
+
+// Npgsql's own message for an unreachable host is only "Failed to connect to <host>:<port>";
+// the reason (refused, timed out, no route) lives in the socket exception underneath, and the
+// readiness waits print this line when they give up.
+static string Describe(Exception exception)
+{
+    return exception.InnerException is null
+        ? exception.Message
+        : $"{exception.Message} ({exception.InnerException.Message})";
 }

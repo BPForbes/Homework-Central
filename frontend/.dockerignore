@@ -7,3 +7,12 @@ npm-debug.log*
 .DS_Store
 coverage
 .eslintcache
+
+# Reserved names for reviewer/QA probe files. Gitignored, so they never reach
+# a clone, but a local build context is the working tree -- keep them out of
+# image layers too.
+_scratch/
+*.scratch
+*.scratch.*
+*.sarif
+.codeql-db/
