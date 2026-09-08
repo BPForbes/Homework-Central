@@ -54,7 +54,7 @@ Options:
   --build-only   Compile the API and install frontend deps; do not start servers
   --skip-docker  Do not start Postgres via Docker (expects DB on localhost)
   --stripped     Pause leftover neural training and skip neural warmup/refresh
-                 (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha start together.
+                 (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha always start together.
   --help         Show this help
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
@@ -696,10 +696,10 @@ run_stack() {
     log "Starting API on http://localhost:5000"
     if [[ "$SKIP_DOCKER" == true ]]; then
       HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 \
-        HC_DEV_STRIPPED="${HC_DEV_STRIPPED}" "$REPO_ROOT/scripts/start-api-dev.sh" &
+        HC_DEV_STRIPPED="${HC_DEV_STRIPPED:-}" "$REPO_ROOT/scripts/start-api-dev.sh" &
     else
       HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 \
-        HC_DEV_STRIPPED="${HC_DEV_STRIPPED}" "$REPO_ROOT/scripts/start-api-dev.sh" &
+        HC_DEV_STRIPPED="${HC_DEV_STRIPPED:-}" "$REPO_ROOT/scripts/start-api-dev.sh" &
     fi
     BACKEND_PID=$!
     api_ready=1

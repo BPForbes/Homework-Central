@@ -553,6 +553,11 @@ public sealed class NeuralNetTrainingService(
     public static bool ResolveContinuousTraining(bool continuousFlag, int ticketCount) =>
         continuousFlag || ticketCount <= 0;
 
+    /// <summary>Queued or Running, matching <see cref="StopTrainingSessionAsync"/>.</summary>
+    public static bool IsActiveTrainingStatus(string? status) =>
+        string.Equals(status, "Queued", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Blocks until the continuous session token is cancelled (Stop or host shutdown).</summary>
     private static async Task WaitUntilContinuousCancelledAsync(CancellationToken ct)
     {
@@ -577,7 +582,7 @@ public sealed class NeuralNetTrainingService(
 
         bool queued = string.Equals(session.Status, "Queued", StringComparison.OrdinalIgnoreCase);
         bool running = string.Equals(session.Status, "Running", StringComparison.OrdinalIgnoreCase);
-        if (!queued && !running)
+        if (!IsActiveTrainingStatus(session.Status))
             return false;
 
         if (running && cancellationRegistry.TryCancel(sessionId))
@@ -607,7 +612,8 @@ public sealed class NeuralNetTrainingService(
     public async Task<int> PauseAllActiveTrainingSessionsAsync(CancellationToken ct = default)
     {
         List<Guid> sessionIds = await db.NeuralNetTrainingSessions
-            .Where(session => session.Status == "Queued" || session.Status == "Running")
+            .Where(session =>
+                session.Status.ToLower() == "queued" || session.Status.ToLower() == "running")
             .OrderBy(session => session.CreatedAtUtc)
             .Select(session => session.SessionId)
             .ToListAsync(ct);

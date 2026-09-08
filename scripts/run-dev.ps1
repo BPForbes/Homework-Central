@@ -54,7 +54,7 @@ Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Stripped     Pause leftover neural training and skip neural warmup/refresh
-                (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha start together.
+                (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha always start together.
   -Help         Show this help
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip

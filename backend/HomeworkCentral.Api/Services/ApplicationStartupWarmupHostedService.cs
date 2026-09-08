@@ -50,7 +50,17 @@ public sealed class ApplicationStartupWarmupHostedService(
                 return;
 
             if (pauseNeuralEnvironments)
-                await PauseActiveNeuralSessionsAsync(stoppingToken);
+            {
+                await OperationalExceptionGuard.RunAsync(
+                    () => PauseActiveNeuralSessionsAsync(stoppingToken),
+                    ex =>
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "Stripped neural pause failed after auth seed; /healthz will still become ready.");
+                        return Task.CompletedTask;
+                    });
+            }
 
             readiness.MarkReady();
             logger.LogInformation("Application startup warmup finished; API is ready.");

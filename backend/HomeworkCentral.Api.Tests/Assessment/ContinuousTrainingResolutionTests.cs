@@ -22,4 +22,17 @@ public sealed class ContinuousTrainingResolutionTests
             expectedContinuous,
             NeuralNetTrainingService.ResolveContinuousTraining(continuousFlag, ticketCount));
     }
+
+    [Theory]
+    [InlineData("Queued", true)]
+    [InlineData("queued", true)]
+    [InlineData("Running", true)]
+    [InlineData("RUNNING", true)]
+    [InlineData("Cancelled", false)]
+    [InlineData("Completed", false)]
+    [InlineData(null, false)]
+    public void IsActiveTrainingStatus_matches_stop_path(string? status, bool expected)
+    {
+        Assert.Equal(expected, NeuralNetTrainingService.IsActiveTrainingStatus(status));
+    }
 }
