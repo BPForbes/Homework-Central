@@ -300,18 +300,31 @@ test_dev_postgres_connection() {
 }
 
 # Readiness gate for "the host can reach Docker Postgres on this published port".
-# Exit code 3 means a server answered and rejected the connection — no master database on a
-# fresh volume, or credentials that do not match the dev ones. Both still prove the published
-# port reaches Postgres, and run-dev creates the database and resets a mismatched volume only
-# after this wait, so treating 3 as not-ready deadlocks the wait against its own repair.
-# Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on its own.
+# Exit code 3 (no master database on a fresh volume) and exit code 5 (the volume's password is
+# not the dev one) both mean a server answered and rejected the connection, which still proves
+# the published port reaches Postgres. run-dev creates the database and resets a mismatched
+# volume only after this wait, so treating either as not-ready deadlocks the wait against its
+# own repair. Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on
+# its own.
 #
 # Silent, because polling loops call it once per second. One-shot callers should prefer
 # test_dev_postgres_already_running, which names the rejection.
 test_dev_postgres_host_reachable() {
   local status=0
   invoke_dev_postgres_host_check "$1" || status=$?
-  [[ "$status" -eq 0 || "$status" -eq 3 ]]
+  [[ "$status" -eq 0 || "$status" -eq 3 || "$status" -eq 5 ]]
+}
+
+# True when a server answered and rejected the dev credentials, which means the volume behind
+# it was initialised with a different password.
+#
+# Only the host's view of the published port can establish this. A psql probe run inside the
+# container connects over loopback, which initdb trusts ahead of the image's scram-sha-256
+# rule, so it authenticates against no password and succeeds on a mismatched volume.
+test_dev_postgres_credentials_rejected() {
+  local status=0
+  invoke_dev_postgres_host_check "$1" || status=$?
+  [[ "$status" -eq 5 ]]
 }
 
 report_dev_postgres_rejected() {
@@ -328,10 +341,10 @@ test_dev_postgres_already_running() {
   local port="$1"
   local status=0
   invoke_dev_postgres_host_check "$port" || status=$?
-  if [[ "$status" -eq 3 ]]; then
+  if [[ "$status" -eq 3 || "$status" -eq 5 ]]; then
     report_dev_postgres_rejected "$port"
   fi
-  [[ "$status" -eq 0 || "$status" -eq 3 ]]
+  [[ "$status" -eq 0 || "$status" -eq 3 || "$status" -eq 5 ]]
 }
 
 start_dev_stack_postgres_container() {
@@ -361,7 +374,7 @@ wait_dev_postgres_ready() {
     if [[ "$status" -eq 0 ]]; then
       return 0
     fi
-    if [[ "$status" -eq 3 ]]; then
+    if [[ "$status" -eq 3 || "$status" -eq 5 ]]; then
       # Nothing repairs the volume behind this wait — start-api-dev only starts the
       # container — so name the rejection instead of leaving the API to fail on it.
       report_dev_postgres_rejected "$port"
