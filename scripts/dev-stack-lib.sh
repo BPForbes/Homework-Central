@@ -366,6 +366,43 @@ wait_dev_fcaptcha_ready() {
   return 1
 }
 
+# start-api-dev (not already waited by run-dev) uses one compose up so a cold
+# FCaptcha image build overlaps Postgres instead of starting after it.
+ensure_dev_stack_core_running() {
+  local postgres_port="$1"
+  local fcaptcha_port="$2"
+  local force_recreate=0
+  local postgres_status=0
+  local fcaptcha_status=0
+  local postgres_wait_pid
+  local fcaptcha_wait_pid
+
+  if test_dev_postgres_connection "$postgres_port" && test_dev_fcaptcha_connection "$fcaptcha_port"; then
+    if test_dev_fcaptcha_secret_aligned; then
+      with_dev_stack_lock _join_dev_stack_if_managed "$postgres_port"
+      return 0
+    fi
+    force_recreate=1
+    printf '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)\n'
+  fi
+
+  printf '==> Starting Docker Postgres and FCaptcha together (127.0.0.1:%s, localhost:%s)\n' \
+    "$postgres_port" "$fcaptcha_port"
+  start_dev_stack_core_containers "$postgres_port" "$fcaptcha_port" "$force_recreate" || return 1
+
+  wait_dev_postgres_ready "$postgres_port" &
+  postgres_wait_pid=$!
+  wait_dev_fcaptcha_ready "$fcaptcha_port" &
+  fcaptcha_wait_pid=$!
+  wait "$postgres_wait_pid" || postgres_status=$?
+  wait "$fcaptcha_wait_pid" || fcaptcha_status=$?
+  if [[ "$postgres_status" -ne 0 || "$fcaptcha_status" -ne 0 ]]; then
+    return 1
+  fi
+
+  with_dev_stack_lock _ensure_dev_postgres_state "$postgres_port"
+}
+
 ensure_dev_fcaptcha_running() {
   local port="$1"
   local needs_start=1

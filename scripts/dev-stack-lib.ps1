@@ -431,6 +431,63 @@ function Wait-DevFCaptchaReady([string]$Port) {
     throw "FCaptcha did not become ready on localhost:$Port within 30s"
 }
 
+function Ensure-DevStackCoreRunning {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresPort,
+        [Parameter(Mandatory = $true)]
+        [string]$FCaptchaPort
+    )
+
+    $forceRecreate = $false
+    if ((Test-DevPostgresConnection $PostgresPort) -and (Test-DevFCaptchaConnection $FCaptchaPort)) {
+        if (Test-DevFCaptchaSecretAligned) {
+            Join-DevStackIfManaged -Port $PostgresPort
+            return
+        }
+        $forceRecreate = $true
+        Write-Host '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)' -ForegroundColor DarkGray
+    }
+
+    Write-Host "==> Starting Docker Postgres and FCaptcha together (127.0.0.1:$PostgresPort, localhost:$FCaptchaPort)" -ForegroundColor DarkGray
+    Start-DevStackCoreContainers -PostgresPort $PostgresPort -FCaptchaPort $FCaptchaPort -ForceRecreate:$forceRecreate
+
+    $libPath = Join-Path $PSScriptRoot 'dev-stack-lib.ps1'
+    $postgresJob = Start-Job -ScriptBlock {
+        param($LibPath, $Port, $Path)
+        $env:Path = $Path
+        . $LibPath
+        Wait-DevPostgresReady $Port
+    } -ArgumentList $libPath, $PostgresPort, $env:Path
+    $fcaptchaJob = Start-Job -ScriptBlock {
+        param($LibPath, $Port, $Path)
+        $env:Path = $Path
+        . $LibPath
+        Wait-DevFCaptchaReady $Port
+    } -ArgumentList $libPath, $FCaptchaPort, $env:Path
+
+    try {
+        Wait-Job $postgresJob, $fcaptchaJob | Out-Null
+        Receive-Job $postgresJob -ErrorAction Stop | Out-Null
+        Receive-Job $fcaptchaJob -ErrorAction Stop | Out-Null
+    }
+    finally {
+        Remove-Job $postgresJob, $fcaptchaJob -Force -ErrorAction SilentlyContinue
+    }
+
+    Invoke-DevStackStateUpdate {
+        $state = Read-DevStackState
+        if ($null -eq $state) {
+            Write-DevStackState @{
+                managed_postgres = '1'
+                postgres_port    = $PostgresPort
+                refcount         = '1'
+            }
+            $script:DevStackServerRegistered = $true
+        }
+    }
+}
+
 function Ensure-DevFCaptchaRunning([string]$Port) {
     $needsStart = -not (Test-DevFCaptchaConnection $Port)
     $needsRecreate = -not $needsStart -and -not (Test-DevFCaptchaSecretAligned)
