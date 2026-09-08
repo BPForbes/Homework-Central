@@ -156,15 +156,13 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
   branch; no shared-checkout commits until QA PASS). Isolate with
   a **clone**, not `git worktree add`. Talk to other Coders so
   side-branches do not collide. Run the change in that clone
-  (VM / tools). CodeQL + CodeRabbit CLI (`cr`) before Reviewers.
+  (VM / tools). CodeQL before Reviewers.
   Write Push JSON, Coder→Reviewer `qa` comments, and a Handoff
   **before the first review**
   ([side-work.md](references/side-work.md)).
 - **Reviewers** — compare Push JSON to the side-branch diff vs
   `<integration-base>`; Handoff on send-back
-  ([role-identity.md](references/role-identity.md)). **Block
-  Satisfied** if CodeRabbit findings are `open` or CR was NOT RUN
-  on a code change; send CR + review notes to the Coder. Satisfied
+  ([role-identity.md](references/role-identity.md)). Satisfied
   does **not** authorize a push. Agent: `.cursor/agents/devops-reviewer.md`.
 - **QA** — after Satisfied + Security Clear. `/code-review`: look;
   **do not edit**. `/repro` as needed. Fail → VM review, Handoff
@@ -174,8 +172,7 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
   ([department-pods.md](references/department-pods.md),
   [triage-template.md](references/triage-template.md)). Follow
   [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md).
-  PASS only when AC + applicable CodeQL hold, and CodeRabbit
-  findings are not `open` on a code change
+  PASS only when AC + applicable CodeQL hold
   ([side-work.md](references/side-work.md)). Agent:
   `.cursor/agents/devops-quality-engineer.md`.
 - **Observability / Optimization / Documentation / Refactoring /

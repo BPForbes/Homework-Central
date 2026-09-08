@@ -31,8 +31,6 @@ Same ids in the thread `## Q&A` table and the JSON `qa` array.
 `status` is `open`, `answered`, or `withdrawn`. A Q&A-only bounce
 may set `"files": {}`. Do not invent a commit to record an answer.
 Each `qa` row: `id`, `from`, `to`, `ask`, `answer`, `status`.
-Optional `cr` array indexes CodeRabbit finding ids from
-`cr-<topic>.md` (`open` | `fixed` | `wontfix` + `why`).
 
 ## Shape
 
@@ -43,7 +41,7 @@ Valid JSON. File paths are object keys. Hunks are
 tree vs `<integration-base>`, not `git show HEAD` alone.
 
 Top-level keys: `topic`, `round`, `from`, `to`, `notifies`,
-`closes`, `qa`, `cr`, `files`. Hunks index the side-branch
+`closes`, `qa`, `files`. Hunks index the side-branch
 working tree vs `<integration-base>` when there is no shared
 commit yet ([side-work.md](side-work.md)). Example hunk:
 `{ "op": "+", "lines": "12-20", "why": "…" }` then `"delta": "+9/-2"`.

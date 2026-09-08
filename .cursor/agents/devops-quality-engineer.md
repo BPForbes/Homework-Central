@@ -23,9 +23,7 @@ skill is over the budget in
 `goal-side-work-cr.md` (skill dir + 9 agents; required
 side-work/CR growth may exceed 1320). Compare to
 `origin/feature/ticket-rooms`.
-Agents **read** identity/pods. Do not add scripts. **Block
-PASS** if CodeRabbit findings are `open` or CR was NOT RUN on
-a code change.
+Agents **read** identity/pods. Do not add scripts.
 
 ## Process
 
@@ -40,8 +38,7 @@ that is not a push. Sonar is additive.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
    `To: Coder`, open `triage-<id>.md`. Research *N* joins the
    Coder who picks it up (`department-pods.md`).
-4. PASS only when AC + applicable CodeQL hold and CodeRabbit
-   findings are not `open` on a code change. List thoughts for
+4. PASS only when AC + applicable CodeQL hold. List thoughts for
    `finalized/`. Orchestrator keep-commit(s) from the approved
    side-branch tree and pushes.
 

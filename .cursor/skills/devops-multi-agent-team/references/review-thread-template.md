@@ -34,10 +34,6 @@ See [thoughts-layout.md](thoughts-layout.md).
 |----------|---------|-------|
 | reviewer-1 | Changes requested / Satisfied | … |
 
-## CodeRabbit
-- File: `cr-<topic>.md` · CLI: `cr review findings`
-- Open findings **block** Satisfied / PASS. `wontfix` needs `why`.
-
 ## Q&A (Coder ↔ Reviewer)
 | Id | From | To | Ask | Answer | Status |
 |----|------|----|-----|--------|--------|

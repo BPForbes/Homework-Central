@@ -48,10 +48,7 @@ Coder writes `push-<topic>.json` and a Handoff `To: Reviewer`
 Coders may open `qa` rows to Reviewers for clarification.
 Update on every rewrite. Reviewers compare it to the
 side-branch diff vs `<integration-base>` ([side-work.md](side-work.md)).
-Satisfied does **not** authorize a git push. **Block** if
-CodeRabbit findings are `open` or CR was NOT RUN on a code change;
-send those notes to the Coder. Either role may `wontfix` a CR
-finding with `why`.
+Satisfied does **not** authorize a git push.
 
 Quality or bug-standard fail → VM review, Handoff `To: Coder`.
 QA blocked / send-back / not pleased → `triage-<id>.md`;

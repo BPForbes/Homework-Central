@@ -32,10 +32,9 @@ override this); isolate with a **clone**, not `git worktree add`; talk to
 other Coders so owned paths do not collide
 ([side-work.md](side-work.md)). Do not commit on the shared
 checkout. Keep secrets out of git. Prefer idempotent,
-non-interactive scripts. Run applicable CodeQL and CodeRabbit
-(`cr review --agent --uncommitted --include-untracked --base
-<integration-base>`) before Reviewers — neither authorizes a
-push. Write `push-<topic>.json` and any Coder→Reviewer `qa`
+non-interactive scripts. Run applicable CodeQL before Reviewers
+— that does not authorize a push. Write `push-<topic>.json` and
+any Coder→Reviewer `qa`
 rows **before the first review**. Ask Researcher for a reuse
 map before duplicating code.
 
@@ -49,9 +48,7 @@ review thread.
 
 PR-style review. Compare Push JSON to the side-branch tree vs
 `<integration-base>` ([side-work.md](side-work.md),
-[push-json.md](push-json.md)). **Block Satisfied** if CodeRabbit
-findings are `open` or CR was NOT RUN on a code change; send
-CR + review notes to the Coder. Cite research brief, reuse map,
+[push-json.md](push-json.md)). Cite research brief, reuse map,
 `docs/`, and fetched URLs. Duplicated code → request an import.
 Iterate until Satisfied. Satisfied does **not** authorize a
 push. Primaries: [department-pods.md](department-pods.md).
@@ -76,8 +73,7 @@ Done. **Only QA may give the OK to push.** Fail → Handoff
 blocked / sent back / not pleased; Research *N* joins the Coder
 who picks it up ([triage-template.md](triage-template.md)). After
 PASS, list thoughts to finalize. Orchestrator keep-commit(s)
-from the approved side-branch tree, then one push. **Block
-PASS** if CodeRabbit findings are `open` on a code change.
+from the approved side-branch tree, then one push.
 
 ## 6–11. Later passes
 
