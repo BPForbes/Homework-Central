@@ -488,22 +488,6 @@ start_postgres() {
   ensure_postgres_ready
 }
 
-start_fcaptcha() {
-  if test_dev_fcaptcha_connection "$FCAPTCHA_HOST_PORT" && test_dev_fcaptcha_secret_aligned; then
-    log "FCaptcha already ready on localhost:${FCAPTCHA_HOST_PORT}"
-    return 0
-  fi
-
-  require_cmd docker
-  if ! docker info >/dev/null 2>&1; then
-    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
-  fi
-
-  log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
-  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" \
-    || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
-}
-
 start_clamav() {
   if ! dev_clamav_opted_in; then
     log "Skipping ClamAV (set HC_ENABLE_CLAMAV=1 to scan uploads; scans fail open without it)"
@@ -767,7 +751,6 @@ main() {
 
   if [[ "$SKIP_DOCKER" == false ]]; then
     start_postgres
-    start_fcaptcha
     start_clamav
   else
     log "Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / --skip-docker)"

@@ -451,24 +451,6 @@ function Wait-ForPostgres {
     throw "Postgres did not become ready within ${attempts}s"
 }
 
-function Start-FCaptchaContainerAsync([hashtable]$EnvValues) {
-    $port = $EnvValues['FCAPTCHA_HOST_PORT']
-    if ([string]::IsNullOrWhiteSpace($port)) {
-        $port = $script:DevFCaptchaHostPort
-    }
-
-    if (Test-DevFCaptchaConnection $port) {
-        if (-not (Test-DevFCaptchaSecretAligned)) {
-            Write-Step 'Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)'
-            Start-DevStackFCaptchaContainer -Port $port -ForceRecreate
-        }
-        return
-    }
-
-    Write-Step "Starting FCaptcha (Docker) on localhost:$port"
-    Start-DevStackFCaptchaContainer -Port $port
-}
-
 function Wait-PostgresAndFCaptcha([hashtable]$EnvValues) {
     $port = $EnvValues['FCAPTCHA_HOST_PORT']
     if ([string]::IsNullOrWhiteSpace($port)) {
@@ -520,26 +502,6 @@ function Start-Postgres([hashtable]$EnvValues) {
     Assert-DockerRunning
 
     Ensure-PostgresReady $EnvValues
-}
-
-function Start-FCaptcha {
-    param([hashtable]$EnvValues)
-
-    $port = $EnvValues['FCAPTCHA_HOST_PORT']
-    if ([string]::IsNullOrWhiteSpace($port)) {
-        $port = $script:DevFCaptchaHostPort
-    }
-
-    if ((Test-DevFCaptchaConnection $port) -and (Test-DevFCaptchaSecretAligned)) {
-        Write-Step "FCaptcha already ready on localhost:$port"
-        return
-    }
-
-    Write-Step "Starting FCaptcha (Docker) on localhost:$port"
-
-    Assert-DockerRunning
-
-    Ensure-DevFCaptchaRunning -Port $port
 }
 
 function Start-ClamAv {
@@ -785,7 +747,6 @@ function Start-RunPhase([hashtable]$EnvValues) {
 
     if (-not $SkipDocker) {
         Start-Postgres -EnvValues $EnvValues
-        Start-FCaptcha -EnvValues $EnvValues
         Start-ClamAv
     } else {
         Write-Step 'Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / -SkipDocker)'

@@ -11,7 +11,8 @@ namespace HomeworkCentral.Api.Services;
 
 /// <summary>
 /// Master-database migrate and auth seed that must finish before /devlogin is safe.
-/// Ticket/neural catalogs continue after /healthz is ready. Kept off the Kestrel listen path.
+/// Development defers ticket/neural catalogs until after /healthz is ready; Production
+/// finishes those catalogs before Ready. Kept off the Kestrel listen path.
 /// </summary>
 public static class ApplicationStartupWarmup
 {
@@ -61,8 +62,9 @@ public static class ApplicationStartupWarmup
     }
 
     /// <summary>
-    /// Auth, role masks, and /devlogin seed. Ticket portals and neural catalogs are
-    /// <see cref="RunDeferredCatalogSeedAsync"/> so /healthz can become ready sooner.
+    /// Auth, role masks, and /devlogin seed. Ticket portals and neural catalogs stay in
+    /// <see cref="RunDeferredCatalogSeedAsync"/> so Development /healthz can become ready
+    /// after auth; Production still runs that seed before Ready.
     /// </summary>
     public static async Task RunEssentialAuthSeedAsync(
         IServiceProvider services,
@@ -98,13 +100,13 @@ public static class ApplicationStartupWarmup
 
         startupLogger.LogInformation(
             eagerPersonaProvisioning
-                ? "Essential auth seed complete. Ticket catalogs continue after /healthz is ready. Persona databases provision in the background."
-                : "Essential auth seed complete. Ticket catalogs continue after /healthz is ready. Persona databases provision on demand at dev login.");
+                ? "Essential auth seed complete. Ticket catalogs seed separately from auth. Persona databases provision in the background."
+                : "Essential auth seed complete. Ticket catalogs seed separately from auth. Persona databases provision on demand at dev login.");
     }
 
     /// <summary>
-    /// Ticket portals, scoring/AI-tracking catalogs, and channel refresh. Safe after
-    /// <see cref="IApplicationReadiness.MarkReady"/>; login does not need these rows.
+    /// Ticket portals, scoring/AI-tracking catalogs, and channel refresh. Login does not
+    /// need these rows. Development runs this after Ready; Production runs it before Ready.
     /// </summary>
     public static async Task RunDeferredCatalogSeedAsync(
         IServiceProvider services,

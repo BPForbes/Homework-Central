@@ -336,8 +336,9 @@ Architecture, trust boundaries, and engineering standards live under
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
 can bind without a duplicate build. It also starts the frontend before the API. Docker Postgres
 and FCaptcha start together; `start-api-dev` does not wait for them again when `run-dev` already
-did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed; ticket portals and
-neural catalogs finish after that so the Vite BackendGate is not held on catalog seed.
+did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
+ticket portals and neural catalogs finish after that so the Vite BackendGate is not held
+on catalog seed. Production finishes those catalogs before Ready.
 `http://localhost:5000/` is an intentional 403 landing page, not the app — use
 `http://localhost:5173/login` and keep that tab open until `/healthz` reports `healthy`.
 
