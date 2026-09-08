@@ -270,7 +270,8 @@ function Test-PostgresHostConnection([hashtable]$EnvValues) {
 # looks in from the host, is the check for that.
 function Test-PostgresDatabaseInContainer {
     param(
-        [string]$Database = 'postgres'
+        [Parameter(Mandatory = $true)]
+        [string]$Database
     )
 
     docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
@@ -344,11 +345,30 @@ function Start-CoreContainers {
     Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
 }
 
+# Removes the Postgres container and the volume behind its data directory, leaving the caller to
+# start it again. `docker compose down -v` would also take llmdata, uploads, and miniodata, which
+# costs a developer their Ollama models and attachment blobs for a fault that lives in the Postgres
+# data directory alone; scripts\reset-dev-db.ps1 stays the way to ask for the wider wipe.
+#
+# The volume name is read off the container rather than composed from the project name, because
+# Compose derives that name from the checkout directory.
 function Reset-PostgresVolume {
     Write-Step 'Recreating Postgres Docker volume (reset to postgres/postgres credentials)'
-    docker compose -f $ComposeFile --env-file $EnvFile down -v --remove-orphans *> $null
+
+    [string]$container = (docker compose -f $ComposeFile --env-file $EnvFile ps -q postgres 2>$null | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($container)) {
+        throw 'Cannot identify the Postgres container to reset. Run: scripts\reset-dev-db.ps1 -Yes'
+    }
+
+    [string]$volume = (docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' $container 2>$null | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($volume)) {
+        throw 'Cannot identify the Postgres data volume to reset. Run: scripts\reset-dev-db.ps1 -Yes'
+    }
+
+    docker compose -f $ComposeFile --env-file $EnvFile rm --stop --force postgres *> $null
+    docker volume rm $volume *> $null
     if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to remove Postgres Docker volume'
+        throw "Failed to remove Postgres Docker volume $volume"
     }
 }
 
@@ -357,9 +377,9 @@ function Wait-CoreBeforeApi([hashtable]$EnvValues) {
     return Wait-ForPostgres -EnvValues $EnvValues
 }
 
-# Recreates the volume when Postgres rejects the dev credentials. The password is initialised
-# into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT can change
-# it — both only republish the same 28P01 on a new port, which is where this used to end up.
+# Recreates the Postgres volume when the server rejects the dev credentials. The password is
+# initialised into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT
+# can change it — both only republish the same 28P01 on a new port.
 #
 # Confined to a port our own container publishes. A foreign Postgres answering there has a
 # volume that is not ours to destroy, and it is Repair-PostgresHostReachability's port
@@ -371,6 +391,7 @@ function Reset-StalePostgresVolume([hashtable]$EnvValues) {
     }
 
     if (-not (Test-OurPostgresPublishedOn $port)) {
+        Write-Step "Postgres on ${DevPostgresConnectHost}:$port rejects the dev credentials but is not our container; leaving its volume alone"
         return
     }
 
@@ -428,6 +449,14 @@ Pick a free port in .env (for example POSTGRES_HOST_PORT=$example), then run:
 
 function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     $port = $EnvValues['POSTGRES_HOST_PORT']
+
+    # Our own volume initialised with a different password answers every port the same way, so
+    # recreating the container and relocating POSTGRES_HOST_PORT cannot repair it. Leave that fault
+    # to Reset-StalePostgresVolume, which the caller runs next. A foreign Postgres rejecting the
+    # same credentials still belongs here, because relocating off its port is the only repair.
+    if ((Test-DevPostgresCredentialsRejected $port) -and (Test-OurPostgresPublishedOn $port)) {
+        return
+    }
 
     if (Test-OurPostgresPublishedOn $port) {
         Write-Step "Host cannot reach Docker Postgres on ${DevPostgresConnectHost}:$port; recreating the container"

@@ -5,15 +5,17 @@ using Npgsql;
 //   0 — homework_central_master accepted the connection and answered a query.
 //   1 — the host cannot reach a Postgres server on this address at all.
 //   2 — bad usage.
-//   3 — a server answered on this address and rejected this connection: the master
-//       database does not exist yet. Readiness waits accept this as "the published port
-//       reaches Docker Postgres", because run-dev creates the database only after the
-//       wait returns.
+//   3 — a server answered on this address but did not hand back a usable
+//       homework_central_master, for a reason other than the two below. The expected case is
+//       a fresh volume that has no such database yet, which is why readiness waits accept
+//       this as "the published port reaches Docker Postgres": run-dev creates the database
+//       only after the wait returns. This is also the fallback for every SqlState that is
+//       not mapped, so it does not on its own prove the database is merely missing.
 //   4 — a server answered with 57P03: it is starting up or shutting down and is not taking
 //       sessions yet. Readiness waits keep waiting, since that state clears on its own.
 //   5 — a server answered with 28P01: it rejected the dev credentials, so the volume was
 //       initialised with a different password. Readiness waits accept it for the same
-//       reason as 3, and run-dev recreates its own volume on it.
+//       reason as 3, and run-dev recreates its own Postgres volume on it.
 //
 //       Kept separate from 3 because this is the only signal that carries it. initdb
 //       writes `host all all 127.0.0.1/32 trust` ahead of the image's scram-sha-256 rule,
@@ -40,6 +42,11 @@ if (!IsSafeHost(host))
     return 2;
 }
 
+// These credentials must stay equal to DEV_STACK_POSTGRES_PASSWORD in scripts/dev-stack-lib.sh
+// and $script:DevPostgresPassword in scripts/dev-stack-lib.ps1, which are what run-dev writes into
+// .env and exports to Compose. A divergence would report 28P01 against a healthy volume, and exit 5
+// authorises run-dev to destroy that volume. Passing the password as an argument instead would put
+// it in the process list on a shared machine.
 string connectionString =
     $"Host={host};Port={port};Database=homework_central_master;Username=postgres;Password=postgres;Timeout=5";
 

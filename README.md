@@ -342,7 +342,9 @@ connection counts as reachable, because a freshly wiped volume has no `homework_
 yet and `run-dev` creates it — and recreates a volume whose password does not match — right after
 that wait. That password check has to look in from the host: the container trusts its own
 loopback ahead of password authentication, so a `psql` probe run inside it succeeds on a
-mismatched volume. If the container is up but the published port never answers, `run-dev`
+mismatched volume. The recreate takes the Postgres container and the volume mounted at its data
+directory only, leaving the Ollama, uploads, and MinIO volumes alone; `scripts/reset-dev-db.*`
+remains the way to wipe the whole stack. If the container is up but the published port never answers, `run-dev`
 recreates the container or moves `POSTGRES_HOST_PORT` to a free port instead of giving up. `start-api-dev`
 does not wait for them again when `run-dev` already did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
 ticket portals and neural catalogs finish after that so the Vite BackendGate is not held

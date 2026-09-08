@@ -293,7 +293,7 @@ test_postgres_host_connection() {
 # on a volume whose password is not the dev one. test_dev_postgres_credentials_rejected, which
 # looks in from the host, is the check for that.
 test_postgres_database_in_container() {
-  local database="${1:-postgres}"
+  local database="$1"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
     sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d $database -tAc 'SELECT 1'" >/dev/null 2>&1
 }
@@ -355,14 +355,31 @@ start_core_containers() {
   start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0 || return 1
 }
 
+# Removes the Postgres container and the volume behind its data directory, leaving the caller to
+# start it again. `docker compose down -v` would also take llmdata, uploads, and miniodata, which
+# costs a developer their Ollama models and attachment blobs for a fault that lives in the Postgres
+# data directory alone; scripts/reset-dev-db.sh stays the way to ask for the wider wipe.
+#
+# The volume name is read off the container rather than composed from the project name, because
+# Compose derives that name from the checkout directory.
 reset_postgres_volume() {
+  local container
+  local volume
+
   log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
+  container="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" ps -q postgres 2>/dev/null | tr -d '\r\n' || true)"
+  [[ -n "$container" ]] || fail "Cannot identify the Postgres container to reset. Run: scripts/reset-dev-db.sh --yes"
+
+  volume="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$container" 2>/dev/null | tr -d '\r\n' || true)"
+  [[ -n "$volume" ]] || fail "Cannot identify the Postgres data volume to reset. Run: scripts/reset-dev-db.sh --yes"
+
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" rm --stop --force postgres >/dev/null 2>&1 || true
+  docker volume rm "$volume" >/dev/null 2>&1 || fail "Failed to remove Postgres Docker volume ${volume}"
 }
 
-# Recreates the volume when Postgres rejects the dev credentials. The password is initialised
-# into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT can change
-# it — both only republish the same 28P01 on a new port, which is where this used to end up.
+# Recreates the Postgres volume when the server rejects the dev credentials. The password is
+# initialised into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT
+# can change it — both only republish the same 28P01 on a new port.
 #
 # Confined to a port our own container publishes. A foreign Postgres answering there has a
 # volume that is not ours to destroy, and it is repair_postgres_host_reachability's port
@@ -373,6 +390,7 @@ reset_stale_postgres_volume() {
   fi
 
   if ! our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    log "Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} rejects the dev credentials but is not our container; leaving its volume alone"
     return 0
   fi
 
@@ -431,6 +449,15 @@ postgres_host_failure_message() {
 }
 
 repair_postgres_host_reachability() {
+  # Our own volume initialised with a different password answers every port the same way, so
+  # recreating the container and relocating POSTGRES_HOST_PORT cannot repair it. Leave that fault to
+  # reset_stale_postgres_volume, which the caller runs next. A foreign Postgres rejecting the same
+  # credentials still belongs here, because relocating off its port is the only repair available.
+  if test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT" \
+    && our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
   if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
     log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
     start_core_containers 1 || fail "Failed to recreate Postgres. Check: docker compose logs"

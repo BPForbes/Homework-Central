@@ -300,8 +300,9 @@ test_dev_postgres_connection() {
 }
 
 # Readiness gate for "the host can reach Docker Postgres on this published port".
-# Exit code 3 (no master database on a fresh volume) and exit code 5 (the volume's password is
-# not the dev one) both mean a server answered and rejected the connection, which still proves
+# Exit code 3 (a server answered without handing back a usable master database, normally a fresh
+# volume) and exit code 5 (the volume's password is not the dev one) both mean a server answered
+# and refused this connection, which still proves
 # the published port reaches Postgres. run-dev creates the database and resets a mismatched
 # volume only after this wait, so treating either as not-ready deadlocks the wait against its
 # own repair. Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on

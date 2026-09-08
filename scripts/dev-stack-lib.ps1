@@ -263,8 +263,9 @@ function Test-DevPostgresConnection([string]$Port) {
 }
 
 # Readiness gate for "the host can reach Docker Postgres on this published port".
-# Exit code 3 (no master database on a fresh volume) and exit code 5 (the volume's password is
-# not the dev one) both mean a server answered and rejected the connection, which still proves
+# Exit code 3 (a server answered without handing back a usable master database, normally a fresh
+# volume) and exit code 5 (the volume's password is not the dev one) both mean a server answered
+# and refused this connection, which still proves
 # the published port reaches Postgres. run-dev creates the database and resets a mismatched
 # volume only after this wait, so treating either as not-ready deadlocks the wait against its
 # own repair. Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on
@@ -273,7 +274,8 @@ function Test-DevPostgresConnection([string]$Port) {
 # Silent, because polling loops call it once per second. One-shot callers should prefer
 # Test-DevPostgresAlreadyRunning, which names the rejection.
 function Test-DevPostgresHostReachable([string]$Port) {
-    return (Invoke-DevPostgresHostCheck $Port) -in @(0, 3, 5)
+    [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
+    return $hostCheckExit -in @(0, 3, 5)
 }
 
 # True when a server answered and rejected the dev credentials, which means the volume behind
@@ -283,7 +285,10 @@ function Test-DevPostgresHostReachable([string]$Port) {
 # container connects over loopback, which initdb trusts ahead of the image's scram-sha-256
 # rule, so it authenticates against no password and succeeds on a mismatched volume.
 function Test-DevPostgresCredentialsRejected([string]$Port) {
-    return (Invoke-DevPostgresHostCheck $Port) -eq 5
+    # Cast before comparing: this gates a destructive reset in run-dev, and `@(x, 5) -eq 5` would
+    # be truthy if the helper ever emitted an extra object alongside its exit code.
+    [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
+    return $hostCheckExit -eq 5
 }
 
 function Write-DevPostgresRejected([string]$Port) {
