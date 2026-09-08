@@ -676,10 +676,6 @@ supervise_children() {
 }
 
 run_stack() {
-  if [[ "$SKIP_DOCKER" == false ]]; then
-    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
-  fi
-
   local api_ready=0
   BACKEND_PID=""
 
@@ -771,6 +767,10 @@ main() {
   fi
 
   if [[ "$SKIP_DOCKER" == false ]]; then
+    # Stop a leftover managed session *before* start_postgres waits on the published
+    # port. Doing this afterwards tears down the container that wait just cleared,
+    # and the API child used to skip its own wait because HC_DEV_STACK_PREREGISTERED=1.
+    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
     start_postgres
     start_clamav
   else

@@ -366,7 +366,7 @@ start_dev_stack_postgres_container() {
 
 wait_dev_postgres_ready() {
   local port="$1"
-  local timeout_seconds=30
+  local timeout_seconds=60
   local deadline=$((SECONDS + timeout_seconds))
   local status
   while true; do

@@ -70,8 +70,11 @@ if ($PreRegistered) {
 Push-Location $RepoRoot
 $browserProcess = $null
 try {
-    # run-dev already waited for host-published Postgres when -PreRegistered / HC_DEV_STACK_PREREGISTERED=1.
-    if (-not $skipDocker -and $env:HC_DEV_STACK_PREREGISTERED -ne '1') {
+    # -PreRegistered means the parent already took the refcount slot. It does not
+    # mean 127.0.0.1 still answers: leftover .hc-dev-stack.state used to make
+    # run-dev stop Postgres after it had waited, and the watch rebuild is another
+    # window. Confirm (or start) the published port unless the caller opted out.
+    if (-not $skipDocker) {
         Ensure-DevStackCoreRunning -PostgresPort $envValues['POSTGRES_HOST_PORT'] -FCaptchaPort $envValues['FCAPTCHA_HOST_PORT']
         Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
     }

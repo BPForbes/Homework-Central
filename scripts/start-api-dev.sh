@@ -70,8 +70,11 @@ cleanup_api() {
 }
 trap cleanup_api EXIT
 
-# run-dev already waited for host-published Postgres when it set HC_DEV_STACK_PREREGISTERED=1.
-if [[ "${HC_SKIP_DOCKER:-0}" != "1" && "${HC_DEV_STACK_PREREGISTERED:-0}" != "1" ]]; then
+# HC_DEV_STACK_PREREGISTERED means the parent already took the refcount slot. It
+# does not mean 127.0.0.1 still answers: leftover .hc-dev-stack.state used to make
+# run-dev stop Postgres after it had waited, and the watch rebuild is another
+# window. Confirm (or start) the published port unless the caller opted out.
+if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
   ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
     || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
   ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" || fail "Could not start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."

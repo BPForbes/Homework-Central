@@ -668,10 +668,6 @@ function Start-DevStack([hashtable]$EnvValues) {
     $apiStarter = Join-Path $RepoRoot 'scripts/start-api-dev.ps1'
     $frontendStarter = Join-Path $RepoRoot 'scripts/start-frontend-dev.ps1'
 
-    if (-not $SkipDocker) {
-        Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
-    }
-
     $env:HC_SKIP_BROWSER_OPEN = '1'
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
@@ -768,6 +764,10 @@ function Start-RunPhase([hashtable]$EnvValues) {
     Write-Step 'Preparing dev stack (Postgres, API, frontend)'
 
     if (-not $SkipDocker) {
+        # Stop a leftover managed session *before* Start-Postgres waits on the published
+        # port. Doing this afterwards tears down the container that wait just cleared,
+        # and the API child used to skip its own wait because -PreRegistered was set.
+        Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
         Start-Postgres -EnvValues $EnvValues
         Start-ClamAv
     } else {

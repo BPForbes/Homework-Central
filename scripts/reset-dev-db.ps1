@@ -57,4 +57,9 @@ if ($LASTEXITCODE -eq 0) {
     }
 }
 
+# compose down does not remove .hc-dev-stack.state. Leaving it makes the next
+# run-dev treat this wipe as a live managed session and stop Postgres after it
+# has already waited for the published port.
+Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
+
 Write-Host '==> Dev database volume removed. Run scripts/run-dev.ps1 to start fresh.'

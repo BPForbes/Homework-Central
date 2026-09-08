@@ -347,7 +347,7 @@ function Start-DevStackPostgresContainer {
 }
 
 function Wait-DevPostgresReady([string]$Port) {
-    [int]$timeoutSeconds = 30
+    [int]$timeoutSeconds = 60
     [datetime]$deadline = (Get-Date).AddSeconds($timeoutSeconds)
     do {
         [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port

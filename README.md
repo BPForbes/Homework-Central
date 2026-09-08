@@ -352,8 +352,13 @@ loopback ahead of password authentication, so a `psql` probe run inside it succe
 mismatched volume. The recreate takes the Postgres container and the volume mounted at its data
 directory only, leaving the Ollama, uploads, and MinIO volumes alone; `scripts/reset-dev-db.*`
 remains the way to wipe the whole stack. If the container is up but the published port never answers, `run-dev`
-recreates the container or moves `POSTGRES_HOST_PORT` to a free port instead of giving up. `start-api-dev`
-does not wait for them again when `run-dev` already did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
+recreates the container or moves `POSTGRES_HOST_PORT` to a free port instead of giving up.
+`run-dev` stops a leftover managed session *before* that wait, not after: leftover
+`.hc-dev-stack.state` used to look like a previous session and stop the container the wait
+had just cleared, and `start-api-dev` then skipped its own check because `run-dev` had marked
+the stack pre-registered. `start-api-dev` still confirms the published port before it launches
+the API, even when `run-dev` already waited. `scripts/reset-dev-db.*` removes that state file
+along with the volume. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
 ticket portals and neural catalogs finish after that so the Vite BackendGate is not held
 on catalog seed. Production finishes those catalogs before Ready.
 Do not run `scripts/reset-dev-db.ps1` / `scripts/reset-dev-db.sh` in a second terminal while
