@@ -558,6 +558,21 @@ public sealed class NeuralNetTrainingService(
         string.Equals(status, "Queued", StringComparison.OrdinalIgnoreCase)
         || string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Applies <paramref name="stop"/> to each id; used by PauseAll so tests can see the loop.</summary>
+    public static async Task<int> ApplyStopsAsync(
+        IReadOnlyList<Guid> sessionIds,
+        Func<Guid, Task<bool>> stop)
+    {
+        int paused = 0;
+        foreach (Guid sessionId in sessionIds)
+        {
+            if (await stop(sessionId))
+                paused++;
+        }
+
+        return paused;
+    }
+
     /// <summary>Blocks until the continuous session token is cancelled (Stop or host shutdown).</summary>
     private static async Task WaitUntilContinuousCancelledAsync(CancellationToken ct)
     {
@@ -597,7 +612,8 @@ public sealed class NeuralNetTrainingService(
         session.CompletedAtUtc = stoppedAt;
         session.FailureReason = reason;
         await db.ChatMonitoringNeuralModelRuns
-            .Where(x => x.SessionId == sessionId && (x.Status == "Queued" || x.Status == "Running"))
+            .Where(run => run.SessionId == sessionId
+                && (EF.Functions.ILike(run.Status, "queued") || EF.Functions.ILike(run.Status, "running")))
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(x => x.Status, "Cancelled")
@@ -613,19 +629,12 @@ public sealed class NeuralNetTrainingService(
     {
         List<Guid> sessionIds = await db.NeuralNetTrainingSessions
             .Where(session =>
-                session.Status.ToLower() == "queued" || session.Status.ToLower() == "running")
+                EF.Functions.ILike(session.Status, "queued") || EF.Functions.ILike(session.Status, "running"))
             .OrderBy(session => session.CreatedAtUtc)
             .Select(session => session.SessionId)
             .ToListAsync(ct);
 
-        int paused = 0;
-        foreach (Guid sessionId in sessionIds)
-        {
-            if (await StopTrainingSessionAsync(sessionId, ct))
-                paused++;
-        }
-
-        return paused;
+        return await ApplyStopsAsync(sessionIds, sessionId => StopTrainingSessionAsync(sessionId, ct));
     }
 
     /// <summary>

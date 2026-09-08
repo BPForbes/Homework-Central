@@ -6,9 +6,9 @@ using Microsoft.AspNetCore.Hosting;
 namespace HomeworkCentral.Api.Services;
 
 /// <summary>
-/// Runs migrate/auth seed after Kestrel is listening, marks /healthz ready, then
-/// finishes ticket/neural catalog seed. BackgroundService.StartAsync returns once
-/// ExecuteAsync hits its first await, so /healthz is reachable during warmup.
+/// Runs migrate/auth seed after Kestrel is listening. Development marks /healthz ready
+/// before ticket/neural catalogs; Production finishes those catalogs first (K8s probe).
+/// BackgroundService.StartAsync returns once ExecuteAsync hits its first await.
 /// </summary>
 public sealed class ApplicationStartupWarmupHostedService(
     IServiceProvider services,
@@ -27,6 +27,9 @@ public sealed class ApplicationStartupWarmupHostedService(
         bool devBypassEnabled = DevBypass.IsEnabled(configuration, environment);
         bool eagerPersonaProvisioning = DevPersonaEagerProvisioning.IsEnabled(configuration);
         bool pauseNeuralEnvironments = DevNeuralEnvironmentPause.ShouldPause(configuration, environment);
+        // Local BackendGate can bind after auth seed. Production /healthz is the K8s readiness
+        // probe, so ticket/neural catalogs must finish before Ready there.
+        bool deferCatalogsUntilReady = environment.IsDevelopment();
 
         try
         {
@@ -62,8 +65,30 @@ public sealed class ApplicationStartupWarmupHostedService(
                     });
             }
 
+            if (!deferCatalogsUntilReady)
+            {
+                await OperationalExceptionGuard.RunAsync(
+                    () => ApplicationStartupWarmup.RunDeferredCatalogSeedAsync(
+                        services,
+                        skipDevStartupWarmup,
+                        devBypassEnabled,
+                        stoppingToken),
+                    ex =>
+                    {
+                        readiness.MarkFailed(ex.Message);
+                        logger.LogCritical(ex, "Catalog seed failed; stopping the host.");
+                        lifetime.StopApplication();
+                        return Task.CompletedTask;
+                    });
+                if (readiness.State == ApplicationReadyState.Failed)
+                    return;
+            }
+
             readiness.MarkReady();
             logger.LogInformation("Application startup warmup finished; API is ready.");
+
+            if (!deferCatalogsUntilReady)
+                return;
 
             await OperationalExceptionGuard.RunAsync(
                 () => ApplicationStartupWarmup.RunDeferredCatalogSeedAsync(

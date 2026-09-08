@@ -205,6 +205,7 @@ function Resolve-PostgresHostPort([hashtable]$Values) {
 function Set-ComposeEnv([hashtable]$EnvValues) {
     $env:POSTGRES_PASSWORD = $DevPostgresPassword
     $env:POSTGRES_HOST_PORT = $EnvValues['POSTGRES_HOST_PORT']
+    $env:FCAPTCHA_HOST_PORT = $EnvValues['FCAPTCHA_HOST_PORT']
 }
 
 function Invoke-PostgresAdminSql {
@@ -315,7 +316,7 @@ function Prepare-HomeworkCentralDatabase {
     return $true
 }
 
-function Start-PostgresContainer {
+function Start-CoreContainers {
     param(
         [Parameter(Mandatory = $true)]
         [hashtable]$EnvValues,
@@ -323,16 +324,20 @@ function Start-PostgresContainer {
     )
 
     $expectedPort = $EnvValues['POSTGRES_HOST_PORT']
-    $published = Get-PostgresPublishedPort
-
-    if ($ForceRecreate -or ($published -and $published -ne $expectedPort)) {
-        Write-Step "Recreating Postgres container for ${DevPostgresConnectHost}:$expectedPort"
-        docker compose -f $ComposeFile --env-file $EnvFile up -d --force-recreate postgres
-    } else {
-        docker compose -f $ComposeFile --env-file $EnvFile up -d postgres
+    $fcaptchaPort = $EnvValues['FCAPTCHA_HOST_PORT']
+    if ([string]::IsNullOrWhiteSpace($fcaptchaPort)) {
+        $fcaptchaPort = $script:DevFCaptchaHostPort
     }
 
-    if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+    $published = Get-PostgresPublishedPort
+    $recreate = $ForceRecreate -or ($published -and $published -ne $expectedPort)
+    if (-not $recreate -and (Test-DevFCaptchaConnection $fcaptchaPort) -and -not (Test-DevFCaptchaSecretAligned)) {
+        $recreate = $true
+        Write-Step 'Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)'
+    }
+
+    Write-Step "Starting Postgres and FCaptcha together (${DevPostgresConnectHost}:$expectedPort, localhost:$fcaptchaPort)"
+    Start-DevStackCoreContainers -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
 }
 
 function Reset-PostgresVolume {
@@ -346,16 +351,14 @@ function Reset-PostgresVolume {
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
-    Start-PostgresContainer -EnvValues $EnvValues
-    Start-FCaptchaContainerAsync -EnvValues $EnvValues
+    Start-CoreContainers -EnvValues $EnvValues
     Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
     Wait-PostgresAndFCaptcha -EnvValues $EnvValues
 
     if (-not (Test-PostgresAuth -Database 'postgres')) {
         Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
         Reset-PostgresVolume
-        Start-PostgresContainer -EnvValues $EnvValues
-        Start-FCaptchaContainerAsync -EnvValues $EnvValues
+        Start-CoreContainers -EnvValues $EnvValues
         Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
         Wait-PostgresAndFCaptcha -EnvValues $EnvValues
         if (-not (Test-PostgresAuth -Database 'postgres')) {
@@ -366,8 +369,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
     if (-not (Prepare-HomeworkCentralDatabase)) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
         Reset-PostgresVolume
-        Start-PostgresContainer -EnvValues $EnvValues
-        Start-FCaptchaContainerAsync -EnvValues $EnvValues
+        Start-CoreContainers -EnvValues $EnvValues
         Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
         Wait-PostgresAndFCaptcha -EnvValues $EnvValues
 
@@ -403,9 +405,9 @@ function Repair-PostgresHostReachability([hashtable]$EnvValues) {
 
     if (Test-OurPostgresPublishedOn $port) {
         Write-Step "Host cannot reach Docker Postgres on ${DevPostgresConnectHost}:$port; recreating the container"
-        Start-PostgresContainer -EnvValues $EnvValues -ForceRecreate
-        Write-Step 'Waiting for Postgres to accept connections'
-        Wait-ForPostgres
+        Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
+        Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
+        Wait-PostgresAndFCaptcha -EnvValues $EnvValues
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master after recreating Docker Postgres'
         }
@@ -423,9 +425,9 @@ function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     Write-Step "Host cannot reach homework_central_master on ${DevPostgresConnectHost}:$port. Using POSTGRES_HOST_PORT=$freePort instead"
     Set-PostgresHostPortValue $EnvValues $freePort
     Set-ComposeEnv $EnvValues
-    Start-PostgresContainer -EnvValues $EnvValues -ForceRecreate
-    Write-Step 'Waiting for Postgres to accept connections'
-    Wait-ForPostgres
+    Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
+    Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
+    Wait-PostgresAndFCaptcha -EnvValues $EnvValues
     if (-not (Prepare-HomeworkCentralDatabase)) {
         throw 'Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT'
     }

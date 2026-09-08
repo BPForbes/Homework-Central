@@ -239,6 +239,7 @@ resolve_postgres_host_port() {
 set_compose_env() {
   export POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
   export POSTGRES_HOST_PORT
+  export FCAPTCHA_HOST_PORT
 }
 
 invoke_postgres_admin_sql() {
@@ -333,30 +334,25 @@ prepare_homework_central_master_database() {
   return 0
 }
 
-start_postgres_container() {
+start_core_containers() {
   local force_recreate="${1:-0}"
   local published
   published="$(get_postgres_published_port || true)"
 
-  if [[ "$force_recreate" == "1" || ( -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ) ]]; then
-    log "Recreating Postgres container for ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}"
-    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d --force-recreate postgres
-  else
-    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  if [[ "$force_recreate" != "1" ]] && test_dev_fcaptcha_connection "$FCAPTCHA_HOST_PORT" \
+    && ! test_dev_fcaptcha_secret_aligned; then
+    force_recreate=1
+    log "Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)"
   fi
-}
 
-start_fcaptcha_container_async() {
-  if test_dev_fcaptcha_connection "$FCAPTCHA_HOST_PORT"; then
-    if ! test_dev_fcaptcha_secret_aligned; then
-      log "Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)"
-      start_dev_stack_fcaptcha_container "$FCAPTCHA_HOST_PORT" 1 || return 1
-    fi
+  if [[ "$force_recreate" == "1" || ( -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ) ]]; then
+    log "Starting Postgres and FCaptcha together (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}, localhost:${FCAPTCHA_HOST_PORT})"
+    start_dev_stack_core_containers "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
     return 0
   fi
 
-  log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
-  start_dev_stack_fcaptcha_container "$FCAPTCHA_HOST_PORT" 0
+  log "Starting Postgres and FCaptcha together (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}, localhost:${FCAPTCHA_HOST_PORT})"
+  start_dev_stack_core_containers "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0
 }
 
 wait_postgres_and_fcaptcha() {
@@ -387,16 +383,14 @@ reset_postgres_volume() {
 ensure_postgres_ready() {
   set_compose_env
 
-  start_postgres_container
-  start_fcaptcha_container_async || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
+  start_core_containers || fail "Failed to start Postgres and FCaptcha. Check: docker compose logs"
   log "Waiting for Postgres and FCaptcha (in parallel)"
   wait_postgres_and_fcaptcha
 
   if ! test_postgres_auth postgres; then
     log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
     reset_postgres_volume
-    start_postgres_container
-    start_fcaptcha_container_async || true
+    start_core_containers || true
     log "Waiting for Postgres and FCaptcha (in parallel)"
     wait_postgres_and_fcaptcha
     if ! test_postgres_auth postgres; then
@@ -407,8 +401,7 @@ ensure_postgres_ready() {
   if ! prepare_homework_central_master_database; then
     log "Postgres volume is unhealthy (collation mismatch); recreating"
     reset_postgres_volume
-    start_postgres_container
-    start_fcaptcha_container_async || true
+    start_core_containers || true
     log "Waiting for Postgres and FCaptcha (in parallel)"
     wait_postgres_and_fcaptcha
 
@@ -439,9 +432,9 @@ postgres_host_failure_message() {
 repair_postgres_host_reachability() {
   if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
     log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
-    start_postgres_container 1
-    log "Waiting for Postgres to accept connections"
-    wait_for_postgres
+    start_core_containers 1 || fail "Failed to recreate Postgres and FCaptcha. Check: docker compose logs"
+    log "Waiting for Postgres and FCaptcha (in parallel)"
+    wait_postgres_and_fcaptcha
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master after recreating Docker Postgres"
     fi
@@ -461,9 +454,9 @@ repair_postgres_host_reachability() {
   POSTGRES_HOST_PORT="$free_port"
   set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
   set_compose_env
-  start_postgres_container 1
-  log "Waiting for Postgres to accept connections"
-  wait_for_postgres
+  start_core_containers 1 || fail "Failed to start Postgres and FCaptcha after changing POSTGRES_HOST_PORT. Check: docker compose logs"
+  log "Waiting for Postgres and FCaptcha (in parallel)"
+  wait_postgres_and_fcaptcha
   if ! prepare_homework_central_master_database; then
     fail "Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT"
   fi

@@ -146,7 +146,7 @@ After a successful run, these services are available:
 |---------|-----|-------------|
 | **Frontend** | http://localhost:5173/login | React app (Vite HMR) |
 | **API** | http://localhost:5000 | ASP.NET Core (`dotnet watch` by default; `HC_API_WATCH=0` to disable) |
-| **Health check** | http://localhost:5000/healthz | Listen probe (`starting` while migrate/seed runs, then `healthy`) |
+| **Health check** | http://localhost:5000/healthz | Listen probe (`starting` during migrate/auth seed, then `healthy`; ticket/neural catalogs may still be finishing in local Development) |
 | **Postgres** | `127.0.0.1:5434` (default) | Docker container; port configurable via `.env` |
 | **FCaptcha** | `localhost:3010` (default) | Self-hosted captcha service (Docker) |
 

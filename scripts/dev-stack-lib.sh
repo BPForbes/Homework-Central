@@ -296,6 +296,32 @@ start_dev_stack_fcaptcha_container() {
   fi
 }
 
+# One compose up so FCaptcha image build overlaps Postgres start.
+start_dev_stack_core_containers() {
+  local postgres_port="$1"
+  local fcaptcha_port="$2"
+  local force_recreate="${3:-0}"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 || return 1
+
+  export POSTGRES_PASSWORD="$DEV_STACK_POSTGRES_PASSWORD"
+  export POSTGRES_HOST_PORT="$postgres_port"
+  export FCAPTCHA_HOST_PORT="$fcaptcha_port"
+  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d)
+  if [[ "${HC_FCAPTCHA_REBUILD:-0}" == "1" ]] \
+    || ! docker image inspect "$DEV_STACK_FCAPTCHA_IMAGE" >/dev/null 2>&1; then
+    compose_args+=(--build)
+  fi
+  if [[ "$force_recreate" == "1" ]]; then
+    compose_args+=(--force-recreate)
+  fi
+  compose_args+=(postgres fcaptcha)
+  if ! docker compose "${compose_args[@]}"; then
+    printf 'error: docker compose up postgres fcaptcha failed (first run builds FCaptcha from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)\n' >&2
+    return 1
+  fi
+}
+
 get_dev_fcaptcha_container_secret() {
   local container_id line
   container_id="$(docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" ps -q fcaptcha 2>/dev/null || true)"

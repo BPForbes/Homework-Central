@@ -337,6 +337,45 @@ function Start-DevStackFCaptchaContainer([string]$Port, [switch]$ForceRecreate) 
     }
 }
 
+function Start-DevStackCoreContainers {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresPort,
+        [Parameter(Mandatory = $true)]
+        [string]$FCaptchaPort,
+        [switch]$ForceRecreate
+    )
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'Docker CLI not found. Install Docker Desktop or run scripts/run-dev.ps1 first.'
+    }
+
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker is not running. Start Docker Desktop and retry.'
+    }
+
+    $env:POSTGRES_PASSWORD = $script:DevPostgresPassword
+    $env:POSTGRES_HOST_PORT = $PostgresPort
+    $env:FCAPTCHA_HOST_PORT = $FCaptchaPort
+    $composeArgs = @('-f', $script:DevStackComposeFile, '--env-file', $script:DevStackEnvFile, 'up', '-d')
+
+    docker image inspect $script:DevFCaptchaImage *> $null
+    if ($LASTEXITCODE -ne 0 -or $env:HC_FCAPTCHA_REBUILD -eq '1') {
+        $composeArgs += '--build'
+    }
+
+    if ($ForceRecreate) {
+        $composeArgs += '--force-recreate'
+    }
+
+    $composeArgs += @('postgres', 'fcaptcha')
+    docker compose @composeArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw 'docker compose up postgres fcaptcha failed (first run builds FCaptcha from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)'
+    }
+}
+
 function Get-DevFCaptchaContainerSecret {
     $containerId = docker compose -f $script:DevStackComposeFile --env-file $script:DevStackEnvFile ps -q fcaptcha 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
