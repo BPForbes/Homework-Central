@@ -70,7 +70,7 @@ cleanup_api() {
 }
 trap cleanup_api EXIT
 
-# run-dev already waited for Postgres/FCaptcha when it set HC_DEV_STACK_PREREGISTERED=1.
+# run-dev already waited for Postgres (and FCaptcha unless stripped) when it set HC_DEV_STACK_PREREGISTERED=1.
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" && "${HC_DEV_STACK_PREREGISTERED:-0}" != "1" ]]; then
   ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
     || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."

@@ -2,7 +2,7 @@
 #
 # Usage:
 #   scripts/run-dev.ps1              # build + run everything
-#   scripts/run-dev.ps1 -Stripped    # pause neural environments; overlap Docker waits
+#   scripts/run-dev.ps1 -Stripped    # pause neural environments; FCaptcha not joined before API
 #   scripts/run-dev.ps1 -BuildOnly   # compile only (no servers)
 #   scripts/run-dev.ps1 -Help
 #
@@ -54,7 +54,9 @@ Options:
   -BuildOnly    Compile the API and install frontend deps; do not start servers
   -SkipDocker   Do not start Postgres via Docker (expects DB on localhost)
   -Stripped     Pause leftover neural training and skip neural warmup/refresh
-                (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha always start together.
+                (also set HC_DEV_STRIPPED=1). Postgres starts with the existing
+                helper; FCaptcha is started in the background and is not joined
+                before the API.
   -Help         Show this help
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
@@ -336,6 +338,12 @@ function Start-CoreContainers {
         Write-Step 'Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)'
     }
 
+    if ($Stripped -or $env:HC_DEV_STRIPPED -eq '1') {
+        Write-Step "Starting Postgres (${DevPostgresConnectHost}:$expectedPort); FCaptcha continues in the background"
+        Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
+        return
+    }
+
     Write-Step "Starting Postgres and FCaptcha together (${DevPostgresConnectHost}:$expectedPort, localhost:$fcaptchaPort)"
     Start-DevStackCoreContainers -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
 }
@@ -348,19 +356,28 @@ function Reset-PostgresVolume {
     }
 }
 
+function Wait-CoreBeforeApi([hashtable]$EnvValues) {
+    if ($Stripped -or $env:HC_DEV_STRIPPED -eq '1') {
+        Write-Step 'Waiting for Postgres (FCaptcha continues in the background)'
+        Wait-ForPostgres
+        return
+    }
+
+    Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
+    Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+}
+
 function Ensure-PostgresReady([hashtable]$EnvValues) {
     Set-ComposeEnv $EnvValues
 
     Start-CoreContainers -EnvValues $EnvValues
-    Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
-    Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+    Wait-CoreBeforeApi -EnvValues $EnvValues
 
     if (-not (Test-PostgresAuth -Database 'postgres')) {
         Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
         Reset-PostgresVolume
         Start-CoreContainers -EnvValues $EnvValues
-        Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
-        Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+        Wait-CoreBeforeApi -EnvValues $EnvValues
         if (-not (Test-PostgresAuth -Database 'postgres')) {
             throw 'Postgres password verification failed after recreating the Docker volume'
         }
@@ -370,8 +387,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
         Reset-PostgresVolume
         Start-CoreContainers -EnvValues $EnvValues
-        Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
-        Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+        Wait-CoreBeforeApi -EnvValues $EnvValues
 
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master inside the Docker Postgres container'
@@ -406,8 +422,7 @@ function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     if (Test-OurPostgresPublishedOn $port) {
         Write-Step "Host cannot reach Docker Postgres on ${DevPostgresConnectHost}:$port; recreating the container"
         Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
-        Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
-        Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+        Wait-CoreBeforeApi -EnvValues $EnvValues
         if (-not (Prepare-HomeworkCentralDatabase)) {
             throw 'Failed to prepare homework_central_master after recreating Docker Postgres'
         }
@@ -426,8 +441,7 @@ function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     Set-PostgresHostPortValue $EnvValues $freePort
     Set-ComposeEnv $EnvValues
     Start-CoreContainers -EnvValues $EnvValues -ForceRecreate
-    Write-Step 'Waiting for Postgres and FCaptcha (in parallel)'
-    Wait-PostgresAndFCaptcha -EnvValues $EnvValues
+    Wait-CoreBeforeApi -EnvValues $EnvValues
     if (-not (Prepare-HomeworkCentralDatabase)) {
         throw 'Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT'
     }
@@ -772,7 +786,7 @@ Push-Location $RepoRoot
 try {
     if ($Stripped) {
         $env:HC_DEV_STRIPPED = '1'
-        Write-Step 'Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start'
+        Write-Step 'Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start; FCaptcha is not joined before the API'
     }
 
     $envValues = Get-EnvValues

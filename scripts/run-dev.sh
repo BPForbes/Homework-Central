@@ -54,7 +54,9 @@ Options:
   --build-only   Compile the API and install frontend deps; do not start servers
   --skip-docker  Do not start Postgres via Docker (expects DB on localhost)
   --stripped     Pause leftover neural training and skip neural warmup/refresh
-                 (also set HC_DEV_STRIPPED=1). Docker Postgres and FCaptcha always start together.
+                 (also set HC_DEV_STRIPPED=1). Postgres starts with the existing
+                 helper; FCaptcha is started in the background and is not joined
+                 before the API.
   --help         Show this help
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
@@ -346,9 +348,20 @@ start_core_containers() {
   fi
 
   if [[ "$force_recreate" == "1" || ( -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ) ]]; then
+    if [[ "$STRIPPED" == true ]]; then
+      log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
+      start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
+      return 0
+    fi
     log "Starting Postgres and FCaptcha together (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}, localhost:${FCAPTCHA_HOST_PORT})"
     start_dev_stack_core_containers "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
     return 0
+  fi
+
+  if [[ "$STRIPPED" == true ]]; then
+    log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
+    start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0 || return 1
+    return
   fi
 
   log "Starting Postgres and FCaptcha together (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}, localhost:${FCAPTCHA_HOST_PORT})"
@@ -380,19 +393,27 @@ reset_postgres_volume() {
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
 }
 
+wait_core_before_api() {
+  if [[ "$STRIPPED" == true ]]; then
+    log "Waiting for Postgres (FCaptcha continues in the background)"
+    wait_for_postgres
+    return
+  fi
+  log "Waiting for Postgres and FCaptcha (in parallel)"
+  wait_postgres_and_fcaptcha
+}
+
 ensure_postgres_ready() {
   set_compose_env
 
   start_core_containers || fail "Failed to start Postgres and FCaptcha. Check: docker compose logs"
-  log "Waiting for Postgres and FCaptcha (in parallel)"
-  wait_postgres_and_fcaptcha
+  wait_core_before_api
 
   if ! test_postgres_auth postgres; then
     log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
     reset_postgres_volume
     start_core_containers || true
-    log "Waiting for Postgres and FCaptcha (in parallel)"
-    wait_postgres_and_fcaptcha
+    wait_core_before_api
     if ! test_postgres_auth postgres; then
       fail "Postgres password verification failed after recreating the Docker volume"
     fi
@@ -402,8 +423,7 @@ ensure_postgres_ready() {
     log "Postgres volume is unhealthy (collation mismatch); recreating"
     reset_postgres_volume
     start_core_containers || true
-    log "Waiting for Postgres and FCaptcha (in parallel)"
-    wait_postgres_and_fcaptcha
+    wait_core_before_api
 
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master inside the Docker Postgres container"
@@ -433,8 +453,7 @@ repair_postgres_host_reachability() {
   if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
     log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
     start_core_containers 1 || fail "Failed to recreate Postgres and FCaptcha. Check: docker compose logs"
-    log "Waiting for Postgres and FCaptcha (in parallel)"
-    wait_postgres_and_fcaptcha
+    wait_core_before_api
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master after recreating Docker Postgres"
     fi
@@ -455,8 +474,7 @@ repair_postgres_host_reachability() {
   set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
   set_compose_env
   start_core_containers 1 || fail "Failed to start Postgres and FCaptcha after changing POSTGRES_HOST_PORT. Check: docker compose logs"
-  log "Waiting for Postgres and FCaptcha (in parallel)"
-  wait_postgres_and_fcaptcha
+  wait_core_before_api
   if ! prepare_homework_central_master_database; then
     fail "Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT"
   fi
@@ -738,7 +756,7 @@ main() {
 
   if [[ "$STRIPPED" == true ]]; then
     export HC_DEV_STRIPPED=1
-    log "Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start"
+    log "Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start; FCaptcha is not joined before the API"
   fi
 
   ensure_env_file

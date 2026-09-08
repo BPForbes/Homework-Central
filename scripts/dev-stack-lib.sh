@@ -247,12 +247,18 @@ test_dev_postgres_connection() {
 
 start_dev_stack_postgres_container() {
   local port="$1"
+  local force_recreate="${2:-0}"
   command -v docker >/dev/null 2>&1 || return 1
   docker info >/dev/null 2>&1 || return 1
 
   export POSTGRES_PASSWORD="$DEV_STACK_POSTGRES_PASSWORD"
   export POSTGRES_HOST_PORT="$port"
-  docker compose -f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d postgres
+  local -a compose_args=(-f "$DEV_STACK_COMPOSE_FILE" --env-file "$DEV_STACK_ENV_FILE" up -d)
+  if [[ "$force_recreate" == "1" ]]; then
+    compose_args+=(--force-recreate)
+  fi
+  compose_args+=(postgres)
+  docker compose "${compose_args[@]}"
 }
 
 wait_dev_postgres_ready() {
@@ -296,7 +302,10 @@ start_dev_stack_fcaptcha_container() {
   fi
 }
 
-# One compose up so FCaptcha image build overlaps Postgres start.
+# One compose up so a cached FCaptcha image starts with Postgres. A missing
+# image still runs `up --build` for both names, and Compose finishes that git
+# build before either container is created — so stripped start uses
+# start_dev_stack_postgres_then_fcaptcha_background instead.
 start_dev_stack_core_containers() {
   local postgres_port="$1"
   local fcaptcha_port="$2"
@@ -320,6 +329,17 @@ start_dev_stack_core_containers() {
     printf 'error: docker compose up postgres fcaptcha failed (first run builds FCaptcha from github.com/WebDecoy/FCaptcha v1.12.0 — check network and Docker BuildKit)\n' >&2
     return 1
   fi
+}
+
+# Postgres helper first, then the existing FCaptcha helper in the background.
+# /healthz only needs the master database; login captcha can finish after Ready.
+start_dev_stack_postgres_then_fcaptcha_background() {
+  local postgres_port="$1"
+  local fcaptcha_port="$2"
+  local force_recreate="${3:-0}"
+  start_dev_stack_postgres_container "$postgres_port" "$force_recreate" || return 1
+  start_dev_stack_fcaptcha_container "$fcaptcha_port" "$force_recreate" &
+  return 0
 }
 
 get_dev_fcaptcha_container_secret() {
@@ -366,8 +386,9 @@ wait_dev_fcaptcha_ready() {
   return 1
 }
 
-# start-api-dev (not already waited by run-dev) uses one compose up so a cold
-# FCaptcha image build overlaps Postgres instead of starting after it.
+# start-api-dev (not already waited by run-dev) uses one compose up so a cached
+# FCaptcha image starts with Postgres. Stripped does not join the FCaptcha
+# helper — a cold `up --build` would hold migrate/auth for the git image.
 ensure_dev_stack_core_running() {
   local postgres_port="$1"
   local fcaptcha_port="$2"
@@ -376,6 +397,29 @@ ensure_dev_stack_core_running() {
   local fcaptcha_status=0
   local postgres_wait_pid
   local fcaptcha_wait_pid
+
+  if [[ "${HC_DEV_STRIPPED:-}" == "1" ]]; then
+    if test_dev_postgres_connection "$postgres_port"; then
+      if test_dev_fcaptcha_connection "$fcaptcha_port" && test_dev_fcaptcha_secret_aligned; then
+        with_dev_stack_lock _join_dev_stack_if_managed "$postgres_port"
+        return 0
+      fi
+      if test_dev_fcaptcha_connection "$fcaptcha_port"; then
+        printf '==> Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)\n'
+        start_dev_stack_fcaptcha_container "$fcaptcha_port" 1 &
+      else
+        start_dev_stack_fcaptcha_container "$fcaptcha_port" 0 &
+      fi
+      with_dev_stack_lock _join_dev_stack_if_managed "$postgres_port"
+      return 0
+    fi
+    printf '==> Starting Docker Postgres on 127.0.0.1:%s (FCaptcha continues in the background)\n' \
+      "$postgres_port"
+    start_dev_stack_postgres_then_fcaptcha_background "$postgres_port" "$fcaptcha_port" 0 || return 1
+    wait_dev_postgres_ready "$postgres_port" || return 1
+    with_dev_stack_lock _ensure_dev_postgres_state "$postgres_port"
+    return 0
+  fi
 
   if test_dev_postgres_connection "$postgres_port" && test_dev_fcaptcha_connection "$fcaptcha_port"; then
     if test_dev_fcaptcha_secret_aligned; then

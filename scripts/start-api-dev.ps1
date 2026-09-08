@@ -70,7 +70,7 @@ if ($PreRegistered) {
 Push-Location $RepoRoot
 $browserProcess = $null
 try {
-    # run-dev already waited for Postgres/FCaptcha when -PreRegistered / HC_DEV_STACK_PREREGISTERED=1.
+    # run-dev already waited for Postgres (and FCaptcha unless stripped) when -PreRegistered / HC_DEV_STACK_PREREGISTERED=1.
     if (-not $skipDocker -and $env:HC_DEV_STACK_PREREGISTERED -ne '1') {
         Ensure-DevStackCoreRunning -PostgresPort $envValues['POSTGRES_HOST_PORT'] -FCaptchaPort $envValues['FCAPTCHA_HOST_PORT']
         Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
