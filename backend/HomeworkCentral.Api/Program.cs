@@ -406,6 +406,10 @@ if (builder.Configuration.GetValue<bool>("KubernetesTraining:RunOneQueued"))
         skipDevStartupWarmup,
         devBypassEnabled,
         eagerPersonaProvisioning);
+    await ApplicationStartupWarmup.RunDeferredCatalogSeedAsync(
+        app.Services,
+        skipDevStartupWarmup,
+        devBypassEnabled);
     app.Services.GetRequiredService<IApplicationReadiness>().MarkReady();
 
     using IServiceScope kubernetesJobScope = app.Services.CreateScope();
