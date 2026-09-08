@@ -334,7 +334,10 @@ Architecture, trust boundaries, and engineering standards live under
 ### Fast repeat starts
 
 `run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
-can bind without a duplicate build. It also starts the frontend before the API. Docker Postgres
+can bind without a duplicate build. The frontend typecheck is incremental: `tsconfig.app.json`
+and `tsconfig.node.json` pair `incremental` with `tsBuildInfoFile`, because both set `noEmit` and
+`tsc -b` otherwise looks for emitted `.js` files that never exist and re-checks every file on
+every start. `run-dev` also starts the frontend before the API. Docker Postgres
 starts with the existing helper; FCaptcha continues in the background and is not joined before
 the API. `run-dev` waits until Postgres is ready in the container and answers on
 `127.0.0.1:<POSTGRES_HOST_PORT>` before launching the API. A server that answers and rejects the
