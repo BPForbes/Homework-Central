@@ -70,12 +70,20 @@ if ($PreRegistered) {
 Push-Location $RepoRoot
 $browserProcess = $null
 try {
-    # -PreRegistered means the parent already took the refcount slot. It does not
-    # mean 127.0.0.1 still answers: leftover .hc-dev-stack.state used to make
-    # run-dev stop Postgres after it had waited, and the watch rebuild is another
-    # window. Confirm (or start) the published port unless the caller opted out.
+    # -PreRegistered / HC_DEV_STACK_PREREGISTERED means the parent already took
+    # the refcount slot and started FCaptcha in the background. It does not mean
+    # 127.0.0.1 still answers: leftover .hc-dev-stack.state used to make run-dev
+    # stop Postgres after it had waited, and the watch rebuild is another window.
+    # Recheck (or start) Postgres unless the caller opted out. Do not compose-up
+    # FCaptcha here — the parent owns that even if /fcaptcha.js is not ready yet.
+    # Standalone start-api-dev still starts Postgres+FCaptcha via the core helper.
     if (-not $skipDocker) {
-        Ensure-DevStackCoreRunning -PostgresPort $envValues['POSTGRES_HOST_PORT'] -FCaptchaPort $envValues['FCAPTCHA_HOST_PORT']
+        if ($env:HC_DEV_STACK_PREREGISTERED -eq '1') {
+            Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+        }
+        else {
+            Ensure-DevStackCoreRunning -PostgresPort $envValues['POSTGRES_HOST_PORT'] -FCaptchaPort $envValues['FCAPTCHA_HOST_PORT']
+        }
         Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
     }
 

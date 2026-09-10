@@ -70,13 +70,21 @@ cleanup_api() {
 }
 trap cleanup_api EXIT
 
-# HC_DEV_STACK_PREREGISTERED means the parent already took the refcount slot. It
-# does not mean 127.0.0.1 still answers: leftover .hc-dev-stack.state used to make
-# run-dev stop Postgres after it had waited, and the watch rebuild is another
-# window. Confirm (or start) the published port unless the caller opted out.
+# HC_DEV_STACK_PREREGISTERED means the parent already took the refcount slot and
+# started FCaptcha in the background. It does not mean 127.0.0.1 still answers:
+# leftover .hc-dev-stack.state used to make run-dev stop Postgres after it had
+# waited, and the watch rebuild is another window. Recheck (or start) Postgres
+# unless the caller opted out. Do not compose-up FCaptcha here — the parent owns
+# that even if /fcaptcha.js is not ready yet. Standalone start-api-dev still
+# starts Postgres+FCaptcha via the core helper.
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
-  ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
-    || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
+    ensure_dev_postgres_running "$POSTGRES_HOST_PORT" \
+      || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  else
+    ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
+      || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  fi
   ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" || fail "Could not start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
