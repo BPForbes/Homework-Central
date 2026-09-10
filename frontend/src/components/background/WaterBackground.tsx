@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { API_MUTATION_EVENT } from '../../api/apiActivity'
+import { dprCapFromRenderScale } from '../../context/performance/modeFromPressure'
+import { usePerformanceBudget, useReportFrameSample } from '../../context/performance/usePerformanceBudget'
+import type { FramePressureSample, PerformanceBudget } from '../../context/performance/types'
 import {
   AmbientSpawner,
   SCENE_FPS,
@@ -291,6 +294,8 @@ class WaterScene {
   private frame = 0
   private running = false
   private renderDprCap = 1.75
+  private budget: PerformanceBudget = { mode: 'NORMAL', density: 1, renderScale: 1 }
+  private frameSampleReporter: ((sample: FramePressureSample) => void) | null = null
   private interactionBounds: number[] = []
   private interactionBoundsFrame = Number.NEGATIVE_INFINITY
   private lastApiDropletAt = 0
@@ -344,14 +349,27 @@ class WaterScene {
     this.accumulatedMs += elapsedMs
 
     const stepCount = Math.min(3, Math.floor(this.accumulatedMs / SCENE_FRAME_MS))
+    const stepStartedAt = performance.now()
     for (let index = 0; index < stepCount; index++) {
       this.frame++
       this.step(this.frame, 1 / SCENE_FPS)
     }
+    const stepMs = performance.now() - stepStartedAt
+    let drawMs = 0
     if (stepCount > 0) {
       this.accumulatedMs -= stepCount * SCENE_FRAME_MS
-      this.draw(this.frame)
+      if (this.budget.mode !== 'CRITICAL') {
+        const drawStartedAt = performance.now()
+        this.draw(this.frame)
+        drawMs = performance.now() - drawStartedAt
+      }
     }
+    this.frameSampleReporter?.({
+      stepMs,
+      drawMs,
+      elapsedMs,
+      didStep: stepCount > 0,
+    })
     this.rafId = requestAnimationFrame(this.renderFrame)
   }
 
@@ -375,8 +393,8 @@ class WaterScene {
     // Seed the scene so it never starts empty; backdated frame ages stagger the lifetimes.
     this.seedInitial(this.frame)
     for (const kind of SPAWNABLE_KINDS)
-      this.spawners[kind].reset(this.count(kind), SPAWN_RULES[kind].cap)
-    this.dropletSpawner.reset(0, DROPLET_CAP)
+      this.spawners[kind].reset(this.count(kind), this.effectiveCap(kind))
+    this.dropletSpawner.reset(0, this.effectiveDropletCap())
 
     this.running = true
     this.lastFrameAt = performance.now()
@@ -393,6 +411,31 @@ class WaterScene {
     this.themeObserver.disconnect()
   }
 
+  setPerformanceBudget(budget: PerformanceBudget): void {
+    this.budget = budget
+  }
+
+  setFrameSampleReporter(reporter: ((sample: FramePressureSample) => void) | null): void {
+    this.frameSampleReporter = reporter
+  }
+
+  private isFocusedOrAbove(): boolean {
+    return this.budget.mode !== 'NORMAL'
+  }
+
+  private shouldIgnoreDroplets(): boolean {
+    return this.isFocusedOrAbove() || this.budget.density < 0.5
+  }
+
+  private effectiveCap(kind: SpawnableKind): number {
+    return Math.max(0, Math.round(SPAWN_RULES[kind].cap * this.budget.density))
+  }
+
+  private effectiveDropletCap(): number {
+    if (this.shouldIgnoreDroplets()) return 0
+    return Math.max(0, Math.round(DROPLET_CAP * this.budget.density))
+  }
+
   private onThemeChange(): void {
     this.dark = document.documentElement.getAttribute('data-theme') === 'dark'
     this.palette = readPalette()
@@ -405,8 +448,8 @@ class WaterScene {
           this.beginDespawn(entity)
       }
     } else {
-      this.spawners.firefly.reset(this.count('firefly'), SPAWN_RULES.firefly.cap)
-      this.spawners.fog.reset(this.count('fog'), SPAWN_RULES.fog.cap)
+      this.spawners.firefly.reset(this.count('firefly'), this.effectiveCap('firefly'))
+      this.spawners.fog.reset(this.count('fog'), this.effectiveCap('fog'))
     }
   }
 
@@ -554,8 +597,11 @@ class WaterScene {
   }
 
   private seedInitial(frame: number): void {
+    if (this.isFocusedOrAbove()) return
+    const density = this.budget.density
     const seedKind = (kind: SpawnableKind, amount: number) => {
-      for (let index = 0; index < amount; index++) {
+      const scaled = Math.max(0, Math.round(amount * density))
+      for (let index = 0; index < scaled; index++) {
         const entity = this.makeEntity(kind, frame)
         entity.bornFrame = frame - Math.round(rand(0, entity.lifespanFrames * 0.4))
         this.entities.push(entity)
@@ -641,10 +687,11 @@ class WaterScene {
   }
 
   private spawnApiDroplet(): void {
+    if (this.shouldIgnoreDroplets()) return
     const now = performance.now()
     if (now - this.lastApiDropletAt < 180) return
     this.lastApiDropletAt = now
-    if (this.count('droplet') >= DROPLET_CAP) return
+    if (this.count('droplet') >= this.effectiveDropletCap()) return
     // Keep API-send ripples in the outer band of the viewport, away from the
     // middle of the page where forms and input boxes live.
     let pos = this.randomPoint(40)
@@ -799,16 +846,19 @@ class WaterScene {
     if (frame % SCENE_FPS !== 0) return
 
     const entityCount = this.entities.length
-    let nextCap = this.renderDprCap
+    let entityCap = this.renderDprCap
     if (this.renderDprCap === 1.75) {
-      if (entityCount >= 34) nextCap = 1.1
-      else if (entityCount >= 26) nextCap = 1.35
+      if (entityCount >= 34) entityCap = 1.1
+      else if (entityCount >= 26) entityCap = 1.35
     } else if (this.renderDprCap === 1.35) {
-      if (entityCount >= 34) nextCap = 1.1
-      else if (entityCount <= 20) nextCap = 1.75
+      if (entityCount >= 34) entityCap = 1.1
+      else if (entityCount <= 20) entityCap = 1.75
     } else if (entityCount <= 26) {
-      nextCap = 1.35
+      entityCap = 1.35
     }
+
+    const budgetCap = dprCapFromRenderScale(this.budget.renderScale)
+    const nextCap = Math.min(entityCap, budgetCap)
 
     if (nextCap === this.renderDprCap) return
     this.renderDprCap = nextCap
@@ -823,7 +873,7 @@ class WaterScene {
       let pendingCount = 0
       for (const pending of this.pendingSpawns)
         if (pending.kind === kind) pendingCount++
-      const burstSize = this.spawners[kind].update(this.count(kind) + pendingCount, rule.cap)
+      const burstSize = this.spawners[kind].update(this.count(kind) + pendingCount, this.effectiveCap(kind))
       if (burstSize === 0) continue
 
       const anchor =
@@ -841,13 +891,13 @@ class WaterScene {
       if (pending.framesRemaining > 0) continue
 
       const rule = SPAWN_RULES[pending.kind]
-      if ((!rule.darkOnly || this.dark) && this.count(pending.kind) < rule.cap) {
+      if ((!rule.darkOnly || this.dark) && this.count(pending.kind) < this.effectiveCap(pending.kind)) {
         this.entities.push(this.makeEntity(pending.kind, frame, pending))
       }
       this.pendingSpawns.splice(index, 1)
     }
 
-    if (this.dropletSpawner.update(this.count('droplet'), DROPLET_CAP) > 0)
+    if (this.dropletSpawner.update(this.count('droplet'), this.effectiveDropletCap()) > 0)
       this.entities.push(this.makeDroplet(this.spatialPoint(30), frame))
   }
 
@@ -1103,6 +1153,13 @@ class WaterScene {
 
 export function WaterBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const sceneRef = useRef<WaterScene | null>(null)
+  const budget = usePerformanceBudget()
+  const reportFrameSample = useReportFrameSample()
+  const budgetRef = useRef(budget)
+  const reportRef = useRef(reportFrameSample)
+  budgetRef.current = budget
+  reportRef.current = reportFrameSample
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -1111,9 +1168,23 @@ export function WaterBackground() {
     // skip the moving scene entirely rather than animating it slower.
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const scene = new WaterScene(canvas)
+    scene.setPerformanceBudget(budgetRef.current)
+    scene.setFrameSampleReporter(reportRef.current)
+    sceneRef.current = scene
     scene.start()
-    return () => scene.destroy()
+    return () => {
+      scene.destroy()
+      sceneRef.current = null
+    }
   }, [])
+
+  useEffect(() => {
+    sceneRef.current?.setPerformanceBudget(budget)
+  }, [budget])
+
+  useEffect(() => {
+    sceneRef.current?.setFrameSampleReporter(reportFrameSample)
+  }, [reportFrameSample])
 
   return <canvas ref={canvasRef} className="water-scene" aria-hidden="true" />
 }
