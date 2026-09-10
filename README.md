@@ -333,16 +333,32 @@ Architecture, trust boundaries, and engineering standards live under
 
 ### Fast repeat starts
 
-`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child, so Kestrel
-can bind without a duplicate build. It also starts the frontend before the API. Docker Postgres
+`run-dev` builds the API once and passes `HC_SKIP_DOTNET_BUILD=1` to its API child. On the
+default watch path the child still compiles at startup: `dotnet watch` owns recompiling later
+edits, so it cannot take `--no-build` the way the one-shot path does, and the flag instead drops
+the restore that startup build would otherwise repeat. `HC_API_WATCH=0` takes the one-shot path,
+where the child runs `--no-build` and does not compile at all — Kestrel binds seconds sooner, at
+the cost of not rebuilding on edits. The frontend typecheck is incremental: `tsconfig.app.json`
+and `tsconfig.node.json` pair `incremental` with `tsBuildInfoFile`, because both set `noEmit` and
+`tsc -b` otherwise looks for emitted `.js` files that never exist and re-checks every file on
+every start. `run-dev` also starts the frontend before the API. Docker Postgres
 starts with the existing helper; FCaptcha continues in the background and is not joined before
 the API. `run-dev` waits until Postgres is ready in the container and answers on
 `127.0.0.1:<POSTGRES_HOST_PORT>` before launching the API. A server that answers and rejects the
 connection counts as reachable, because a freshly wiped volume has no `homework_central_master`
-yet and `run-dev` creates it — and resets a volume whose password does not match — right after
-that wait. If the container is up but the published port never answers, `run-dev` recreates the
-container or moves `POSTGRES_HOST_PORT` to a free port instead of giving up. `start-api-dev`
-does not wait for them again when `run-dev` already did. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
+yet and `run-dev` creates it — and recreates a volume whose password does not match — right after
+that wait. That password check has to look in from the host: the container trusts its own
+loopback ahead of password authentication, so a `psql` probe run inside it succeeds on a
+mismatched volume. The recreate takes the Postgres container and the volume mounted at its data
+directory only, leaving the Ollama, uploads, and MinIO volumes alone; `scripts/reset-dev-db.*`
+remains the way to wipe the whole stack. If the container is up but the published port never answers, `run-dev`
+recreates the container or moves `POSTGRES_HOST_PORT` to a free port instead of giving up.
+`run-dev` stops a leftover managed session *before* that wait, not after: leftover
+`.hc-dev-stack.state` used to look like a previous session and stop the container the wait
+had just cleared, and `start-api-dev` then skipped its own check because `run-dev` had marked
+the stack pre-registered. `start-api-dev` still confirms the published port before it launches
+the API, even when `run-dev` already waited. `scripts/reset-dev-db.*` removes that state file
+along with the volume. `/healthz` becomes `healthy` after migrate and auth/dev-login seed. In local Development,
 ticket portals and neural catalogs finish after that so the Vite BackendGate is not held
 on catalog seed. Production finishes those catalogs before Ready.
 Do not run `scripts/reset-dev-db.ps1` / `scripts/reset-dev-db.sh` in a second terminal while

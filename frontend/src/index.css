@@ -1300,6 +1300,7 @@ a {
 
 .chat-sidebar-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.75rem;
 }
@@ -1365,6 +1366,12 @@ a {
   align-items: center;
   padding: 0.65rem 0.9rem 0.35rem;
   background: var(--color-interactive-fill);
+  width: 100%;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .chat-category-label-row .chat-category-label {
@@ -1387,10 +1394,22 @@ a {
   flex-shrink: 0;
 }
 
+.chat-category-chevron {
+  width: 0.75rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-ink-secondary);
+  transform: rotate(0deg);
+  transition: transform var(--duration-instant) var(--ease-out);
+}
+
+.chat-category-chevron--collapsed {
+  transform: rotate(-90deg);
+}
 
 .chat-room-list {
   list-style: none;
-  padding: 0.35rem;
+  padding: 0.35rem 0.35rem 0.35rem 0.65rem;
 }
 
 .chat-room-link {

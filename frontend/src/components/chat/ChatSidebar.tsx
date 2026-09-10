@@ -1,22 +1,31 @@
-import { useCallback, useEffect, useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { NavLink, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faComments, faIdBadge } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../../api/chatApi'
 import { useAuth } from '../../context/useAuth'
 import { useChatNavSync } from '../../hooks/useChatNavSync'
+import { useCollapsibleGroups } from '../../hooks/useCollapsibleGroups'
 import { GET_ROLES_ROOM_ID } from '../../types/chat'
 import type { ChatNav, ChatNavCategory } from '../../types/chat'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from './chatIcons'
 import { resolveCustomRoomIcon } from '../infrastructure/customRoomIcons'
 import { ChatRoomIcon } from './ChatRoomIcon'
+import { CollapsibleSidebarSection } from '../layout/CollapsibleSidebarSection'
 import { SidebarSkeleton } from '../layout/SidebarSkeleton'
 
 export function ChatSidebar() {
   const { user } = useAuth()
+  const { roomId } = useParams<{ roomId: string }>()
   const [nav, setNav] = useState<ChatNav | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const categoryKeys = useMemo(
+    () => nav?.categories.map((category) => category.key) ?? [],
+    [nav],
+  )
+  const { isExpanded, toggle, expand } = useCollapsibleGroups(categoryKeys)
 
   const loadNav = useCallback(async () => {
     setLoading(true)
@@ -39,6 +48,18 @@ export function ChatSidebar() {
     void loadNav()
   }, [loadNav, user?.generalSubjectMask, user?.subjectExpertiseMasks, user?.roleMask, user?.permissionMask])
 
+  useEffect(() => {
+    if (!roomId || !nav) {
+      return
+    }
+    const category = nav.categories.find((entry) =>
+      entry.rooms.some((room) => room.id === roomId),
+    )
+    if (category) {
+      expand(category.key)
+    }
+  }, [roomId, nav, expand])
+
   return (
     <aside className="chat-sidebar" aria-label="Chat rooms">
       <div className="chat-sidebar-header">
@@ -55,56 +76,77 @@ export function ChatSidebar() {
           <p className="chat-sidebar-status">No chat rooms available for your profile yet.</p>
         )}
         {nav?.categories.map((category) => (
-          <CategorySection key={category.key} category={category} />
+          <CategorySection
+            key={category.key}
+            category={category}
+            expanded={isExpanded(category.key)}
+            onToggle={() => toggle(category.key)}
+          />
         ))}
       </div>
     </aside>
   )
 }
 
-function CategorySection({ category }: { category: ChatNavCategory }) {
+function CategorySection({
+  category,
+  expanded,
+  onToggle,
+}: {
+  category: ChatNavCategory
+  expanded: boolean
+  onToggle: () => void
+}) {
   const isStaff = category.key === 'Staff'
   const isGeneral = category.key === 'General'
+  const roomsId = `chat-category-rooms-${category.key}`
 
   return (
-    <section className={`chat-category ${category.isPrivateCategory ? 'chat-category--private' : 'chat-category--public'}`}>
-      <div className="chat-category-label-row">
-        <span className="chat-category-label">
+    <CollapsibleSidebarSection
+      expanded={expanded}
+      onToggle={onToggle}
+      label={
+        <>
           <FontAwesomeIcon icon={getCategoryIcon(category.key)} className="chat-category-icon" />
           {category.name}
-        </span>
-      </div>
-      <ul className="chat-room-list">
-        {category.rooms.map((room) => {
-          const baseIcon = room.iconName
-            ? resolveCustomRoomIcon(room.iconName, room.roomType as 'Chat' | 'Info' | 'RoleClaim' | undefined)
-            : room.roomType === 'Info'
-              ? getCategoryIcon('General')
-              : room.roomType === 'RoleClaim' || room.id === GET_ROLES_ROOM_ID
-                ? faIdBadge
-                : isStaff
-                  ? getStaffRoomIcon(room.name)
-                  : isGeneral
-                    ? getCategoryIcon('General')
-                    : getRoomIcon(room.name, category.key)
+        </>
+      }
+      controlsId={roomsId}
+      className={`chat-category ${category.isPrivateCategory ? 'chat-category--private' : 'chat-category--public'}`}
+    >
+      {expanded ? (
+        <ul id={roomsId} className="chat-room-list">
+          {category.rooms.map((room) => {
+            const baseIcon = room.iconName
+              ? resolveCustomRoomIcon(room.iconName, room.roomType as 'Chat' | 'Info' | 'RoleClaim' | undefined)
+              : room.roomType === 'Info'
+                ? getCategoryIcon('General')
+                : room.roomType === 'RoleClaim' || room.id === GET_ROLES_ROOM_ID
+                  ? faIdBadge
+                  : isStaff
+                    ? getStaffRoomIcon(room.name)
+                    : isGeneral
+                      ? getCategoryIcon('General')
+                      : getRoomIcon(room.name, category.key)
 
-          return (
-            <li key={room.id}>
-              <NavLink
-                to={`/chat/${encodeURIComponent(room.id)}`}
-                className={({ isActive }) => `chat-room-link ${isActive ? 'active' : ''}`}
-              >
-                <ChatRoomIcon
-                  icon={baseIcon}
-                  isPrivate={room.isPrivate}
-                  className="chat-room-icon"
-                />
-                <span className="chat-room-name">{room.name}</span>
-              </NavLink>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
+            return (
+              <li key={room.id}>
+                <NavLink
+                  to={`/chat/${encodeURIComponent(room.id)}`}
+                  className={({ isActive }) => `chat-room-link ${isActive ? 'active' : ''}`}
+                >
+                  <ChatRoomIcon
+                    icon={baseIcon}
+                    isPrivate={room.isPrivate}
+                    className="chat-room-icon"
+                  />
+                  <span className="chat-room-name">{room.name}</span>
+                </NavLink>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
+    </CollapsibleSidebarSection>
   )
 }

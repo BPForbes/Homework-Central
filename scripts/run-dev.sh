@@ -287,8 +287,13 @@ test_postgres_host_connection() {
   return 1
 }
 
-test_postgres_auth() {
-  local database="${1:-postgres}"
+# Proves that a database exists and answers a query inside the container. It does not prove
+# the volume's password: initdb writes `host all all 127.0.0.1/32 trust` ahead of the image's
+# scram-sha-256 rule, so this loopback session authenticates against no password and succeeds
+# on a volume whose password is not the dev one. test_dev_postgres_credentials_rejected, which
+# looks in from the host, is the check for that.
+test_postgres_database_in_container() {
+  local database="$1"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
     sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d $database -tAc 'SELECT 1'" >/dev/null 2>&1
 }
@@ -322,7 +327,7 @@ prepare_homework_central_master_database() {
     invoke_postgres_admin_sql "ALTER DATABASE homework_central_master REFRESH COLLATION VERSION;"
   fi
 
-  if ! test_postgres_auth homework_central_master; then
+  if ! test_postgres_database_in_container homework_central_master; then
     return 1
   fi
 
@@ -350,9 +355,52 @@ start_core_containers() {
   start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0 || return 1
 }
 
+# Removes the Postgres container and the volume behind its data directory, leaving the caller to
+# start it again. `docker compose down -v` would also take llmdata, uploads, and miniodata, which
+# costs a developer their Ollama models and attachment blobs for a fault that lives in the Postgres
+# data directory alone; scripts/reset-dev-db.sh stays the way to ask for the wider wipe.
+#
+# The volume name is read off the container rather than composed from the project name, because
+# Compose derives that name from the checkout directory.
 reset_postgres_volume() {
+  local container
+  local volume
+
   log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
+  container="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" ps -q postgres 2>/dev/null | tr -d '\r\n' || true)"
+  [[ -n "$container" ]] || fail "Cannot identify the Postgres container to reset. Run: scripts/reset-dev-db.sh --yes"
+
+  volume="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$container" 2>/dev/null | tr -d '\r\n' || true)"
+  [[ -n "$volume" ]] || fail "Cannot identify the Postgres data volume to reset. Run: scripts/reset-dev-db.sh --yes"
+
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" rm --stop --force postgres >/dev/null 2>&1 || true
+  docker volume rm "$volume" >/dev/null 2>&1 || fail "Failed to remove Postgres Docker volume ${volume}"
+}
+
+# Recreates the Postgres volume when the server rejects the dev credentials. The password is
+# initialised into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT
+# can change it — both only republish the same 28P01 on a new port.
+#
+# Confined to a port our own container publishes. A foreign Postgres answering there has a
+# volume that is not ours to destroy, and it is repair_postgres_host_reachability's port
+# relocation that gets run-dev off it.
+reset_stale_postgres_volume() {
+  if ! test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  if ! our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    log "Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} rejects the dev credentials but is not our container; leaving its volume alone"
+    return 0
+  fi
+
+  log "Postgres rejected postgres/postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} (stale Docker volume with a different password)"
+  reset_postgres_volume
+  start_core_containers || true
+  wait_core_before_api || true
+  if test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT"; then
+    fail "Postgres still rejects postgres/postgres after recreating the Docker volume"
+  fi
 }
 
 wait_core_before_api() {
@@ -368,15 +416,7 @@ ensure_postgres_ready() {
     repair_postgres_host_reachability
   fi
 
-  if ! test_postgres_auth postgres; then
-    log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
-    reset_postgres_volume
-    start_core_containers || true
-    wait_core_before_api || true
-    if ! test_postgres_auth postgres; then
-      fail "Postgres password verification failed after recreating the Docker volume"
-    fi
-  fi
+  reset_stale_postgres_volume
 
   if ! prepare_homework_central_master_database; then
     log "Postgres volume is unhealthy (collation mismatch); recreating"
@@ -409,6 +449,15 @@ postgres_host_failure_message() {
 }
 
 repair_postgres_host_reachability() {
+  # Our own volume initialised with a different password answers every port the same way, so
+  # recreating the container and relocating POSTGRES_HOST_PORT cannot repair it. Leave that fault to
+  # reset_stale_postgres_volume, which the caller runs next. A foreign Postgres rejecting the same
+  # credentials still belongs here, because relocating off its port is the only repair available.
+  if test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT" \
+    && our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
   if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
     log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
     start_core_containers 1 || fail "Failed to recreate Postgres. Check: docker compose logs"
@@ -448,8 +497,8 @@ repair_postgres_host_reachability() {
 #
 # Readiness here is host reachability, not a usable homework_central_master: this wait runs
 # before prepare_homework_central_master_database creates that database and before
-# test_postgres_auth resets a volume whose password does not match, so requiring either
-# would never clear.
+# reset_stale_postgres_volume recreates a volume whose password does not match, so requiring
+# either would never clear.
 wait_for_postgres() {
   local timeout_seconds=60
   local deadline=$((SECONDS + timeout_seconds))
@@ -627,10 +676,6 @@ supervise_children() {
 }
 
 run_stack() {
-  if [[ "$SKIP_DOCKER" == false ]]; then
-    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
-  fi
-
   local api_ready=0
   BACKEND_PID=""
 
@@ -722,6 +767,10 @@ main() {
   fi
 
   if [[ "$SKIP_DOCKER" == false ]]; then
+    # Stop a leftover managed session *before* start_postgres waits on the published
+    # port. Doing this afterwards tears down the container that wait just cleared,
+    # and the API child used to skip its own wait because HC_DEV_STACK_PREREGISTERED=1.
+    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
     start_postgres
     start_clamav
   else

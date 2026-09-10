@@ -263,17 +263,32 @@ function Test-DevPostgresConnection([string]$Port) {
 }
 
 # Readiness gate for "the host can reach Docker Postgres on this published port".
-# Exit code 3 means a server answered and rejected the connection — no master database on a
-# fresh volume, or credentials that do not match the dev ones. Both still prove the published
-# port reaches Postgres, and run-dev creates the database and resets a mismatched volume only
-# after this wait, so treating 3 as not-ready deadlocks the wait against its own repair.
-# Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on its own.
+# Exit code 3 (a server answered without handing back a usable master database, normally a fresh
+# volume) and exit code 5 (the volume's password is not the dev one) both mean a server answered
+# and refused this connection, which still proves
+# the published port reaches Postgres. run-dev creates the database and resets a mismatched
+# volume only after this wait, so treating either as not-ready deadlocks the wait against its
+# own repair. Exit code 4 (server not accepting sessions yet) stays not-ready: it clears on
+# its own.
 #
 # Silent, because polling loops call it once per second. One-shot callers should prefer
 # Test-DevPostgresAlreadyRunning, which names the rejection.
 function Test-DevPostgresHostReachable([string]$Port) {
     [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
-    return $hostCheckExit -eq 0 -or $hostCheckExit -eq 3
+    return $hostCheckExit -in @(0, 3, 5)
+}
+
+# True when a server answered and rejected the dev credentials, which means the volume behind
+# it was initialised with a different password.
+#
+# Only the host's view of the published port can establish this. A psql probe run inside the
+# container connects over loopback, which initdb trusts ahead of the image's scram-sha-256
+# rule, so it authenticates against no password and succeeds on a mismatched volume.
+function Test-DevPostgresCredentialsRejected([string]$Port) {
+    # Cast before comparing: this gates a destructive reset in run-dev, and `@(x, 5) -eq 5` would
+    # be truthy if the helper ever emitted an extra object alongside its exit code.
+    [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
+    return $hostCheckExit -eq 5
 }
 
 function Write-DevPostgresRejected([string]$Port) {
@@ -291,11 +306,11 @@ function Write-DevPostgresRejected([string]$Port) {
 # resurface as an opaque API startup failure well after the cause scrolled away.
 function Test-DevPostgresAlreadyRunning([string]$Port) {
     [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
-    if ($hostCheckExit -eq 3) {
+    if ($hostCheckExit -in @(3, 5)) {
         Write-DevPostgresRejected $Port
     }
 
-    return $hostCheckExit -eq 0 -or $hostCheckExit -eq 3
+    return $hostCheckExit -in @(0, 3, 5)
 }
 
 function Get-DevPostgresHostCheckDetail {
@@ -332,7 +347,7 @@ function Start-DevStackPostgresContainer {
 }
 
 function Wait-DevPostgresReady([string]$Port) {
-    [int]$timeoutSeconds = 30
+    [int]$timeoutSeconds = 60
     [datetime]$deadline = (Get-Date).AddSeconds($timeoutSeconds)
     do {
         [int]$hostCheckExit = Invoke-DevPostgresHostCheck $Port
@@ -340,7 +355,7 @@ function Wait-DevPostgresReady([string]$Port) {
             return
         }
 
-        if ($hostCheckExit -eq 3) {
+        if ($hostCheckExit -in @(3, 5)) {
             # Nothing repairs the volume behind this wait — start-api-dev only starts the
             # container — so name the rejection instead of leaving the API to fail on it.
             Write-DevPostgresRejected $Port

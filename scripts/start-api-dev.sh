@@ -70,10 +70,21 @@ cleanup_api() {
 }
 trap cleanup_api EXIT
 
-# run-dev already waited for host-published Postgres when it set HC_DEV_STACK_PREREGISTERED=1.
-if [[ "${HC_SKIP_DOCKER:-0}" != "1" && "${HC_DEV_STACK_PREREGISTERED:-0}" != "1" ]]; then
-  ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
-    || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+# HC_DEV_STACK_PREREGISTERED means the parent already took the refcount slot and
+# started FCaptcha in the background. It does not mean 127.0.0.1 still answers:
+# leftover .hc-dev-stack.state used to make run-dev stop Postgres after it had
+# waited, and the watch rebuild is another window. Recheck (or start) Postgres
+# unless the caller opted out. Do not compose-up FCaptcha here — the parent owns
+# that even if /fcaptcha.js is not ready yet. Standalone start-api-dev still
+# starts Postgres+FCaptcha via the core helper.
+if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
+  if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
+    ensure_dev_postgres_running "$POSTGRES_HOST_PORT" \
+      || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  else
+    ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
+      || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  fi
   ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" || fail "Could not start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
@@ -103,10 +114,22 @@ fi
 # 0x18000000 = 384 MiB. Set this after the build so only the API runtime is
 # constrained; preserve an explicit caller override.
 export DOTNET_GCHeapHardLimit="${DOTNET_GCHeapHardLimit:-18000000}"
+
+# --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+API_WATCH_ARGS=(--non-interactive)
+# Watch owns recompiling every later edit, so it cannot take --no-build the way the one-shot
+# branch below does — its startup build repeats the compile the caller just did. Skipping the
+# restore is the one part that can be dropped without leaving watch unable to rebuild, and
+# HC_SKIP_DOTNET_BUILD means a build (and therefore a restore) already succeeded against this
+# tree. Adding a PackageReference mid-session then needs a restart rather than a hot reload.
+if [[ "${HC_SKIP_DOTNET_BUILD:-0}" == "1" ]]; then
+  API_WATCH_ARGS+=(--no-restore)
+fi
+API_WATCH_ARGS+=(run)
+
 set +e
 if [[ "$USE_WATCH" == "1" ]]; then
-  # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
-  dotnet watch --non-interactive run --project "$API_PROJECT" --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+  dotnet watch "${API_WATCH_ARGS[@]}" --project "$API_PROJECT" --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 else
   dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
 fi
