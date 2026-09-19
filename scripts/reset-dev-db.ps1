@@ -1,5 +1,8 @@
 # Wipe the local Docker Postgres volume (removes all registered accounts and seed data).
 #
+# `docker compose down -v` stops the published 127.0.0.1 Postgres port. Run this
+# before scripts/run-dev.ps1, not in a second terminal while run-dev is up.
+#
 # Usage:
 #   scripts/reset-dev-db.ps1
 #   scripts/reset-dev-db.ps1 -Yes
@@ -10,6 +13,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
@@ -18,6 +22,7 @@ $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
 
 if (-not $Yes) {
     Write-Host 'This removes the pgdata Docker volume and all local account data.'
+    Write-Host 'Stop run-dev first, or run this before starting the API. A live API keeps retrying until Postgres is back.'
     Write-Host 'Re-run with -Yes to continue: scripts/reset-dev-db.ps1 -Yes'
     exit 1
 }
@@ -30,7 +35,31 @@ $env:FCAPTCHA_SECRET = $envValues['FCAPTCHA_SECRET']
 $env:JWT_SECRET = $envValues['JWT_SECRET']
 $env:FCAPTCHA_HOST_PORT = $envValues['FCAPTCHA_HOST_PORT']
 
-$composeArgs = @('-f', $ComposeFile, '--env-file', $script:DevStackEnvFile)
+Write-Host 'Stopping Docker Postgres (and optional profile containers) and removing the pgdata volume. Do not run this beside a live run-dev.'
+
+# Include optional profiles so clamav/llm/minio containers (if started) release the compose network.
+$composeArgs = @('-f', $ComposeFile, '--env-file', $script:DevStackEnvFile, '--profile', 'antivirus', '--profile', 'ai', '--profile', 'object-storage')
 docker compose @composeArgs down -v --remove-orphans
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Compose warns "Network … Resource is still in use" when something outside this
+# down still holds homework-central_default. Volume wipe already succeeded; try a
+# best-effort network remove, then continue — run-dev reuses the network either way.
+$networkName = 'homework-central_default'
+docker network inspect $networkName *> $null
+if ($LASTEXITCODE -eq 0) {
+    docker network rm $networkName *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "==> Removed leftover Docker network $networkName"
+    }
+    else {
+        Write-Host "==> Docker network $networkName is still in use (harmless). run-dev will reuse it." -ForegroundColor DarkGray
+    }
+}
+
+# compose down does not remove .hc-dev-stack.state. Leaving it makes the next
+# run-dev treat this wipe as a live managed session and stop Postgres after it
+# has already waited for the published port.
+Remove-Item $script:DevStackStateFile -Force -ErrorAction SilentlyContinue
+
 Write-Host '==> Dev database volume removed. Run scripts/run-dev.ps1 to start fresh.'

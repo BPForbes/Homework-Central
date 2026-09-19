@@ -4,8 +4,15 @@
 # Local Postgres credentials are fixed: postgres / postgres
 # Sets HC_DEV_BYPASS=1 so localhost dev auth endpoints and the styled 403 root page are enabled.
 #
+# By default uses `dotnet watch run` so file changes (including after git pull) rebuild/restart
+# the API. This is process restart / .NET Hot Reload — not Vite-style HMR. Set HC_API_WATCH=0
+# to use a one-shot `dotnet run` instead.
+#
 # Usage:
 #   scripts/start-api-dev.sh
+#
+# Set HC_SKIP_DEV_WARMUP=1 only for repeat starts against an already initialized local database.
+# Set HC_SKIP_RUST_BUILD=1 to skip cargo build --workspace in rust/ (run-dev sets this after its compile).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,12 +44,22 @@ export FCaptcha__ServerUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 export FCaptcha__PublicUrl="http://localhost:${FCAPTCHA_HOST_PORT}"
 # Enables DevAuthController, dev seed data, and the styled localhost root page.
 export HC_DEV_BYPASS=1
-export ConnectionStrings__MasterConnection="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
-export ConnectionStrings__PostgresAdmin="Host=localhost;Port=${POSTGRES_HOST_PORT};Database=postgres;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
+export ConnectionStrings__MasterConnection="Host=127.0.0.1;Port=${POSTGRES_HOST_PORT};Database=homework_central_master;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
+export ConnectionStrings__PostgresAdmin="Host=127.0.0.1;Port=${POSTGRES_HOST_PORT};Database=postgres;Username=${DEV_POSTGRES_USER};Password=${DEV_POSTGRES_PASSWORD}"
 export Tenancy__ClusterEnvironment=dev
+export DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER=1
+
+USE_WATCH=1
+if [[ "${HC_API_WATCH:-1}" == "0" ]]; then
+  USE_WATCH=0
+fi
 
 printf 'Homework Central API - http://localhost:5000\n'
-printf 'Using Postgres user %s on localhost:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
+printf 'Using Postgres user %s on 127.0.0.1:%s (local dev)\n' "$DEV_POSTGRES_USER" "$POSTGRES_HOST_PORT"
+if [[ "$USE_WATCH" == "1" ]]; then
+  printf 'API watch enabled (dotnet watch). File changes / git pull rebuild or hot-reload the process.\n'
+  printf 'Set HC_API_WATCH=0 for a one-shot run without watching.\n'
+fi
 printf 'Note: first-run EF logs about missing __EF*MigrationsHistory tables are normal.\n'
 printf 'Note: first startup provisions ~70 persona databases and may take several minutes.\n'
 
@@ -53,13 +70,26 @@ cleanup_api() {
 }
 trap cleanup_api EXIT
 
+# HC_DEV_STACK_PREREGISTERED means the parent already took the refcount slot and
+# started FCaptcha in the background. It does not mean 127.0.0.1 still answers:
+# leftover .hc-dev-stack.state used to make run-dev stop Postgres after it had
+# waited, and the watch rebuild is another window. Recheck (or start) Postgres
+# unless the caller opted out. Do not compose-up FCaptcha here — the parent owns
+# that even if /fcaptcha.js is not ready yet. Standalone start-api-dev still
+# starts Postgres+FCaptcha via the core helper.
 if [[ "${HC_SKIP_DOCKER:-0}" != "1" ]]; then
-  ensure_dev_postgres_running "$POSTGRES_HOST_PORT" || fail "Could not start Docker Postgres on localhost:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
-  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" || fail "Could not start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  if [[ "${HC_DEV_STACK_PREREGISTERED:-0}" == "1" ]]; then
+    ensure_dev_postgres_running "$POSTGRES_HOST_PORT" \
+      || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  else
+    ensure_dev_stack_core_running "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" \
+      || fail "Could not start Docker Postgres on 127.0.0.1:${POSTGRES_HOST_PORT} and FCaptcha on localhost:${FCAPTCHA_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
+  fi
+  ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" || fail "Could not start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Run scripts/run-dev.sh or start Docker Desktop."
 fi
 
 if [[ "${HC_SKIP_BROWSER_OPEN:-0}" != "1" ]]; then
-  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
+  "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/healthz" "API" 300 &
   BROWSER_WAIT_PID=$!
 fi
 
@@ -72,13 +102,37 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
-if [[ "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
+if [[ "${HC_SKIP_RUST_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
+  build_rust_workspace || fail "Rust cargo build --workspace failed"
+fi
+
+if [[ "$USE_WATCH" != "1" && "${HC_SKIP_DOTNET_BUILD:-0}" != "1" && "${HC_SKIP_BUILD:-0}" != "1" ]]; then
   printf '==> Building API\n'
   dotnet build "$API_PROJECT" -c Debug -v q
 fi
 
+# 0x18000000 = 384 MiB. Set this after the build so only the API runtime is
+# constrained; preserve an explicit caller override.
+export DOTNET_GCHeapHardLimit="${DOTNET_GCHeapHardLimit:-18000000}"
+
+# --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+API_WATCH_ARGS=(--non-interactive)
+# Watch owns recompiling every later edit, so it cannot take --no-build the way the one-shot
+# branch below does — its startup build repeats the compile the caller just did. Skipping the
+# restore is the one part that can be dropped without leaving watch unable to rebuild, and
+# HC_SKIP_DOTNET_BUILD means a build (and therefore a restore) already succeeded against this
+# tree. Adding a PackageReference mid-session then needs a restart rather than a hot reload.
+if [[ "${HC_SKIP_DOTNET_BUILD:-0}" == "1" ]]; then
+  API_WATCH_ARGS+=(--no-restore)
+fi
+API_WATCH_ARGS+=(run)
+
 set +e
-dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+if [[ "$USE_WATCH" == "1" ]]; then
+  dotnet watch "${API_WATCH_ARGS[@]}" --project "$API_PROJECT" --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+else
+  dotnet run --project "$API_PROJECT" --no-build --no-launch-profile --urls http://localhost:5000 2> >(tee "$API_ERROR_LOG" >&2)
+fi
 api_status=$?
 set -e
 

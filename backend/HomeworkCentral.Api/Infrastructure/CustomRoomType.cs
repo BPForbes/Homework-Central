@@ -5,6 +5,7 @@ public enum CustomRoomType
     Chat,
     Info,
     RoleClaim,
+    Ticket,
 }
 
 public enum ChannelTieType

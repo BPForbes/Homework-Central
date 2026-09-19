@@ -45,4 +45,11 @@ public class ChatMessage : IShareableScopedResource
     public Guid? ReplyToSenderId { get; set; }
     public string? ReplyToSenderUsername { get; set; }
     public string? ReplyToContentSnippet { get; set; }
+
+    /// <summary>JSON snapshot when this message forwards another message.</summary>
+    public string? ForwardedFromJson { get; set; }
+
+    public ICollection<ChatMessageAttachment> Attachments { get; set; } = [];
+    public ICollection<ChatMessageVote> Votes { get; set; } = [];
+    public ICollection<ChatLinkPreview> LinkPreviews { get; set; } = [];
 }

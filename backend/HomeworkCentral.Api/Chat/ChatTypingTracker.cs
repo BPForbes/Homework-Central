@@ -25,6 +25,15 @@ public sealed class ChatTypingTracker : IChatTypingTracker
 
     public void SetTyping(string connectionId, string groupKey, Guid userId, string username)
     {
+        // A connection can only be actively typing in one room at a time, but a prior NotifyTyping
+        // in another room is not automatically cleared when the client moves rooms (e.g. a reconnect
+        // that re-JoinRoom's without LeaveRoom first). Drop any stale room entry before updating.
+        if (_connections.TryGetValue(connectionId, out (string GroupKey, Guid UserId) prior)
+            && (prior.GroupKey != groupKey || prior.UserId != userId))
+        {
+            RemoveConnectionFromRoom(prior.GroupKey, prior.UserId, connectionId);
+        }
+
         ConcurrentDictionary<Guid, TypingEntry> room =
             _rooms.GetOrAdd(groupKey, _ => new ConcurrentDictionary<Guid, TypingEntry>());
         TypingEntry entry = room.GetOrAdd(userId, _ => new TypingEntry(username));
@@ -45,11 +54,23 @@ public sealed class ChatTypingTracker : IChatTypingTracker
     /// the room, or null if the connection wasn't marked as typing anywhere.</summary>
     public (string GroupKey, Guid UserId)? ClearTypingForConnection(string connectionId)
     {
-        if (!_connections.TryRemove(connectionId, out (string GroupKey, Guid UserId) entry))
-            return null;
+        _connections.TryRemove(connectionId, out _);
 
-        bool wasLastConnection = RemoveConnectionFromRoom(entry.GroupKey, entry.UserId, connectionId);
-        return wasLastConnection ? entry : null;
+        // Sweep every room: a connection can leak into a room if SetTyping moved rooms without
+        // clearing the old entry (fixed above, but this also cleans up state left by older builds).
+        (string GroupKey, Guid UserId)? notify = null;
+        IEnumerable<(string GroupKey, Guid UserId)> connectionRooms = _rooms.ToArray()
+            .SelectMany(roomPair => roomPair.Value.ToArray()
+                .Where(userPair => userPair.Value.ConnectionIds.ContainsKey(connectionId))
+                .Select(userPair => (GroupKey: roomPair.Key, UserId: userPair.Key)));
+
+        foreach ((string groupKey, Guid userId) in connectionRooms)
+        {
+            if (RemoveConnectionFromRoom(groupKey, userId, connectionId))
+                notify = (groupKey, userId);
+        }
+
+        return notify;
     }
 
     /// <summary>Returns every user currently marked as typing in <paramref name="groupKey"/>,
@@ -82,7 +103,22 @@ public sealed class ChatTypingTracker : IChatTypingTracker
         // check above and this removal, TryRemove below will simply no-op for that race (a rare,
         // low-stakes presence indicator, not correctness-critical state), and the new connection's
         // own SetTyping call already re-added a fresh entry that stays intact regardless.
-        return room.TryRemove(userId, out _);
+        bool removed = room.TryRemove(userId, out _);
+
+        // Drop the room bucket once its last typer is gone. Without this, _rooms only ever grows:
+        // an entry is added for every group key anyone types in and is never reclaimed for the
+        // life of the process. The identity-checked removal below only removes the exact
+        // dictionary instance observed empty, so a room another thread has since repopulated via
+        // GetOrAdd is left alone. The same benign race as above remains — a SetTyping that runs
+        // between the emptiness check and the removal loses its indicator — and is acceptable for
+        // the same reason.
+        if (room.IsEmpty)
+        {
+            ((ICollection<KeyValuePair<string, ConcurrentDictionary<Guid, TypingEntry>>>)_rooms)
+                .Remove(new KeyValuePair<string, ConcurrentDictionary<Guid, TypingEntry>>(groupKey, room));
+        }
+
+        return removed;
     }
 
     private sealed class TypingEntry(string username)

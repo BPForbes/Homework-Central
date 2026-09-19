@@ -4,6 +4,7 @@
 import { lazy, Suspense, type ComponentType } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { PerformanceProvider } from './context/performance/PerformanceContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { WaterBackground } from './components/background/WaterBackground'
 import { BackendConnectingLoader } from './components/BackendConnectingLoader'
@@ -33,12 +34,14 @@ const Inbox = lazyPage(() => import('./pages/Inbox'), 'Inbox')
 const UserConfig = lazyPage(() => import('./pages/UserConfig'), 'UserConfig')
 const ServerMaintenance = lazyPage(() => import('./pages/ServerMaintenance'), 'ServerMaintenance')
 const ChannelBuilder = lazyPage(() => import('./pages/ChannelBuilder'), 'ChannelBuilder')
+const NeuralNet = lazyPage(() => import('./pages/NeuralNet'), 'NeuralNet')
 
 export default function App() {
   return (
     <ThemeProvider>
-      <WaterBackground />
-      <BackendGate>
+      <PerformanceProvider>
+        <WaterBackground />
+        <BackendGate>
         <BrowserRouter>
           <AuthProvider>
             <Suspense fallback={<BackendConnectingLoader message="Loading page…" />}>
@@ -91,13 +94,30 @@ export default function App() {
                     </PermissionRoute>
                   }
                 />
+                <Route
+                  path="/server/NeuralNet/Training"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
+                />
+                <Route
+                  path="/server/NeuralNet/TrainingFeedback"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
+                />
+                <Route
+                  path="/server/NeuralNet/DataManagement"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
+                />
+                <Route
+                  path="/server/NeuralNet/Visualizer"
+                  element={<PermissionRoute permissionBit={MANAGE_SERVER_INFRASTRUCTURE_BIT}><NeuralNet /></PermissionRoute>}
+                />
               </Route>
               <Route path="*" element={<Navigate to="/login" replace />} />
               </Routes>
             </Suspense>
           </AuthProvider>
         </BrowserRouter>
-      </BackendGate>
+        </BackendGate>
+      </PerformanceProvider>
     </ThemeProvider>
   )
 }

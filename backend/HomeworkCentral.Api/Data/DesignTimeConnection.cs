@@ -9,6 +9,6 @@ internal static class DesignTimeConnection
             return fromEnv;
 
         string port = Environment.GetEnvironmentVariable("POSTGRES_HOST_PORT") ?? "5434";
-        return $"Host=localhost;Port={port};Database=homework_central_master;Username=postgres;Password=postgres";
+        return $"Host=127.0.0.1;Port={port};Database=homework_central_master;Username=postgres;Password=postgres";
     }
 }

@@ -1,5 +1,6 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faBrain,
   faCircleInfo,
   faComments,
   faIdBadge,
@@ -8,10 +9,11 @@ import {
   faPlus,
   faServer,
   faShieldHalved,
+  faTicket,
   faUsersGear,
 } from '@fortawesome/free-solid-svg-icons'
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   useServerNavSection,
   useUserConfigNavSection,
@@ -108,28 +110,33 @@ function ConfigurationSidebar<T extends string>({
 }
 
 function ServerSidebar({ loading }: { loading: boolean }) {
-  const [section, setSection] = useServerNavSection()
-
-  const items: { id: ServerNavSection; label: string; icon: typeof faComments }[] = [
+  const [serverSection] = useServerNavSection()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  type ServerConfigurationSection = ServerNavSection | 'neuralTraining' | 'neuralFeedback' | 'neuralData' | 'neuralVisualizer'
+  const items: SidebarItem<ServerConfigurationSection>[] = [
     { id: 'chat', label: 'Create Chat Room', icon: faComments },
     { id: 'roleclaim', label: 'Create Role Claim', icon: faIdBadge },
     { id: 'info', label: 'Create Info Page', icon: faCircleInfo },
+    { id: 'ticket', label: 'Create Ticket Room', icon: faTicket },
     { id: 'rooms', label: 'All Rooms', icon: faLayerGroup },
+    { id: 'neuralTraining', label: 'Neural Net · Training', icon: faBrain },
+    { id: 'neuralFeedback', label: 'Neural Net · Feedback', icon: faBrain },
+    { id: 'neuralData', label: 'Neural Net · Data', icon: faBrain },
+    { id: 'neuralVisualizer', label: 'Neural Net · Visualizer', icon: faBrain },
   ]
-
-  return (
-    <ConfigurationSidebar
-      ariaLabel="Server configuration"
-      title="Server"
-      titleIcon={faServer}
-      items={items}
-      section={section}
-      setSection={setSection}
-      loading={loading}
-    />
-  )
+  const routes: Record<Exclude<ServerConfigurationSection, ServerNavSection>, string> = {
+    neuralTraining: '/server/NeuralNet/Training', neuralFeedback: '/server/NeuralNet/TrainingFeedback',
+    neuralData: '/server/NeuralNet/DataManagement', neuralVisualizer: '/server/NeuralNet/Visualizer',
+  }
+  const active: ServerConfigurationSection = pathname.includes('/server/NeuralNet/')
+    ? (Object.entries(routes).find(([, path]) => path === pathname)?.[0] as ServerConfigurationSection ?? 'neuralTraining')
+    : serverSection
+  return <ConfigurationSidebar ariaLabel="Server configuration" title="Server" titleIcon={faServer} items={items} section={active} setSection={(next) => {
+    if (next in routes) navigate(routes[next as keyof typeof routes])
+    else navigate(`/server?section=${next}`)
+  }} loading={loading} />
 }
-
 function UserConfigSidebar({ loading }: { loading: boolean }) {
   const [section, setSection] = useUserConfigNavSection()
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
 import { chatApi } from '../api/chatApi'
@@ -12,6 +12,8 @@ import { ChatRoomIcon } from '../components/chat/ChatRoomIcon'
 import { CustomRoleClaimPanel } from '../components/infrastructure/CustomRoomPanels'
 import { InfoEntriesFeed } from '../components/infrastructure/InfoEntriesFeed'
 import { GetRolesPanel } from '../components/infrastructure/GetRolesPanel'
+import { TicketPortalPanel } from '../components/tickets/TicketPortalPanel'
+import { TicketChatChrome } from '../components/tickets/TicketChatChrome'
 import { ServerMaintenanceNav } from '../components/layout/ServerMaintenanceNav'
 import { getCategoryIcon, getRoomIcon, getStaffRoomIcon } from '../components/chat/chatIcons'
 import { resolveCustomRoomIcon } from '../components/infrastructure/customRoomIcons'
@@ -20,8 +22,8 @@ import { LoadingBars } from '../components/LoadingBars'
 function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIcon> {
   if (room.iconName) {
     const roomType = room.roomType === 'GetRoles' ? 'RoleClaim' : room.roomType
-    if (roomType === 'Chat' || roomType === 'Info' || roomType === 'RoleClaim')
-      return resolveCustomRoomIcon(room.iconName, roomType)
+    if (roomType === 'Chat' || roomType === 'Info' || roomType === 'RoleClaim' || roomType === 'Ticket')
+      return resolveCustomRoomIcon(room.iconName, roomType as 'Chat' | 'Info' | 'RoleClaim' | 'Ticket')
   }
 
   if (room.categoryKey === 'Staff')
@@ -30,6 +32,8 @@ function resolveRoomIcon(room: ChatRoomDetail): ReturnType<typeof getCategoryIco
     return resolveCustomRoomIcon(null, 'Info')
   if (room.roomType === 'RoleClaim' || room.roomType === 'GetRoles')
     return resolveCustomRoomIcon(null, 'RoleClaim')
+  if (room.roomType === 'Ticket')
+    return resolveCustomRoomIcon(null, 'Ticket')
   if (room.categoryKind === 'Custom')
     return resolveCustomRoomIcon(null, 'Chat')
   if (room.categoryKey === 'General')
@@ -44,6 +48,8 @@ function navTitleForRoomType(roomType: string): string {
     case 'RoleClaim':
     case 'GetRoles':
       return 'Role Claim'
+    case 'Ticket':
+      return 'Ticket'
     default:
       return 'Chat'
   }
@@ -51,15 +57,20 @@ function navTitleForRoomType(roomType: string): string {
 
 export function ChatRoom() {
   const { roomId } = useParams<{ roomId: string }>()
+  const navigate = useNavigate()
   const decodedRoomId = roomId ? decodeURIComponent(roomId) : ''
   const { user } = useAuth()
   const [room, setRoom] = useState<ChatRoomDetail | null>(null)
   const [roomLoading, setRoomLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
   const [mentionRoles, setMentionRoles] = useState<MentionRoleOption[]>([])
+  // null = unresolved; enable votes until a ticket chat is confirmed (avoids stuck-off / flash-off)
+  const [isTicketChat, setIsTicketChat] = useState<boolean | null>(null)
+  const votesEnabled = isTicketChat !== true
 
   const roomType = room?.roomType ?? 'Chat'
   const isChatRoom = roomType === 'Chat'
+  const isTicketPortal = roomType === 'Ticket'
 
   const {
     messages,
@@ -73,13 +84,40 @@ export function ChatRoom() {
     stopTyping,
     startReply,
     cancelReply,
-  } = useChatRoom(isChatRoom ? decodedRoomId : '', user?.userId)
+    castVote,
+  } = useChatRoom(isChatRoom ? decodedRoomId : '', user?.userId, {
+    enableVotes: votesEnabled,
+  })
+
+  async function handleReportMessage(message: { messageId: string; roomId: string; senderId: string; senderUsername: string; content: string }) {
+    try {
+      const { data: nav } = await chatApi.getNav()
+      const portal = nav.categories
+        .flatMap((category) => category.rooms)
+        .find((room) => room.name === 'Notify Mods' && room.roomType === 'Ticket')
+      if (!portal) {
+        window.alert('Notify Mods portal is not available.')
+        return
+      }
+      const params = new URLSearchParams({
+        reportMessageId: message.messageId,
+        reportRoomId: message.roomId,
+        reportedUserId: message.senderId,
+        reportedUsername: message.senderUsername,
+        reportSnippet: message.content.slice(0, 200),
+      })
+      navigate(`/chat/${encodeURIComponent(portal.id)}?${params.toString()}`)
+    } catch {
+      window.alert('Could not open a moderation ticket.')
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
     setRoom(null)
     setRoomLoading(true)
     setAccessDenied(false)
+    setIsTicketChat(null)
 
     void chatApi
       .getRoom(decodedRoomId)
@@ -169,6 +207,15 @@ export function ChatRoom() {
 
       {roomType === 'Info' && <InfoEntriesFeed roomId={decodedRoomId} />}
 
+      {isTicketPortal && (
+        <TicketPortalPanel
+          roomId={decodedRoomId}
+          onOpened={(ticketRoomId) => {
+            navigate(`/chat/${encodeURIComponent(ticketRoomId)}`)
+          }}
+        />
+      )}
+
       {(roomType === 'RoleClaim' || roomType === 'GetRoles') &&
         (roomType === 'GetRoles' ? (
           <GetRolesPanel roomId={decodedRoomId} />
@@ -178,6 +225,10 @@ export function ChatRoom() {
 
       {isChatRoom && (
         <>
+          <TicketChatChrome
+            roomId={decodedRoomId}
+            onTicketResolved={setIsTicketChat}
+          />
           {messagesError && <p className="chat-room-error chat-room-error--inline">{messagesError}</p>}
           <div className="chat-room-panel">
             <ChatMessageList
@@ -186,7 +237,10 @@ export function ChatRoom() {
               loading={messagesLoading}
               currentUserId={user?.userId}
               mentionRoles={mentionRoles}
+              votesEnabled={votesEnabled}
               onReply={startReply}
+              onVote={votesEnabled ? (message, value) => void castVote(message, value) : undefined}
+              onReport={(message) => void handleReportMessage(message)}
             />
             <ChatComposer
               disabled={messagesLoading}

@@ -91,9 +91,54 @@ public class IdentityRiskProfileServiceTests
         Assert.Equal(0, untouched.TotalScans);
     }
 
-    private static IdentityRiskProfileService CreateService(int minUpdateIntervalSeconds = 5)
+    [Fact]
+    public void Profiles_default_to_a_retention_tied_to_the_trust_decay_half_life()
     {
-        RiskOptions options = new() { MinProfileUpdateIntervalSeconds = minUpdateIntervalSeconds };
+        RiskOptions options = new();
+
+        // 7 days at a 72h half-life is ~2.3 half-lives, where a profile still carries about a
+        // fifth of its deviation from neutral. The previous 30 days was ten half-lives — memory
+        // held for a value arithmetically indistinguishable from a fresh profile.
+        Assert.Equal(7, options.ProfileRetentionDays);
+        Assert.Equal(72, options.TrustDecayHalfLifeHours);
+    }
+
+    [Fact]
+    public void A_non_positive_retention_is_floored_rather_than_evicting_on_write()
+    {
+        // MemoryCacheEntryOptions rejects a zero or negative expiration outright, so an
+        // unguarded value here would throw on the first write rather than merely shortening
+        // retention. The floor keeps a misconfigured value harmless.
+        IdentityRiskProfileService service = CreateService(retentionDays: 0);
+
+        service.RecordOutcome("user:g", passed: true, observedScore: 0.9);
+        IdentityRiskProfile profile = service.GetProfile("user:g");
+
+        Assert.Equal(1, profile.TotalScans);
+        Assert.Equal(0.58, profile.TrustScore, precision: 6);
+    }
+
+    [Fact]
+    public void A_configured_retention_still_keeps_the_profile_within_its_window()
+    {
+        IdentityRiskProfileService service = CreateService(retentionDays: 1);
+
+        service.RecordOutcome("user:h", passed: false, observedScore: 0.1);
+        IdentityRiskProfile profile = service.GetProfile("user:h");
+
+        Assert.Equal(1, profile.TotalScans);
+        Assert.Equal(1, profile.ConsecutiveFailures);
+    }
+
+    private static IdentityRiskProfileService CreateService(
+        int minUpdateIntervalSeconds = 5,
+        int retentionDays = 7)
+    {
+        RiskOptions options = new()
+        {
+            MinProfileUpdateIntervalSeconds = minUpdateIntervalSeconds,
+            ProfileRetentionDays = retentionDays,
+        };
         return new IdentityRiskProfileService(new MemoryCache(new MemoryCacheOptions()), Options.Create(options));
     }
 }

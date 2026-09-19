@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { isAxiosError } from 'axios'
 import type { AuthResponse } from '../types/auth'
 
 const TOKEN_KEY = 'accessToken'
@@ -55,12 +55,18 @@ function tokenNeedsRefresh(): boolean {
   }
 }
 
+export function isAuthRejection(error: unknown): boolean {
+  return isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)
+}
+
 export function refreshSession(): Promise<AuthResponse> {
   if (!refreshPromise) {
     refreshPromise = runRefreshLocked()
       .catch((error: unknown) => {
-        clearAuthSession()
-        document.dispatchEvent(new CustomEvent('hc:auth-expired'))
+        if (isAuthRejection(error)) {
+          clearAuthSession()
+          document.dispatchEvent(new CustomEvent('hc:auth-expired'))
+        }
         throw error
       })
       .finally(() => {

@@ -5,6 +5,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!--
+      Memory. Microsoft.NET.Sdk.Web turns server GC on by default: one managed heap plus one
+      background GC thread per CPU core. On a developer machine that is hundreds of MB of
+      resident memory bought for nothing, both inside the Docker container and when
+      scripts/run-dev.* runs the API natively. Workstation, non-concurrent GC keeps the working
+      set proportional to what the app actually allocates, at the cost of slightly longer GC
+      pauses that no workload here is sensitive to. backend.Dockerfile sets the equivalent
+      DOTNET_gcServer / DOTNET_gcConcurrent env vars so `docker run` of the image alone behaves
+      the same. Revisit both together if this ever runs under real concurrent load.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <!--
@@ -28,7 +42,9 @@
 
   <ItemGroup>
     <PackageReference Include="AspNetCoreRateLimit" Version="5.0.0" />
+    <PackageReference Include="AWSSDK.S3" Version="3.7.410.12" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
@@ -37,11 +53,21 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+    <PackageReference Include="Mime-Detective" Version="25.8.1" />
+    <PackageReference Include="nClam" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
+    <PackageReference Include="TorchSharp" Version="0.105.1" />
+    <PackageReference Include="TorchSharp-cpu" Version="0.105.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HomeworkCentral.Api.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Canonical favicon lives in frontend/public; link it into Dev/ at build output. -->
     <Content Include="..\..\frontend\public\favicon.svg" Link="Dev\favicon.svg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="native\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('native')" />
   </ItemGroup>
 
 </Project>

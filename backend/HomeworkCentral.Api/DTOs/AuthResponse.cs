@@ -30,5 +30,6 @@ public class EffectiveMaskDto
     public string GeneralSubjectMask { get; set; } = null!;
     public Dictionary<string, string> SubjectExpertiseMasks { get; set; } = [];
     public string StatusMask { get; set; } = null!;
-    public List<Guid> CustomRoleIds { get; set; } = [];
+    /// <summary>Assigned custom role ids; HashSet so room/mention membership checks stay keyed.</summary>
+    public HashSet<Guid> CustomRoleIds { get; set; } = [];
 }

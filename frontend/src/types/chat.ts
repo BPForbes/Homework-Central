@@ -37,6 +37,32 @@ export interface ChatRoomDetail {
   iconName?: string | null
 }
 
+export interface ChatAttachmentInfo {
+  attachmentId: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  downloadUrl: string
+  isHazard?: boolean
+  inlinePreviewKind?: string | null
+  scanStatus?: 'Clean' | 'Infected' | 'ScanFailed' | 'NotScanned' | 'Unknown'
+}
+
+export interface ChatForwardSnapshot {
+  sourceRoomId: string
+  sourceMessageId: string
+  sourceSenderId: string
+  sourceSenderUsername: string
+  contentSnippet: string
+}
+
+export interface LinkPreview {
+  url: string
+  title?: string | null
+  description?: string | null
+  imageUrl?: string | null
+}
+
 export interface ChatMessage {
   messageId: string
   roomId: string
@@ -49,6 +75,22 @@ export interface ChatMessage {
   replyToSenderId?: string | null
   replyToSenderUsername?: string | null
   replyToContentSnippet?: string | null
+  score?: number
+  upvoteCount?: number
+  downvoteCount?: number
+  viewerVote?: 'up' | 'down' | null
+  attachments?: ChatAttachmentInfo[]
+  forwardedFrom?: ChatForwardSnapshot | null
+  linkPreviews?: LinkPreview[]
+}
+
+export interface MessageVoteUpdate {
+  messageId: string
+  roomId: string
+  score: number
+  upvoteCount: number
+  downvoteCount: number
+  viewerVote?: string | null
 }
 
 export interface MentionRoleOption {

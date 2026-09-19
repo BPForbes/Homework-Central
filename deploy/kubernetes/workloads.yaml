@@ -1,0 +1,108 @@
+# Replace homework-central-api:latest and secret values before applying.
+# Requires KEDA for the ScaledJob resource.
+#
+# Work split:
+# - homework-central-api: HTTP + live visualization/progress polling (HPA).
+# - neural-net-training ScaledJob: CPU-heavy synthetic training sessions (KEDA).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homework-central
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: training-worker
+  namespace: homework-central
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homework-central-api
+  namespace: homework-central
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: homework-central-api } }
+  template:
+    metadata: { labels: { app: homework-central-api } }
+    spec:
+      containers:
+        - name: api
+          image: homework-central-api:latest
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: "250m", memory: "384Mi" }
+            limits: { cpu: "1", memory: "768Mi" }
+          envFrom: [{ secretRef: { name: homework-central-runtime } }]
+          env:
+            # Keep training off the API pod so visualization stays responsive under HPA.
+            - name: KubernetesTraining__DisableInProcessWorker
+              value: "true"
+            - name: KubernetesTraining__RunOneQueued
+              value: "false"
+          readinessProbe: { httpGet: { path: /healthz, port: 8080 }, initialDelaySeconds: 10 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: homework-central-api
+  namespace: homework-central
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: homework-central-api }
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+---
+# KEDA creates short-lived workers when PostgreSQL has queued sessions. Each worker atomically
+# claims one session then exits. ttlSecondsAfterFinished reclaims the pod and its Job.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: neural-net-training
+  namespace: homework-central
+spec:
+  pollingInterval: 15
+  maxReplicaCount: 4
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTargetRef:
+    ttlSecondsAfterFinished: 300
+    backoffLimit: 1
+    template:
+      spec:
+        serviceAccountName: training-worker
+        restartPolicy: Never
+        containers:
+          - name: training-worker
+            image: homework-central-api:latest
+            envFrom: [{ secretRef: { name: homework-central-runtime } }]
+            env:
+              - name: KubernetesTraining__RunOneQueued
+                value: "true"
+              # One-shot Jobs never register the in-process queue consumer.
+              - name: KubernetesTraining__DisableInProcessWorker
+                value: "true"
+            resources:
+              requests: { cpu: "750m", memory: "768Mi" }
+              limits: { cpu: "2", memory: "1536Mi" }
+  triggers:
+    - type: postgresql
+      metadata:
+        connectionFromEnv: POSTGRES_CONNECTION
+        query: SELECT COUNT(*) FROM "NeuralNetTrainingSessions" WHERE "Status" = 'Queued'
+        targetQueryValue: "1"
+      authenticationRef:
+        name: neural-net-training-postgres
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: neural-net-training-postgres
+  namespace: homework-central
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: homework-central-runtime
+      key: POSTGRES_CONNECTION

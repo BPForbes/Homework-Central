@@ -13,6 +13,7 @@ public static class PlatformRoleCatalog
             ["Student"] = PlatformRoles.Student,
             ["Staff"] = PlatformRoles.Staff,
             ["Tutor"] = PlatformRoles.Tutor,
+            ["TrialTutor"] = PlatformRoles.TrialTutor,
             ["SeniorTutor"] = PlatformRoles.SeniorTutor,
             ["HeadTutor"] = PlatformRoles.HeadTutor,
             ["Moderator"] = PlatformRoles.Moderator,
@@ -38,17 +39,18 @@ public static class PlatformRoleCatalog
 
     public static bool TryGetRoleNameFromBit(short bit, out string roleName)
     {
-        foreach (KeyValuePair<string, short> entry in RoleBits)
+        string? match = RoleBits
+            .Where(entry => entry.Value == bit)
+            .Select(entry => entry.Key)
+            .FirstOrDefault();
+        if (match is null)
         {
-            if (entry.Value == bit)
-            {
-                roleName = entry.Key;
-                return true;
-            }
+            roleName = string.Empty;
+            return false;
         }
 
-        roleName = string.Empty;
-        return false;
+        roleName = match;
+        return true;
     }
 
     public static bool TryGetCanonicalRoleName(string roleName, out string canonicalName, out short bit)
@@ -63,31 +65,30 @@ public static class PlatformRoleCatalog
         return true;
     }
 
-    public static short GetHighestRoleBit(IEnumerable<string> roleNames)
-    {
-        short highest = PlatformRoles.Guest;
-        foreach (string roleName in roleNames)
+    public static short GetHighestRoleBit(IEnumerable<string> roleNames) =>
+        roleNames.Aggregate(PlatformRoles.Guest, static (highest, roleName) =>
         {
-            if (TryGetRoleBit(roleName, out short bit) && bit > highest)
-                highest = bit;
-        }
+            if (!TryGetRoleBit(roleName, out short bit) || bit == PlatformRoles.TrialTutor)
+                return highest;
+            return bit > highest ? bit : highest;
+        });
 
-        return highest;
-    }
+    public static short GetHighestRoleBit(System.Collections.BitArray roleMask) =>
+        Enumerable.Range(PlatformRoles.Guest, PlatformRoles.Founder - PlatformRoles.Guest + 1)
+            .Select(static bit => (short)bit)
+            .Where(bit => bit < roleMask.Length && roleMask[bit])
+            .DefaultIfEmpty(PlatformRoles.Guest)
+            .Max();
 
-    public static short GetHighestRoleBit(System.Collections.BitArray roleMask)
+    /// <summary>
+    /// Returns true when <paramref name="targetRoleBit"/> is strictly below <paramref name="granterRoleBit"/>.
+    /// TrialTutor is treated as Tutor-level for grant checks so it remains grantable by HeadTutor+.
+    /// </summary>
+    public static bool CanGrantRole(short granterRoleBit, short targetRoleBit)
     {
-        short highest = PlatformRoles.Guest;
-        for (short bit = PlatformRoles.Guest; bit <= PlatformRoles.Founder; bit++)
-        {
-            if (bit < roleMask.Length && roleMask[bit] && bit > highest)
-                highest = bit;
-        }
-
-        return highest;
+        short effectiveTarget = targetRoleBit == PlatformRoles.TrialTutor
+            ? PlatformRoles.Tutor
+            : targetRoleBit;
+        return effectiveTarget < granterRoleBit;
     }
-
-    /// <summary>Returns true when <paramref name="targetRoleBit"/> is strictly below <paramref name="granterRoleBit"/>.</summary>
-    public static bool CanGrantRole(short granterRoleBit, short targetRoleBit) =>
-        targetRoleBit < granterRoleBit;
 }

@@ -67,13 +67,25 @@ public class BitmaskAuthorizationHandler(
             MaskType.Feature => mask.EffectiveFeatureMask,
             MaskType.Role => mask.EffectiveRoleMask,
             MaskType.GeneralSubject => mask.GeneralSubjectMask,
-            MaskType.SubjectExpertise => mask.SubjectExpertiseMasks
-                .FirstOrDefault(m => m.Category == requirement.SubjectCategory)?.ExpertiseMask,
+            MaskType.SubjectExpertise => ResolveSubjectExpertiseMask(mask, requirement.SubjectCategory),
             MaskType.Status => mask.StatusMask,
             _ => null,
         };
 
         return bitArray is not null && BitMask.HasBit(bitArray, requirement.Bit);
+    }
+
+    private static System.Collections.BitArray? ResolveSubjectExpertiseMask(
+        UserEffectiveMask mask,
+        string? subjectCategory)
+    {
+        if (subjectCategory is null)
+            return null;
+
+        // Prefer FirstOrDefault only after the category is known; callers pass one category per check.
+        return mask.SubjectExpertiseMasks
+            .FirstOrDefault(row => row.Category == subjectCategory)
+            ?.ExpertiseMask;
     }
 }
 
