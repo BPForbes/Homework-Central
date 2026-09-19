@@ -1,4 +1,4 @@
-# Shared CodeQL configuration for C# and JavaScript/TypeScript analysis.
+# Shared CodeQL configuration for C#, JavaScript/TypeScript, and Rust analysis.
 # See docs/COMMENT_DOCUMENTATION_GUIDE.md#analyzer-and-ci-expectations
 name: Homework Central
 
@@ -13,4 +13,5 @@ paths-ignore:
   - '**/.vite/**'
   - '**/bin/**'
   - '**/obj/**'
+  - '**/target/**'
   - 'llm-service/**'

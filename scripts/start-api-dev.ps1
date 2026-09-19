@@ -13,6 +13,7 @@
 #   scripts/start-api-dev.ps1 -PreRegistered
 #
 # Set HC_SKIP_DEV_WARMUP=1 only for repeat starts against an already initialized local database.
+# Set HC_SKIP_RUST_BUILD=1 to skip cargo build --workspace in rust/ (run-dev sets this after its compile).
 [CmdletBinding()]
 param(
     [switch]$SkipDocker,
@@ -33,8 +34,8 @@ $DevPostgresPassword = 'postgres'
 . (Join-Path $PSScriptRoot 'dev-stack-lib.ps1')
 
 $envValues = Ensure-DevEnvFile
-$connectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
-$adminConnectionString = "Host=localhost;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
+$connectionString = "Host=127.0.0.1;Port=$($envValues['POSTGRES_HOST_PORT']);Database=homework_central_master;Username=$DevPostgresUser;Password=$DevPostgresPassword"
+$adminConnectionString = "Host=127.0.0.1;Port=$($envValues['POSTGRES_HOST_PORT']);Database=postgres;Username=$DevPostgresUser;Password=$DevPostgresPassword"
 
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:ASPNETCORE_URLS = 'http://localhost:5000'
@@ -53,7 +54,7 @@ $env:DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER = '1'
 $useWatch = $env:HC_API_WATCH -ne '0'
 
 Write-Host 'Homework Central API - http://localhost:5000' -ForegroundColor Cyan
-Write-Host "Using Postgres user $DevPostgresUser on localhost:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
+Write-Host "Using Postgres user $DevPostgresUser on 127.0.0.1:$($envValues['POSTGRES_HOST_PORT']) (local dev)" -ForegroundColor DarkGray
 if ($useWatch) {
     Write-Host 'API watch enabled (dotnet watch). File changes / git pull rebuild or hot-reload the process.' -ForegroundColor DarkGray
     Write-Host 'Set HC_API_WATCH=0 for a one-shot run without watching.' -ForegroundColor DarkGray
@@ -69,16 +70,27 @@ if ($PreRegistered) {
 Push-Location $RepoRoot
 $browserProcess = $null
 try {
+    # -PreRegistered / HC_DEV_STACK_PREREGISTERED means the parent already took
+    # the refcount slot and started FCaptcha in the background. It does not mean
+    # 127.0.0.1 still answers: leftover .hc-dev-stack.state used to make run-dev
+    # stop Postgres after it had waited, and the watch rebuild is another window.
+    # Recheck (or start) Postgres unless the caller opted out. Do not compose-up
+    # FCaptcha here — the parent owns that even if /fcaptcha.js is not ready yet.
+    # Standalone start-api-dev still starts Postgres+FCaptcha via the core helper.
     if (-not $skipDocker) {
-        Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
-        Ensure-DevFCaptchaRunning -Port $envValues['FCAPTCHA_HOST_PORT']
+        if ($env:HC_DEV_STACK_PREREGISTERED -eq '1') {
+            Ensure-DevPostgresRunning -Port $envValues['POSTGRES_HOST_PORT']
+        }
+        else {
+            Ensure-DevStackCoreRunning -PostgresPort $envValues['POSTGRES_HOST_PORT'] -FCaptchaPort $envValues['FCAPTCHA_HOST_PORT']
+        }
         Ensure-DevClamAvRunning -Port $script:DevClamAvHostPort
     }
 
     if ($env:HC_SKIP_BROWSER_OPEN -ne '1') {
         $browserProcess = Start-DevStackPowerShellProcess -WindowStyle Hidden -PassThru -ArgumentList @(
             '-File', (Join-Path $ScriptRoot 'wait-and-open-browser.ps1'),
-            '-Url', 'http://localhost:5000/',
+            '-Url', 'http://localhost:5000/healthz',
             '-Label', 'API',
             '-MaxAttempts', '300'
         ) -WorkingDirectory $RepoRoot
@@ -86,6 +98,10 @@ try {
 
     $errorLog = Join-Path ([System.IO.Path]::GetTempPath()) ("hc-api-run-errors-{0}.log" -f ([guid]::NewGuid().ToString('N')))
     if (Test-Path $errorLog) { Remove-Item $errorLog -Force }
+
+    if ($env:HC_SKIP_RUST_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
+        Build-RustWorkspace
+    }
 
     if (-not $useWatch -and $env:HC_SKIP_DOTNET_BUILD -ne '1' -and $env:HC_SKIP_BUILD -ne '1') {
         Write-Host '==> Building API' -ForegroundColor DarkGray
@@ -102,9 +118,20 @@ try {
         $env:DOTNET_GCHeapHardLimit = '18000000'
     }
 
+    # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
+    $apiWatchArgs = @('--non-interactive')
+    # Watch owns recompiling every later edit, so it cannot take --no-build the way the one-shot
+    # branch below does — its startup build repeats the compile the caller just did. Skipping the
+    # restore is the one part that can be dropped without leaving watch unable to rebuild, and
+    # HC_SKIP_DOTNET_BUILD means a build (and therefore a restore) already succeeded against this
+    # tree. Adding a PackageReference mid-session then needs a restart rather than a hot reload.
+    if ($env:HC_SKIP_DOTNET_BUILD -eq '1') {
+        $apiWatchArgs += '--no-restore'
+    }
+    $apiWatchArgs += 'run'
+
     if ($useWatch) {
-        # --non-interactive: rude edits that cannot hot-reload restart instead of prompting.
-        dotnet watch --non-interactive run --project $ApiProject --no-launch-profile --urls http://localhost:5000 2>&1 |
+        dotnet watch @apiWatchArgs --project $ApiProject --no-launch-profile --urls http://localhost:5000 2>&1 |
             Tee-Object -FilePath $errorLog
     }
     else {

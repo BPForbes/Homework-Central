@@ -4,7 +4,7 @@ import { authApi } from '../api/authApi'
 import type { CoreMaskField, UserInfo } from '../types/auth'
 import type { CaptchaSubmission } from '../types/captcha'
 import { hasMaskBit } from '../utils/bitmask'
-import { clearAuthSession, getAccessToken, refreshSession, setAuthSession } from '../api/tokenManager'
+import { clearAuthSession, getAccessToken, isAuthRejection, refreshSession, setAuthSession } from '../api/tokenManager'
 
 interface AuthContextValue {
   user: UserInfo | null
@@ -35,24 +35,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const bootstrap = async () => {
+    let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+
+    const loadProfile = async () => {
       try {
         const token = getAccessToken()
         if (token) {
           const { data } = await authApi.me()
-          setUser(data)
+          if (!cancelled) {
+            setUser(data)
+            setIsLoading(false)
+          }
           return
         }
         const data = await refreshSession()
-        setUser(data.user)
-      } catch {
-        clearAuthSession()
-        setUser(null)
-      } finally {
-        setIsLoading(false)
+        if (!cancelled) {
+          setUser(data.user)
+          setIsLoading(false)
+        }
+      } catch (error) {
+        if (isAuthRejection(error) || !getAccessToken()) {
+          clearAuthSession()
+          if (!cancelled) {
+            setUser(null)
+            setIsLoading(false)
+          }
+          return
+        }
+        if (!cancelled) {
+          setIsLoading(true)
+          retryTimer = setTimeout(() => {
+            void loadProfile()
+          }, 4000)
+        }
       }
     }
-    void bootstrap()
+
+    void loadProfile()
+    return () => {
+      cancelled = true
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+    }
   }, [])
 
   useEffect(() => {

@@ -40,13 +40,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // IPv4 loopback: Windows `localhost` can resolve to ::1 while Kestrel is on 127.0.0.1.
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         configure: (proxy) => quietProxyConfigure(proxy),
       },
       '/hubs': {
-        target: 'http://localhost:5000',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         ws: true,
         configure: (proxy) => {
@@ -58,7 +59,7 @@ export default defineConfig({
         },
       },
       '/healthz': {
-        target: 'http://localhost:5000',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         configure: (proxy) => quietProxyConfigure(proxy),
       },

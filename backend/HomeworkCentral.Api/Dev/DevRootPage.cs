@@ -174,7 +174,7 @@ public static class DevRootPage
               <div class="message-body">
                 <h1 class="forbidden">403 - Forbidden Access is denied.</h1>
                 <p class="detail">You do not have access to this directory or page while using the credentials you supplied.</p>
-                <p class="hint">Homework Central API is running. Use the frontend or API routes instead.</p>
+                <p class="hint">This is the API, not the app. Open <a href="http://localhost:5173/login">http://localhost:5173/login</a> and wait until the API log says it is ready.</p>
               </div>
             </div>
           </main>

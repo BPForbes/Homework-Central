@@ -189,6 +189,7 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.ModerationChatMonit
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.TutoringChatMonitorNeuralNet>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.IChatMonitoringNeuralModelFactory, HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelFactory>();
 builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingProgressStore, HomeworkCentral.Api.Assessment.NeuralNetTrainingProgressStore>();
+builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAITrackingService, HomeworkCentral.Api.Assessment.AITrackingService>();
     builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingService, HomeworkCentral.Api.Assessment.NeuralNetTrainingService>();
     builder.Services.AddScoped<HomeworkCentral.Api.Assessment.SyntheticThreadScenarioGenerator>();
     builder.Services.AddScoped<HomeworkCentral.Api.Assessment.INeuralNetTrainingLlmModule, HomeworkCentral.Api.Assessment.NeuralNetTrainingLlmModule>();
@@ -199,12 +200,17 @@ builder.Services.AddSingleton<HomeworkCentral.Api.Assessment.INeuralNetTrainingC
 // API pods can host visualization/polling while KEDA ScaledJobs own training execution.
 bool disableInProcessTrainingWorker =
     builder.Configuration.GetValue<bool>("KubernetesTraining:DisableInProcessWorker");
-if (!disableInProcessTrainingWorker)
+bool pauseNeuralEnvironments =
+    HomeworkCentral.Api.Dev.DevNeuralEnvironmentPause.ShouldPause(builder.Configuration, builder.Environment);
+if (!disableInProcessTrainingWorker && !pauseNeuralEnvironments)
 {
     builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetTrainingWorker>();
 }
-builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
-builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelWarmupService>();
+if (!pauseNeuralEnvironments)
+{
+    builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.NeuralNetCheckpointRefreshService>();
+    builder.Services.AddHostedService<HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelWarmupService>();
+}
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICommunityScoreAggregator, HomeworkCentral.Api.Assessment.CommunityScoreAggregator>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.ICandidateStateService, HomeworkCentral.Api.Assessment.CandidateStateService>();
 builder.Services.AddScoped<HomeworkCentral.Api.Assessment.IAssessmentPipelineService, HomeworkCentral.Api.Assessment.AssessmentPipelineService>();
@@ -400,6 +406,10 @@ if (builder.Configuration.GetValue<bool>("KubernetesTraining:RunOneQueued"))
         skipDevStartupWarmup,
         devBypassEnabled,
         eagerPersonaProvisioning);
+    await ApplicationStartupWarmup.RunDeferredCatalogSeedAsync(
+        app.Services,
+        skipDevStartupWarmup,
+        devBypassEnabled);
     app.Services.GetRequiredService<IApplicationReadiness>().MarkReady();
 
     using IServiceScope kubernetesJobScope = app.Services.CreateScope();

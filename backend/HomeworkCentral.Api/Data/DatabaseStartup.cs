@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using HomeworkCentral.Api.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,33 +10,56 @@ namespace HomeworkCentral.Api.Data;
 /// <summary>Creates databases and applies migrations with retries for Docker warm-up.</summary>
 public static class DatabaseStartup
 {
-    private const int MaxAttempts = 10;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
+    internal const int MaxAttempts = 10;
+    internal static TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
 
     public static async Task InitializeDevelopmentAsync(
         IServiceProvider services,
         CancellationToken ct = default)
     {
-        for (int attempt = 1; attempt <= MaxAttempts; attempt++)
+        int attempt = 0;
+        while (true)
         {
+            ct.ThrowIfCancellationRequested();
+            attempt++;
             try
             {
                 await InitializeOnceAsync(services, ct);
                 return;
             }
-            catch (Exception ex) when (IsTransient(ex) && attempt < MaxAttempts)
+            catch (Exception ex) when (ShouldRetryDevelopment(ex, attempt))
             {
                 ILogger<Program>? logger = services.GetService<ILogger<Program>>();
-                logger?.LogWarning(
-                    ex,
-                    "Database startup attempt {Attempt}/{MaxAttempts} failed; retrying in {DelaySeconds}s",
-                    attempt,
-                    MaxAttempts,
-                    RetryDelay.TotalSeconds);
+                if (IsHostUnreachable(ex))
+                {
+                    logger?.LogWarning(
+                        ex,
+                        "Database startup attempt {Attempt} failed: Postgres is not accepting host connections. "
+                        + "Keep Docker Postgres running (do not reset the volume for a refused connection); retrying in {DelaySeconds}s",
+                        attempt,
+                        RetryDelay.TotalSeconds);
+                }
+                else
+                {
+                    logger?.LogWarning(
+                        ex,
+                        "Database startup attempt {Attempt}/{MaxAttempts} failed; retrying in {DelaySeconds}s",
+                        attempt,
+                        MaxAttempts,
+                        RetryDelay.TotalSeconds);
+                }
 
                 await Task.Delay(RetryDelay, ct);
             }
         }
+    }
+
+    internal static bool ShouldRetryDevelopment(Exception ex, int attempt)
+    {
+        if (IsHostUnreachable(ex))
+            return true;
+
+        return IsTransient(ex) && attempt < MaxAttempts;
     }
 
     private static async Task InitializeOnceAsync(IServiceProvider services, CancellationToken ct)
@@ -61,7 +85,7 @@ public static class DatabaseStartup
         logger?.LogInformation("Master database migrations complete.");
     }
 
-    private static bool IsTransient(Exception ex)
+    internal static bool IsTransient(Exception ex)
     {
         for (Exception? current = ex; current is not null; current = current.InnerException)
         {
@@ -76,7 +100,22 @@ public static class DatabaseStartup
                     return true;
             }
 
-            if (current is NpgsqlException or TimeoutException or IOException)
+            if (current is NpgsqlException or TimeoutException or IOException or SocketException)
+                return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsHostUnreachable(Exception ex)
+    {
+        for (Exception? current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is SocketException)
+                return true;
+
+            if (current is NpgsqlException npgsql
+                && npgsql.Message.Contains("Failed to connect", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 

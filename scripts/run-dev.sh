@@ -2,14 +2,17 @@
 # Start the full Homework Central local dev stack (Postgres, API, frontend).
 #
 # Usage:
-#   scripts/run-dev.sh              # build + run everything
+#   scripts/run-dev.sh              # build + run; Postgres first, FCaptcha not joined before API
+#   scripts/run-dev.sh --stripped   # also pause neural environments; FCaptcha not joined before API
 #   scripts/run-dev.sh --build-only # compile only (no servers)
 #   scripts/run-dev.sh --help
 #
 # Environment:
 #   HC_SKIP_DOTNET_BUILD=1  Skip dotnet build only (set by IDE after a fresh compile)
+#   HC_SKIP_RUST_BUILD=1    Skip cargo build --workspace in rust/
 #   HC_SKIP_DOCKER=1        Skip starting Postgres via Docker (use existing DB)
 #   HC_SKIP_DEV_WARMUP=1   Skip development migrations/seeds for a known-warm local database
+#   HC_DEV_STRIPPED=1       Pause leftover neural training and skip neural warmup/refresh
 #   HC_DEV_BYPASS=1         Set for the API child process (enables /devlogin backend)
 #   VITE_HC_DEV_BYPASS=true Set for the frontend (enables /devlogin route)
 set -euo pipefail
@@ -18,8 +21,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/dev-stack-lib.sh
 source "$REPO_ROOT/scripts/dev-stack-lib.sh"
 API_PROJECT="$REPO_ROOT/backend/HomeworkCentral.Api/HomeworkCentral.Api.csproj"
-POSTGRES_HOST_CHECK_PROJECT="$REPO_ROOT/scripts/PostgresHostCheck/PostgresHostCheck.csproj"
-POSTGRES_HOST_CHECK_DLL="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 ENV_FILE="$REPO_ROOT/.env"
 DEV_POSTGRES_USER="postgres"
@@ -27,11 +28,13 @@ DEV_POSTGRES_PASSWORD="postgres"
 DEV_POSTGRES_HOST_PORT="5434"
 DEV_POSTGRES_HOST_PORT_MIN=5434
 DEV_POSTGRES_HOST_PORT_MAX=5450
+DEV_POSTGRES_CONNECT_HOST="127.0.0.1"
 # Matches docker-compose.yml's `fcaptcha` service default and appsettings.Development.json's
 # FCaptcha:ServerUrl override.
 FCAPTCHA_HOST_PORT="${DEV_STACK_FCAPTCHA_HOST_PORT}"
 BUILD_ONLY=false
 SKIP_DOCKER=false
+STRIPPED=false
 HC_API_BUILD_FAILED=0
 JWT_SECRET=""
 FCAPTCHA_SECRET=""
@@ -48,7 +51,14 @@ Usage:
 Options:
   --build-only   Compile the API and install frontend deps; do not start servers
   --skip-docker  Do not start Postgres via Docker (expects DB on localhost)
+  --stripped     Pause leftover neural training and skip neural warmup/refresh
+                 (also set HC_DEV_STRIPPED=1). Does not change Docker start order.
   --help         Show this help
+
+Default start brings Postgres up with the existing helper and backgrounds
+FCaptcha so a cold captcha image build is not joined before the API. The API
+does not start until Postgres accepts connections on
+127.0.0.1:<POSTGRES_HOST_PORT>.
 
 For rapid restarts after a successful start, set HC_SKIP_DEV_WARMUP=1 to skip
 development migrations and seeds. Unset it after pulling migrations/catalog changes
@@ -63,7 +73,7 @@ Stop:
   scripts/stop-dev.sh
   Ctrl+C in this terminal also stops Docker Postgres and frees its port.
 
-Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+
+Requires: Docker (for Postgres), .NET 10 SDK, Node.js 18+, Rust stable (rustup; cargo build --workspace)
 EOF
 }
 
@@ -91,6 +101,10 @@ parse_args() {
         SKIP_DOCKER=true
         shift
         ;;
+      --stripped)
+        STRIPPED=true
+        shift
+        ;;
       --help|-h)
         usage
         exit 0
@@ -103,6 +117,10 @@ parse_args() {
 
   if [[ "${HC_SKIP_DOCKER:-}" == "1" ]]; then
     SKIP_DOCKER=true
+  fi
+
+  if [[ "${HC_DEV_STRIPPED:-}" == "1" ]]; then
+    STRIPPED=true
   fi
 }
 
@@ -135,34 +153,44 @@ ensure_env_file() {
   resolve_postgres_host_port
 }
 
-loopback_port_in_use() {
+host_port_in_use() {
   local port="$1"
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | grep -E ":${port}([[:space:]]|$)" >/dev/null && return 0
+    return 1
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  fi
 
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
       if command -v powershell.exe >/dev/null 2>&1; then
         powershell.exe -NoProfile -Command "
           \$c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-            Where-Object { \$_.LocalAddress -in @('127.0.0.1', '::1') } |
             Select-Object -First 1
           if (\$null -ne \$c) { exit 0 } else { exit 1 }
         " >/dev/null 2>&1
         return $?
       fi
-      netstat -ano 2>/dev/null | grep LISTENING | grep -E "127\.0\.0\.1:${port}[[:space:]]" >/dev/null && return 0
-      netstat -ano 2>/dev/null | grep LISTENING | grep -E "\[::1\]:${port}[[:space:]]" >/dev/null && return 0
-      return 1
-      ;;
-    *)
+      netstat -ano 2>/dev/null | grep LISTENING | grep -E ":${port}[[:space:]]" >/dev/null && return 0
       return 1
       ;;
   esac
+
+  return 1
 }
 
 find_free_postgres_host_port() {
   local port
+  local exclude_port="${1:-}"
   for ((port = DEV_POSTGRES_HOST_PORT_MIN; port <= DEV_POSTGRES_HOST_PORT_MAX; port++)); do
-    if loopback_port_in_use "$port"; then
+    if [[ -n "$exclude_port" && "$port" == "$exclude_port" ]]; then
+      continue
+    fi
+    if host_port_in_use "$port"; then
       continue
     fi
     printf '%s' "$port"
@@ -171,14 +199,39 @@ find_free_postgres_host_port() {
   return 1
 }
 
+suggested_postgres_host_port() {
+  local failed_port="$1"
+  local free_port
+  free_port="$(find_free_postgres_host_port "$failed_port" || true)"
+  if [[ -n "$free_port" ]]; then
+    printf '%s' "$free_port"
+    return 0
+  fi
+  if (( failed_port < DEV_POSTGRES_HOST_PORT_MAX )); then
+    printf '%s' "$((failed_port + 1))"
+  else
+    printf '%s' "$DEV_POSTGRES_HOST_PORT_MIN"
+  fi
+}
+
+our_postgres_published_on() {
+  local published
+  published="$(get_postgres_published_port || true)"
+  [[ -n "$published" && "$published" == "$1" ]]
+}
+
 resolve_postgres_host_port() {
-  if ! loopback_port_in_use "$POSTGRES_HOST_PORT"; then
+  if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  if ! host_port_in_use "$POSTGRES_HOST_PORT"; then
     return 0
   fi
 
   local free_port
-  log "Port ${POSTGRES_HOST_PORT} is bound on 127.0.0.1 by another PostgreSQL install (localhost would not reach Docker)"
-  free_port="$(find_free_postgres_host_port || true)"
+  log "Port ${POSTGRES_HOST_PORT} is already in use on this machine (${DEV_POSTGRES_CONNECT_HOST} would not reach Docker)"
+  free_port="$(find_free_postgres_host_port "$POSTGRES_HOST_PORT" || true)"
   [[ -n "$free_port" ]] || fail "No free Postgres host port found between ${DEV_POSTGRES_HOST_PORT_MIN} and ${DEV_POSTGRES_HOST_PORT_MAX}"
 
   log "Using POSTGRES_HOST_PORT=${free_port} instead"
@@ -189,6 +242,7 @@ resolve_postgres_host_port() {
 set_compose_env() {
   export POSTGRES_PASSWORD="$DEV_POSTGRES_PASSWORD"
   export POSTGRES_HOST_PORT
+  export FCAPTCHA_HOST_PORT
 }
 
 invoke_postgres_admin_sql() {
@@ -212,37 +266,34 @@ get_postgres_published_port() {
 test_postgres_host_connection() {
   local published
   local attempt
-  local output
-  local status
 
   published="$(get_postgres_published_port || true)"
   if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
-    log "Docker Postgres is not published on localhost:${POSTGRES_HOST_PORT} (container maps to ${published})"
+    log "Docker Postgres is not published on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} (container maps to ${published})"
     return 1
   fi
 
-  if [[ ! -f "$POSTGRES_HOST_CHECK_DLL" ]]; then
-    build_postgres_host_check
-  fi
-
   for ((attempt = 1; attempt <= 10; attempt++)); do
-    output="$(dotnet "$POSTGRES_HOST_CHECK_DLL" "$POSTGRES_HOST_PORT" 2>&1)"
-    status=$?
-    if [[ $status -eq 0 ]]; then
+    if test_dev_postgres_connection "$POSTGRES_HOST_PORT"; then
       return 0
     fi
     sleep 1
   done
 
-  log "Cannot connect to homework_central_master on localhost:${POSTGRES_HOST_PORT} from the host"
-  if [[ -n "$output" ]]; then
-    printf '       %s\n' "$output"
+  log "Cannot connect to homework_central_master on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} from the host"
+  if [[ -n "${DEV_POSTGRES_HOST_CHECK_DETAIL:-}" ]]; then
+    printf '       %s\n' "$DEV_POSTGRES_HOST_CHECK_DETAIL"
   fi
   return 1
 }
 
-test_postgres_auth() {
-  local database="${1:-postgres}"
+# Proves that a database exists and answers a query inside the container. It does not prove
+# the volume's password: initdb writes `host all all 127.0.0.1/32 trust` ahead of the image's
+# scram-sha-256 rule, so this loopback session authenticates against no password and succeeds
+# on a volume whose password is not the dev one. test_dev_postgres_credentials_rejected, which
+# looks in from the host, is the check for that.
+test_postgres_database_in_container() {
+  local database="$1"
   docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" exec -T postgres \
     sh -c "PGPASSWORD='$DEV_POSTGRES_PASSWORD' psql -h 127.0.0.1 -p 5432 -U $DEV_POSTGRES_USER -d $database -tAc 'SELECT 1'" >/dev/null 2>&1
 }
@@ -276,54 +327,102 @@ prepare_homework_central_master_database() {
     invoke_postgres_admin_sql "ALTER DATABASE homework_central_master REFRESH COLLATION VERSION;"
   fi
 
-  if ! test_postgres_auth homework_central_master; then
+  if ! test_postgres_database_in_container homework_central_master; then
     return 1
   fi
 
   return 0
 }
 
-start_postgres_container() {
+start_core_containers() {
+  local force_recreate="${1:-0}"
   local published
   published="$(get_postgres_published_port || true)"
 
-  if [[ -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ]]; then
-    log "Recreating Postgres container for localhost:${POSTGRES_HOST_PORT}"
-    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d --force-recreate postgres
-  else
-    docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" up -d postgres
+  if [[ "$force_recreate" != "1" ]] && test_dev_fcaptcha_connection "$FCAPTCHA_HOST_PORT" \
+    && ! test_dev_fcaptcha_secret_aligned; then
+    force_recreate=1
+    log "Recreating Docker FCaptcha (FCAPTCHA_SECRET changed in .env)"
+  fi
+
+  if [[ "$force_recreate" == "1" || ( -n "$published" && "$published" != "$POSTGRES_HOST_PORT" ) ]]; then
+    log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
+    start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 1 || return 1
+    return 0
+  fi
+
+  log "Starting Postgres (${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}); FCaptcha continues in the background"
+  start_dev_stack_postgres_then_fcaptcha_background "$POSTGRES_HOST_PORT" "$FCAPTCHA_HOST_PORT" 0 || return 1
+}
+
+# Removes the Postgres container and the volume behind its data directory, leaving the caller to
+# start it again. `docker compose down -v` would also take llmdata, uploads, and miniodata, which
+# costs a developer their Ollama models and attachment blobs for a fault that lives in the Postgres
+# data directory alone; scripts/reset-dev-db.sh stays the way to ask for the wider wipe.
+#
+# The volume name is read off the container rather than composed from the project name, because
+# Compose derives that name from the checkout directory.
+reset_postgres_volume() {
+  local container
+  local volume
+
+  log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
+  container="$(docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" ps -q postgres 2>/dev/null | tr -d '\r\n' || true)"
+  [[ -n "$container" ]] || fail "Cannot identify the Postgres container to reset. Run: scripts/reset-dev-db.sh --yes"
+
+  volume="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$container" 2>/dev/null | tr -d '\r\n' || true)"
+  [[ -n "$volume" ]] || fail "Cannot identify the Postgres data volume to reset. Run: scripts/reset-dev-db.sh --yes"
+
+  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" rm --stop --force postgres >/dev/null 2>&1 || true
+  docker volume rm "$volume" >/dev/null 2>&1 || fail "Failed to remove Postgres Docker volume ${volume}"
+}
+
+# Recreates the Postgres volume when the server rejects the dev credentials. The password is
+# initialised into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT
+# can change it — both only republish the same 28P01 on a new port.
+#
+# Confined to a port our own container publishes. A foreign Postgres answering there has a
+# volume that is not ours to destroy, and it is repair_postgres_host_reachability's port
+# relocation that gets run-dev off it.
+reset_stale_postgres_volume() {
+  if ! test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  if ! our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    log "Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} rejects the dev credentials but is not our container; leaving its volume alone"
+    return 0
+  fi
+
+  log "Postgres rejected postgres/postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} (stale Docker volume with a different password)"
+  reset_postgres_volume
+  start_core_containers || true
+  wait_core_before_api || true
+  if test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT"; then
+    fail "Postgres still rejects postgres/postgres after recreating the Docker volume"
   fi
 }
 
-reset_postgres_volume() {
-  log "Recreating Postgres Docker volume (reset to postgres/postgres credentials)"
-  docker compose -f "$REPO_ROOT/docker-compose.yml" --env-file "$ENV_FILE" down -v --remove-orphans >/dev/null
+wait_core_before_api() {
+  log "Waiting for Postgres (FCaptcha continues in the background)"
+  wait_for_postgres
 }
 
 ensure_postgres_ready() {
   set_compose_env
 
-  start_postgres_container
-  log "Waiting for Postgres to accept connections"
-  wait_for_postgres
-
-  if ! test_postgres_auth postgres; then
-    log "Postgres rejected postgres/postgres (stale Docker volume with a different password)"
-    reset_postgres_volume
-    start_postgres_container
-    log "Waiting for Postgres to accept connections"
-    wait_for_postgres
-    if ! test_postgres_auth postgres; then
-      fail "Postgres password verification failed after recreating the Docker volume"
-    fi
+  start_core_containers || fail "Failed to start Postgres. Check: docker compose logs"
+  if ! wait_core_before_api; then
+    repair_postgres_host_reachability
   fi
+
+  reset_stale_postgres_volume
 
   if ! prepare_homework_central_master_database; then
     log "Postgres volume is unhealthy (collation mismatch); recreating"
     reset_postgres_volume
-    start_postgres_container
-    log "Waiting for Postgres to accept connections"
-    wait_for_postgres
+    start_core_containers || true
+    wait_core_before_api || true
 
     if ! prepare_homework_central_master_database; then
       fail "Failed to prepare homework_central_master inside the Docker Postgres container"
@@ -331,21 +430,102 @@ ensure_postgres_ready() {
   fi
 
   if ! test_postgres_host_connection; then
-    fail "Failed to reach homework_central_master on localhost:${POSTGRES_HOST_PORT}. If another PostgreSQL install owns that port, pick a free port in .env (for example POSTGRES_HOST_PORT=5434), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh"
+    repair_postgres_host_reachability
   fi
 }
 
+postgres_host_failure_message() {
+  local port="$1"
+  local example
+  local hint=""
+  example="$(suggested_postgres_host_port "$port")"
+  if our_postgres_published_on "$port"; then
+    hint=" Docker published ${DEV_POSTGRES_CONNECT_HOST}:${port} but the host still cannot open homework_central_master."
+  elif host_port_in_use "$port"; then
+    hint=" Port ${port} is already in use on this machine, so ${DEV_POSTGRES_CONNECT_HOST} does not reach the Docker container."
+  fi
+  printf 'Failed to reach homework_central_master on %s:%s.%s Pick a free port in .env (for example POSTGRES_HOST_PORT=%s), then run: scripts/reset-dev-db.sh --yes && scripts/run-dev.sh' \
+    "$DEV_POSTGRES_CONNECT_HOST" "$port" "$hint" "$example"
+}
+
+repair_postgres_host_reachability() {
+  # Our own volume initialised with a different password answers every port the same way, so
+  # recreating the container and relocating POSTGRES_HOST_PORT cannot repair it. Leave that fault to
+  # reset_stale_postgres_volume, which the caller runs next. A foreign Postgres rejecting the same
+  # credentials still belongs here, because relocating off its port is the only repair available.
+  if test_dev_postgres_credentials_rejected "$POSTGRES_HOST_PORT" \
+    && our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    return 0
+  fi
+
+  if our_postgres_published_on "$POSTGRES_HOST_PORT"; then
+    log "Host cannot reach Docker Postgres on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}; recreating the container"
+    start_core_containers 1 || fail "Failed to recreate Postgres. Check: docker compose logs"
+    wait_core_before_api || true
+    if ! prepare_homework_central_master_database; then
+      fail "Failed to prepare homework_central_master after recreating Docker Postgres"
+    fi
+    if test_postgres_host_connection; then
+      return 0
+    fi
+  fi
+
+  local failed_port="$POSTGRES_HOST_PORT"
+  local free_port
+  free_port="$(find_free_postgres_host_port "$failed_port" || true)"
+  if [[ -z "$free_port" ]]; then
+    fail "$(postgres_host_failure_message "$failed_port")"
+  fi
+
+  log "Host cannot reach homework_central_master on ${DEV_POSTGRES_CONNECT_HOST}:${failed_port}. Using POSTGRES_HOST_PORT=${free_port} instead"
+  POSTGRES_HOST_PORT="$free_port"
+  set_env_var "POSTGRES_HOST_PORT" "$POSTGRES_HOST_PORT"
+  set_compose_env
+  start_core_containers 1 || fail "Failed to start Postgres after changing POSTGRES_HOST_PORT. Check: docker compose logs"
+  wait_core_before_api || true
+  if ! prepare_homework_central_master_database; then
+    fail "Failed to prepare homework_central_master after changing POSTGRES_HOST_PORT"
+  fi
+  if ! test_postgres_host_connection; then
+    fail "$(postgres_host_failure_message "$POSTGRES_HOST_PORT")"
+  fi
+}
+
+# Returns 0 when the host reaches Postgres, 1 when in-container Postgres is up but the
+# published port does not reach it, and `fail`s when Postgres never came up inside the
+# container, which no caller can repair.
+#
+# Readiness here is host reachability, not a usable homework_central_master: this wait runs
+# before prepare_homework_central_master_database creates that database and before
+# reset_stale_postgres_volume recreates a volume whose password does not match, so requiring
+# either would never clear.
 wait_for_postgres() {
-  local attempts=30
-  local i
-  for ((i = 1; i <= attempts; i++)); do
+  local timeout_seconds=60
+  local deadline=$((SECONDS + timeout_seconds))
+  local ready_in_container=false
+  while true; do
     if docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres \
       pg_isready -U postgres -d postgres >/dev/null 2>&1; then
-      return 0
+      ready_in_container=true
+      if test_dev_postgres_host_reachable "$POSTGRES_HOST_PORT"; then
+        return 0
+      fi
+    fi
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      break
     fi
     sleep 1
   done
-  fail "Postgres did not become ready within ${attempts}s"
+
+  if [[ "$ready_in_container" == false ]]; then
+    fail "Postgres did not become ready inside the Docker container within ${timeout_seconds}s. Check: docker compose logs postgres"
+  fi
+
+  # In-container Postgres is up but the published port does not reach it. Report instead of
+  # failing: ensure_postgres_ready hands this to repair_postgres_host_reachability, which
+  # recreates the container or moves POSTGRES_HOST_PORT to a free port.
+  log "Postgres is ready in the container but ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} does not reach it: ${DEV_POSTGRES_HOST_CHECK_DETAIL:-no detail}"
+  return 1
 }
 
 start_postgres() {
@@ -354,19 +534,8 @@ start_postgres() {
     fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
   fi
 
-  log "Starting Postgres (Docker) on localhost:${POSTGRES_HOST_PORT}"
+  log "Starting Postgres (Docker) on ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT}"
   ensure_postgres_ready
-}
-
-start_fcaptcha() {
-  require_cmd docker
-  if ! docker info >/dev/null 2>&1; then
-    fail "Docker is not running. Start Docker Desktop (or the Docker daemon) and retry."
-  fi
-
-  log "Starting FCaptcha (Docker) on localhost:${FCAPTCHA_HOST_PORT}"
-  ensure_dev_fcaptcha_running "$FCAPTCHA_HOST_PORT" \
-    || fail "Failed to start the FCaptcha Docker container on localhost:${FCAPTCHA_HOST_PORT}. Check: docker compose logs fcaptcha"
 }
 
 start_clamav() {
@@ -383,35 +552,6 @@ start_clamav() {
   log "Starting ClamAV (Docker) on localhost:${DEV_STACK_CLAMAV_HOST_PORT}"
   ensure_dev_clamav_running "$DEV_STACK_CLAMAV_HOST_PORT" \
     || fail "Failed to start the ClamAV Docker container on localhost:${DEV_STACK_CLAMAV_HOST_PORT}. Check: docker compose logs clamav"
-}
-
-build_postgres_host_check() {
-  dotnet build "$POSTGRES_HOST_CHECK_PROJECT" -c Debug -v q >/dev/null
-}
-
-build_postgres_host_check_if_needed() {
-  local dll="$REPO_ROOT/scripts/PostgresHostCheck/bin/Debug/net10.0/PostgresHostCheck.dll"
-  # Compare against the project file *and* every .cs source under it, not just the .csproj —
-  # otherwise a source-only edit (no .csproj change) is wrongly treated as already fresh and
-  # this script keeps running the stale compiled checker.
-  if [[ -f "$dll" ]]; then
-    local project_dir
-    project_dir="$(dirname "$POSTGRES_HOST_CHECK_PROJECT")"
-    local stale=false
-    while IFS= read -r -d '' source_file; do
-      if [[ "$source_file" -nt "$dll" ]]; then
-        stale=true
-        break
-      fi
-    done < <(find "$project_dir" -name '*.cs' -print0)
-
-    if [[ "$stale" == false && ! "$POSTGRES_HOST_CHECK_PROJECT" -nt "$dll" ]]; then
-      log "Postgres host check already built"
-      return
-    fi
-  fi
-
-  build_postgres_host_check
 }
 
 build_projects() {
@@ -432,11 +572,18 @@ build_projects() {
     log "Frontend dependencies already installed"
   fi
 
+  local rust_build_pid=""
+  if [[ "${HC_SKIP_RUST_BUILD:-}" != "1" && "${HC_SKIP_BUILD:-}" != "1" ]]; then
+    require_rust_cargo || fail "Rust cargo build --workspace failed"
+    build_rust_workspace &
+    rust_build_pid=$!
+  fi
+
   local api_build_pid=""
   local api_build_log=""
   if [[ "$skip_dotnet" == false ]]; then
     require_cmd dotnet
-    log "Building API (parallel with frontend typecheck)"
+    log "Building API (parallel with frontend typecheck and Rust)"
     api_build_log="$(mktemp /tmp/hc-api-build-errors-XXXXXX.log)"
     dotnet build "$API_PROJECT" -c Debug >"$api_build_log" 2>&1 &
     api_build_pid=$!
@@ -471,8 +618,19 @@ build_projects() {
     fi
   fi
 
+  local rust_build_failed=false
+  if [[ -n "$rust_build_pid" ]]; then
+    if ! wait "$rust_build_pid"; then
+      rust_build_failed=true
+    fi
+  fi
+
   if [[ "$frontend_typecheck_failed" == true ]]; then
     fail "frontend typecheck failed"
+  fi
+
+  if [[ "$rust_build_failed" == true ]]; then
+    fail "Rust cargo build --workspace failed"
   fi
 
   if [[ "$postgres_host_check_failed" == true ]]; then
@@ -518,10 +676,6 @@ supervise_children() {
 }
 
 run_stack() {
-  if [[ "$SKIP_DOCKER" == false ]]; then
-    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
-  fi
-
   local api_ready=0
   BACKEND_PID=""
 
@@ -535,9 +689,11 @@ run_stack() {
   if [[ "$HC_API_BUILD_FAILED" -eq 0 ]]; then
     log "Starting API on http://localhost:5000"
     if [[ "$SKIP_DOCKER" == true ]]; then
-      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=1 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 \
+        HC_DEV_STRIPPED="${HC_DEV_STRIPPED:-}" "$REPO_ROOT/scripts/start-api-dev.sh" &
     else
-      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 "$REPO_ROOT/scripts/start-api-dev.sh" &
+      HC_SKIP_DOCKER=0 HC_SKIP_DOTNET_BUILD=1 HC_SKIP_RUST_BUILD=1 HC_DEV_STACK_PREREGISTERED=1 HC_DEV_BYPASS=1 HC_SKIP_BROWSER_OPEN=1 \
+        HC_DEV_STRIPPED="${HC_DEV_STRIPPED:-}" "$REPO_ROOT/scripts/start-api-dev.sh" &
     fi
     BACKEND_PID=$!
     api_ready=1
@@ -545,12 +701,8 @@ run_stack() {
     log "Skipping API start because the build failed (see API Build Errors browser tab)"
   fi
 
-  if [[ "$api_ready" -eq 1 ]]; then
-    "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5000/" "API" 300 &
-    API_BROWSER_PID=$!
-  else
-    API_BROWSER_PID=""
-  fi
+  # API GET / is an intentional 403 landing page; the app is the Vite login route.
+  API_BROWSER_PID=""
   "$REPO_ROOT/scripts/wait-and-open-browser.sh" "http://localhost:5173/login" "Frontend" 300 &
   FRONTEND_BROWSER_PID=$!
 
@@ -577,7 +729,7 @@ run_stack() {
     log "  API:      unavailable (check API Build Errors or API terminal output)"
   fi
   if [[ "$SKIP_DOCKER" == false ]]; then
-    log "  Postgres: localhost:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
+    log "  Postgres: ${DEV_POSTGRES_CONNECT_HOST}:${POSTGRES_HOST_PORT} (Docker; stops on exit)"
     log "  FCaptcha: localhost:${FCAPTCHA_HOST_PORT} (Docker; stops on exit)"
   fi
   log "Press Ctrl+C to stop servers and free the Postgres port"
@@ -601,6 +753,11 @@ main() {
   require_cmd dotnet
   require_cmd npm
 
+  if [[ "$STRIPPED" == true ]]; then
+    export HC_DEV_STRIPPED=1
+    log "Stripped mode: leftover neural training sessions will be paused; neural warmup/refresh will not start; FCaptcha is not joined before the API"
+  fi
+
   ensure_env_file
   build_projects
 
@@ -610,8 +767,11 @@ main() {
   fi
 
   if [[ "$SKIP_DOCKER" == false ]]; then
+    # Stop a leftover managed session *before* start_postgres waits on the published
+    # port. Doing this afterwards tears down the container that wait just cleared,
+    # and the API child used to skip its own wait because HC_DEV_STACK_PREREGISTERED=1.
+    init_dev_stack_state "$POSTGRES_HOST_PORT" 2
     start_postgres
-    start_fcaptcha
     start_clamav
   else
     log "Skipping Docker Postgres, FCaptcha and ClamAV (HC_SKIP_DOCKER / --skip-docker)"

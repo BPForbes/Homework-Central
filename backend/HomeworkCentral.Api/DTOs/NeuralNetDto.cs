@@ -53,7 +53,7 @@ public sealed class NeuralNetVisualizerModelDto
     public string CascadeComposition { get; set; } = "g(f(x))";
     public string ChainRuleSummary { get; set; } = "∂C/∂θ_f = (∂C/∂f)(∂f/∂θ_f)";
     /// <summary>Checkpoint/runtime lineage id; Math.NET-backed engine keeps HashedMlpV8 packing.</summary>
-    public string RuntimeKind { get; set; } = "HashedMlpV8";
+    public string RuntimeKind { get; set; } = HomeworkCentral.Api.Assessment.ChatMonitoringNeuralModelHashedMlp.RuntimeKind;
 }
 
 public sealed class NeuralNetVisualizerDto
@@ -77,7 +77,7 @@ public sealed class StartNeuralNetTrainingRequest
     public NeuralTrainingMode Mode { get; set; } = NeuralTrainingMode.Both;
 
     /// <summary>
-    /// When true, train one ticket / one message at a time until the session is stopped.
+    /// When true, train one ticket / one message at a time until the session is paused.
     /// <see cref="TicketCount"/> is ignored; stored as RequestedTicketCount = 0.
     /// TicketCount &lt;= 0 is also treated as continuous so a missing flag cannot become a one-shot run.
     /// </summary>
@@ -105,6 +105,8 @@ public sealed class NeuralNetTrainingSessionDto
 
 public sealed class NeuralNetTrainingLiveProgressDto
 {
+    public Guid SessionId { get; set; }
+
     public string Phase { get; set; } = string.Empty;
     public int TicketsRequested { get; set; }
     public int TicketsGenerated { get; set; }

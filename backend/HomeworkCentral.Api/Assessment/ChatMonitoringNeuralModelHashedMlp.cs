@@ -17,7 +17,13 @@ namespace HomeworkCentral.Api.Assessment;
 /// </summary>
 public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeuralModelTelemetry
 {
-    public const string RuntimeKind = "HashedMlpV8";
+    /// <summary>
+    /// Bumped from HashedMlpV8 when the semantic region widened the input from 86 to
+    /// <see cref="ChatMonitoringFeatureEncoder.FeatureCount"/>. NeuralNetCheckpointStore filters
+    /// on this, so older checkpoints stay in the table but are never restored into a network of a
+    /// different shape; the two lineages simply coexist.
+    /// </summary>
+    public const string RuntimeKind = "SemanticMlpV9";
     private const float LearningRate = .035f;
     private const float MomentumCoefficient = .9f;
     private const float MaxAbsGradient = 5f;
@@ -26,7 +32,19 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
     private readonly NeuralNetwork network;
     private readonly NeuralNetTopologySnapshot topology;
     private readonly Queue<SupportExample> support = new();
+    private readonly HostLru predictionMemo = new(64);
     private readonly object gate = new();
+    private static readonly ForwardPropagationTrace EmptyForwardTrace = new(
+        [],
+        [],
+        [],
+        [],
+        [],
+        0f,
+        0f,
+        0f,
+        0f,
+        0f);
 
     protected ChatMonitoringNeuralModelHashedMlp(
         NeuralModelKindChatMonitoring kind,
@@ -77,7 +95,8 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
     public ChatMonitoringNeuralModelPrediction Predict(ChatMonitoringNeuralModelInput input)
     {
-        lock (gate) return PredictUnlocked(input).Prediction;
+        // Predict discards the forward trace, so always take the memo path.
+        lock (gate) return PredictUnlocked(input, captureTrace: false).Prediction;
     }
 
     public ChatMonitoringNeuralModelInferenceTrace PredictWithTrace(ChatMonitoringNeuralModelInput input)
@@ -145,6 +164,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
         lock (gate)
         {
+            predictionMemo.Clear();
             int n = examples.Count;
             NeuralNetworkGradientBuffers gradients = network.CreateGradientBuffers();
             List<TrainingIterationReplay> iterations = [];
@@ -170,6 +190,10 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 float[][] encoded = batch.Select(example => ChatMonitoringFeatureEncoder.Encode(example.Input)).ToArray();
                 int[] categoryIndices = batch.Select(ResolveCategoryIndex).ToArray();
+                List<float[]?> categoryDistributions = batch.Select(ResolveCategoryDistribution).ToList();
+                // NeuralTorchMixedHeadBatch takes hard class indices, so a batch carrying any soft
+                // target takes the in-process path rather than silently losing the distribution.
+                bool anySoftTarget = categoryDistributions.Any(distribution => distribution is not null);
                 lastEncoded = encoded;
                 lastCategoryIndices = categoryIndices;
 
@@ -182,7 +206,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
 
                 bool torchEpoch = false;
                 NeuralTorchMixedHeadBatch.BatchGradientResult torchResult = default;
-                if (preferTorch)
+                if (preferTorch && !anySoftTarget)
                 {
                     torchEpoch = NeuralTorchMixedHeadBatch.TryAccumulate(
                         network,
@@ -224,17 +248,27 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
                             relevanceLogitSum += cache.PreActivations[^1][1];
                             evidenceLossSum += NeuralNetwork.BinaryCrossEntropy(evidence, batch[i].Targets.Evidence);
                             relevanceLossSum += NeuralNetwork.BinaryCrossEntropy(relevance, batch[i].Targets.Relevance);
-                            categoryLossSum += network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
+                            categoryLossSum += categoryDistributions[i] is float[] softLoss
+                                ? network.CategoricalCrossEntropy(cache.Activations[^1], softLoss)
+                                : network.CategoricalCrossEntropy(cache.Activations[^1], categoryIndices[i]);
                         }
 
                         ChatMonitoringNeuralModelTargets targets = batch[i].Targets with { CategoryIndex = categoryIndices[i] };
-                        inputGradients[i] = network.AccumulateMixedHeadGradients(
-                            cache,
-                            targets.Evidence,
-                            targets.Relevance,
-                            targets.CategoryIndex,
-                            gradients,
-                            trackGradient);
+                        inputGradients[i] = categoryDistributions[i] is float[] softTarget
+                            ? network.AccumulateMixedHeadGradients(
+                                cache,
+                                targets.Evidence,
+                                targets.Relevance,
+                                softTarget,
+                                gradients,
+                                trackGradient)
+                            : network.AccumulateMixedHeadGradients(
+                                cache,
+                                targets.Evidence,
+                                targets.Relevance,
+                                targets.CategoryIndex,
+                                gradients,
+                                trackGradient);
                     }
                 }
 
@@ -432,10 +466,49 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             float[] values = new float[snapshot.ParameterCount];
             Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
             network.LoadParameters(values);
+            predictionMemo.Clear();
         }
     }
 
-    public void Dispose() { }
+    public void Dispose() => predictionMemo.Dispose();
+
+    /// <summary>
+    /// Normalises a supplied teacher distribution onto this model's category axis, or returns null
+    /// when there isn't a usable one so the caller falls back to the hard label.
+    ///
+    /// Teacher output is not trusted to be well-formed: a distribution can arrive shorter or longer
+    /// than the taxonomy, carry negatives, or not sum to one. Negatives are clamped away and the
+    /// rest is rescaled to sum to one, because the gradient (prediction - target) only behaves like
+    /// a probability comparison when the target is one. An all-zero or negative vector carries no
+    /// information at all, so it is rejected rather than trained on.
+    /// </summary>
+    private float[]? ResolveCategoryDistribution(ChatMonitoringNeuralModelTrainingExample example)
+    {
+        IReadOnlyList<float>? supplied = example.Targets.CategoryDistribution;
+        if (supplied is null || CategoryLabels.Count == 0)
+            return null;
+
+        float[] distribution = new float[CategoryLabels.Count];
+        float total = 0f;
+        int count = Math.Min(CategoryLabels.Count, supplied.Count);
+        for (int category = 0; category < count; category++)
+        {
+            float weight = supplied[category];
+            if (weight <= 0f || !float.IsFinite(weight))
+                continue;
+
+            distribution[category] = weight;
+            total += weight;
+        }
+
+        if (total <= 0f)
+            return null;
+
+        for (int category = 0; category < distribution.Length; category++)
+            distribution[category] /= total;
+
+        return distribution;
+    }
 
     private int ResolveCategoryIndex(ChatMonitoringNeuralModelTrainingExample example)
     {
@@ -447,11 +520,67 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         return ChatMonitoringCategoryTaxonomy.IndexOf(Kind, category);
     }
 
-    private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(ChatMonitoringNeuralModelInput input, float[]? encoded = null)
+    private ChatMonitoringNeuralModelInferenceTrace PredictUnlocked(
+        ChatMonitoringNeuralModelInput input,
+        float[]? encoded = null,
+        bool? captureTrace = null)
     {
         float[] features = encoded ?? ChatMonitoringFeatureEncoder.Encode(input);
-        NeuralNetworkForwardState cache = network.Forward(features, captureTrace: true);
-        return BuildInference(input, features, cache);
+        bool capture = captureTrace ?? !TrainingHeapPressure.ShouldSkipTraces();
+        string featureKey = FingerprintFeatures(features);
+        if (!capture && TryReadCachedPrediction(featureKey, out ChatMonitoringNeuralModelPrediction? cached)
+            && cached is not null)
+        {
+            return new ChatMonitoringNeuralModelInferenceTrace(cached, EmptyForwardTrace);
+        }
+
+        NeuralNetworkForwardState cache = network.Forward(features, capture);
+        ChatMonitoringNeuralModelInferenceTrace trace = BuildInference(input, features, cache);
+        if (!capture)
+            WriteCachedPrediction(featureKey, trace.Prediction);
+        return trace;
+    }
+
+    private bool TryReadCachedPrediction(string key, out ChatMonitoringNeuralModelPrediction? prediction)
+    {
+        prediction = null;
+        if (!predictionMemo.TryGetBytes(key, out byte[] payload) || payload.Length != 20)
+            return false;
+
+        float[] numbers = new float[4];
+        Buffer.BlockCopy(payload, 0, numbers, 0, 16);
+        int categoryIndex = BitConverter.ToInt32(payload, 16);
+        if (categoryIndex < 0 || categoryIndex >= CategoryLabels.Count)
+            return false;
+
+        string category = CategoryLabels[categoryIndex];
+        prediction = new ChatMonitoringNeuralModelPrediction(
+            numbers[0],
+            numbers[1],
+            numbers[2],
+            Kind,
+            ModelVersion,
+            category,
+            $"Cached chat-monitor score for {category}.",
+            numbers[3]);
+        return true;
+    }
+
+    private void WriteCachedPrediction(string key, ChatMonitoringNeuralModelPrediction prediction)
+    {
+        int categoryIndex = ChatMonitoringCategoryTaxonomy.IndexOf(Kind, prediction.Category);
+        byte[] payload = new byte[20];
+        float[] numbers = [prediction.Evidence, prediction.Relevance, prediction.Confidence, prediction.CategoryConfidence];
+        Buffer.BlockCopy(numbers, 0, payload, 0, 16);
+        BitConverter.TryWriteBytes(payload.AsSpan(16), categoryIndex);
+        predictionMemo.PutBytes(key, payload);
+    }
+
+    internal static string FingerprintFeatures(float[] features)
+    {
+        byte[] bytes = new byte[features.Length * sizeof(float)];
+        Buffer.BlockCopy(features, 0, bytes, 0, bytes.Length);
+        return Convert.ToHexString(bytes);
     }
 
     private ChatMonitoringNeuralModelInferenceTrace BuildInference(
@@ -464,7 +593,7 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
         int categoryIndex = network.ArgMaxCategory(cache.Activations[^1]);
         float categoryConfidence = cache.Activations[^1][2 + categoryIndex];
         string category = CategoryLabels[categoryIndex];
-        double supportSimilarity = support.Count == 0 ? 0 : support.Max(item => Cosine(features, item.Features));
+        double supportSimilarity = MaxSupportSimilarity(features);
         double separation = Math.Abs(evidence - .5f) * 2;
         float confidence = (float)Math.Clamp(
             separation * (.25 + .45 * supportSimilarity + .30 * categoryConfidence),
@@ -474,10 +603,31 @@ public abstract class ChatMonitoringNeuralModelHashedMlp : IChatMonitoringNeural
             : $"Limited training support for {category}; neural score stands alone when LLM review is disabled.";
         return new ChatMonitoringNeuralModelInferenceTrace(
             new ChatMonitoringNeuralModelPrediction(evidence, relevance, confidence, Kind, ModelVersion, category, reasoning, categoryConfidence),
-            cache.Trace!);
+            cache.Trace ?? EmptyForwardTrace);
     }
 
-    private static double Cosine(float[] left, float[] right)
+    private double MaxSupportSimilarity(float[] features)
+    {
+        if (support.Count == 0)
+            return 0;
+        if (RustKernels.TryMaxSupportCosine(features, support.Select(static item => item.Features), out double rustScore))
+            return rustScore;
+
+        return support.Max(item => Cosine(features, item.Features));
+    }
+
+    /// <summary>
+    /// Support-set cosine. Clamped to <c>[0, 1]</c> — not the store cosine contract.
+    /// </summary>
+    internal static double Cosine(float[] left, float[] right)
+    {
+        if (RustKernels.TrySupportCosine(left, right, out double rustScore))
+            return rustScore;
+
+        return CosineManaged(left, right);
+    }
+
+    internal static double CosineManaged(float[] left, float[] right)
     {
         double dot = 0, leftNorm = 0, rightNorm = 0;
         int length = Math.Min(left.Length, right.Length);
@@ -883,7 +1033,8 @@ public sealed class TutoringChatMonitorNeuralNet : IChatMonitoringNeuralModelTel
             input.ThreadContinuity,
             input.PriorScore,
             snap,
-            context);
+            context,
+            input.TextEmbedding);
         return baseInput with
         {
             CommunityVote = input.CommunityVote,

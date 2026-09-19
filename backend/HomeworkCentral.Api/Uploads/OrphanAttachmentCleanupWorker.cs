@@ -1,3 +1,4 @@
+using HomeworkCentral.Api.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,10 +9,14 @@ namespace HomeworkCentral.Api.Uploads;
 public sealed class OrphanAttachmentCleanupWorker(
     IServiceScopeFactory scopeFactory,
     IOptions<UploadOptions> options,
+    IApplicationReadiness readiness,
     ILogger<OrphanAttachmentCleanupWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!await readiness.WaitUntilReadyAsync(stoppingToken))
+            return;
+
         UploadOptions opts = options.Value;
         TimeSpan interval = TimeSpan.FromMinutes(opts.CleanupIntervalMinutes);
 

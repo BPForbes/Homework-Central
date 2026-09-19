@@ -5,6 +5,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!--
+      Memory. Microsoft.NET.Sdk.Web turns server GC on by default: one managed heap plus one
+      background GC thread per CPU core. On a developer machine that is hundreds of MB of
+      resident memory bought for nothing, both inside the Docker container and when
+      scripts/run-dev.* runs the API natively. Workstation, non-concurrent GC keeps the working
+      set proportional to what the app actually allocates, at the cost of slightly longer GC
+      pauses that no workload here is sensitive to. backend.Dockerfile sets the equivalent
+      DOTNET_gcServer / DOTNET_gcConcurrent env vars so `docker run` of the image alone behaves
+      the same. Revisit both together if this ever runs under real concurrent load.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <!--
@@ -47,8 +61,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="HomeworkCentral.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Canonical favicon lives in frontend/public; link it into Dev/ at build output. -->
     <Content Include="..\..\frontend\public\favicon.svg" Link="Dev\favicon.svg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="native\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('native')" />
   </ItemGroup>
 
 </Project>

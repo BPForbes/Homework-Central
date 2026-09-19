@@ -60,6 +60,17 @@ public sealed class TutoringSubjectContextRouter : IDisposable
     {
         if (string.IsNullOrWhiteSpace(label))
             return;
+        if (RustKernels.TryAddExpertiseHash(values, label, BaseInputSize, ExpertiseHashBins))
+            return;
+
+        AddExpertiseHashManaged(values, label);
+    }
+
+    /// <summary>Managed FNV-1a bins used when <c>libhc_kernels</c> is absent.</summary>
+    internal static void AddExpertiseHashManaged(float[] values, string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return;
         string key = label.Trim().ToLowerInvariant();
         uint hash = 2166136261;
         foreach (char character in key)

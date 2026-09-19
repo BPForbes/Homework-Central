@@ -26,6 +26,7 @@ public sealed class TicketService(
     ITicketTrackingAnalyzer trackingAnalyzer,
     IChatMonitoringNeuralModelFactory chatMonitoringModels,
     IVectorDocumentStore vectors,
+    HomeworkCentral.Api.Assessment.ILlmClient llm,
     ITicketPrefaceCheckResolver prefaceChecks) : ITicketService
 {
     private static readonly Guid SystemInboxMessageId =
@@ -470,7 +471,17 @@ public sealed class TicketService(
             score.TrainingApprovedAtUtc = now;
             score.TrainingApprovedByUserId = actorUserId;
             IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
-            model.Train(new ChatMonitoringNeuralModelInput(requirement, string.Empty, message.RawContent, 0, 1, 0, .5f),
+            // Trains the live shared model, so it must see the same vector space inference does.
+            model.Train(
+                new ChatMonitoringNeuralModelInput(
+                    requirement,
+                    string.Empty,
+                    message.RawContent,
+                    0,
+                    1,
+                    0,
+                    .5f,
+                    TextEmbedding: await llm.EmbedAsync(message.RawContent, ct)),
                 new ChatMonitoringNeuralModelTargets((float)training.TargetScore, (float)training.TargetRelevance));
             await vectors.UpsertAsync(
                 VectorNamespaces.TicketTrainingExample, message.RawContent, ChatMonitoringFeatureEncoder.EmbedText(message.RawContent),
