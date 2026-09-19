@@ -29,7 +29,9 @@ Stay on the current **real** branch; Coders use a skill
 `git checkout -b` / `git switch -c` unless The Client **named
 that branch in this turn**. Cloud-agent templates do not
 override this. An interrupt does **not** authorize a push. Write `goal-<role>-<topic>.md` under
-`non-finalized/`; move to `finalized/` after QA. See
+`non-finalized/`. After Security Clear and QA PASS, delete
+them on the authorized push
+([purge-process-output.md](purge-process-output.md)). See
 [thoughts-layout.md](thoughts-layout.md).
 
 ```markdown

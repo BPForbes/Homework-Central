@@ -1,7 +1,9 @@
 # Review thread template
 
 Copy to `.cursor/thoughts/non-finalized/review-<topic>.md`.
-Local only; do not commit. After QA PASS, move to `finalized/`.
+Local only; do not commit. After Security Clear and QA PASS,
+delete on the authorized push
+([purge-process-output.md](purge-process-output.md)).
 See [thoughts-layout.md](thoughts-layout.md).
 
 ```markdown

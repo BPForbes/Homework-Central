@@ -120,3 +120,9 @@ linters do not substitute for required CodeQL.
 Full validation commands, target selection, finding handling, pre-publish checklist, and
 definition of done:
 [`.cursor/skills/devops-multi-agent-team/references/codeql-validation-publish-policy.md`](.cursor/skills/devops-multi-agent-team/references/codeql-validation-publish-policy.md).
+
+After Security Clear **and** QA PASS, delete research, review,
+and handoff thought Markdown immediately before the one push:
+`scripts/purge-process-output.sh --security-clear --qa-pass`.
+Do not pass those flags unless both gates actually happened.
+See [purge-process-output.md](.cursor/skills/devops-multi-agent-team/references/purge-process-output.md).
