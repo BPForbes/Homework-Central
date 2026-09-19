@@ -145,6 +145,38 @@ jobs:
           # The job's postgres service holds homework_central_test, not homework_central_master.
           expect_exit "server answered, master database missing" 3 5432
 
+          # A volume whose password is not the dev one must stay distinguishable from a volume
+          # that is merely missing the database: recreating the volume repairs the first and
+          # would destroy data for no reason on the second. This job's postgres service cannot
+          # cover that case, because it holds the dev password.
+          #
+          # The trap reclaims the name and port 5598 when an assertion below exits non-zero,
+          # which matters on a self-hosted runner where the VM is not discarded afterwards.
+          trap 'docker rm -f pg-wrong-password >/dev/null 2>&1 || true' EXIT
+          docker rm -f pg-wrong-password >/dev/null 2>&1 || true
+          # Same digest as this job's postgres service, so the runner reuses an image it has.
+          docker run -d --name pg-wrong-password -e POSTGRES_PASSWORD=not-the-dev-password \
+            -p 5598:5432 \
+            postgres:16@sha256:4f6c1ec9743885ba6438a91f7c08c4ef4d645a41eae31fc8521c2d831c622107 \
+            >/dev/null || { echo "could not start pg-wrong-password"; exit 1; }
+          # -h forces TCP. initdb's bootstrap server runs with listen_addresses='' and answers on
+          # the Unix socket alone, so a socket probe clears while the published port is still shut
+          # and the assertion would see exit 1 instead of 5.
+          accepting_tcp=no
+          for _ in $(seq 1 60); do
+            if docker exec pg-wrong-password pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; then
+              accepting_tcp=yes
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$accepting_tcp" != yes ]]; then
+            echo "pg-wrong-password never accepted a TCP connection"
+            docker logs pg-wrong-password
+            exit 1
+          fi
+          expect_exit "server answered, credentials rejected" 5 5598
+
       # Backstop for C# pattern `var`, `dynamic`, and per-file suppressions.
       # IDE0008 itself is pinned in .editorconfig + EnforceCodeStyleInBuild.
       - name: Reject implicitly typed locals

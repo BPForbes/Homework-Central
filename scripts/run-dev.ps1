@@ -263,9 +263,15 @@ function Test-PostgresHostConnection([hashtable]$EnvValues) {
     return $false
 }
 
-function Test-PostgresAuth {
+# Proves that a database exists and answers a query inside the container. It does not prove
+# the volume's password: initdb writes `host all all 127.0.0.1/32 trust` ahead of the image's
+# scram-sha-256 rule, so this loopback session authenticates against no password and succeeds
+# on a volume whose password is not the dev one. Test-DevPostgresCredentialsRejected, which
+# looks in from the host, is the check for that.
+function Test-PostgresDatabaseInContainer {
     param(
-        [string]$Database = 'postgres'
+        [Parameter(Mandatory = $true)]
+        [string]$Database
     )
 
     docker compose -f $ComposeFile --env-file $EnvFile exec -T postgres `
@@ -308,7 +314,7 @@ function Prepare-HomeworkCentralDatabase {
         }
     }
 
-    if (-not (Test-PostgresAuth -Database 'homework_central_master')) {
+    if (-not (Test-PostgresDatabaseInContainer -Database 'homework_central_master')) {
         return $false
     }
 
@@ -339,17 +345,63 @@ function Start-CoreContainers {
     Start-DevStackPostgresThenFCaptchaBackground -PostgresPort $expectedPort -FCaptchaPort $fcaptchaPort -ForceRecreate:$recreate
 }
 
+# Removes the Postgres container and the volume behind its data directory, leaving the caller to
+# start it again. `docker compose down -v` would also take llmdata, uploads, and miniodata, which
+# costs a developer their Ollama models and attachment blobs for a fault that lives in the Postgres
+# data directory alone; scripts\reset-dev-db.ps1 stays the way to ask for the wider wipe.
+#
+# The volume name is read off the container rather than composed from the project name, because
+# Compose derives that name from the checkout directory.
 function Reset-PostgresVolume {
     Write-Step 'Recreating Postgres Docker volume (reset to postgres/postgres credentials)'
-    docker compose -f $ComposeFile --env-file $EnvFile down -v --remove-orphans *> $null
+
+    [string]$container = (docker compose -f $ComposeFile --env-file $EnvFile ps -q postgres 2>$null | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($container)) {
+        throw 'Cannot identify the Postgres container to reset. Run: scripts\reset-dev-db.ps1 -Yes'
+    }
+
+    [string]$volume = (docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' $container 2>$null | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($volume)) {
+        throw 'Cannot identify the Postgres data volume to reset. Run: scripts\reset-dev-db.ps1 -Yes'
+    }
+
+    docker compose -f $ComposeFile --env-file $EnvFile rm --stop --force postgres *> $null
+    docker volume rm $volume *> $null
     if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to remove Postgres Docker volume'
+        throw "Failed to remove Postgres Docker volume $volume"
     }
 }
 
 function Wait-CoreBeforeApi([hashtable]$EnvValues) {
     Write-Step 'Waiting for Postgres (FCaptcha continues in the background)'
     return Wait-ForPostgres -EnvValues $EnvValues
+}
+
+# Recreates the Postgres volume when the server rejects the dev credentials. The password is
+# initialised into the volume, so neither recreating the container nor moving POSTGRES_HOST_PORT
+# can change it — both only republish the same 28P01 on a new port.
+#
+# Confined to a port our own container publishes. A foreign Postgres answering there has a
+# volume that is not ours to destroy, and it is Repair-PostgresHostReachability's port
+# relocation that gets run-dev off it.
+function Reset-StalePostgresVolume([hashtable]$EnvValues) {
+    $port = $EnvValues['POSTGRES_HOST_PORT']
+    if (-not (Test-DevPostgresCredentialsRejected $port)) {
+        return
+    }
+
+    if (-not (Test-OurPostgresPublishedOn $port)) {
+        Write-Step "Postgres on ${DevPostgresConnectHost}:$port rejects the dev credentials but is not our container; leaving its volume alone"
+        return
+    }
+
+    Write-Step "Postgres rejected postgres/postgres on ${DevPostgresConnectHost}:$port (stale Docker volume with a different password)"
+    Reset-PostgresVolume
+    Start-CoreContainers -EnvValues $EnvValues
+    $null = Wait-CoreBeforeApi -EnvValues $EnvValues
+    if (Test-DevPostgresCredentialsRejected $port) {
+        throw 'Postgres still rejects postgres/postgres after recreating the Docker volume'
+    }
 }
 
 function Ensure-PostgresReady([hashtable]$EnvValues) {
@@ -360,15 +412,7 @@ function Ensure-PostgresReady([hashtable]$EnvValues) {
         Repair-PostgresHostReachability $EnvValues
     }
 
-    if (-not (Test-PostgresAuth -Database 'postgres')) {
-        Write-Step 'Postgres rejected postgres/postgres (stale Docker volume with a different password)'
-        Reset-PostgresVolume
-        Start-CoreContainers -EnvValues $EnvValues
-        $null = Wait-CoreBeforeApi -EnvValues $EnvValues
-        if (-not (Test-PostgresAuth -Database 'postgres')) {
-            throw 'Postgres password verification failed after recreating the Docker volume'
-        }
-    }
+    Reset-StalePostgresVolume $EnvValues
 
     if (-not (Prepare-HomeworkCentralDatabase)) {
         Write-Step 'Postgres volume is unhealthy (collation mismatch); recreating'
@@ -405,6 +449,14 @@ Pick a free port in .env (for example POSTGRES_HOST_PORT=$example), then run:
 
 function Repair-PostgresHostReachability([hashtable]$EnvValues) {
     $port = $EnvValues['POSTGRES_HOST_PORT']
+
+    # Our own volume initialised with a different password answers every port the same way, so
+    # recreating the container and relocating POSTGRES_HOST_PORT cannot repair it. Leave that fault
+    # to Reset-StalePostgresVolume, which the caller runs next. A foreign Postgres rejecting the
+    # same credentials still belongs here, because relocating off its port is the only repair.
+    if ((Test-DevPostgresCredentialsRejected $port) -and (Test-OurPostgresPublishedOn $port)) {
+        return
+    }
 
     if (Test-OurPostgresPublishedOn $port) {
         Write-Step "Host cannot reach Docker Postgres on ${DevPostgresConnectHost}:$port; recreating the container"
@@ -446,8 +498,9 @@ function Ensure-EnvFile {
 # container, which no caller can repair.
 #
 # Readiness here is host reachability, not a usable homework_central_master: this wait runs
-# before Prepare-HomeworkCentralDatabase creates that database and before Test-PostgresAuth
-# resets a volume whose password does not match, so requiring either would never clear.
+# before Prepare-HomeworkCentralDatabase creates that database and before
+# Reset-StalePostgresVolume recreates a volume whose password does not match, so requiring
+# either would never clear.
 function Wait-ForPostgres {
     param([hashtable]$EnvValues)
 
@@ -615,10 +668,6 @@ function Start-DevStack([hashtable]$EnvValues) {
     $apiStarter = Join-Path $RepoRoot 'scripts/start-api-dev.ps1'
     $frontendStarter = Join-Path $RepoRoot 'scripts/start-frontend-dev.ps1'
 
-    if (-not $SkipDocker) {
-        Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
-    }
-
     $env:HC_SKIP_BROWSER_OPEN = '1'
 
     Write-Step 'Starting frontend in a new terminal (http://localhost:5173)'
@@ -715,6 +764,10 @@ function Start-RunPhase([hashtable]$EnvValues) {
     Write-Step 'Preparing dev stack (Postgres, API, frontend)'
 
     if (-not $SkipDocker) {
+        # Stop a leftover managed session *before* Start-Postgres waits on the published
+        # port. Doing this afterwards tears down the container that wait just cleared,
+        # and the API child used to skip its own wait because -PreRegistered was set.
+        Initialize-DevStackState -PostgresPort $EnvValues['POSTGRES_HOST_PORT'] -ServerCount 2
         Start-Postgres -EnvValues $EnvValues
         Start-ClamAv
     } else {

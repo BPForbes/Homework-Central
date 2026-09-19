@@ -42,4 +42,10 @@ if docker network inspect "$network_name" >/dev/null 2>&1; then
   fi
 fi
 
+# compose down does not remove .hc-dev-stack.state. Leaving it makes the next
+# run-dev treat this wipe as a live managed session and stop Postgres after it
+# has already waited for the published port.
+rm -f "$DEV_STACK_STATE_FILE"
+rmdir "${DEV_STACK_STATE_FILE}.lock.d" 2>/dev/null || true
+
 printf '==> Dev database volume removed. Run scripts/run-dev.sh to start fresh.\n'

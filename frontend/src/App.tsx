@@ -4,6 +4,7 @@
 import { lazy, Suspense, type ComponentType } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { PerformanceProvider } from './context/performance/PerformanceContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { WaterBackground } from './components/background/WaterBackground'
 import { BackendConnectingLoader } from './components/BackendConnectingLoader'
@@ -38,8 +39,9 @@ const NeuralNet = lazyPage(() => import('./pages/NeuralNet'), 'NeuralNet')
 export default function App() {
   return (
     <ThemeProvider>
-      <WaterBackground />
-      <BackendGate>
+      <PerformanceProvider>
+        <WaterBackground />
+        <BackendGate>
         <BrowserRouter>
           <AuthProvider>
             <Suspense fallback={<BackendConnectingLoader message="Loading page…" />}>
@@ -114,7 +116,8 @@ export default function App() {
             </Suspense>
           </AuthProvider>
         </BrowserRouter>
-      </BackendGate>
+        </BackendGate>
+      </PerformanceProvider>
     </ThemeProvider>
   )
 }
