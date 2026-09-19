@@ -116,6 +116,8 @@ public sealed class NeuralNetwork
 {
     public const float DefaultLeakyReluSlope = .01f;
     public const float DefaultMaxAbsLogit = 20f;
+    /// <summary>Skip near-zero source activations when accumulating ∂C/∂W (sparse ReLU paths).</summary>
+    private const float SourceActivationEpsilon = 1e-8f;
 
     private readonly DenseLayer[] _layers;
     private readonly Node[] _nodes;
@@ -527,7 +529,7 @@ public sealed class NeuralNetwork
             for (int column = 0; column < cols; column++)
             {
                 float sourceValue = sourceActivations[column];
-                if (sourceValue == 0f)
+                if (MathF.Abs(sourceValue) <= SourceActivationEpsilon)
                     continue;
                 int offset = column * rows;
                 for (int row = 0; row < rows; row++)

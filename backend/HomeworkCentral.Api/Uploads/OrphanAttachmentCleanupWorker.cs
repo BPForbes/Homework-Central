@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Utilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -24,12 +25,21 @@ public sealed class OrphanAttachmentCleanupWorker(
         {
             try
             {
-                await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                IOrphanAttachmentCleanupService cleanup =
-                    scope.ServiceProvider.GetRequiredService<IOrphanAttachmentCleanupService>();
-                int removed = await cleanup.PurgeOrphansAsync(stoppingToken);
-                if (removed > 0)
-                    logger.LogInformation("Purged {Count} orphan attachments", removed);
+                await OperationalExceptionGuard.RunAsync(
+                    async () =>
+                    {
+                        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+                        IOrphanAttachmentCleanupService cleanup =
+                            scope.ServiceProvider.GetRequiredService<IOrphanAttachmentCleanupService>();
+                        int removed = await cleanup.PurgeOrphansAsync(stoppingToken);
+                        if (removed > 0)
+                            logger.LogInformation("Purged {Count} orphan attachments", removed);
+                    },
+                    ex =>
+                    {
+                        logger.LogWarning(ex, "Orphan attachment cleanup failed");
+                        return Task.CompletedTask;
+                    });
 
                 await Task.Delay(interval, stoppingToken);
             }
@@ -37,18 +47,6 @@ public sealed class OrphanAttachmentCleanupWorker(
             {
                 // Host shutdown cancels Delay; do not surface TaskCanceledException (StopHost behavior).
                 return;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Orphan attachment cleanup failed");
-                try
-                {
-                    await Task.Delay(interval, stoppingToken);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    return;
-                }
             }
         }
     }

@@ -246,14 +246,14 @@ public sealed class NeuralNetTrainingPromoter(AppDbContext db, NeuralNetCheckpoi
         if (current is not null)
             model.LoadParameterSnapshot(initial);
 
-        int trained = 0;
-        foreach (TicketModelTrainingExample example in examples)
-        {
-            // Held-out rows are skipped here and only ever used for scoring. Training on them
-            // would make the evaluation measure memorisation instead of generalisation.
-            if (ChatMonitoringHoldout.IsHeldOut(example.TrainingExampleId))
-                continue;
+        // Held-out rows are skipped here and only ever used for scoring. Training on them
+        // would make the evaluation measure memorisation instead of generalisation.
+        IEnumerable<TicketModelTrainingExample> trainExamples = examples
+            .Where(example => !ChatMonitoringHoldout.IsHeldOut(example.TrainingExampleId));
 
+        int trained = 0;
+        foreach (TicketModelTrainingExample example in trainExamples)
+        {
             model.Train(await BuildModelInputAsync(example, ct), BuildTargets(example));
             trained++;
         }

@@ -1,4 +1,5 @@
 using HomeworkCentral.Api.Services;
+using HomeworkCentral.Api.Utilities;
 
 namespace HomeworkCentral.Api.Assessment;
 
@@ -44,22 +45,20 @@ public sealed class NeuralNetCheckpointRefreshService(
                     continue;
                 }
 
-                await using AsyncServiceScope scope = scopes.CreateAsyncScope();
-                NeuralNetCheckpointStore store = scope.ServiceProvider.GetRequiredService<NeuralNetCheckpointStore>();
-                foreach (NeuralModelKindChatMonitoring chatMonitoringKind in Enum.GetValues<NeuralModelKindChatMonitoring>())
-                {
-                    HomeworkCentral.Api.Models.NeuralNetCanonicalCheckpoint? checkpoint = await store.GetCurrentAsync(chatMonitoringKind, stoppingToken);
-                    IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
-                    if (checkpoint is not null && !string.Equals(checkpoint.Checksum, loadedChecksums.GetValueOrDefault(chatMonitoringKind), StringComparison.Ordinal) && model is IChatMonitoringNeuralModelTelemetry telemetry)
+                await OperationalExceptionGuard.RunAsync(
+                    async () =>
                     {
-                        int parameterCount = telemetry.GetTopologySnapshot().Parameters.Count;
-                        telemetry.LoadParameterSnapshot(new(checkpoint.Generation, 0, "ieee754-float32-le", "dense-base64", parameterCount, checkpoint.ParametersBase64, checkpoint.Checksum));
-                        loadedChecksums[chatMonitoringKind] = checkpoint.Checksum;
-                        logger.LogInformation("Loaded {ChatMonitoringKind} canonical neural checkpoint {Generation}.", chatMonitoringKind, checkpoint.Generation);
-                    }
-                }
+                        await RefreshCheckpointsAsync(stoppingToken);
+                        delay = BaseDelay;
+                    },
+                    ex =>
+                    {
+                        logger.LogWarning(ex, "Canonical neural checkpoint refresh failed.");
+                        if (IsTimeout(ex))
+                            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, MaxBackoff.TotalSeconds));
+                        return Task.CompletedTask;
+                    });
 
-                delay = BaseDelay;
                 await Task.Delay(delay, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -67,19 +66,39 @@ public sealed class NeuralNetCheckpointRefreshService(
                 // Host shutdown cancels Delay; do not surface TaskCanceledException (StopHost behavior).
                 return;
             }
-            catch (Exception ex)
+        }
+    }
+
+    private async Task RefreshCheckpointsAsync(CancellationToken stoppingToken)
+    {
+        await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+        NeuralNetCheckpointStore store = scope.ServiceProvider.GetRequiredService<NeuralNetCheckpointStore>();
+        foreach (NeuralModelKindChatMonitoring chatMonitoringKind in Enum.GetValues<NeuralModelKindChatMonitoring>())
+        {
+            HomeworkCentral.Api.Models.NeuralNetCanonicalCheckpoint? checkpoint =
+                await store.GetCurrentAsync(chatMonitoringKind, stoppingToken);
+            IChatMonitoringNeuralModel model = chatMonitoringModels.Get(chatMonitoringKind);
+            if (checkpoint is not null
+                && !string.Equals(
+                    checkpoint.Checksum,
+                    loadedChecksums.GetValueOrDefault(chatMonitoringKind),
+                    StringComparison.Ordinal)
+                && model is IChatMonitoringNeuralModelTelemetry telemetry)
             {
-                logger.LogWarning(ex, "Canonical neural checkpoint refresh failed.");
-                if (IsTimeout(ex))
-                    delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, MaxBackoff.TotalSeconds));
-                try
-                {
-                    await Task.Delay(delay, stoppingToken);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    return;
-                }
+                int parameterCount = telemetry.GetTopologySnapshot().Parameters.Count;
+                telemetry.LoadParameterSnapshot(new(
+                    checkpoint.Generation,
+                    0,
+                    "ieee754-float32-le",
+                    "dense-base64",
+                    parameterCount,
+                    checkpoint.ParametersBase64,
+                    checkpoint.Checksum));
+                loadedChecksums[chatMonitoringKind] = checkpoint.Checksum;
+                logger.LogInformation(
+                    "Loaded {ChatMonitoringKind} canonical neural checkpoint {Generation}.",
+                    chatMonitoringKind,
+                    checkpoint.Generation);
             }
         }
     }
