@@ -3,7 +3,8 @@
 Copy to `.cursor/thoughts/non-finalized/triage-<id>.md`. Same
 Handoff + **Q&A** as the review thread. Copy ids into Push JSON
 `qa`. `"files"` may be `{}`. Do not `git add`. After QA PASS,
-move to `finalized/`.
+delete on the authorized push
+([purge-process-output.md](purge-process-output.md)).
 
 When QA is **blocked**, **sends back**, or is **not pleased**, QA
 opens this file. Research *N* of that department **joins the Coder

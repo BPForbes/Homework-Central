@@ -70,8 +70,12 @@ cannot run when required, do not claim it passed and do not publish.
 6. Then **QA**. QA owns
    [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)
    and is the **only** role that may give the OK to push.
-7. After PASS, the Orchestrator makes keep-commit(s) from the
-   approved side-branch tree and **one push**
+7. After PASS, the Orchestrator **deletes** research and handoff
+   process files
+   (`scripts/purge-process-output.sh --security-clear --qa-pass`;
+   [purge-process-output.md](references/purge-process-output.md)),
+   makes keep-commit(s) from the approved side-branch tree, and
+   **one push**
    ([thoughts-layout.md](references/thoughts-layout.md) One push).
    Run `check-clean-timeline.sh --history <integration-base>` after
    any strip. Do not commit process notes.
@@ -198,8 +202,9 @@ Fan out `/create-subagent` so each **pod** starts together. Rules:
 research  ∥  implement  ∥  review   (department rules apply)
 security  →  qa  →  docs
 push      →  NEVER until QA marks PASS
-            After PASS: thoughts → finalized/ (local); one push
-            that keeps approved Coder commits
+            After Security Clear and QA PASS: purge process
+            Markdown, then one push that keeps approved Coder
+            commits
 repeat    →  until PASS; QA blocked/send-back → triage;
             Research N joins the Coder who picks it up
 ```
