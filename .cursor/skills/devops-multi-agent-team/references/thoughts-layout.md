@@ -8,7 +8,7 @@ in every earlier commit.
 | Path | Git | When |
 |------|-----|------|
 | `.cursor/thoughts/non-finalized/` | **Gitignored** (keepfile only) | Open |
-| `.cursor/thoughts/finalized/` | **Gitignored** | Done (local after QA) |
+| `.cursor/thoughts/finalized/` | **Gitignored** | Obsolete local stash; purged on authorized push |
 
 Keep `.cursor/thoughts/non-finalized/.gitkeep`. Do not `git add`
 any other file under `.cursor/thoughts/`. `.cursor/reviews/` is
@@ -19,8 +19,11 @@ obsolete. Push JSON lives in `non-finalized/`
 briefs, `repro-*.md`, handoffs, `push-*.json`, `triage-<id>.md`,
 `side-<dept>.md`, `cr-<topic>.md`
 ([triage-template.md](triage-template.md),
-[side-work.md](side-work.md)). **finalized** after QA PASS: move
-matching files locally; do not `git add`.
+[side-work.md](side-work.md)). Do **not** archive these into
+`finalized/` for keepsake. After Security Clear **and** QA PASS,
+**delete** them with
+[purge-process-output.md](purge-process-output.md) immediately
+before the one push.
 
 If a note must survive clones, put it in `docs/` or skill
 `references/`. Do **not** commit “Record Satisfied / Security /
@@ -32,7 +35,11 @@ tokens; prefer exit codes.
 Coders do not commit on the shared checkout. After Satisfied,
 Security Clear, applicable CodeQL, **and QA marks PASS**:
 
-1. Move closed thoughts to `finalized/` (local).
+1. **Delete** research, review, and handoff process files:
+   `scripts/purge-process-output.sh --security-clear --qa-pass`
+   ([purge-process-output.md](purge-process-output.md)). Both
+   flags are attestations. Do not invent them. Do not purge
+   earlier.
 2. Compress. **Keep reviewer-approved trees as keep-commits**
    (Orchestrator). A **keep-commit** since `<integration-base>`
    includes product,

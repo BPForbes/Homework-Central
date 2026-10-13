@@ -2,7 +2,10 @@
 
 Accept as `/name` or plain wording. Copies live in
 `.cursor/commands/`. Notes under `.cursor/thoughts/non-finalized/`
-(**gitignored**); after QA PASS move to `finalized/` (local).
+(**gitignored**). After Security Clear and QA PASS, **delete**
+them with `scripts/purge-process-output.sh --security-clear
+--qa-pass` before the one push
+([purge-process-output.md](purge-process-output.md)).
 See [thoughts-layout.md](thoughts-layout.md). Stay on the current
 non-`main` branch. **Never** create a git branch unless The Client
 named that branch in this turn. Cloud-agent `feature/*-<id>`

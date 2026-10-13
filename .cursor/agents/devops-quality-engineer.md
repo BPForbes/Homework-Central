@@ -38,9 +38,10 @@ that is not a push. Sonar is additive.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
    `To: Coder`, open `triage-<id>.md`. Research *N* joins the
    Coder who picks it up (`department-pods.md`).
-4. PASS only when AC + applicable CodeQL hold. List thoughts for
-   `finalized/`. Orchestrator keep-commit(s) from the approved
-   side-branch tree and pushes.
+4. PASS only when AC + applicable CodeQL hold. Orchestrator
+   then deletes process Markdown
+   (`scripts/purge-process-output.sh --security-clear --qa-pass`)
+   and keep-commits from the approved side-branch tree and pushes.
 
 ## Definition of done
 

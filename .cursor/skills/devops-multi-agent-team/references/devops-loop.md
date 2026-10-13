@@ -2,8 +2,11 @@
 
 Use with the orchestrator loop. Persist `/goal`, review threads, and
 `/repro` notes under `.cursor/thoughts/non-finalized/` (local; do
-not commit). After QA PASS, move closed thoughts to `finalized/`
-(still local). See [thoughts-layout.md](thoughts-layout.md),
+not commit). After Security Clear and QA PASS, **delete** those
+files with `scripts/purge-process-output.sh --security-clear
+--qa-pass` immediately before the one push
+([purge-process-output.md](purge-process-output.md)). See
+[thoughts-layout.md](thoughts-layout.md),
 [role-identity.md](role-identity.md), and
 [department-pods.md](department-pods.md). Spawn roles
 asynchronously **in pods**. Commands:
@@ -72,7 +75,7 @@ Done. **Only QA may give the OK to push.** Fail → Handoff
 `To: Coder` from a **VM** review. Open `triage-<id>.md` when
 blocked / sent back / not pleased; Research *N* joins the Coder
 who picks it up ([triage-template.md](triage-template.md)). After
-PASS, list thoughts to finalize. Orchestrator keep-commit(s)
+PASS, Orchestrator purges process files, then keep-commit(s)
 from the approved side-branch tree, then one push.
 
 ## 6–11. Later passes
